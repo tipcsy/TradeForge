@@ -508,6 +508,11 @@ class WprSmaStrategy(Strategy):
                 sig = check_m1_entry(m1_state, float(pw), float(cw), md.params)
                 if sig not in ("BUY", "SELL"):
                     continue
+                # TF-együttállás kapu (ha a keret bekötötte): a kapu által BLOKKOLT
+                # belépő nem jelenik meg a charton (csak az látszik, ami élesben is
+                # végrehajtódott volna).
+                if md.entry_gate is not None and not md.entry_gate(t, sig):
+                    continue
                 atr_v = tl_atr[p]
                 if math.isnan(atr_v):
                     continue

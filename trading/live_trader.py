@@ -509,6 +509,51 @@ def tf_align_visual_objects(symbol: str) -> list:
         return []
 
 
+def tf_align_gate_fn(symbol: str, strategy_name: str, params: dict):
+    """A TF-együttállás kapu TÖRTÉNELMI kiértékelője a JEL-REPLAY szűréséhez.
+
+    Ha a kapu AKTÍV erre a stratégiára (`tf_align.enabled` ÉS a stratégia a `gate`
+    listában), visszaad egy `fn(t_unix, direction) -> bool`-t: True, ha az adott
+    időben MINDEN figyelt idősík a jel irányába állt (a belépő ÁTMENT volna a kapun).
+    None, ha a kapu nincs bekapcsolva / nincs kapuzva ez a stratégia / adathiány
+    (→ nincs szűrés, minden nyers jel látszik — fail-open). Így a charton csak az a
+    belépő-jelölő marad, ami élesben is végrehajtódott volna (a memória-note-beli BUG)."""
+    try:
+        import numpy as _np
+        from core import tf_align as _tfa
+        en, tfs, sma, gate = _tfa.config_for(_run_cfg, symbol)
+        if not en or strategy_name not in gate or not tfs:
+            return None
+        span_min = int(params.get("viz_trade_lookback_days", 30) or 30) * 1440
+        series = []   # (times_ndarray, signs_ndarray) idősíkonként
+        for tf in tfs:
+            count = span_min // max(1, int(tf)) + sma + 5
+            df = get_candles(symbol, mt5_timeframe(int(tf)), count)
+            if df is None or len(df) < sma + 1:
+                return None   # adathiány → fail-open (nem szűrünk)
+            c = df["close"].to_numpy(dtype=float)
+            smv = pd.Series(c).rolling(sma).mean().to_numpy()
+            sign = _np.sign(c - smv)
+            times = _np.array([int(t.timestamp()) for t in df.index], dtype=_np.int64)
+            series.append((times, sign))
+
+        def _at(t_unix, direction):
+            for times, sign in series:
+                idx = int(_np.searchsorted(times, int(t_unix), side="right")) - 1
+                if idx < 0:
+                    return True     # a sorozat előtti időre nem szűrünk (fail-open)
+                s = sign[idx]
+                if _np.isnan(s) or s == 0:
+                    return False    # semleges/hiányos → nincs teljes együttállás → blokk
+                if ("BUY" if s > 0 else "SELL") != direction:
+                    return False    # legalább egy idősík nem a jel irányába → blokk
+            return True
+
+        return _at
+    except Exception:
+        return None
+
+
 def actual_trade_objects(symbol: str, since_ts: int) -> list:
     """A VALÓS kötések (MT5 deal-history) rétege — a replay jel-vonalaktól eltérő:
       • belépő-NYÍL a tényleges betöltési áron (fel=BUY / le=SELL),
@@ -682,6 +727,9 @@ def pair_visual_lines(symbol: str, params: dict, strategy, pip_size: float,
                     params={**params, "pip_size": pip_size,
                             "backtest_spread_pips": (pair_cfg or {}).get("backtest_spread_pips", 1.5)},
                     bars=bars, no_trade_hours=no_trade_set, show_signals=_show_signals)
+    # TF-együttállás kapu: ha AKTÍV erre a stratégiára, a jel-replay belépőit a
+    # történelmi együttállással szűrjük (a blokkoltak nem jelennek meg — BUG-fix).
+    md.entry_gate = tf_align_gate_fn(symbol, strategy.name, params)
     objects = apply_no_trade(strategy.visual_objects(md), pair_cfg or {}, th)
     # + a GENERIKUS piac-állapot kód a per-gyertya BarState-ekhez (a per-pár
     #   kiválasztott piac-stratégiából; csak ha kérve van a charton).

@@ -115,6 +115,12 @@ class MarketData:
     # False → a stratégia NE adja vissza a jel-replay objektumokat (a chart-zsúfoltság
     # forrása); az SMA-szalag, a sáv-állapot és a tényleges kötések nem érintettek.
     show_signals: bool = True
+    # Opcionális VÉGREHAJTÁSI-kapu a JEL-REPLAY szűréséhez: `fn(t_unix, direction) ->
+    # bool` — True, ha a belépő az adott időben ÁTMENNE a kapun. A keret tölti (pl. a
+    # TF-együttállás kapu történelmi kiértékelője); None → nincs szűrés (minden nyers
+    # jel látszik). Így a charton csak az a belépő-jelölő jelenik meg, ami élesben is
+    # végrehajtódott volna — nem a kapu által blokkolt.
+    entry_gate: "callable | None" = None
 
     def closed(self, label: str) -> Optional[pd.Series]:
         df = self.bars.get(label)
