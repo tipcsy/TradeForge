@@ -380,10 +380,15 @@ class WprSmaStrategy(Strategy):
             # ennyire lehet visszagörgetni a sáv-csíkon (a warmup mindig fedve van).
             return params.get("sma_period", 200) + 2880
         if timeframe_label == "M1":
-            # ~3 nap M1 a belépő-jelzésekhez (feltétel 3) ÉS a valós kötés-nyilak
-            # ablakához (live_trader.actual_trade_objects ezt a tartományt olvassa).
-            # A TP/SL a 6-gyertyás szélessége miatt M1 charton nézve látszik igazán.
-            return params.get("wpr_m1_period", 8) + 4320
+            # A belépő-jelző FÜGGŐLEGES vonalak (feltétel 3) ÉS a valós kötés-nyilak
+            # ablaka (live_trader.actual_trade_objects ezt a tartományt olvassa).
+            # Alap ~1 HÓNAP (mint az M15-sáv) — hogy visszagörgetve is sok kötés
+            # látszódjon a charton; a `viz_trade_lookback_days` paraméterrel hangolható
+            # (kevesebb, ha zsúfolt/lassú; a „K" gomb amúgy is elrejti a jel-replay-t).
+            # A mély warmup CSAK az első bemelegítéskor tölt (egyszeri költség), a
+            # viselkedés nem változik (az M1-felfegyverzés az ablakhatárnál resetel).
+            days = int(params.get("viz_trade_lookback_days", 30) or 30)
+            return params.get("wpr_m1_period", 8) + days * 1440
         return 0
 
     def visual_objects(self, md: MarketData) -> list:
