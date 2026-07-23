@@ -42,12 +42,14 @@ from dashboard.theme import (
     color as sem_color,
 )
 from dashboard.instrument_dialog import _attach_tooltip, _style_om, _scrollable
+from dashboard.date_picker import CalendarPopup
 from core.quality import metric_colors
 from core.params_store import resolve_trade_hours
 from core import rr_state as _rrs
 from core import risk_reduction as _rrx
 from core import build_state as _bst
 from core import position_build as _pb
+from core import backtest_prefs as _bprefs
 
 # A technika-kulcsok magyar nevei (a rr_technique / progress tech dict-hez)
 _TECH_NAMES = {"shield": "Pajzs", "halving": "Felező", "risky": "Risky",
@@ -139,6 +141,9 @@ class BacktestDialog:
         self._orig_result = None
         self._orig_summary = None
         self._ib = float(cfg.get("ml", {}).get("starting_balance_eur", 1000.0))
+        # Megjegyzett (per stratégia+pár) kényelmi beállítások: időszak, nyitó
+        # összeg, slotok. A preset/építés SZÁNDÉKOSAN nem mentődik (feltáró).
+        self._prefs = _bprefs.get(symbol, strategy.name)
 
         self._df15 = None
         self._df1  = None
@@ -269,11 +274,21 @@ class BacktestDialog:
                       fg=FG_WHITE, font=self._sf, insertbackground=FG_WHITE,
                       justify="center")
         e1.pack(side="left", padx=(6, 2))
+        _cb1 = tk.Button(rng, text="📅", bg=BG_HEADER, fg=FG_WHITE, relief="flat",
+                         cursor="hand2", font=("Segoe UI Emoji", 10),
+                         command=lambda: self._open_calendar(self._start_var, e1))
+        _cb1.pack(side="left", padx=(0, 4))
+        _attach_tooltip(_cb1, "Kezdő dátum választása naptárból.")
         tk.Label(rng, text="→", bg=BG, fg=FG_GRAY, font=self._sf).pack(side="left")
         e2 = tk.Entry(rng, width=12, textvariable=self._end_var, bg=BG_HEADER,
                       fg=FG_WHITE, font=self._sf, insertbackground=FG_WHITE,
                       justify="center")
-        e2.pack(side="left", padx=(2, 0))
+        e2.pack(side="left", padx=(2, 2))
+        _cb2 = tk.Button(rng, text="📅", bg=BG_HEADER, fg=FG_WHITE, relief="flat",
+                         cursor="hand2", font=("Segoe UI Emoji", 10),
+                         command=lambda: self._open_calendar(self._end_var, e2))
+        _cb2.pack(side="left")
+        _attach_tooltip(_cb2, "Záró dátum választása naptárból.")
         self._span_lbl = tk.Label(body, text="Adat betöltése…", bg=BG,
                                   fg=FG_GRAY_DIM, font=self._sf)
         self._span_lbl.pack(anchor="w", padx=12, pady=(1, 4))
@@ -299,7 +314,8 @@ class BacktestDialog:
         # core.risk_manager.calc_lot. Több slot → arányosan kisebb lot.
         tk.Label(hrow, text="Slotok:", bg=BG, fg=FG_GRAY,
                  font=self._sf).pack(side="left", padx=(16, 2))
-        self._slots_var = tk.StringVar(value=str(self._cfg_max_slots()))
+        self._slots_var = tk.StringVar(
+            value=str(self._prefs.get("slots", self._cfg_max_slots())))
         _se = tk.Entry(hrow, width=4, textvariable=self._slots_var, bg=BG_HEADER,
                        fg=FG_WHITE, font=self._sf, insertbackground=FG_WHITE,
                        justify="center")
@@ -315,7 +331,7 @@ class BacktestDialog:
         # ettől függ. Üres/érvénytelen → a config starting_balance_eur (alap 1000).
         tk.Label(hrow, text="Nyitó összeg:", bg=BG, fg=FG_GRAY,
                  font=self._sf).pack(side="left", padx=(16, 2))
-        self._ib_var = tk.StringVar(value=f"{self._ib:.0f}")
+        self._ib_var = tk.StringVar(value=str(self._prefs.get("ib", f"{self._ib:.0f}")))
         _ie = tk.Entry(hrow, width=8, textvariable=self._ib_var, bg=BG_HEADER,
                        fg=FG_WHITE, font=self._sf, insertbackground=FG_WHITE,
                        justify="center")
@@ -816,13 +832,31 @@ class BacktestDialog:
             self._span_lbl.config(
                 text=f"Elérhető: {lo} … {hi}  (alap: az utolsó ~18 hónap)",
                 fg=FG_GRAY_DIM)
+            # Megjegyzett időszak (ha van) elsőbbséget élvez a ~18 hónap alap fölött.
             if not self._start_var.get():
-                self._start_var.set(ds)
+                self._start_var.set(self._prefs.get("start", ds))
             if not self._end_var.get():
-                self._end_var.set(hi)
+                self._end_var.set(self._prefs.get("end", hi))
         except Exception:
             self._span_lbl.config(text="Adat betöltve.", fg=FG_GRAY_DIM)
         self._btn_start.config(state="normal")
+
+    def _open_calendar(self, var, anchor):
+        """Naptár-popup a `var` (kezdő/záró) dátumhoz, a letöltött history-hoz
+        igazított választható tartománnyal."""
+        try:
+            cur = pd.Timestamp(var.get().strip()).date() if var.get().strip() else None
+        except Exception:
+            cur = None
+        lo = hi = None
+        if self._df1 is not None:
+            try:
+                lo = self._df1.index[0].date()
+                hi = self._df1.index[-1].date()
+            except Exception:
+                pass
+        CalendarPopup(self.win, anchor=anchor, initial=cur, lo=lo, hi=hi,
+                      on_pick=lambda s: var.set(s), font=self._sf)
 
     # ── Futtatás ─────────────────────────────────────────────────────────────
     def _start(self):
@@ -856,6 +890,14 @@ class BacktestDialog:
         build_cfg = self._current_build_cfg()      # az ablakban választott (feltáró) építés
         allowed = self._allowed_hours()            # None = minden óra; különben trade_hours
         tcfg = self._run_trading_cfg()             # a `Slotok` mezővel felülírt méretezés
+
+        # Kényelmi beállítások megjegyzése (per stratégia+pár): időszak + nyitó
+        # összeg + slotok. A következő megnyitáskor visszatöltődnek.
+        _bprefs.save(self.symbol, self.strategy.name,
+                     start=self._start_var.get().strip() or None,
+                     end=self._end_var.get().strip() or None,
+                     ib=self._ib_var.get().strip() or None,
+                     slots=tcfg.get("max_open_slots"))
 
         stop_flag = self._stop_flag
 
