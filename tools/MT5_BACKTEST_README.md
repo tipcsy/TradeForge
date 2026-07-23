@@ -40,3 +40,15 @@ A Python-backtest belépőit az MT5 Strategy Testerben lehet reprodukálni.
 - A CSV a `tools/mt5_export.py`-ból jön (12 oszlop: event, datetime, symbol,
   direction, price, sl, tp, lot, comment, **be_trigger=tid**, trail_trigger, trail_dist_p).
   A `tid` (trade-azonosító) köti az eseményt a helyes pozícióhoz.
+
+## Kötések megtekintése NORMÁL charton (BacktestTradesViewer.mq5)
+
+Ha nem futtatni akarod a kötéseket, csak MEGNÉZNI az egész időszak összes
+kereskedési vonalát egy sima charton (nem a Strategy Testerben):
+
+1. Fordítsd le a `tools/BacktestTradesViewer.mq5`-öt (Indicators közé), majd húzd egy
+   `<SYMBOL>` **M1** chartra (pl. GER40 M1).
+2. Ugyanaz a CSV kell a `Common\Files\` mappába; az inputnál add meg az `InpCsvFile`-t.
+3. Kirajzolja az ÖSSZES kötést: belépő + SL-lépcső + TP + kiszállás + részleges zárás
+   jelölő — szabadon görgethető a teljes időszakon. Az `InpDaysBack`-kel az utolsó N
+   napra szűkíthető (0 = mind). Csak RAJZOL, nem kereskedik.
