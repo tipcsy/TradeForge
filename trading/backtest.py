@@ -644,6 +644,19 @@ def run_pair(
 
     prev_m1_row = None
 
+    # ── BID/ASK modell előkészítés (MT5-hű) ─────────────────────────────────
+    # Az MT5 chart/tester gyertyái BID árak; ask-gyertya NINCS. A mi adatunk is
+    # BID-ből épül (tools/download_history), bar-onként az `avg_spread`-del
+    # (ask−bid, ÁRBAN). A végrehajtás a valós mechanika szerint:
+    #   BUY  → ASK-on lép be (close + s), a SL/TP a BID-en (nyers OHLC) triggerel
+    #   SELL → BID-en lép be (close),     a SL/TP az ASK-on (OHLC + s) triggerel
+    # Így egy körbeforduló kötés PONTOSAN egy spreadet fizet — mint élesben.
+    # Ha nincs avg_spread (régi adat), a pár `backtest_spread_pips`-e a tartalék.
+    _spread_fallback = pip_to_price(
+        float(pair_cfg.get("backtest_spread_pips", 1.5)), pip_size)
+    _spread_arr = (m1["avg_spread"].to_numpy(dtype=float)
+                   if "avg_spread" in m1.columns else None)
+
     # ── Progressz-visszajelzés (B3 Backtest-ablak) ──────────────────────────
     # Best-effort: időnként jelenti a haladást (%), az aktuális egyenleget, a
     # nyitott/lezárt kötések számát és a ténylegesen alkalmazott rr-technikákat.
@@ -700,15 +713,17 @@ def run_pair(
             m15_row = m15.iloc[m15_ptr]
             state = strategy.bt_on_high_close(state, m15_row, params)
 
-        # Nyitott pozíciók kezelése (SL/TP/breakeven/trailing)
-        spread_pips = pair_cfg.get("backtest_spread_pips", 1.5)
-        spread = pip_to_price(spread_pips, pip_size)
+        # Nyitott pozíciók kezelése (SL/TP/breakeven/trailing) — BID/ASK modellel
+        _sp = _spread_arr[i] if _spread_arr is not None else float("nan")
+        if not (_sp > 0):                       # NaN / hiány → config-tartalék
+            _sp = _spread_fallback
+        spread_pips = _sp / pip_size            # a pnl_pips + swing-SL számításhoz
+        # A gyertya BID; az ASK-sorozat = BID + spread. A kilépés mindig a
+        # SZEMBENI oldalon történik (BUY→bid, SELL→ask).
+        bid_hi, bid_lo = m1_row["high"], m1_row["low"]            # BUY ezen zár
+        ask_hi, ask_lo = m1_row["high"] + _sp, m1_row["low"] + _sp  # SELL ezen zár
 
         for trade in list(open_trades):
-            # BUY esetén az ár amit kapunk eladáskor = bid = close; vételkor = ask = close + spread
-            bid = m1_row["low"]   # legrosszabb ár SL-hez (BUY SL ütés)
-            ask = m1_row["high"]  # legrosszabb ár SL-hez (SELL SL ütés)
-
             closed = False
             if record_events:
                 _ev_sl0, _ev_lot0 = trade.sl, trade.lot
@@ -717,38 +732,41 @@ def run_pair(
                 # TP ellenőrzés — ÉPÍTETT csomagnál NINCS TP (a live a ráépítéskor
                 # törli minden láb TP-jét, hogy az induló láb ne zárjon önállóan;
                 # a csomag az átlagár-stopig / kiszállási jelig fut).
-                if not trade.built and m1_row["high"] >= trade.tp:
+                # A BUY a BID-en zár → a TP/SL a BID-sorozaton triggerel.
+                if not trade.built and bid_hi >= trade.tp:
                     trade.close_price = trade.tp
                     trade.close_time  = m1_time
                     trade.pnl_usd     = calc_pnl(trade, trade.tp)
                     trade.status      = "tp"
                     closed = True
                 # SL ellenőrzés
-                elif m1_row["low"] <= trade.sl:
+                elif bid_lo <= trade.sl:
                     trade.close_price = trade.sl
                     trade.close_time  = m1_time
                     trade.pnl_usd     = calc_pnl(trade, trade.sl)
                     trade.status      = "sl"
                     closed = True
                 else:
-                    _manage_position(trade, m1_row["high"], m1_row["low"],
+                    # A BE/trailing is a KILÉPÉSI (bid) oldalon mér
+                    _manage_position(trade, bid_hi, bid_lo,
                                      params, pip_size, min_lot, lot_step, rr_spec)
 
             elif trade.direction == "SELL":
-                if not trade.built and m1_row["low"] <= trade.tp:
+                # A SELL az ASK-on zár → a TP/SL az ASK-sorozaton triggerel.
+                if not trade.built and ask_lo <= trade.tp:
                     trade.close_price = trade.tp
                     trade.close_time  = m1_time
                     trade.pnl_usd     = calc_pnl(trade, trade.tp)
                     trade.status      = "tp"
                     closed = True
-                elif m1_row["high"] >= trade.sl:
+                elif ask_hi >= trade.sl:
                     trade.close_price = trade.sl
                     trade.close_time  = m1_time
                     trade.pnl_usd     = calc_pnl(trade, trade.sl)
                     trade.status      = "sl"
                     closed = True
                 else:
-                    _manage_position(trade, m1_row["high"], m1_row["low"],
+                    _manage_position(trade, ask_hi, ask_lo,
                                      params, pip_size, min_lot, lot_step, rr_spec)
 
             # ── Esemény-napló: a menedzsment-fázis (részleges zárás + stop-mozgás)
@@ -775,7 +793,9 @@ def run_pair(
             if (not closed and _exit_at is not None and trade.reduced
                     and trade.runner_mode == _rrm.RUNNER_EXIT
                     and _exit_at(m15_ptr, trade.direction)):
-                trade.close_price = m1_row["close"]
+                # piaci zárás a SZEMBENI oldalon (BUY→bid=close, SELL→ask=close+s)
+                trade.close_price = (m1_row["close"] if trade.direction == "BUY"
+                                     else m1_row["close"] + _sp)
                 trade.close_time  = m1_time
                 trade.pnl_usd     = calc_pnl(trade, trade.close_price)
                 trade.status      = "exit"
@@ -785,7 +805,9 @@ def run_pair(
             # korai zárás a gyertyazáró áron (a teljes SL kivárása helyett).
             if (not closed and _cc_on
                     and (m1_time - trade.open_time) >= _cc_delta):
-                _px = float(m1_row["close"])
+                # piaci zárás a SZEMBENI oldalon (BUY→bid, SELL→ask)
+                _px = float(m1_row["close"] if trade.direction == "BUY"
+                            else m1_row["close"] + _sp)
                 if (_px < trade.open_price if trade.direction == "BUY"
                         else _px > trade.open_price):
                     trade.close_price = _px
@@ -820,7 +842,10 @@ def run_pair(
                     _add  = _posbuild.next_lot(_last, _build_cfg["size_factor"],
                                                min_lot, lot_step)
                     if _add > 0:
-                        trade.legs.append((float(m1_row["close"]), _add))
+                        # ráépítés piaci áron a BELÉPŐ oldalon (BUY→ask, SELL→bid)
+                        _add_px = float(m1_row["close"] + _sp
+                                        if trade.direction == "BUY" else m1_row["close"])
+                        trade.legs.append((_add_px, _add))
                         trade.lot = round(sum(l[1] for l in trade.legs), 8)
                         trade.sl  = round(_posbuild.average_price(trade.legs), 6)
                         trade.build_ref = _bc_close

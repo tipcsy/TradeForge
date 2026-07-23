@@ -75,16 +75,21 @@ def _ticks_to_bars(ticks_raw, freq: str) -> pd.DataFrame:
     has_ask  = "ask"  in df.columns
     has_last = "last" in df.columns
 
+    # FONTOS: a gyertyák BID árból épülnek — az MT5 chart és a Strategy Tester is
+    # BID-et rajzol (ask-gyertya nincs; az ASK csak a végrehajtásnál jelenik meg:
+    # BUY belép ask-on, SELL kilép ask-on). Így az indikátoraink és a trigger-
+    # ellenőrzéseink UGYANAZON a soron dolgoznak, mint az MT5 → a backtest és az
+    # MT5-replay összevethető. Az `avg_spread` (ask−bid) mellé megy, ebből áll elő
+    # az ask-sorozat a motorban (ask = bid + spread).
     if has_bid and has_ask:
-        df["mid"] = (df["bid"] + df["ask"]) / 2.0
-        if has_last:
-            mask = df["last"] > 0
-            df.loc[mask, "mid"] = df.loc[mask, "last"]
+        df["mid"] = df["bid"]                      # BID a bar-alap (nem közép!)
         valid = (df["bid"] > 0) & (df["ask"] > 0) & (df["ask"] > df["bid"])
         df["spread"] = float("nan")
         df.loc[valid, "spread"] = df.loc[valid, "ask"] - df.loc[valid, "bid"]
+    elif has_bid:
+        df["mid"] = df["bid"]
     elif has_last:
-        df["mid"] = df["last"]
+        df["mid"] = df["last"]                     # tőzsdei (last) szimbólum
     else:
         return pd.DataFrame()
 
