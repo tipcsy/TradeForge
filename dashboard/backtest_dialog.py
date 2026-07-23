@@ -1112,12 +1112,20 @@ class BacktestDialog:
         """Az egyenleg-görbe újrarajzolása: az aktuális futás + (opcionálisan) a
         kiválasztott referencia (előző/eredeti) HALVÁNYAN, közös skálán."""
         ref_result, ref_summary, ref_label = self._reference()
-        self._ref_metrics_lbl.config(
-            text=self._fmt_ref_metrics(ref_summary, ref_label))
         # Minden görbe a SAJÁT futásának nyitó egyenlegéről indul (a nyitó összeg
         # mezővel állítható); a config 1000 csak fallback, ha nincs summary.
         cur_ib = self._start_bal(self._cur_summary, self._ib)
         ref_ib = self._start_bal(ref_summary, cur_ib)
+        # Ha a referencia MÁS nyitó összegen futott, az összevetés félrevezető (közös
+        # abszolút tengelyen távol kerülnének) → kihagyjuk, de az előzményt megtartjuk
+        # (ugyanarra a tőkére visszaállítva az összevetés magától visszatér).
+        if ref_result is not None and abs(ref_ib - cur_ib) > 0.005:
+            self._ref_metrics_lbl.config(
+                text=f"{ref_label}: más nyitó összeg ({ref_ib:,.0f}$) — nem összevethető")
+            ref_result = None
+        else:
+            self._ref_metrics_lbl.config(
+                text=self._fmt_ref_metrics(ref_summary, ref_label))
         self._draw_equity(self._cur_result, cur_ib, ref_result, ref_ib)
 
     def _draw_equity(self, result, ib, ref_result=None, ref_ib=None):
