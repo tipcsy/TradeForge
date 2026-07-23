@@ -1097,28 +1097,46 @@ class BacktestDialog:
                 f"Win {summary.get('win_rate', 0) * 100:.0f}% · "
                 f"P&L {summary.get('total_pnl', 0):+.0f}$ · PF {pf_s}")
 
+    @staticmethod
+    def _start_bal(summary, fallback):
+        """A futás TÉNYLEGES nyitó egyenlege a summary-ből: final_balance − total_pnl
+        (= initial_balance). Így a görbe a valós tőkéről indul, nem a config 1000-ről."""
+        if summary and "final_balance" in summary and "total_pnl" in summary:
+            try:
+                return float(summary["final_balance"]) - float(summary["total_pnl"])
+            except (TypeError, ValueError):
+                pass
+        return fallback
+
     def _redraw(self):
         """Az egyenleg-görbe újrarajzolása: az aktuális futás + (opcionálisan) a
         kiválasztott referencia (előző/eredeti) HALVÁNYAN, közös skálán."""
         ref_result, ref_summary, ref_label = self._reference()
         self._ref_metrics_lbl.config(
             text=self._fmt_ref_metrics(ref_summary, ref_label))
-        self._draw_equity(self._cur_result, self._ib, ref_result)
+        # Minden görbe a SAJÁT futásának nyitó egyenlegéről indul (a nyitó összeg
+        # mezővel állítható); a config 1000 csak fallback, ha nincs summary.
+        cur_ib = self._start_bal(self._cur_summary, self._ib)
+        ref_ib = self._start_bal(ref_summary, cur_ib)
+        self._draw_equity(self._cur_result, cur_ib, ref_result, ref_ib)
 
-    def _draw_equity(self, result, ib, ref_result=None):
+    def _draw_equity(self, result, ib, ref_result=None, ref_ib=None):
         """Egyenleg-görbe a balance_curve-ből (matplotlib nélkül). A `ref_result`
-        (ha van) HALVÁNYAN, ugyanazon a skálán rajzolódik az összevetéshez."""
+        (ha van) HALVÁNYAN, ugyanazon a skálán rajzolódik az összevetéshez. Az `ib`
+        az aktuális, a `ref_ib` a referencia futás nyitó egyenlege (eltérhetnek)."""
         c = self._canvas
         c.delete("all")
         W = int(c.cget("width")); H = int(c.cget("height"))
         pad = 6
+        if ref_ib is None:
+            ref_ib = ib
 
-        def curve_ys(res):
+        def curve_ys(res, base):
             cur = getattr(res, "balance_curve", None) or [] if res is not None else []
-            return [ib] + [b for _, b in cur] if len(cur) >= 1 else []
+            return [base] + [b for _, b in cur] if len(cur) >= 1 else []
 
-        ys_cur = curve_ys(result)
-        ys_ref = curve_ys(ref_result)
+        ys_cur = curve_ys(result, ib)
+        ys_ref = curve_ys(ref_result, ref_ib)
         if len(ys_cur) < 2 and len(ys_ref) < 2:
             c.create_text(W // 2, H // 2, text="nincs elég adat a görbéhez",
                           fill=FG_GRAY_DIM, font=self._sf)
