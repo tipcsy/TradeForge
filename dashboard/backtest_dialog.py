@@ -144,6 +144,8 @@ class BacktestDialog:
         self._df1  = None
         self._build_csv = None      # a legutóbbi futás Építés CSV-je (gomb)
         self._running = False
+        self._closed  = False       # az ablak bezárult-e (a háttérszál ne piszkálja a widgeteket)
+        self._stop_flag = None      # threading.Event a futó backtest megszakításához
         self._summary = None
         self._build()
         # Adat betöltése háttérben (a dátum-tartományhoz + a futáshoz cache-elve)
@@ -604,6 +606,12 @@ class BacktestDialog:
             pass
 
     def _close(self):
+        # Előbb jelezzük a háttérszálnak: ne ütemezzen több widget-frissítést, és a
+        # futó backtest álljon le — különben a megsemmisült progressbar/widgetek
+        # miatt `TclError`-cunami jönne az after-callbackekből.
+        self._closed = True
+        if self._stop_flag is not None:
+            self._stop_flag.set()
         try:
             self.parent.grab_set()
         except Exception:
@@ -791,6 +799,8 @@ class BacktestDialog:
         threading.Thread(target=work, daemon=True, name="BtDlgLoad").start()
 
     def _data_ready(self, df15, df1, err):
+        if self._closed:
+            return   # az ablak bezárult a betöltés alatt — ne piszkáljuk a widgeteket
         if err:
             self._span_lbl.config(text=err, fg=FG_RED)
             return
@@ -823,8 +833,11 @@ class BacktestDialog:
             return
         self._run_params = params
         self._running = True
-        self._btn_start.config(text="Fut…", state="disabled")
-        self._status.config(text="Backtest fut…", fg=FG_GRAY)
+        self._stop_flag = threading.Event()
+        # A start gomb futás közben MEGSZAKÍTÁS gombbá válik (a _done visszaállítja).
+        self._btn_start.config(text="Megszakítás", state="normal", command=self._cancel)
+        self._status.config(text="Backtest fut… (a Megszakítás gombbal leállítható)",
+                            fg=FG_GRAY)
         self._pbar.config(value=0.0)
         self._pct_lbl.config(text="0%")
         self._canvas.delete("all")
@@ -844,7 +857,11 @@ class BacktestDialog:
         allowed = self._allowed_hours()            # None = minden óra; különben trade_hours
         tcfg = self._run_trading_cfg()             # a `Slotok` mezővel felülírt méretezés
 
+        stop_flag = self._stop_flag
+
         def cb(pct, m1_time, balance, n_open, n_closed, tech):
+            if self._closed:
+                return
             try:
                 self.win.after(0, lambda: self._on_progress(
                     pct, m1_time, balance, n_open, n_closed, tech))
@@ -852,7 +869,7 @@ class BacktestDialog:
                 pass
 
         def work():
-            summary, result, err = None, None, None
+            summary, result, err, cancelled = None, None, None, False
             try:
                 from trading.backtest import run_pair
                 result = run_pair(self.symbol, self._df15, self._df1, params,
@@ -860,65 +877,94 @@ class BacktestDialog:
                                   strategy=self.strategy, rr=rr_spec,
                                   build=build_cfg, allowed_hours=allowed,
                                   test_start=start, test_end=end,
-                                  progress_callback=cb, record_events=True)
-                summary = result.summary(ib)
-                from collections import Counter
-                tech = Counter(t.rr_technique for t in result.closed
-                               if getattr(t, "rr_technique", ""))
-                if summary and tech:
-                    summary["_rr_tech"] = dict(tech)
-                # MT5 backtest-reprodukció: a belépők CSV-be (BacktestReplayer.mq5
-                # replay). „Amikor futtatok egy backtestet, elkészíti a belépőket."
-                try:
-                    from tools.mt5_export import export_mt5_csv
-                    from version import BASE_DIR
-                    _p = export_mt5_csv(result, self.symbol, params,
-                                        self.pair_cfg, BASE_DIR / "data" / "mt5_backtest")
-                    if _p and summary is not None:
-                        summary["_mt5_csv"] = _p.name
-                except Exception:
-                    pass
-                # Pozícióépítés — tételes CSV (csak ha volt ráépítés). Az ablak
-                # „Építés CSV" gombja ezt nyitja meg (mint a Trials CSV).
-                try:
-                    from tools.build_export import export_build_csv
-                    from version import BASE_DIR
-                    _bp = export_build_csv(result, self.symbol,
-                                           BASE_DIR / "data" / "build_csv")
-                    if _bp and summary is not None:
-                        summary["_build_csv"] = str(_bp)
-                except Exception:
-                    pass
+                                  progress_callback=cb, record_events=True,
+                                  stop_flag=stop_flag)
+                if stop_flag.is_set():
+                    # Megszakítva: a részeredményt eldobjuk (nincs összegzés/CSV).
+                    cancelled = True
+                else:
+                    summary = result.summary(ib)
+                    from collections import Counter
+                    tech = Counter(t.rr_technique for t in result.closed
+                                   if getattr(t, "rr_technique", ""))
+                    if summary and tech:
+                        summary["_rr_tech"] = dict(tech)
+                    # MT5 backtest-reprodukció: a belépők CSV-be (BacktestReplayer.mq5
+                    # replay). „Amikor futtatok egy backtestet, elkészíti a belépőket."
+                    try:
+                        from tools.mt5_export import export_mt5_csv
+                        from version import BASE_DIR
+                        _p = export_mt5_csv(result, self.symbol, params,
+                                            self.pair_cfg, BASE_DIR / "data" / "mt5_backtest")
+                        if _p and summary is not None:
+                            summary["_mt5_csv"] = _p.name
+                    except Exception:
+                        pass
+                    # Pozícióépítés — tételes CSV (csak ha volt ráépítés). Az ablak
+                    # „Építés CSV" gombja ezt nyitja meg (mint a Trials CSV).
+                    try:
+                        from tools.build_export import export_build_csv
+                        from version import BASE_DIR
+                        _bp = export_build_csv(result, self.symbol,
+                                               BASE_DIR / "data" / "build_csv")
+                        if _bp and summary is not None:
+                            summary["_build_csv"] = str(_bp)
+                    except Exception:
+                        pass
             except Exception as ex:
                 err = str(ex)
+            if self._closed:
+                return   # az ablak közben bezárult — ne érintsük a widgeteket
             try:
-                self.win.after(0, lambda: self._done(summary, result, ib, err))
+                self.win.after(0, lambda: self._done(summary, result, ib, err, cancelled))
             except Exception:
                 pass
 
         threading.Thread(target=work, daemon=True, name="BtDlgRun").start()
 
-    def _on_progress(self, pct, m1_time, balance, n_open, n_closed, tech):
-        self._pbar.config(value=pct * 100.0)
-        self._pct_lbl.config(text=f"{pct * 100:.0f}%")
-        try:
-            self._live["time"].config(text=str(m1_time)[:16])
-        except Exception:
-            pass
-        col = FG_GREEN if balance >= 0 else FG_RED
-        self._live["balance"].config(text=f"{balance:,.0f}$", fg=col)
-        self._live["open"].config(text=str(n_open))
-        self._live["closed"].config(text=str(n_closed))
-        if tech:
-            self._tech_lbl.config(text="Technika: " + ", ".join(
-                f"{_TECH_NAMES.get(k, k)}×{v}" for k, v in tech.items()))
+    def _cancel(self):
+        """A futó backtest megszakítása (a Megszakítás gomb). A run_pair a részered-
+        ménnyel visszatér, a _done „Megszakítva"-ként zár (nem renderel, nincs CSV)."""
+        if self._running and self._stop_flag is not None:
+            self._stop_flag.set()
+            self._btn_start.config(state="disabled")
+            try:
+                self._status.config(text="Megszakítás…", fg=FG_YELLOW)
+            except Exception:
+                pass
 
-    def _done(self, summary, result, ib, err):
-        self._running = False
+    def _on_progress(self, pct, m1_time, balance, n_open, n_closed, tech):
+        if self._closed:
+            return   # az ablak bezárult — a widgetek már nem léteznek
         try:
-            self._btn_start.config(text="Backtest indítása", state="normal")
+            self._pbar.config(value=pct * 100.0)
+            self._pct_lbl.config(text=f"{pct * 100:.0f}%")
+            self._live["time"].config(text=str(m1_time)[:16])
+            col = FG_GREEN if balance >= 0 else FG_RED
+            self._live["balance"].config(text=f"{balance:,.0f}$", fg=col)
+            self._live["open"].config(text=str(n_open))
+            self._live["closed"].config(text=str(n_closed))
+            if tech:
+                self._tech_lbl.config(text="Technika: " + ", ".join(
+                    f"{_TECH_NAMES.get(k, k)}×{v}" for k, v in tech.items()))
+        except tk.TclError:
+            return   # a widgetek közben megsemmisültek (bezárás) — csendben kilép
+
+    def _done(self, summary, result, ib, err, cancelled=False):
+        self._running = False
+        if self._closed:
+            return   # az ablak bezárult — nincs mit frissíteni
+        # A gomb visszaáll indító gombbá (a futás közben Megszakítás volt).
+        try:
+            self._btn_start.config(text="Backtest indítása", state="normal",
+                                   command=self._start)
         except Exception:
             return   # az ablak közben bezárult
+        if cancelled:
+            self._status.config(text="Megszakítva.", fg=FG_YELLOW)
+            self._pbar.config(value=0.0)
+            self._pct_lbl.config(text="0%")
+            return
         if err:
             self._status.config(text=f"Backtest hiba: {err}", fg=FG_RED)
             return

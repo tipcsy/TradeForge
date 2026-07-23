@@ -538,6 +538,7 @@ def run_pair(
     progress_callback=None,
     build: "dict | None" = None,
     record_events: bool = False,
+    stop_flag=None,
 ) -> BacktestResult:
     # A jelzést/indikátorokat a STRATÉGIA adja (seam); a végrehajtás (SL/TP/
     # breakeven/trailing, slot, lot) a motoré. strategy=None → config szerinti.
@@ -664,8 +665,14 @@ def run_pair(
             pass
 
     for i, (m1_time, m1_row) in enumerate(m1.iterrows()):
-        if progress_callback is not None and i % _PROG_EVERY == 0:
-            _report(i, m1_time)
+        if i % _PROG_EVERY == 0:
+            # Megszakítás (a Backtest-ablak „Megszakítás" gombja / ablak bezárása):
+            # a részeredménnyel visszatérünk (a hívó eldobja). Ritkán ellenőrzünk
+            # (4096 bar-onként) → nincs érdemi overhead.
+            if stop_flag is not None and stop_flag.is_set():
+                break
+            if progress_callback is not None:
+                _report(i, m1_time)
         # Óra-szűrő (csak ha allowed_hours adott — preview; egyébként minden óra).
         # A no-trade órában nem kereskedünk. A jelzés-reset (mint a live/viz) CSAK ha a
         # `no_trade_resets_signal` param be van kapcsolva (alap: KI) → a szünet után
