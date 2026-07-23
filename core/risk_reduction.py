@@ -166,6 +166,18 @@ def closable_lot(cur_lot: float, fraction: float, min_lot: float,
     return round(closed, 8)
 
 
+def can_reduce_lot(cur_lot: float, min_lot: float, lot_step: float) -> bool:
+    """Megfelezhető-e egyáltalán ez a lot? (A részleges záráshoz ≥ 2× min_lot kell.)
+    A Felező/Pajzs (és a Pajzs↔Fibo, ami Pajzsra eshet) ezt igényli — a GUI ez
+    alapján tiltja a presetet a nem-felezhető (pl. min-loton nyíló) instrumentumnál."""
+    return closable_lot(cur_lot, 0.5, min_lot, lot_step) > 0.0
+
+
+# A részleges zárást (megfelezést) IGÉNYLŐ presetek — ezeket kell tiltani, ha a
+# pozíció lotja nem felezhető (a Fibo/Harmados/Risky csak stopot mozgat, nem zár részt).
+PARTIAL_CLOSE_PRESETS = (PRESET_HALVING, PRESET_SHIELD, PRESET_SHIELD_FIBO)
+
+
 @dataclass
 class Plan:
     """Amit a technika 1R-nél tesz — a motor ezt hajtja végre."""

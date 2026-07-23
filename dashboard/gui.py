@@ -3959,11 +3959,35 @@ class DashboardWindow:
 
         cur_preset = _rrs.effective_preset(symbol)
         cur_runner = _rrs.get_runner(symbol)
+
+        # Felezhetőség: ha van NYITOTT pozíció a páron, a TÉNYLEGES lotja alapján. A
+        # részleges zárást igénylő presetek (Felező/Pajzs/Pajzs↔Fibo) csak akkor
+        # választhatók, ha a lot ≥ 2× min_lot (különben nem lehet megfelezni — pl. a
+        # min-loton nyíló indexeknél). Nyitott pozíció híján nem tiltunk (nem tudjuk a
+        # jövőbeli méretet), a preset úgyis risky/BE-re degradál, ha nem osztható.
+        pair_cfg = (self.cfg.get("pairs", {}) or {}).get(symbol, {}) or {}
+        min_lot  = float(pair_cfg.get("min_lot", 0.01) or 0.01)
+        lot_step = float(pair_cfg.get("lot_step", 0.01) or 0.01)
+        _lots = [float(p.get("volume", 0.0) or 0.0)
+                 for p in getattr(self, "_mt5_cache", {}).get("positions_detail", [])
+                 if p.get("symbol") == symbol]
+        cur_lot  = max(_lots) if _lots else None
+        halvable = cur_lot is None or _rrx.can_reduce_lot(cur_lot, min_lot, lot_step)
+
         menu = tk.Menu(self.root, tearoff=0, bg=BG_HEADER, fg=FG_WHITE,
                        activebackground=BTN_OPT_BG, activeforeground=FG_ON_ACCENT)
         menu.add_command(label=f"Kiszállás — a(z) {symbol} MINDEN pozíciójára hat:",
                          state="disabled")
+        if not halvable:
+            menu.add_command(
+                label=f"  (a lot {cur_lot:.2f} < 2× min {min_lot:.2f} → Felező/Pajzs nem osztható)",
+                state="disabled")
         for preset in _rrs.CYCLE:
+            if preset in _rrx.PARTIAL_CLOSE_PRESETS and not halvable:
+                # Nem felezhető → a részleges zárást igénylő preset nem választható.
+                menu.add_command(label=f"    {_rrs.NAME[preset]}  — nem felezhető",
+                                 state="disabled")
+                continue
             menu.add_command(
                 label=("● " if preset == cur_preset else "    ") + _rrs.NAME[preset],
                 command=lambda p=preset: self._set_exit_preset(symbol, p))
