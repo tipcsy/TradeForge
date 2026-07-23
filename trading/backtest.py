@@ -74,6 +74,12 @@ class Trade:
     # ── Pozícióépítés (AUTO) — több „láb" (ráépítés) egy átlagárral ──
     legs: list = field(default_factory=list)   # [(price, lot), …]; üres → egyleges
     build_ref: float = 0.0      # a következő ráépítés referencia-záróára
+    # ── Esemény-napló (MT5 BacktestReplayer visszajátszáshoz) ──
+    # CSAK ha a run_pair `record_events=True`-val fut (a Backtest-ablak); alapból
+    # üres → az optimalizáló/portfólió-BT bitazonos, nincs overhead. Minden elem:
+    # (típus, idő, ár, sl, tp, lot, komment). Típus: OPEN / SL_MODIFY / TP_MODIFY /
+    # PARTIAL_CLOSE / BUILD_ADD / CLOSE. Az MT5 ezeket VÉGREHAJTJA (nem szimulál újra).
+    events: list = field(default_factory=list)
 
     @property
     def built(self) -> bool:
@@ -531,6 +537,7 @@ def run_pair(
     test_end: Optional[str] = None,
     progress_callback=None,
     build: "dict | None" = None,
+    record_events: bool = False,
 ) -> BacktestResult:
     # A jelzést/indikátorokat a STRATÉGIA adja (seam); a végrehajtás (SL/TP/
     # breakeven/trailing, slot, lot) a motoré. strategy=None → config szerinti.
@@ -696,6 +703,8 @@ def run_pair(
             ask = m1_row["high"]  # legrosszabb ár SL-hez (SELL SL ütés)
 
             closed = False
+            if record_events:
+                _ev_sl0, _ev_lot0 = trade.sl, trade.lot
 
             if trade.direction == "BUY":
                 # TP ellenőrzés — ÉPÍTETT csomagnál NINCS TP (a live a ráépítéskor
@@ -734,6 +743,23 @@ def run_pair(
                 else:
                     _manage_position(trade, m1_row["high"], m1_row["low"],
                                      params, pip_size, min_lot, lot_step, rr_spec)
+
+            # ── Esemény-napló: a menedzsment-fázis (részleges zárás + stop-mozgás)
+            # változásai. A TP/SL-záró bar-on a `else` nem futott → nincs változás.
+            # (A build-fázis változásait külön, a ráépítés helyén naplózzuk.)
+            if record_events and not closed:
+                if trade.reduced and trade.lot < _ev_lot0:
+                    _1r = trade.sl_pips * pip_size
+                    _pp = (trade.open_price + _1r if trade.direction == "BUY"
+                           else trade.open_price - _1r)
+                    trade.events.append(("PARTIAL_CLOSE", m1_time, round(_pp, 6),
+                                         0.0, 0.0, round(_ev_lot0 - trade.lot, 8),
+                                         trade.rr_technique or "reduce"))
+                if trade.sl != _ev_sl0:
+                    _be = abs(trade.sl - trade.open_price) < pip_size * 0.5
+                    trade.events.append(("SL_MODIFY", m1_time, 0.0,
+                                         round(trade.sl, 6), 0.0, 0.0,
+                                         "BE" if _be else "TRAIL"))
 
             # Runner KISZÁLLÁSI JELRE zárása (Pajzs/Felező maradéka, TP nélkül fut):
             # a részleges zárás UTÁN figyeljük; a jel az m15_ptr gyertyán (ugyanaz az
@@ -791,6 +817,15 @@ def run_pair(
                         trade.lot = round(sum(l[1] for l in trade.legs), 8)
                         trade.sl  = round(_posbuild.average_price(trade.legs), 6)
                         trade.build_ref = _bc_close
+                        if record_events:
+                            # Ráépítés: új láb (piaci áron) + az SL az új ÁTLAGÁRRA,
+                            # és a csomag TP nélkül fut (minden láb TP-je törölve).
+                            trade.events.append(("BUILD_ADD", m1_time,
+                                                 round(float(m1_row["close"]), 6),
+                                                 round(trade.sl, 6), 0.0,
+                                                 round(_add, 8), "build"))
+                            trade.events.append(("TP_MODIFY", m1_time, 0.0, 0.0,
+                                                 0.0, 0.0, "build_no_tp"))
 
             if closed:
                 # A részleges zárás(ok)ból már realizált P&L hozzáadása a runner
@@ -801,6 +836,10 @@ def run_pair(
                     trade.pnl_pips = (trade.close_price - trade.open_price) / trade.pip_size - spread_pips
                 else:
                     trade.pnl_pips = (trade.open_price - trade.close_price) / trade.pip_size - spread_pips
+                if record_events:
+                    trade.events.append(("CLOSE", m1_time,
+                                         round(trade.close_price, 6), 0.0, 0.0,
+                                         round(trade.lot, 8), trade.status))
                 open_trades.remove(trade)
                 result.trades.append(trade)
                 balance += trade.pnl_usd
@@ -858,6 +897,10 @@ def run_pair(
                         trade.rr_preset_eff = (_rrm.PRESET_FIBO if _bigmove_at(m15_ptr)
                                                else _rrm.PRESET_SHIELD)
                     open_trades.append(trade)
+                    if record_events:
+                        trade.events.append(("OPEN", m1_time, round(open_price, 6),
+                                             round(sl_price, 6), round(tp_price, 6),
+                                             round(lot, 8), ""))
 
         prev_m1_row = m1_row
 

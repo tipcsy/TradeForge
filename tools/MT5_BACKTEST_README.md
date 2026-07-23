@@ -17,16 +17,26 @@ A Python-backtest belépőit az MT5 Strategy Testerben lehet reprodukálni.
    - `InpCsvFile` = a CSV fájlneve,
    - `InpPipSize` = a szimbólum pip-mérete,
    - `InpMagic` = tetszőleges egyedi szám.
-5. Indítsd — az EA az OPEN-eseményekből nyit, a BE/trail/SL/TP-t **belül** kezeli
-   (a CSV `be_trigger`/`trail_trigger`/`trail_dist_p` alapján, M1 bar H→L logikával),
-   és kirajzolja a trade-eket.
+5. Indítsd — az EA a Python **eseménynaplóját JÁTSSZA VISSZA** (nem szimulál újra):
+   OPEN → SL_MODIFY / TP_MODIFY / PARTIAL_CLOSE / BUILD_ADD → CLOSE, és kirajzolja a
+   trade-eket. Az OPEN-kor a valódi SL/TP a pozícióra kerül → az MT5 a pontos SL/TP
+   áron zár.
 
 ## Fontos / korlátok
-- **Trading-with-Erik M1-belépőket ad** → az EA **M1**-en fut (a Trading-with-ai
-  M15-öt adott). Az OPEN időbélyege a belépő + 1 M1 (bar-záró).
-- A modell az **OFF preset** (egyszerű BE + trail) logikájával egyezik. A
-  risky/felező/pajzs preset, a kiszállási jel és a pozícióépítés a **Python-oldalon**
-  van, az EA-ban nincs modellezve → azoknál az MT5-eredmény eltérhet.
+- **Trading-with-Erik M1-belépőket ad** → az EA **M1**-en fut. Minden esemény
+  időbélyege a detektáló bar + 1 M1 (bar-záró) → az EA a következő bar nyitásán hajtja
+  végre.
+- **v4 (eseménynapló-alapú):** BÁRMELY preset (Felező/Pajzs/Fibo/Harmados/Risky), a
+  kiszállási jel és a pozícióépítés is egyezik, mert a döntéseket a **Python** hozza, az
+  MT5 csak végrehajtja. A CSV-t a `run_pair(record_events=True)` termeli (a Backtest-ablak
+  automatikusan ezzel fut).
+- **Elfogadott, kis eltérés:** a belépő az MT5 valós bar-open/spread-jén tölt (a Python
+  `close+spread`-en), a részleges zárás pedig piaci áron zár a bar-on (a Python az 1R
+  szinten) → épp ezt (a spread/pip-modellt) validálja a replayer. Az SL/TP-alapú
+  kilépések viszont pontos áron egyeznek.
+- **Számla-mód:** a több egyidejű pozíció (kockázatmentes runner + új belépő) és a
+  ráépítés (BUILD_ADD) helyes visszajátszásához a tesztszámla legyen megfelelő
+  (a ráépítés átlagár-csomagja **NETTING** számlát feltételez).
 - A CSV a `tools/mt5_export.py`-ból jön (12 oszlop: event, datetime, symbol,
-  direction, price, sl, tp, lot, comment, be_trigger, trail_trigger, trail_dist_p).
-- Forrás: áthozva a `Trading-with-ai` projektből (ml_backtest.py + BacktestReplayer.mq5).
+  direction, price, sl, tp, lot, comment, **be_trigger=tid**, trail_trigger, trail_dist_p).
+  A `tid` (trade-azonosító) köti az eseményt a helyes pozícióhoz.

@@ -1,80 +1,65 @@
 //+------------------------------------------------------------------+
-//| BacktestReplayer.mq5  v3.10 (TradeForge / Trading-with-Erik)     |
-//| Reads mt5_backtest_SYMBOL.csv from tools/mt5_export.py,          |
-//| executes trades with Python-identical H→L bar logic.             |
+//| BacktestReplayer.mq5  v4.00 (TradeForge / Trading-with-Erik)     |
+//| Reads mt5_backtest_SYMBOL.csv from tools/mt5_export.py and       |
+//| REPLAYS the Python backtest event log 1:1 (no re-simulation).    |
 //|                                                                  |
-//| A Trading-with-Erik M1-BELÉPŐket ad → az EA M1 bar-on dolgozik   |
-//| (a Trading-with-ai M15-öt adott). SL a pozíción 0, a BE/trail-t  |
-//| az EA BELÜL kezeli: minden M1 bar zárásakor Python-azonos H→L:   |
-//| előbb TP, majd BE/trail a HIGH-ból, végül SL a LOW-ból.          |
+//| A korábbi verzió az OFF preset BE/trail-jét ÚJRASZIMULÁLTA →     |
+//| a Felező/Pajzs/Fibo/Harmados/Risky részleges zárása, a kiszállási |
+//| jel és a pozícióépítés kimaradt → teljesen más eredmény.         |
 //|                                                                  |
-//| Strategy Tester: <SYMBOL> M1, "Open prices only" ajánlott.       |
-//| A CSV a Terminal\Common\Files\ mappába kell (FILE_COMMON).       |
-//| Modell: az OFF preset (BE + trail). A risky/felező/pajzs +       |
-//| kiszállási jel + pozícióépítés Python-oldali (itt nincs).        |
+//| v4: az EA már NEM dönt semmiről — a Python ESEMÉNYNAPLÓJÁT hajtja |
+//| végre: OPEN → SL_MODIFY / TP_MODIFY / PARTIAL_CLOSE / BUILD_ADD → |
+//| CLOSE. Az SL/TP a pozícióra VALÓDI stopként kerül, így az MT5 a   |
+//| pontos SL/TP áron zár (a felezés/kiszállás piaci áron). Minden    |
+//| eseményt a `tid` (be_trigger oszlop) köt a helyes pozícióhoz →    |
+//| egy páron az egyidejű pozíciók sem keverednek.                   |
+//|                                                                  |
+//| Strategy Tester: <SYMBOL> M1, "Open prices only". A CSV a        |
+//| Terminal\Common\Files\ mappába kell (FILE_COMMON). A ráépítés     |
+//| (BUILD_ADD) pontos visszajátszása NETTING számlát igényel.       |
 //+------------------------------------------------------------------+
 #property copyright "TradeForge"
-#property description "Backtest trade executor (M1) — Python H→L bar logic"
-#property version   "3.10"
+#property description "Backtest event-log replayer (M1) — executes Python decisions"
+#property version   "4.00"
 #property strict
 
 #include <Trade\Trade.mqh>
 
-int BarHour(datetime t) { MqlDateTime s; TimeToStruct(t, s); return s.hour; }
-
 //--- Inputs
-input string InpCsvFile    = "mt5_backtest_UKOUSD.csv"; // CSV fájlnév (Common\Files\)
-input int    InpMagic      = 20260627;                   // Magic number
+input string InpCsvFile    = "mt5_backtest_EURUSD.csv"; // CSV fájlnév (Common\Files\)
+input long   InpMagic      = 20260627;                   // Magic number
 input int    InpSlippage   = 50;                         // Max slippage (points)
-input int    InpEodHour    = 24;                         // EOD zárás óra (24 = KIKAPCS; a Python nem zár EOD-n)
-input double InpPipSize    = 0.01;                       // Pip méret (a szimbólumhoz)
+input double InpPipSize    = 0.0001;                     // Pip méret (CSAK a rajzoláshoz)
 input bool   InpShowLines  = true;                       // Vonalak az összes trade-re
 input bool   InpShowLabels = true;                       // Szöveg feliratok
 input int    InpLineWidth  = 1;                          // Vonalvastagság (1-3)
 
 //--- Object prefix
-#define OBJ_PFX   "BTR_"
-#define MAX_EVENTS 80000
+#define OBJ_PFX    "BTR_"
+#define MAX_EVENTS 200000
 
-//--- CSV event (for loading and visualization)
+//--- CSV event (a Python-backtest egy naplósora)
 struct TEvent {
-    string   type;           // OPEN / SL_MODIFY / CLOSE
-    datetime dt;
-    string   dir;            // BUY / SELL
-    double   price;
-    double   sl;
-    double   tp;
-    double   lot;
-    string   comment;
-    double   be_trigger;     // absolute price (0 = disabled)
-    double   trail_trigger;  // absolute price (0 = disabled)
-    double   trail_dist_p;   // pips behind best_price
-};
-
-//--- Position state (tracked internally, SL=0 on MT5 position)
-struct TPos {
-    bool     is_open;
-    ulong    ticket;
-    string   dir;
-    double   entry_price;
-    double   sl;             // current SL (managed by EA, NOT set on MT5 position)
-    double   tp;
-    double   lot;
-    double   be_trigger;
-    double   trail_trigger;
-    double   trail_dist_p;
-    double   best_price;
-    bool     be_done;
+    string   type;    // OPEN / SL_MODIFY / TP_MODIFY / PARTIAL_CLOSE / BUILD_ADD / CLOSE
+    datetime dt;      // az esemény ideje (a detektáló bar záró = a köv. bar nyitása)
+    string   dir;     // BUY / SELL
+    double   price;   // esemény-ár (OPEN belépő, PARTIAL 1R ár, CLOSE záróár, BUILD láb ár)
+    double   sl;      // OPEN kezdeti SL / SL_MODIFY új SL / BUILD_ADD új átlagár-SL
+    double   tp;      // OPEN TP / TP_MODIFY új TP (0 = törlés)
+    double   lot;     // OPEN teljes lot / PARTIAL lezárandó lot / BUILD_ADD adalék lot
+    string   comment; // OPEN: stratégia; egyébként a reason (BE/TRAIL/tp/sl/exit/…)
+    int      tid;     // trade-azonosító (a be_trigger oszlopból) → pozícióhoz kötés
 };
 
 //--- Globals
 CTrade   g_trade;
 TEvent   g_ev[];
-int      g_cnt    = 0;
-int      g_next   = 0;
+int      g_cnt      = 0;
+int      g_next     = 0;
+datetime g_last_bar = 0;
 
-TPos     g_pos;
-datetime g_last_m15 = 0;  // M15 bar change detection
+ulong    g_ticket[];    // tid -> nyitott pozíció ticket (0 = nincs)
+int      g_maxtid  = 0;
 
 //+------------------------------------------------------------------+
 int OnInit()
@@ -83,9 +68,8 @@ int OnInit()
     g_trade.SetDeviationInPoints(InpSlippage);
     g_trade.SetTypeFilling(ORDER_FILLING_IOC);
 
-    ZeroMemory(g_pos);
-    g_pos.is_open = false;
-    g_last_m15    = 0;
+    g_last_bar = 0;
+    g_next     = 0;
 
     DeleteObjects();
     WritePathHint();
@@ -96,13 +80,15 @@ int OnInit()
         return INIT_FAILED;
     }
 
+    ArrayResize(g_ticket, g_maxtid + 1);
+    ArrayInitialize(g_ticket, 0);
+
     if(InpShowLines)
         DrawAllTrades();
 
     ChartRedraw();
-    g_next = 0;
 
-    Print("BacktestReplayer v3: ", g_cnt, " esemeny betoltve (H->L bar logic).");
+    Print("BacktestReplayer v4: ", g_cnt, " esemeny betoltve (event-log replay).");
     return INIT_SUCCEEDED;
 }
 
@@ -110,217 +96,136 @@ int OnInit()
 void OnDeinit(const int reason) { DeleteObjects(); }
 
 //+------------------------------------------------------------------+
+//| Egy tick/bar (Open prices only) → a lejárt eseményeket végrehajtja|
+//+------------------------------------------------------------------+
 void OnTick()
 {
-    datetime bar0 = iTime(_Symbol, PERIOD_M1, 0);  // current M15 bar open time
+    datetime bar0 = iTime(_Symbol, PERIOD_M1, 0);   // az aktuális M1 bar nyitása
+    if(bar0 == g_last_bar) return;                  // ugyanaz a bar — nincs teendő
+    g_last_bar = bar0;
 
-    if(bar0 == g_last_m15) return;  // same bar — nothing to do yet
-
-    // --- New M15 bar started → process the bar that just completed ---
-    if(g_last_m15 > 0)
-        ProcessBar();
-
-    g_last_m15 = bar0;
-
-    // --- Process CSV OPEN events whose time <= current bar open ---
-    // OPEN events are stamped at ts + 15min (bar close = current bar open)
+    // Minden esemény, aminek ideje <= az aktuális bar nyitása → sorrendben végrehajt
     while(g_next < g_cnt && g_ev[g_next].dt <= bar0)
     {
-        TEvent ev = g_ev[g_next];
+        ExecEvent(g_ev[g_next]);
         g_next++;
-
-        if(ev.type == "OPEN") {
-            if(!g_pos.is_open)
-                ExecOpen(ev);
-            else
-                PrintFormat("OPEN eskipped – mar nyitott pozicio (ticket=%I64u)", g_pos.ticket);
-        }
-        // SL_MODIFY and CLOSE from CSV are ignored — EA handles these internally
     }
 }
 
 //+------------------------------------------------------------------+
-//| Process the just-completed M15 bar: Python-identical H→L logic   |
+//| Esemény-diszpécser                                                |
 //+------------------------------------------------------------------+
-void ProcessBar()
+void ExecEvent(const TEvent &ev)
 {
-    // Check if position was auto-closed by MT5 (TP hit)
-    if(g_pos.is_open && !PositionSelectByTicket(g_pos.ticket)) {
-        PrintFormat("Pozicio auto-zarva TP-n (ticket=%I64u)", g_pos.ticket);
-        g_pos.is_open = false;
-        return;
-    }
+    if(ev.tid < 0 || ev.tid > g_maxtid) return;   // védelmi (pl. régi, tid nélküli CSV)
 
-    if(!g_pos.is_open) return;
-
-    datetime bar1_t = iTime(_Symbol, PERIOD_M1, 1);   // completed bar open time
-    double   hi     = iHigh(_Symbol, PERIOD_M1, 1);
-    double   lo     = iLow(_Symbol, PERIOD_M1, 1);
-    double   cl     = iClose(_Symbol, PERIOD_M1, 1);
-    bool     closed = false;
-
-    if(g_pos.dir == "BUY")
-    {
-        // 1. TP check FIRST (matches Python order)
-        //    (MT5 auto-TP handles this; if auto-close wasn't caught above, check manually)
-        if(g_pos.tp > 0 && hi >= g_pos.tp) {
-            PrintFormat("BAR-TP: H=%.5f >= tp=%.5f", hi, g_pos.tp);
-            ExecBarClose(g_pos.tp, "TP");
-            closed = true;
-        }
-        else {
-            // 2. Update best_price from HIGH
-            if(hi > g_pos.best_price) g_pos.best_price = hi;
-
-            // 3. BE check (from HIGH, same bar as Python)
-            if(g_pos.be_trigger > 0 && !g_pos.be_done && g_pos.best_price >= g_pos.be_trigger) {
-                double new_sl = MathMax(g_pos.sl, g_pos.entry_price);
-                g_pos.sl      = new_sl;
-                g_pos.be_done = true;
-                PrintFormat("BE: sl→%.5f (entry=%.5f)", g_pos.sl, g_pos.entry_price);
-            }
-
-            // 4. Trail check (from HIGH, same bar as Python)
-            if(g_pos.trail_trigger > 0 && g_pos.trail_dist_p > 0 &&
-               g_pos.best_price >= g_pos.trail_trigger)
-            {
-                double trail_sl = g_pos.best_price - g_pos.trail_dist_p * InpPipSize;
-                if(trail_sl > g_pos.sl) {
-                    g_pos.sl = trail_sl;
-                    PrintFormat("TRAIL: best=%.5f → sl=%.5f", g_pos.best_price, g_pos.sl);
-                }
-            }
-
-            // 5. SL check from LOW (uses updated SL from steps 3+4)
-            if(lo <= g_pos.sl) {
-                PrintFormat("BAR-SL: L=%.5f <= sl=%.5f [%s]",
-                            lo, g_pos.sl, g_pos.be_done ? "BE" : "SL");
-                ExecBarClose(g_pos.sl, g_pos.be_done ? "BE" : "SL");
-                closed = true;
-            }
-
-            // 6. EOD check
-            if(!closed && BarHour(bar1_t) >= InpEodHour) {
-                PrintFormat("BAR-EOD: hour=%d @ close=%.5f", BarHour(bar1_t), cl);
-                ExecBarClose(cl, "EOD");
-                closed = true;
-            }
-        }
-    }
-    else  // SELL
-    {
-        // 1. TP check FIRST (for short: LOW hits TP)
-        if(g_pos.tp > 0 && lo <= g_pos.tp) {
-            PrintFormat("BAR-TP: L=%.5f <= tp=%.5f", lo, g_pos.tp);
-            ExecBarClose(g_pos.tp, "TP");
-            closed = true;
-        }
-        else {
-            // 2. Update best_price from LOW (for short: best = lowest price seen)
-            if(g_pos.best_price == 0)
-                g_pos.best_price = lo;
-            else
-                g_pos.best_price = MathMin(g_pos.best_price, lo);
-
-            // 3. BE check
-            if(g_pos.be_trigger > 0 && !g_pos.be_done && g_pos.best_price <= g_pos.be_trigger) {
-                double new_sl = MathMin(g_pos.sl, g_pos.entry_price);
-                g_pos.sl      = new_sl;
-                g_pos.be_done = true;
-                PrintFormat("BE: sl→%.5f (entry=%.5f)", g_pos.sl, g_pos.entry_price);
-            }
-
-            // 4. Trail check
-            if(g_pos.trail_trigger > 0 && g_pos.trail_dist_p > 0 &&
-               g_pos.best_price <= g_pos.trail_trigger)
-            {
-                double trail_sl = g_pos.best_price + g_pos.trail_dist_p * InpPipSize;
-                if(trail_sl < g_pos.sl) {
-                    g_pos.sl = trail_sl;
-                    PrintFormat("TRAIL: best=%.5f → sl=%.5f", g_pos.best_price, g_pos.sl);
-                }
-            }
-
-            // 5. SL check from HIGH (uses updated SL)
-            if(hi >= g_pos.sl) {
-                PrintFormat("BAR-SL: H=%.5f >= sl=%.5f [%s]",
-                            hi, g_pos.sl, g_pos.be_done ? "BE" : "SL");
-                ExecBarClose(g_pos.sl, g_pos.be_done ? "BE" : "SL");
-                closed = true;
-            }
-
-            // 6. EOD check
-            if(!closed && BarHour(bar1_t) >= InpEodHour) {
-                PrintFormat("BAR-EOD: hour=%d @ close=%.5f", BarHour(bar1_t), cl);
-                ExecBarClose(cl, "EOD");
-                closed = true;
-            }
-        }
-    }
+    if(ev.type == "OPEN")               ExecOpen(ev);
+    else if(ev.type == "SL_MODIFY")     ExecModify(ev, true,  false);
+    else if(ev.type == "TP_MODIFY")     ExecModify(ev, false, true);
+    else if(ev.type == "BUILD_ADD")     ExecBuildAdd(ev);
+    else if(ev.type == "PARTIAL_CLOSE") ExecPartial(ev);
+    else if(ev.type == "CLOSE")         ExecClose(ev);
 }
 
 //+------------------------------------------------------------------+
-//| Open position — SL=0 (managed internally), TP set for auto-close |
+//| OPEN — piaci belépő, VALÓDI SL/TP a pozícióra (MT5 zár pontos áron)|
 //+------------------------------------------------------------------+
 void ExecOpen(const TEvent &ev)
 {
-    bool ok = false;
+    bool ok;
     if(ev.dir == "BUY")
-        ok = g_trade.Buy(ev.lot, _Symbol, 0, 0, ev.tp, ev.comment);
+        ok = g_trade.Buy(ev.lot, _Symbol, 0, ev.sl, ev.tp, ev.comment);
     else
-        ok = g_trade.Sell(ev.lot, _Symbol, 0, 0, ev.tp, ev.comment);
+        ok = g_trade.Sell(ev.lot, _Symbol, 0, ev.sl, ev.tp, ev.comment);
 
     if(ok) {
-        g_pos.is_open      = true;
-        g_pos.ticket       = g_trade.ResultOrder();
-        g_pos.dir          = ev.dir;
-        g_pos.entry_price  = ev.price;   // Python's entry price (bar close)
-        g_pos.sl           = ev.sl;      // initial SL (internal tracking)
-        g_pos.tp           = ev.tp;
-        g_pos.lot          = ev.lot;
-        g_pos.be_trigger   = ev.be_trigger;
-        g_pos.trail_trigger= ev.trail_trigger;
-        g_pos.trail_dist_p = ev.trail_dist_p;
-        g_pos.best_price   = ev.price;
-        g_pos.be_done      = false;
-
-        PrintFormat("OPEN %s  lot=%.2f  entry=%.5f  sl=%.5f  tp=%.5f  "
-                    "be_trig=%.5f  trail_trig=%.5f  trail_d=%.1f  [%s]  ticket=%I64u",
-                    ev.dir, ev.lot, ev.price, ev.sl, ev.tp,
-                    ev.be_trigger, ev.trail_trigger, ev.trail_dist_p,
-                    ev.comment, g_pos.ticket);
+        g_ticket[ev.tid] = g_trade.ResultOrder();   // a nyitó pozíció ticketje
+        PrintFormat("OPEN[%d] %s lot=%.2f sl=%.5f tp=%.5f [%s] ticket=%I64u",
+                    ev.tid, ev.dir, ev.lot, ev.sl, ev.tp, ev.comment, g_ticket[ev.tid]);
     }
     else {
-        PrintFormat("OPEN HIBA (%d): %s", g_trade.ResultRetcode(),
-                    g_trade.ResultRetcodeDescription());
+        PrintFormat("OPEN[%d] HIBA (%d): %s", ev.tid,
+                    g_trade.ResultRetcode(), g_trade.ResultRetcodeDescription());
     }
 }
 
 //+------------------------------------------------------------------+
-//| Close position at bar boundary (market price ≈ SL/TP/close)      |
+//| SL_MODIFY / TP_MODIFY — a pozíció stopjának/TP-jének frissítése   |
 //+------------------------------------------------------------------+
-void ExecBarClose(double ref_price, string reason)
+void ExecModify(const TEvent &ev, bool do_sl, bool do_tp)
 {
-    if(!g_pos.is_open) return;
+    ulong tk = g_ticket[ev.tid];
+    if(tk == 0 || !PositionSelectByTicket(tk)) return;   // már zárva (pl. SL/TP betelt)
 
-    if(g_trade.PositionClose(g_pos.ticket)) {
-        PrintFormat("CLOSE [%s]  ref=%.5f  exec=%.5f  ticket=%I64u",
-                    reason, ref_price, g_trade.ResultPrice(), g_pos.ticket);
-    }
-    else {
-        // Position might have been auto-closed (TP)
-        if(!PositionSelectByTicket(g_pos.ticket))
-            PrintFormat("CLOSE [%s] – pozicio mar zarva (auto TP)  ticket=%I64u",
-                        reason, g_pos.ticket);
-        else
-            PrintFormat("CLOSE HIBA (%d): %s",
-                        g_trade.ResultRetcode(), g_trade.ResultRetcodeDescription());
-    }
-    g_pos.is_open = false;
+    double cur_sl = PositionGetDouble(POSITION_SL);
+    double cur_tp = PositionGetDouble(POSITION_TP);
+    double new_sl = do_sl ? ev.sl : cur_sl;
+    double new_tp = do_tp ? ev.tp : cur_tp;
+
+    if(g_trade.PositionModify(tk, new_sl, new_tp))
+        PrintFormat("%s[%d] sl=%.5f tp=%.5f [%s]", ev.type, ev.tid,
+                    new_sl, new_tp, ev.comment);
+    else
+        PrintFormat("%s[%d] HIBA (%d): %s", ev.type, ev.tid,
+                    g_trade.ResultRetcode(), g_trade.ResultRetcodeDescription());
 }
 
 //+------------------------------------------------------------------+
-//| Load CSV (12 columns, FILE_COMMON)                               |
+//| PARTIAL_CLOSE — a lot egy részének zárása (Felező/Pajzs)          |
+//+------------------------------------------------------------------+
+void ExecPartial(const TEvent &ev)
+{
+    ulong tk = g_ticket[ev.tid];
+    if(tk == 0 || !PositionSelectByTicket(tk)) return;
+
+    if(g_trade.PositionClosePartial(tk, ev.lot))
+        PrintFormat("PARTIAL[%d] lot=%.2f @~%.5f [%s]", ev.tid, ev.lot, ev.price, ev.comment);
+    else
+        PrintFormat("PARTIAL[%d] HIBA (%d): %s", ev.tid,
+                    g_trade.ResultRetcode(), g_trade.ResultRetcodeDescription());
+}
+
+//+------------------------------------------------------------------+
+//| CLOSE — a maradék zárása (kiszállási jel / cost-cut / EOD).       |
+//| SL/TP-záráskor az MT5 már natívan zárt → itt a ticket üres (no-op)|
+//+------------------------------------------------------------------+
+void ExecClose(const TEvent &ev)
+{
+    ulong tk = g_ticket[ev.tid];
+    if(tk != 0 && PositionSelectByTicket(tk)) {
+        if(g_trade.PositionClose(tk))
+            PrintFormat("CLOSE[%d] @~%.5f [%s]", ev.tid, ev.price, ev.comment);
+    }
+    g_ticket[ev.tid] = 0;
+}
+
+//+------------------------------------------------------------------+
+//| BUILD_ADD — piramidális ráépítés: volument ad a csomaghoz.        |
+//| NETTING számlán a pozíció (ticket) átlagára/mérete frissül, a     |
+//| soron következő SL_MODIFY (átlagár) + TP_MODIFY(0) állítja be a   |
+//| csomag stopját. (Hedging számlán a láb külön ticket lenne.)       |
+//+------------------------------------------------------------------+
+void ExecBuildAdd(const TEvent &ev)
+{
+    bool ok;
+    if(ev.dir == "BUY")
+        ok = g_trade.Buy(ev.lot, _Symbol, 0, 0, 0, "build");
+    else
+        ok = g_trade.Sell(ev.lot, _Symbol, 0, 0, 0, "build");
+
+    if(ok) {
+        // Netting: a csomag ticketje változatlan marad (nem írjuk felül).
+        PrintFormat("BUILD_ADD[%d] +%.2f lot @%.5f (uj atlagar-SL=%.5f)",
+                    ev.tid, ev.lot, ev.price, ev.sl);
+    }
+    else {
+        PrintFormat("BUILD_ADD[%d] HIBA (%d): %s", ev.tid,
+                    g_trade.ResultRetcode(), g_trade.ResultRetcodeDescription());
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Load CSV (12 columns, FILE_COMMON). A be_trigger oszlop = tid.    |
 //+------------------------------------------------------------------+
 bool LoadCSV()
 {
@@ -330,12 +235,13 @@ bool LoadCSV()
         return false;
     }
 
-    // Skip header row (12 fields)
+    // Fejléc (12 mező) átugrása
     for(int c = 0; c < 12 && !FileIsEnding(fh); c++)
         FileReadString(fh);
 
     ArrayResize(g_ev, MAX_EVENTS);
-    g_cnt = 0;
+    g_cnt    = 0;
+    g_maxtid = 0;
 
     while(!FileIsEnding(fh) && g_cnt < MAX_EVENTS)
     {
@@ -350,32 +256,31 @@ bool LoadCSV()
         double tp         = StringToDouble(FileReadString(fh));
         double lot        = StringToDouble(FileReadString(fh));
         string comment    = FileReadString(fh);
-        double be_trig    = StringToDouble(FileReadString(fh));
-        double trail_trig = StringToDouble(FileReadString(fh));
-        double trail_dist = StringToDouble(FileReadString(fh));
+        int    tid        = (int)StringToInteger(FileReadString(fh));  // be_trigger = tid
+        FileReadString(fh);   // trail_trigger (nem használt)
+        FileReadString(fh);   // trail_dist_p (nem használt)
 
-        g_ev[g_cnt].type         = type;
-        g_ev[g_cnt].dt           = StringToTime(dt_str);
-        g_ev[g_cnt].dir          = dir;
-        g_ev[g_cnt].price        = price;
-        g_ev[g_cnt].sl           = sl;
-        g_ev[g_cnt].tp           = tp;
-        g_ev[g_cnt].lot          = lot;
-        g_ev[g_cnt].comment      = comment;
-        g_ev[g_cnt].be_trigger   = be_trig;
-        g_ev[g_cnt].trail_trigger= trail_trig;
-        g_ev[g_cnt].trail_dist_p = trail_dist;
+        g_ev[g_cnt].type    = type;
+        g_ev[g_cnt].dt      = StringToTime(dt_str);
+        g_ev[g_cnt].dir     = dir;
+        g_ev[g_cnt].price   = price;
+        g_ev[g_cnt].sl      = sl;
+        g_ev[g_cnt].tp      = tp;
+        g_ev[g_cnt].lot     = lot;
+        g_ev[g_cnt].comment = comment;
+        g_ev[g_cnt].tid     = tid;
+        if(tid > g_maxtid) g_maxtid = tid;
         g_cnt++;
     }
 
     FileClose(fh);
     ArrayResize(g_ev, g_cnt);
-    Print("LoadCSV: ", g_cnt, " sor betoltve (be/trail parameterekkel).");
+    Print("LoadCSV: ", g_cnt, " sor betoltve (max tid=", g_maxtid, ").");
     return g_cnt > 0;
 }
 
 //+------------------------------------------------------------------+
-//| Draw all trades statically on chart (visual preview from OnInit) |
+//| Draw all trades statically (visual preview) — tid szerint kötve   |
 //+------------------------------------------------------------------+
 void DrawAllTrades()
 {
@@ -385,14 +290,15 @@ void DrawAllTrades()
     {
         if(g_ev[i].type != "OPEN") continue;
 
-        datetime open_dt    = g_ev[i].dt;
-        double   entry      = g_ev[i].price;
-        double   sl0        = g_ev[i].sl;
-        double   tp0        = g_ev[i].tp;
-        double   lot        = g_ev[i].lot;
-        string   dir        = g_ev[i].dir;
-        string   profile    = g_ev[i].comment;
-        bool     is_buy     = (dir == "BUY");
+        int      tid     = g_ev[i].tid;
+        datetime open_dt = g_ev[i].dt;
+        double   entry   = g_ev[i].price;
+        double   sl0     = g_ev[i].sl;
+        double   tp0     = g_ev[i].tp;
+        double   lot     = g_ev[i].lot;
+        string   dir     = g_ev[i].dir;
+        string   profile = g_ev[i].comment;
+        bool     is_buy  = (dir == "BUY");
 
         datetime close_dt    = open_dt + 3600;
         double   close_price = entry;
@@ -403,11 +309,12 @@ void DrawAllTrades()
         string   sl_mod_cmt[];
         int      sl_mod_cnt = 0;
 
+        // Az UGYANEZEN tid-hez tartozó SL_MODIFY / CLOSE események (a zárásig)
         for(int j = i + 1; j < g_cnt; j++)
         {
-            if(g_ev[j].type == "OPEN") break;
+            if(g_ev[j].tid != tid) continue;
 
-            if(g_ev[j].type == "SL_MODIFY") {
+            if(g_ev[j].type == "SL_MODIFY" || g_ev[j].type == "BUILD_ADD") {
                 ArrayResize(sl_mod_dt,  sl_mod_cnt + 1);
                 ArrayResize(sl_mod_val, sl_mod_cnt + 1);
                 ArrayResize(sl_mod_cmt, sl_mod_cnt + 1);
@@ -416,6 +323,8 @@ void DrawAllTrades()
                 sl_mod_cmt[sl_mod_cnt] = g_ev[j].comment;
                 sl_mod_cnt++;
             }
+            if(g_ev[j].type == "TP_MODIFY")
+                tp0 = 0.0;   // épített csomag: TP törölve
 
             if(g_ev[j].type == "CLOSE") {
                 close_dt    = g_ev[j].dt;
@@ -427,8 +336,8 @@ void DrawAllTrades()
 
         string pfx      = OBJ_PFX + IntegerToString(trade_num) + "_";
         color  col_dir  = is_buy ? clrDodgerBlue : clrOrangeRed;
-        color  col_exit = (result == "TP") ? clrLimeGreen :
-                          (result == "SL") ? clrCrimson   : clrGray;
+        color  col_exit = (result == "tp") ? clrLimeGreen :
+                          (result == "sl") ? clrCrimson   : clrGray;
 
         DrawVLine(pfx + "open", open_dt, col_dir, STYLE_SOLID, 1);
 
@@ -468,7 +377,8 @@ void DrawAllTrades()
         if(InpShowLabels) {
             string lbl = StringFormat("%s %.5f  lot:%.2f  [%s]",
                                       dir, entry, lot, profile);
-            DrawText(pfx + "lbl_open", open_dt, is_buy ? tp0 : sl0, lbl, col_dir);
+            DrawText(pfx + "lbl_open", open_dt, is_buy ? (tp0 > 0 ? tp0 : entry) : sl0,
+                     lbl, col_dir);
 
             if(result != "") {
                 string lbl2 = StringFormat("%s @ %.5f", result, close_price);

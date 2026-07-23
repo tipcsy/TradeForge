@@ -1,19 +1,22 @@
-"""MT5 backtest-reprodukció — a Python-backtest belépőit a `BacktestReplayer.mq5`
-expert által olvasható CSV-be írja (12 oszlop).
+"""MT5 backtest-reprodukció — a Python-backtest ESEMÉNYNAPLÓJÁT a
+`BacktestReplayer.mq5` expert által olvasható CSV-be írja (12 oszlop).
 
-Az EA az OPEN-eseményekből nyit, a BE/trail/SL/TP/EOD-t BELÜL kezeli (a
-be_trigger / trail_trigger / trail_dist_p alapján, bar H→L logikával), így az MT5
-Strategy Tester reprodukálja a Python-eredményt. A modell az OFF preset egyszerű
-BE+trail logikájával egyezik (a risky/felező/pajzs preset + kiszállási jel +
-pozícióépítés a Python-oldalon van, az EA-ban nem).
+FONTOS (v2): az EA már NEM szimulál újra semmit — a Python-backtest pontos
+eseménynaplóját (`Trade.events`, `run_pair(record_events=True)`) JÁTSSZA VISSZA:
+OPEN → SL_MODIFY / TP_MODIFY / PARTIAL_CLOSE / BUILD_ADD → CLOSE. Így BÁRMELY
+preset (Felező/Pajzs/Fibo/Harmados/Risky) + a kiszállási jel + a pozícióépítés
+azonos, mert a döntéseket a Python hozta, az MT5 csak végrehajtja. Az SL/TP-alapú
+kilépéseket az MT5 a pozícióra rakott valódi SL/TP-vel, pontos áron tölti.
 
-Forrás: Trading-with-ai/ml_backtest.py + tools/BacktestReplayer.mq5 (áthozva).
+Visszafelé kompatibilis: ha a trade-nek nincs eseménynaplója (régi hívó,
+record_events=False), a régi OFF-derivált OPEN/CLOSE sorokat írjuk.
+
 CSV oszlopok: event, datetime, symbol, direction, price, sl, tp, lot, comment,
               be_trigger, trail_trigger, trail_dist_p
-Az OPEN időbélyege a belépő M1-gyertya ZÁRÁSA (nyitó + 1 M1 = a következő bar
-nyitása), `YYYY.MM.DD HH:MM:SS` formátumban (MT5 StringToTime). FONTOS: a
-Trading-with-Erik M1-BELÉPŐket ad (a Trading-with-ai M15-öt adott) → az EA-t is
-M1-en kell futtatni (a BacktestReplayer.mq5 áthozott verziója M1-re állított).
+A `be_trigger/trail_trigger/trail_dist_p` az eseménynapló-úton 0 (nem kell újra-
+szimuláció). Minden esemény időbélyege a detektáló M1-gyertya ZÁRÁSA (bar + 1 M1 =
+a következő bar nyitása) `YYYY.MM.DD HH:MM:SS` formátumban → az EA a bar nyitásán
+hajtja végre. A Strategy Testert M1-en, „Open prices only" modellel kell futtatni.
 """
 
 from __future__ import annotations
@@ -32,35 +35,67 @@ def _fmt(dt) -> str:
     return pd.Timestamp(dt).strftime("%Y.%m.%d %H:%M:%S")
 
 
-def events_from_result(result, symbol: str, params: dict, pair_cfg: dict,
-                       comment: str = "wpr_sma") -> list[list]:
-    """A BacktestResult trade-jeiből MT5-események (időrendben rendezve).
-    OPEN: a belépő + a KEZDETI SL/TP + a BE/trail triggerek (az EA ebből kezel).
-    CLOSE: a záró (vizualizációhoz; az EA végrehajtásnál figyelmen kívül hagyja)."""
+def _rows_from_event_log(t, tid: int, symbol: str, comment: str) -> list[tuple]:
+    """Egy trade `events` naplójából (sort_ts, sor) párok. Minden esemény
+    időbélyege + 1 M1 (a detektáló bar záró = a következő bar nyitása), így az EA
+    a bar nyitásán, sorrendben hajtja végre. Az OPEN kommentje a stratégia (a
+    címkéhez); a többi esemény a saját reason-jét viszi.
+
+    A `be_trigger` oszlopba a `tid` (trade-azonosító) kerül: az EA ez alapján köti
+    az SL_MODIFY / PARTIAL_CLOSE / CLOSE eseményt a HELYES pozícióhoz, így egy páron
+    az EGYIDEJŰ pozíciók (kockázatmentes runner + új belépő) sem keverednek."""
+    out: list[tuple] = []
+    for etype, etime, price, sl, tp, lot, ecmt in t.events:
+        ts = pd.Timestamp(etime) + pd.Timedelta(minutes=BAR_MINUTES)
+        cmt = comment if etype == "OPEN" else (ecmt or etype)
+        out.append((ts, [
+            etype, _fmt(ts), symbol, t.direction,
+            round(float(price), 5), round(float(sl), 5), round(float(tp), 5),
+            round(float(lot), 2), cmt, tid, 0, 0,
+        ]))
+    return out
+
+
+def _rows_legacy(t, symbol: str, params: dict, pair_cfg: dict,
+                 comment: str) -> list[tuple]:
+    """Visszafelé kompatibilis út: ha nincs eseménynapló (record_events=False),
+    a régi OFF-derivált OPEN (kezdeti SL/TP + BE/trail trigger) + CLOSE sorok."""
     pip        = float(pair_cfg.get("pip_size", 0.0001))
     be_pct     = float(params.get("breakeven_pct", 0.5))
     trail_act  = float(params.get("trail_activation_pips", 8))
     trail_dist = float(params.get("trail_distance_pips", 6))
-
-    events: list[tuple] = []   # (sort_ts, row)
-    for t in getattr(result, "trades", []):
-        sign    = 1 if t.direction == "BUY" else -1
-        init_sl = round(t.open_price - sign * t.sl_pips * pip, 5)   # a nyitáskori (kezdeti) SL
-        be_trig = round(t.open_price + sign * (t.tp - t.open_price) * be_pct, 5) if be_pct > 0 else 0.0
-        tr_trig = round(t.open_price + sign * trail_act * pip, 5) if trail_act > 0 else 0.0
-        o_ts    = pd.Timestamp(t.open_time) + pd.Timedelta(minutes=BAR_MINUTES)
-        events.append((o_ts, [
-            "OPEN", _fmt(o_ts), symbol, t.direction,
-            round(t.open_price, 5), init_sl, round(t.tp, 5), t.lot, comment,
-            be_trig, tr_trig, round(trail_dist, 5),
+    sign    = 1 if t.direction == "BUY" else -1
+    init_sl = round(t.open_price - sign * t.sl_pips * pip, 5)
+    be_trig = round(t.open_price + sign * (t.tp - t.open_price) * be_pct, 5) if be_pct > 0 else 0.0
+    tr_trig = round(t.open_price + sign * trail_act * pip, 5) if trail_act > 0 else 0.0
+    o_ts    = pd.Timestamp(t.open_time) + pd.Timedelta(minutes=BAR_MINUTES)
+    out = [(o_ts, [
+        "OPEN", _fmt(o_ts), symbol, t.direction,
+        round(t.open_price, 5), init_sl, round(t.tp, 5), t.lot, comment,
+        be_trig, tr_trig, round(trail_dist, 5),
+    ])]
+    if getattr(t, "close_time", None) is not None and t.close_price is not None:
+        c_ts = pd.Timestamp(t.close_time)
+        out.append((c_ts, [
+            "CLOSE", _fmt(c_ts), symbol, t.direction,
+            round(t.close_price, 5), 0, 0, t.lot, t.status, 0, 0, 0,
         ]))
-        if getattr(t, "close_time", None) is not None and t.close_price is not None:
-            c_ts = pd.Timestamp(t.close_time)
-            events.append((c_ts, [
-                "CLOSE", _fmt(c_ts), symbol, t.direction,
-                round(t.close_price, 5), 0, 0, t.lot, t.status, 0, 0, 0,
-            ]))
-    events.sort(key=lambda e: e[0])     # időrend (az EA sorrendben dolgozza fel az OPEN-eket)
+    return out
+
+
+def events_from_result(result, symbol: str, params: dict, pair_cfg: dict,
+                       comment: str = "wpr_sma") -> list[list]:
+    """A BacktestResult trade-jeiből MT5-események (globális időrendben rendezve).
+    Elsődlegesen a trade `events` naplójából (az EA VÉGREHAJTJA); ha egy trade-nek
+    nincs naplója, a régi OFF-derivált OPEN/CLOSE (fallback)."""
+    events: list[tuple] = []   # (sort_ts, row)
+    for tid, t in enumerate(getattr(result, "trades", [])):
+        log = getattr(t, "events", None)
+        if log:
+            events.extend(_rows_from_event_log(t, tid, symbol, comment))
+        else:
+            events.extend(_rows_legacy(t, symbol, params, pair_cfg, comment))
+    events.sort(key=lambda e: e[0])     # időrend (az EA sorrendben dolgozza fel)
     return [row for _, row in events]
 
 

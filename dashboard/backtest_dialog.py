@@ -308,6 +308,21 @@ class BacktestDialog:
                              "több slot = kisebb lot. Alapérték a config\n"
                              "trading.max_open_slots értéke.")
 
+        # ── Nyitó összeg (kezdő tőke a futtatáshoz) ─────────────────────────
+        # A lot-méretezés (kockázat = egyenleg × account_risk_pct) és a %-os hozam
+        # ettől függ. Üres/érvénytelen → a config starting_balance_eur (alap 1000).
+        tk.Label(hrow, text="Nyitó összeg:", bg=BG, fg=FG_GRAY,
+                 font=self._sf).pack(side="left", padx=(16, 2))
+        self._ib_var = tk.StringVar(value=f"{self._ib:.0f}")
+        _ie = tk.Entry(hrow, width=8, textvariable=self._ib_var, bg=BG_HEADER,
+                       fg=FG_WHITE, font=self._sf, insertbackground=FG_WHITE,
+                       justify="center")
+        _ie.pack(side="left")
+        _attach_tooltip(_ie, "A backtest kezdő tőkéje ($). A pozícióméretet\n"
+                             "(kockázat = egyenleg × account_risk_pct) és a\n"
+                             "százalékos hozamot skálázza. Üresen a config\n"
+                             "kezdő egyenlege (starting_balance_eur).")
+
         # ── Paraméterek (SZERKESZTHETŐ — feltáró) ───────────────────────────
         phdr = tk.Frame(body, bg=BG)
         phdr.pack(fill="x", padx=12, pady=(2, 0))
@@ -822,7 +837,8 @@ class BacktestDialog:
 
         start = self._start_var.get().strip() or None
         end   = self._end_var.get().strip() or None
-        ib = self._ib
+        _ibn = _num(self._ib_var.get())            # a mezőből olvasott nyitó összeg
+        ib = _ibn if _ibn is not None and _ibn > 0 else self._ib
         rr_spec = self._current_rr_spec()          # az ablakban választott (feltáró) rr
         build_cfg = self._current_build_cfg()      # az ablakban választott (feltáró) építés
         allowed = self._allowed_hours()            # None = minden óra; különben trade_hours
@@ -844,7 +860,7 @@ class BacktestDialog:
                                   strategy=self.strategy, rr=rr_spec,
                                   build=build_cfg, allowed_hours=allowed,
                                   test_start=start, test_end=end,
-                                  progress_callback=cb)
+                                  progress_callback=cb, record_events=True)
                 summary = result.summary(ib)
                 from collections import Counter
                 tech = Counter(t.rr_technique for t in result.closed
