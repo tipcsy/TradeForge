@@ -14,13 +14,23 @@
 //| eseményt a `tid` (be_trigger oszlop) köt a helyes pozícióhoz →    |
 //| egy páron az egyidejű pozíciók sem keverednek.                   |
 //|                                                                  |
-//| Strategy Tester: <SYMBOL> M1, "Open prices only". A CSV a        |
-//| Terminal\Common\Files\ mappába kell (FILE_COMMON). A ráépítés     |
-//| (BUILD_ADD) pontos visszajátszása NETTING számlát igényel.       |
+//| v4.10: az MT5 fillje ELTÉRHET a Python belépőárától (más bróker/  |
+//| feed, más időzítés) — ezért NEM abszolút Python-szinteket teszünk |
+//| a pozícióra (az "invalid stops"/10016 miatt elutasított megbízás  |
+//| lenne), hanem: SL/TP nélkül nyitunk, majd a FILL ismeretében a    |
+//| Python-geometriát (távolságokat) visszük át, a bróker minimum     |
+//| stop-távolságához igazítva. Minden további Python-szintet a       |
+//| tid-enkénti ár-eltolással (fill − python_belépő) fordítunk.       |
+//|                                                                  |
+//| Strategy Tester: <SYMBOL> M1. A CSV a Terminal\Common\Files\      |
+//| mappába kell (FILE_COMMON). Az egyidejű, ÖNÁLLÓ pozíciókhoz       |
+//| HEDGING számla kell (netting számlán összevonódnak!).             |
+//| FONTOS: a Python-backtest adata UGYANARRÓL a brókerről legyen,    |
+//| amelyiken a replay fut — különben a két ár-feed elcsúszik.        |
 //+------------------------------------------------------------------+
 #property copyright "TradeForge"
 #property description "Backtest event-log replayer (M1) — executes Python decisions"
-#property version   "4.00"
+#property version   "4.10"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -59,7 +69,54 @@ int      g_next     = 0;
 datetime g_last_bar = 0;
 
 ulong    g_ticket[];    // tid -> nyitott pozíció ticket (0 = nincs)
+double   g_offset[];    // tid -> (MT5 fill − Python belépő) ÁR-ELTOLÁS
 int      g_maxtid  = 0;
+
+//+------------------------------------------------------------------+
+//| A bróker minimális stop-távolsága ÁRBAN (0 = nincs korlát)       |
+//+------------------------------------------------------------------+
+double MinStopDist()
+{
+    long lvl = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
+    return (double)lvl * SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+}
+
+//+------------------------------------------------------------------+
+//| A Python abszolút SL/TP szintjeit a SAJÁT fillünkre tolja és a    |
+//| bróker stop-távolságára igazítja, majd ráteszi a pozícióra.       |
+//| (0 = az adott láb törlése.)                                       |
+//+------------------------------------------------------------------+
+void ApplyStops(int tid, string dir, double py_sl, double py_tp, string tag)
+{
+    ulong tk = g_ticket[tid];
+    if(tk == 0 || !PositionSelectByTicket(tk)) return;
+
+    double off  = g_offset[tid];
+    double cur  = PositionGetDouble(POSITION_PRICE_CURRENT);
+    double mind = MinStopDist();
+    int    dg   = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
+    bool   isbuy = (dir == "BUY");
+
+    double sl = (py_sl > 0) ? py_sl + off : 0.0;
+    double tp = (py_tp > 0) ? py_tp + off : 0.0;
+
+    // A bróker minimum stop-távolságára toljuk, ha közelebb esne (invalid stops)
+    if(sl > 0) {
+        if(isbuy  && cur - sl < mind) sl = cur - mind;
+        if(!isbuy && sl - cur < mind) sl = cur + mind;
+    }
+    if(tp > 0) {
+        if(isbuy  && tp - cur < mind) tp = cur + mind;
+        if(!isbuy && cur - tp < mind) tp = cur - mind;
+    }
+    sl = (sl > 0) ? NormalizeDouble(sl, dg) : 0.0;
+    tp = (tp > 0) ? NormalizeDouble(tp, dg) : 0.0;
+
+    if(!g_trade.PositionModify(tk, sl, tp))
+        PrintFormat("%s[%d] stop-allitas HIBA (%d): %s  sl=%.2f tp=%.2f cur=%.2f",
+                    tag, tid, g_trade.ResultRetcode(),
+                    g_trade.ResultRetcodeDescription(), sl, tp, cur);
+}
 
 //+------------------------------------------------------------------+
 int OnInit()
@@ -82,13 +139,15 @@ int OnInit()
 
     ArrayResize(g_ticket, g_maxtid + 1);
     ArrayInitialize(g_ticket, 0);
+    ArrayResize(g_offset, g_maxtid + 1);
+    ArrayInitialize(g_offset, 0.0);
 
     if(InpShowLines)
         DrawAllTrades();
 
     ChartRedraw();
 
-    Print("BacktestReplayer v4: ", g_cnt, " esemeny betoltve (event-log replay).");
+    Print("BacktestReplayer v4.10: ", g_cnt, " esemeny betoltve (event-log replay).");
     return INIT_SUCCEEDED;
 }
 
@@ -132,21 +191,37 @@ void ExecEvent(const TEvent &ev)
 //+------------------------------------------------------------------+
 void ExecOpen(const TEvent &ev)
 {
+    // SL/TP NÉLKÜL nyitunk! Az MT5 fillje eltérhet a Python belépőárától (más
+    // adat-feed / bróker, más végrehajtási időzítés) — az abszolút Python-szintek
+    // ilyenkor a piaci ár ROSSZ OLDALÁRA esnének → "invalid stops" (10016) és a
+    // megbízás elutasítva. Ezért előbb nyitunk, majd a FILL ismeretében tesszük
+    // rá a stopokat, a Python-geometriát (távolságokat) megőrizve.
     bool ok;
     if(ev.dir == "BUY")
-        ok = g_trade.Buy(ev.lot, _Symbol, 0, ev.sl, ev.tp, ev.comment);
+        ok = g_trade.Buy(ev.lot, _Symbol, 0, 0, 0, ev.comment);
     else
-        ok = g_trade.Sell(ev.lot, _Symbol, 0, ev.sl, ev.tp, ev.comment);
+        ok = g_trade.Sell(ev.lot, _Symbol, 0, 0, 0, ev.comment);
 
-    if(ok) {
-        g_ticket[ev.tid] = g_trade.ResultOrder();   // a nyitó pozíció ticketje
-        PrintFormat("OPEN[%d] %s lot=%.2f sl=%.5f tp=%.5f [%s] ticket=%I64u",
-                    ev.tid, ev.dir, ev.lot, ev.sl, ev.tp, ev.comment, g_ticket[ev.tid]);
-    }
-    else {
+    if(!ok) {
         PrintFormat("OPEN[%d] HIBA (%d): %s", ev.tid,
                     g_trade.ResultRetcode(), g_trade.ResultRetcodeDescription());
+        return;
     }
+
+    ulong tk = g_trade.ResultOrder();       // a nyitó pozíció ticketje
+    g_ticket[ev.tid] = tk;
+
+    // Ár-eltolás: MINDEN további Python-szintet (SL_MODIFY/TP_MODIFY) ezzel tolunk
+    double fill = ev.price;
+    if(PositionSelectByTicket(tk))
+        fill = PositionGetDouble(POSITION_PRICE_OPEN);
+    g_offset[ev.tid] = fill - ev.price;
+
+    ApplyStops(ev.tid, ev.dir, ev.sl, ev.tp, "OPEN");
+
+    PrintFormat("OPEN[%d] %s lot=%.2f fill=%.2f (py=%.2f, offset=%+.2f) [%s] ticket=%I64u",
+                ev.tid, ev.dir, ev.lot, fill, ev.price, g_offset[ev.tid],
+                ev.comment, tk);
 }
 
 //+------------------------------------------------------------------+
@@ -157,17 +232,15 @@ void ExecModify(const TEvent &ev, bool do_sl, bool do_tp)
     ulong tk = g_ticket[ev.tid];
     if(tk == 0 || !PositionSelectByTicket(tk)) return;   // már zárva (pl. SL/TP betelt)
 
+    // A meglévő szinteket VISSZA-fordítjuk Python-térbe (−offset), hogy az
+    // ApplyStops egységesen tolhassa és igazíthassa a stop-távolsághoz.
+    double off    = g_offset[ev.tid];
     double cur_sl = PositionGetDouble(POSITION_SL);
     double cur_tp = PositionGetDouble(POSITION_TP);
-    double new_sl = do_sl ? ev.sl : cur_sl;
-    double new_tp = do_tp ? ev.tp : cur_tp;
+    double py_sl  = do_sl ? ev.sl : (cur_sl > 0 ? cur_sl - off : 0.0);
+    double py_tp  = do_tp ? ev.tp : (cur_tp > 0 ? cur_tp - off : 0.0);
 
-    if(g_trade.PositionModify(tk, new_sl, new_tp))
-        PrintFormat("%s[%d] sl=%.5f tp=%.5f [%s]", ev.type, ev.tid,
-                    new_sl, new_tp, ev.comment);
-    else
-        PrintFormat("%s[%d] HIBA (%d): %s", ev.type, ev.tid,
-                    g_trade.ResultRetcode(), g_trade.ResultRetcodeDescription());
+    ApplyStops(ev.tid, ev.dir, py_sl, py_tp, ev.type);
 }
 
 //+------------------------------------------------------------------+
