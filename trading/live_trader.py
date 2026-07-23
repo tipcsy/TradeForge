@@ -40,7 +40,8 @@ from core import viz_prefs as _vp
 from core import trade_mode as _tmode
 from core import adopted
 from core.indicator_engine import atr as atr_indicator
-from core.risk_manager import calc_lot, calc_effective_slots, SlotManager
+from core.risk_manager import (calc_lot, calc_effective_slots, SlotManager,
+                               calc_swing_sl_tp_pips)
 from strategy import get_strategy
 from strategy.base import MarketData
 
@@ -677,8 +678,10 @@ def pair_visual_lines(symbol: str, params: dict, strategy, pip_size: float,
     # legacy `show_trades` visszaesés EGY helyen dől el.
     _show_signals = _vp.trades_on({"pairs": {symbol: (pair_cfg or {})}},
                                   symbol, strategy.name)
-    md = MarketData(symbol=symbol, params={**params, "pip_size": pip_size}, bars=bars,
-                    no_trade_hours=no_trade_set, show_signals=_show_signals)
+    md = MarketData(symbol=symbol,
+                    params={**params, "pip_size": pip_size,
+                            "backtest_spread_pips": (pair_cfg or {}).get("backtest_spread_pips", 1.5)},
+                    bars=bars, no_trade_hours=no_trade_set, show_signals=_show_signals)
     objects = apply_no_trade(strategy.visual_objects(md), pair_cfg or {}, th)
     # + a GENERIKUS piac-állapot kód a per-gyertya BarState-ekhez (a per-pár
     #   kiválasztott piac-stratégiából; csak ha kérve van a charton).
@@ -1512,6 +1515,19 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
                              "érvényes SL/TP méretet (hi_row/indikátor hiány).", symbol, signal)
                 return
             sl_pips, tp_pips = plan
+            # SL-módszer: `swing20` → az utolsó N M1 gyertya swingjéből (ATR helyett):
+            # BUY = legalacsonyabb LOW − spread, SELL = legmagasabb HIGH + spread; a TP
+            # marad tp_rr_ratio × SL-táv. A döntő (zárt) M1 gyertya záróárához mérve.
+            if params.get("sl_method", "swing20") == "swing20":
+                _sw = calc_swing_sl_tp_pips(
+                    float(df_lo["close"].iloc[-2]), signal,
+                    df_lo["low"].to_numpy(), df_lo["high"].to_numpy(),
+                    params, pip_size, pair_cfg.get("backtest_spread_pips", 1.5))
+                if _sw is None:
+                    log.info("⏭ %s %s jel — belépő KIHAGYVA: nincs érvényes swing-SL "
+                             "(kevés M1 gyertya / a belépő a swingen túl).", symbol, signal)
+                    return
+                sl_pips, tp_pips = _sw
             eff_slots = calc_effective_slots(balance, sl_pips, pair_cfg, ctf)
             lot = calc_lot(balance, sl_pips, pair_cfg, ctf, eff_slots)
 

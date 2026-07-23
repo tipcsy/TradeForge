@@ -16,6 +16,34 @@ def calc_sl_tp_pips(atr_value: float, params: dict) -> tuple[float, float]:
     return sl_pips, tp_pips
 
 
+def calc_swing_sl_tp_pips(entry_price: float, direction: str, lows, highs,
+                          params: dict, pip_size: float, spread_pips: float):
+    """SL az utolsó N M1 gyertya SWINGJÉBŐL (ATR helyett, `sl_method="swing20"`):
+      • BUY  → SL = a legalacsonyabb LOW − spread  (a támasz ALÁ),
+      • SELL → SL = a legmagasabb HIGH + spread     (az ellenállás FÖLÉ).
+    `sl_pips` = |entry − SL_szint| / pip; `tp_pips` = sl_pips × tp_rr_ratio (R marad).
+    `lows`/`highs`: az M1 gyertyák low/high tömbje (az utolsó `sl_swing_bars` számít).
+    None, ha degenerált (kevés adat, vagy a belépő a swingen túl → nem-pozitív SL)."""
+    bars = int(params.get("sl_swing_bars", 20) or 20)
+    if bars <= 0 or entry_price <= 0 or pip_size <= 0:
+        return None
+    lo_w = list(lows)[-bars:]
+    hi_w = list(highs)[-bars:]
+    if not lo_w or not hi_w:
+        return None
+    sp    = float(spread_pips) * pip_size
+    tp_rr = float(params.get("tp_rr_ratio", 1.5))
+    if direction == "BUY":
+        sl_level = min(lo_w) - sp
+        sl_pips  = (entry_price - sl_level) / pip_size
+    else:
+        sl_level = max(hi_w) + sp
+        sl_pips  = (sl_level - entry_price) / pip_size
+    if not (sl_pips > 0):
+        return None
+    return sl_pips, sl_pips * tp_rr
+
+
 def calc_lot(
     balance: float,
     sl_pips: float,

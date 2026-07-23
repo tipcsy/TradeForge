@@ -26,7 +26,7 @@ from strategy.base import (
 from strategy import visual as viz
 from core.indicator_engine import compute_indicators
 from core.signal_detector import PairState, check_m15_signal, check_m1_entry
-from core.risk_manager import calc_sl_tp_pips
+from core.risk_manager import calc_sl_tp_pips, calc_swing_sl_tp_pips
 
 
 # ---------------------------------------------------------------------------
@@ -512,7 +512,20 @@ class WprSmaStrategy(Strategy):
                 if math.isnan(atr_v):
                     continue
                 entry = float(m1_close[j])
-                sl_pips, tp_pips = calc_sl_tp_pips(float(atr_v), {**md.params, "pip_size": pip})
+                # SL-módszer: `swing20` → az utolsó N M1 gyertya swingjéből (a live/
+                # backtest belépővel EGYEZŐEN), különben a régi ATR-méret.
+                if md.params.get("sl_method", "swing20") == "swing20":
+                    _nb = int(md.params.get("sl_swing_bars", 20) or 20)
+                    _sw = calc_swing_sl_tp_pips(
+                        entry, sig,
+                        m1["low"].to_numpy()[max(0, j - _nb + 1):j + 1],
+                        m1["high"].to_numpy()[max(0, j - _nb + 1):j + 1],
+                        md.params, pip, md.params.get("backtest_spread_pips", 1.5))
+                    if _sw is None:
+                        continue
+                    sl_pips, tp_pips = _sw
+                else:
+                    sl_pips, tp_pips = calc_sl_tp_pips(float(atr_v), {**md.params, "pip_size": pip})
                 if sig == "BUY":
                     sl, tp = entry - sl_pips * pip, entry + tp_pips * pip
                 else:

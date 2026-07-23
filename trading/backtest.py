@@ -28,7 +28,7 @@ RESULTS_DIR = Path(__file__).resolve().parents[1] / "data" / "backtest_results"
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from core.risk_manager import calc_lot, calc_effective_slots
+from core.risk_manager import calc_lot, calc_effective_slots, calc_swing_sl_tp_pips
 from core import risky_mode
 from strategy import get_strategy, get_strategy_by_name
 
@@ -868,6 +868,19 @@ def run_pair(
 
                 if plan is not None:
                     sl_pips, tp_pips = plan
+                    # SL-módszer: `swing20` → az utolsó N M1 gyertya swingjéből (ATR
+                    # helyett): BUY = legalacsonyabb LOW − spread, SELL = legmagasabb
+                    # HIGH + spread; a TP marad tp_rr_ratio × SL-táv. (`atr` = a régi.)
+                    if params.get("sl_method", "swing20") == "swing20":
+                        _nb = int(params.get("sl_swing_bars", 20) or 20)
+                        _lo = m1["low"].iloc[max(0, i - _nb + 1):i + 1].to_numpy()
+                        _hi = m1["high"].iloc[max(0, i - _nb + 1):i + 1].to_numpy()
+                        _sw = calc_swing_sl_tp_pips(float(m1_row["close"]), signal,
+                                                    _lo, _hi, params, pip_size, spread_pips)
+                        if _sw is None:
+                            prev_m1_row = m1_row
+                            continue
+                        sl_pips, tp_pips = _sw
                     eff_slots = calc_effective_slots(balance, sl_pips, pair_cfg, sizing_cfg)
                     lot = calc_lot(balance, sl_pips, pair_cfg, sizing_cfg, eff_slots)
 
