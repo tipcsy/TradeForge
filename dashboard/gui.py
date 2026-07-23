@@ -3974,18 +3974,32 @@ class DashboardWindow:
         cur_lot  = max(_lots) if _lots else None
         halvable = cur_lot is None or _rrx.can_reduce_lot(cur_lot, min_lot, lot_step)
 
+        # NETTING/EXCHANGE számla: egy szimbólumon csak EGY nettó pozíció lehet, így
+        # a kockázatmentes runner mellé nyíló új belépő összevonódna vele → a részleges
+        # záráson alapuló technikák nem működnek helyesen. Ilyenkor NEM választhatók.
+        from core import mt5_connector as _mc
+        _netting = _mc.is_netting()
+        if _netting:
+            halvable = False
+
         menu = tk.Menu(self.root, tearoff=0, bg=BG_HEADER, fg=FG_WHITE,
                        activebackground=BTN_OPT_BG, activeforeground=FG_ON_ACCENT)
         menu.add_command(label=f"Kiszállás — a(z) {symbol} MINDEN pozíciójára hat:",
                          state="disabled")
-        if not halvable:
+        if _netting:
+            menu.add_command(
+                label=f"  (a számla {_mc.margin_mode_name()} → a részleges zárás nem működik)",
+                state="disabled")
+        elif not halvable:
             menu.add_command(
                 label=f"  (a lot {cur_lot:.2f} < 2× min {min_lot:.2f} → Felező/Pajzs nem osztható)",
                 state="disabled")
         for preset in _rrs.CYCLE:
             if preset in _rrx.PARTIAL_CLOSE_PRESETS and not halvable:
-                # Nem felezhető → a részleges zárást igénylő preset nem választható.
-                menu.add_command(label=f"    {_rrs.NAME[preset]}  — nem felezhető",
+                # Netting számla / nem felezhető lot → a részleges zárást igénylő
+                # preset nem választható.
+                _why = "NETTING számla" if _netting else "nem felezhető"
+                menu.add_command(label=f"    {_rrs.NAME[preset]}  — {_why}",
                                  state="disabled")
                 continue
             menu.add_command(
@@ -4272,9 +4286,12 @@ class DashboardWindow:
         if info["connected"]:
             demo_tag = "  [DEMO]" if info.get("is_demo") else "  [ÉLES!]"
             demo_fg  = FG_YELLOW if info.get("is_demo") else FG_RED
+            # Számlatípus (NETTING / HEDGE / EXCHANGE) — NETTING-nél a részleges
+            # záráson alapuló technikák (Felező/Pajzs) tiltva vannak, ezért kiírjuk.
+            mm_tag = f"  [{info.get('margin_mode_name', '—')}]"
             self.lbl_conn.config(text="● Online", fg=FG_GREEN)
             self.lbl_account.config(
-                text=f"#{info['login']}  {info['server']}{demo_tag}", fg=demo_fg)
+                text=f"#{info['login']}  {info['server']}{demo_tag}{mm_tag}", fg=demo_fg)
             self._btn_connect.pack_forget()
             if info["balance"] > 0:
                 self._balance = info["balance"]

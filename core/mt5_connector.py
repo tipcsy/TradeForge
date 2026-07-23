@@ -22,6 +22,53 @@ def _init_kwargs(mt5_cfg: dict) -> dict:
     return kwargs
 
 
+# ---------------------------------------------------------------------------
+# Számla margin-mód (NETTING / HEDGING / EXCHANGE)
+# ---------------------------------------------------------------------------
+# A számlatípus futás közben NEM változik → induláskor (connect) EGYSZER
+# lekérdezzük és cache-eljük. Miért számít: NETTING (és EXCHANGE) számlán egy
+# szimbólumon csak EGY nettó pozíció lehet, így a kockázatmentes runner mellé
+# nyíló új belépő ÖSSZEVONÓDIK vele — a részleges záráson alapuló technikák
+# (Felező/Pajzs/Pajzs↔Fibo) ilyenkor nem működnek helyesen.
+MARGIN_NETTING  = 0   # ACCOUNT_MARGIN_MODE_RETAIL_NETTING
+MARGIN_EXCHANGE = 1   # ACCOUNT_MARGIN_MODE_EXCHANGE
+MARGIN_HEDGING  = 2   # ACCOUNT_MARGIN_MODE_RETAIL_HEDGING
+MARGIN_NAME = {MARGIN_NETTING: "NETTING", MARGIN_EXCHANGE: "EXCHANGE",
+               MARGIN_HEDGING: "HEDGE"}
+
+_MARGIN_MODE = None   # a connect() tölti; None = még ismeretlen
+
+
+def margin_mode():
+    """A számla margin-módja (0/1/2), vagy None ha ismeretlen. Első hívásra
+    lekérdezi, utána cache-elt (a számlatípus futás közben nem változik)."""
+    global _MARGIN_MODE
+    if _MARGIN_MODE is None:
+        try:
+            with MT5_LOCK:
+                info = mt5.account_info()
+            if info is not None:
+                _MARGIN_MODE = int(info.margin_mode)
+        except Exception:
+            pass
+    return _MARGIN_MODE
+
+
+def margin_mode_name() -> str:
+    """A számlatípus emberi neve a kijelzéshez: NETTING | HEDGE | EXCHANGE | —."""
+    m = margin_mode()
+    if m is None:
+        return "—"
+    return MARGIN_NAME.get(m, f"MODE{m}")
+
+
+def is_netting() -> bool:
+    """Nettósító számla-e (NETTING vagy EXCHANGE)? Ilyenkor a részleges záráson
+    alapuló kockázatcsökkentő technikák TILTVA/degradálva vannak. Ismeretlen
+    (None) → False, hogy a kapcsolat nélküli/demo állapot ne tiltson feleslegesen."""
+    return margin_mode() in (MARGIN_NETTING, MARGIN_EXCHANGE)
+
+
 def connect(cfg: dict) -> bool:
     """MT5 inicializálás + bejelentkezés a config alapján, ELLENŐRZÉSSEL.
 
@@ -80,9 +127,22 @@ def connect(cfg: dict) -> bool:
             "Érdemes a config-ban a broker.server-t '%s'-re frissíteni.",
             want_server, info.server, want_login, info.server)
 
-    log.info("MT5 kapcsolódva | %s (login %s) | Egyenleg: %.2f %s | terminál: %s",
+    # Számlatípus EGYSZERI lekérdezése (nem változik futás közben). NETTING/EXCHANGE
+    # esetén a részleges záráson alapuló technikák tiltva lesznek (lásd is_netting).
+    global _MARGIN_MODE
+    try:
+        _MARGIN_MODE = int(info.margin_mode)
+    except Exception:
+        _MARGIN_MODE = None
+
+    log.info("MT5 kapcsolódva | %s (login %s) | Egyenleg: %.2f %s | számlatípus: %s | terminál: %s",
              info.server, info.login, info.balance, info.currency,
-             mt5_cfg.get("path", "(alapértelmezett)"))
+             margin_mode_name(), mt5_cfg.get("path", "(alapértelmezett)"))
+    if is_netting():
+        log.warning("A számla %s → a részleges záráson alapuló technikák "
+                    "(Felező/Pajzs/Pajzs↔Fibo) NEM választhatók és nem futnak "
+                    "(egy szimbólumon csak egy nettó pozíció lehet).",
+                    margin_mode_name())
     return True
 
 
@@ -646,6 +706,9 @@ def connection_info(cfg: dict) -> dict:
                 "balance":   info.balance,
                 "currency":  info.currency,
                 "is_demo":   info.trade_mode == 0,
+                "margin_mode":      margin_mode(),
+                "margin_mode_name": margin_mode_name(),
+                "is_netting":       is_netting(),
             }
     except Exception:
         pass
@@ -659,4 +722,7 @@ def connection_info(cfg: dict) -> dict:
         "balance":   0.0,
         "currency":  "—",
         "is_demo":   broker.get("is_demo", True),
+        "margin_mode":      None,
+        "margin_mode_name": "—",
+        "is_netting":       False,
     }

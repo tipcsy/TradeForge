@@ -187,7 +187,7 @@ class Plan:
 
 
 def plan_at_trigger(preset: str, cfg: dict, cur_lot: float, min_lot: float,
-                    lot_step: float) -> Plan:
+                    lot_step: float, allow_partial: bool = True) -> Plan:
     """1R elérésekor: mit tegyünk a pozícióval, a lot-létrával DEGRADÁLVA.
 
     - off              → nincs teendő.
@@ -212,6 +212,12 @@ def plan_at_trigger(preset: str, cfg: dict, cur_lot: float, min_lot: float,
         # A Pajzs↔Fibo autót a motor belépéskor HATÁSOS presetre oldja fel
         # (shield vagy fibo) — ide már nem juthat el; védelemként Pajzsként kezeljük.
         preset = PRESET_SHIELD
+
+    if not allow_partial:
+        # NETTING/EXCHANGE számla: egy szimbólumon csak EGY nettó pozíció lehet, a
+        # részleges zárásra épülő technika nem működne helyesen → Risky/BE degradálás
+        # (ugyanaz a fallback, mint a nem osztható lotnál).
+        return Plan(0.0, RUNNER_BREAKEVEN, PRESET_RISKY)
 
     frac = target_fraction(preset, cfg)
     closed = closable_lot(cur_lot, frac, min_lot, lot_step)

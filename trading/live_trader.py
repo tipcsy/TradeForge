@@ -1205,7 +1205,11 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
                            if pos.type == mt5.ORDER_TYPE_BUY
                            else pos.price_current <= pos.price_open - one_r)
                 if one_r > 0 and reached:
-                    _plan = _rr.plan_at_trigger(_p_eff, _spec, pos.volume, _minlot, _lotstep)
+                    # NETTING/EXCHANGE számlán a részleges zárás nem működik helyesen
+                    # (egy nettó pozíció) → a technika Risky/BE-re degradál.
+                    _plan = _rr.plan_at_trigger(_p_eff, _spec, pos.volume,
+                                                _minlot, _lotstep,
+                                                allow_partial=not mt5_connector.is_netting())
                     if _plan.close_lot > 0.0 and mt5_connector.close_position_partial(
                             ticket, _plan.close_lot):
                         pstate["rr_reduced"]  = True
