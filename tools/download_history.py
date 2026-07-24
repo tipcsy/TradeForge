@@ -103,7 +103,11 @@ def _ticks_to_bars(ticks_raw, freq: str) -> pd.DataFrame:
     ohlcv = ohlcv[ohlcv["volume"] > 0]
 
     if "spread" in df.columns:
+        # avg_spread: a baron BELÜLI átlag — az intrabar SL/TP-trigger becsléséhez.
         ohlcv["avg_spread"] = df["spread"].resample(freq).mean()
+        # close_spread: az UTOLSÓ tick spreadje a baron — a BELÉPŐHÖZ ez a pontos,
+        # mert a jelzés (és így a belépő) a gyertya ZÁRÁSÁN keletkezik.
+        ohlcv["close_spread"] = df["spread"].resample(freq).last()
 
     return ohlcv
 

@@ -656,6 +656,16 @@ def run_pair(
         float(pair_cfg.get("backtest_spread_pips", 1.5)), pip_size)
     _spread_arr = (m1["avg_spread"].to_numpy(dtype=float)
                    if "avg_spread" in m1.columns else None)
+    # A BELÉPŐ a gyertya ZÁRÁSÁN történik → ott a bar UTOLSÓ tickjének spreadje a
+    # pontos (`close_spread`). Ha nincs (régi adat), az átlag a tartalék.
+    _cspread_arr = (m1["close_spread"].to_numpy(dtype=float)
+                    if "close_spread" in m1.columns else None)
+
+    # Intrabar SL/TP sorrend: ha EGY baron belül a TP és az SL is elérhető, a
+    # bar-adatból NEM derül ki, melyik jött előbb (ehhez tick kellene).
+    #   "pessimistic" (ALAP) → az SL nyer  — óvatos, nem szépít
+    #   "optimistic"         → a TP nyer   — a korábbi viselkedés
+    _sl_first = str(params.get("intrabar_order", "pessimistic")) != "optimistic"
 
     # ── Progressz-visszajelzés (B3 Backtest-ablak) ──────────────────────────
     # Best-effort: időnként jelenti a haladást (%), az aktuális egyenleget, a
@@ -732,19 +742,21 @@ def run_pair(
                 # TP ellenőrzés — ÉPÍTETT csomagnál NINCS TP (a live a ráépítéskor
                 # törli minden láb TP-jét, hogy az induló láb ne zárjon önállóan;
                 # a csomag az átlagár-stopig / kiszállási jelig fut).
-                # A BUY a BID-en zár → a TP/SL a BID-sorozaton triggerel.
-                if not trade.built and bid_hi >= trade.tp:
-                    trade.close_price = trade.tp
-                    trade.close_time  = m1_time
-                    trade.pnl_usd     = calc_pnl(trade, trade.tp)
-                    trade.status      = "tp"
-                    closed = True
-                # SL ellenőrzés
-                elif bid_lo <= trade.sl:
+                # A BUY a BID-en zár → a TP/SL a BID-sorozaton triggerel. Ha MINDKETTŐ
+                # elérhető egy baron, a sorrendet a `_sl_first` dönti (lásd fent).
+                _tp_hit = (not trade.built) and bid_hi >= trade.tp
+                _sl_hit = bid_lo <= trade.sl
+                if _sl_hit and (_sl_first or not _tp_hit):
                     trade.close_price = trade.sl
                     trade.close_time  = m1_time
                     trade.pnl_usd     = calc_pnl(trade, trade.sl)
                     trade.status      = "sl"
+                    closed = True
+                elif _tp_hit:
+                    trade.close_price = trade.tp
+                    trade.close_time  = m1_time
+                    trade.pnl_usd     = calc_pnl(trade, trade.tp)
+                    trade.status      = "tp"
                     closed = True
                 else:
                     # A BE/trailing is a KILÉPÉSI (bid) oldalon mér
@@ -752,18 +764,21 @@ def run_pair(
                                      params, pip_size, min_lot, lot_step, rr_spec)
 
             elif trade.direction == "SELL":
-                # A SELL az ASK-on zár → a TP/SL az ASK-sorozaton triggerel.
-                if not trade.built and ask_lo <= trade.tp:
-                    trade.close_price = trade.tp
-                    trade.close_time  = m1_time
-                    trade.pnl_usd     = calc_pnl(trade, trade.tp)
-                    trade.status      = "tp"
-                    closed = True
-                elif ask_hi >= trade.sl:
+                # A SELL az ASK-on zár → a TP/SL az ASK-sorozaton triggerel. Ha MINDKETTŐ
+                # elérhető egy baron, a sorrendet a `_sl_first` dönti (lásd fent).
+                _tp_hit = (not trade.built) and ask_lo <= trade.tp
+                _sl_hit = ask_hi >= trade.sl
+                if _sl_hit and (_sl_first or not _tp_hit):
                     trade.close_price = trade.sl
                     trade.close_time  = m1_time
                     trade.pnl_usd     = calc_pnl(trade, trade.sl)
                     trade.status      = "sl"
+                    closed = True
+                elif _tp_hit:
+                    trade.close_price = trade.tp
+                    trade.close_time  = m1_time
+                    trade.pnl_usd     = calc_pnl(trade, trade.tp)
+                    trade.status      = "tp"
                     closed = True
                 else:
                     _manage_position(trade, ask_hi, ask_lo,
@@ -909,9 +924,14 @@ def run_pair(
                     eff_slots = calc_effective_slots(balance, sl_pips, pair_cfg, sizing_cfg)
                     lot = calc_lot(balance, sl_pips, pair_cfg, sizing_cfg, eff_slots)
 
+                    # A belépő a gyertya ZÁRÁSÁN → a bar UTOLSÓ tickjének spreadje
+                    # (`close_spread`) a pontos; tartalék az átlag (_sp).
+                    _esp = _cspread_arr[i] if _cspread_arr is not None else float("nan")
+                    if not (_esp > 0):
+                        _esp = _sp
                     open_price = m1_row["close"]
                     if signal == "BUY":
-                        open_price += pip_to_price(spread_pips, pip_size)
+                        open_price += _esp          # BUY → ASK-on lép be
                         sl_price = open_price - pip_to_price(sl_pips, pip_size)
                         tp_price = open_price + pip_to_price(tp_pips, pip_size)
                     else:  # SELL
