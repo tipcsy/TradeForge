@@ -1300,6 +1300,7 @@ def run_portfolio_backtest(
     strategy_name: "str | None" = None,  # melyik stratégián fut (None = a config elsődlegese)
     max_slots: "int | None" = None,      # egyszerre nyitott pozíciók száma (None = trading.max_open_slots)
     build: bool = False,                 # pozícióépítés (piramidális ráépítés) bekapcsolva?
+    exec_gates: bool = False,            # él-paritású végrehajtási kapuk (spread + TF-együttállás)
 ) -> dict:
     """
     Portfólió szintű backtest: az összes szimbólum közös tőkén,
@@ -1326,6 +1327,11 @@ def run_portfolio_backtest(
     migrate_flat_layout(strategy.name)
     tf_hi = strategy.timeframes()[0].label
     tf_lo = strategy.timeframes()[1].label
+
+    # ── Végrehajtási kapuk (él-paritás, opcionális) — UGYANAZ, mint a run_pair-ben ──
+    from core import spread_gate as _spread_gate
+    _exec_gates = bool(exec_gates)
+    _lo_secs    = int(strategy.timeframes()[1].minutes) * 60
 
     # Risky mód forrásai: (1) kézi kapcsoló (data/risky_mode.json) + (2) auto:
     # a Közepes/Gyenge/Rossz minősítésű pár CSAK risky módban futhat (mint élőben).
@@ -1436,6 +1442,10 @@ def run_portfolio_backtest(
             "build_cfg": _pair_build_cfg(sym),   # pozícióépítés (None, ha kikapcsolva)
             "state":     strategy.bt_new_state(sym),
             "prev_row":  None,
+            # TF-együttállás kapu kiértékelő (None, ha nincs bekapcsolva erre a párra/
+            # stratégiára) — a TELJES df_m1-ből, hogy a magasabb idősíkok SMA-ja warmupolt.
+            "tf_eval":   (_build_tf_align_evaluator(cfg, sym, strategy.name, df_m1)
+                          if _exec_gates else None),
         }
         log.info("Portfolio BT: %s betöltve — M15=%d M1=%d bar", sym, len(m15), len(m1))
 
@@ -1646,8 +1656,30 @@ def run_portfolio_backtest(
                         pip_size = pair_cfg["pip_size"]
                         pv1_usd  = pair_cfg["pv1_usd"]
                         sp       = pair_cfg.get("backtest_spread_pips", spread_default)
+
+                        # ── Végrehajtási kapuk (él-paritás) — UGYANAZ, mint a run_pair ──
+                        # spread-kapu (közös core.spread_gate) + TF-együttállás. Bukás →
+                        # a plan-t None-ozzuk (a belépő kimarad, a prev_row lentebb frissül).
+                        _gate_ok = True
+                        if _exec_gates:
+                            _atr_e = m15_row.get("atr", float("nan"))
+                            if _atr_e and not pd.isna(_atr_e):
+                                _sp_e = row.get("close_spread", float("nan"))
+                                if not (_sp_e > 0):
+                                    _sp_e = row.get("avg_spread", float("nan"))
+                                if not (_sp_e > 0):
+                                    _sp_e = pip_to_price(sp, pip_size)
+                                if not _spread_gate.spread_ok(
+                                        _sp_e / pip_size, float(_atr_e), pip_size, params)[0]:
+                                    _gate_ok = False
+                            if _gate_ok and info.get("tf_eval") is not None:
+                                _ecu = int(m1_time.timestamp()) + _lo_secs
+                                if not info["tf_eval"](_ecu, signal):
+                                    _gate_ok = False
+
                         # A stratégia adja a pozíciótervet (SL/TP + saját szűrők)
-                        plan = strategy.bt_entry(m15_row, params, pip_size)
+                        plan = (strategy.bt_entry(m15_row, params, pip_size)
+                                if _gate_ok else None)
                         if plan is not None:
                             sl_pips, tp_pips = plan
                             # Óvatos (felezett) méret? A kockázatcsökkentő preset dönti

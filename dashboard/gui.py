@@ -1081,6 +1081,17 @@ class PortfolioBacktestTab:
                        font=self._small).grid(row=2, column=2, columnspan=2,
                                               sticky="w", padx=4)
 
+        # Reális végrehajtási kapuk (TF-együttállás + spread), mint élesben. Alap BE →
+        # a portfólió sem nyit olyat, amit egy él-oldali kapu kiszűrne. Per-pár config
+        # tiszteletben (ha egy párra ki van kapcsolva az Együtt, arra nem kapuz).
+        self._pf_exec_gates_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(form, text="Reális kapuk (TF+spread)",
+                       variable=self._pf_exec_gates_var,
+                       bg=BG_BT, fg=FG_WHITE, selectcolor=BG_HEADER,
+                       activebackground=BG_BT, activeforeground=FG_WHITE,
+                       font=self._small).grid(row=3, column=2, columnspan=2,
+                                              sticky="w", padx=4)
+
         self._btn_start = tk.Button(form, text="▶  Backtest indítása", width=20,
                                     bg=BTN_BT_BG, fg=BTN_BT_FG, font=self._small,
                                     relief="flat", command=self._start_bt)
@@ -1164,8 +1175,13 @@ class PortfolioBacktestTab:
         params_dir = strategy_dir(strat_name.get() if strat_name else None)
         # A *_hours.json a kereskedési-óra fájl, NEM optimalizált param — kiszűrjük
         # (ilyet kiválasztva a portfólió-backtest elszállna a hiányzó params miatt).
+        # FONTOS: CSAK a jelenleg a configban SZEREPLŐ párokat listázzuk. Az
+        # optimized_params/ mappában bróker-váltás/törlés után is ott maradhatnak régi
+        # fájlok (pl. XAUUSD a régi arany-névvel) — ezek „szellemként" jelentek meg a
+        # listában, holott már nem léteznek. A metszet a config-párokkal ezt megszünteti.
+        _pairs = set(self.cfg.get("pairs", {}))
         optimized  = sorted([f.stem for f in params_dir.glob("*.json")
-                             if not f.stem.endswith("_hours")]) \
+                             if not f.stem.endswith("_hours") and f.stem in _pairs]) \
                      if params_dir.exists() else []
         if not optimized:
             tk.Label(self._sym_frame, text="(Nincs optimalizált instrumentum)",
@@ -1201,6 +1217,7 @@ class PortfolioBacktestTab:
             n_slots = None          # → a config max_open_slots
         build_on   = self._build_var.get()
         strat_name = self._strat_var.get()
+        exec_gates = bool(self._pf_exec_gates_var.get())
 
         self._stop_flag.clear()
         self._equity_pts = []
@@ -1215,7 +1232,7 @@ class PortfolioBacktestTab:
         self._thread = threading.Thread(
             target=self._run_thread,
             args=(symbols, date_from, date_to, init_bal, self._rr_spec(),
-                  strat_name, n_slots, build_on),
+                  strat_name, n_slots, build_on, exec_gates),
             daemon=True,
         )
         self._thread.start()
@@ -1240,7 +1257,7 @@ class PortfolioBacktestTab:
         return {**_rr.default_config(), "preset": preset}
 
     def _run_thread(self, symbols, date_from, date_to, init_bal, rr_spec=None,
-                    strat_name=None, n_slots=None, build_on=False):
+                    strat_name=None, n_slots=None, build_on=False, exec_gates=False):
         from trading.backtest import run_portfolio_backtest, _save_backtest_results
 
         def on_progress(date_str, balance, n_open, n_closed, pct):
@@ -1260,6 +1277,7 @@ class PortfolioBacktestTab:
                 strategy_name=strat_name,
                 max_slots=n_slots,
                 build=build_on,
+                exec_gates=exec_gates,
             )
             if result.get("trades"):
                 _save_backtest_results(
