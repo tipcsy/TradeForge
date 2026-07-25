@@ -528,9 +528,10 @@ def _build_tf_align_evaluator(cfg, symbol, strategy_name, df_m1):
     (per-pár felülírható) — így a backtest bitre azt a kaput modellezi, amit az él.
 
     A `df_m1` a TELJES (nem a test-ablakra vágott) M1 → a magasabb idősíkok SMA-ja
-    a test-ablak elején is warmupolt (nem blokkol feleslegesen). LOOK-AHEAD nincs:
-    a kiértékelés a belépő M1-gyertya ZÁRÁSÁRA történik, és idősíkonként csak a
-    MÁR LEZÁRT (close_time ≤ belépő zárása) gyertyát nézi.
+    a test-ablak elején is warmupolt (nem blokkol feleslegesen). KONVENCIÓ: az élő
+    és a viz (`tf_align_gate_fn`) a jel pillanatában FORMÁLÓDÓ TF-gyertyát nézi
+    (nyitó-idő ≤ t), a bar aktuális close-jával — ezt tükrözzük itt is (nyitó-idős
+    `searchsorted`), különben a backtest más belépőket engedne, mint az él/viz.
 
     Visszaad: `fn(entry_close_unix, direction) -> bool`, vagy None, ha a kapu erre a
     stratégiára/instrumentumra nincs bekapcsolva, vagy nincs elég adat (fail-open)."""
@@ -555,14 +556,14 @@ def _build_tf_align_evaluator(cfg, symbol, strategy_name, df_m1):
             c = closes.to_numpy(dtype=float)
             smv = pd.Series(c).rolling(sma).mean().to_numpy()
             sign = _np.sign(c - smv)
-            open_unix = closes.index.view("int64") // 1_000_000_000  # ns → s (UTC)
-            close_unix = open_unix.astype(_np.int64) + tf * 60       # gyertya ZÁRÁSA
-            series.append((close_unix, sign))
+            # NYITÓ-idő (mint a viz/él): a jel pillanatában FORMÁLÓDÓ gyertyát nézzük.
+            open_unix = (closes.index.view("int64") // 1_000_000_000).astype(_np.int64)
+            series.append((open_unix, sign))
 
-        def _at(entry_close_unix, direction):
-            t = int(entry_close_unix)
-            for close_unix, sign in series:
-                idx = int(_np.searchsorted(close_unix, t, side="right")) - 1
+        def _at(entry_unix, direction):
+            t = int(entry_unix)
+            for open_unix, sign in series:
+                idx = int(_np.searchsorted(open_unix, t, side="right")) - 1
                 if idx < 0:
                     return True     # a sorozat előtti időre nem szűrünk (fail-open)
                 s = sign[idx]
@@ -674,7 +675,8 @@ def run_pair(
 
     # M15 gyertyák indexe gyors kereséshez
     m15_times = m15.index.to_list()
-    m15_ptr = 0  # melyik M15 gyertya az aktuális
+    m15_ptr = 0  # a legutóbb LEZÁRT és feldolgozott M15 gyertya indexe
+    _m15_delta = pd.Timedelta(minutes=strategy.timeframes()[0].minutes)  # egy M15 hossza
     _exit_at = _build_exit_evaluator(m15, rr_spec)   # kiszállási-jel (None, ha nincs)
     _bigmove_at = _build_bigmove_evaluator(m15, rr_spec)  # Pajzs↔Fibo auto (None, ha nem az)
     # Cost-cut (idő-stop, tananyag 2.6): a nyitás után N fő-tf gyertyával még
@@ -714,7 +716,6 @@ def run_pair(
     # TELJES (vágatlan) df_m1-ből építjük, hogy a magasabb idősíkok SMA-ja warmupolt.
     from core import spread_gate as _spread_gate
     _exec_gates = bool(exec_gates)
-    _lo_secs    = int(strategy.timeframes()[1].minutes) * 60
     _tf_eval    = (_build_tf_align_evaluator(cfg, symbol, strategy.name, df_m1)
                    if (_exec_gates and cfg is not None) else None)
 
@@ -774,12 +775,15 @@ def run_pair(
         # A no-trade órában nem kereskedünk. A jelzés-reset (mint a live/viz) CSAK ha a
         # `no_trade_resets_signal` param be van kapcsolva (alap: KI) → a szünet után
         # nulláról fegyverkezik. Kikapcsolva a szünet előtti M15 ablak túléli a szünetet.
+        # Óra-szűrő: a trade_hours-on kívül CSAK a BELÉPŐT tiltjuk (mint élesben). A
+        # M15-állapot frissítése ÉS a nyitott pozíciók kezelése (SL/TP) MEGY tovább —
+        # különben a szünet befagyasztaná a setupot (a belépő az engedélyezett órában
+        # sem tüzelne), és az off-órában elért SL/TP sem záródna. (allowed_hours=None →
+        # _off_hour végig False → a viselkedés BITAZONOS a korábbival.)
         hour = m1_time.hour
-        if allowed_hours is not None and hour not in allowed_hours:
-            if params.get("no_trade_resets_signal", False):
-                state = strategy.bt_new_state(symbol)
-            prev_m1_row = m1_row
-            continue
+        _off_hour = allowed_hours is not None and hour not in allowed_hours
+        if _off_hour and params.get("no_trade_resets_signal", False):
+            state = strategy.bt_new_state(symbol)
 
         # Napi veszteség limit ellenőrzés
         day_key = str(m1_time.date())
@@ -789,13 +793,15 @@ def run_pair(
             prev_m1_row = m1_row
             continue
 
-        # M15 állapot frissítése ha új M15 gyertya zárult
-        while m15_ptr < len(m15_times) - 1 and m15_times[m15_ptr + 1] <= m1_time:
+        # M15 állapot: minden ÚJONNAN ZÁRT M15 gyertyát EGYSZER dolgozunk fel, a
+        # LEZÁRT bart használva (nem a formálódót). Korábban a motor MINDEN M1-ticknél
+        # újrafuttatta a M15-állapotgépet a FORMÁLÓDÓ (open ≤ t) barra → look-ahead ÉS
+        # az M1 arming-állapot ismételt újraszámítása → valós belépők maradtak ki (pl.
+        # a délutáni trendben). Egy M15 bar (nyitó m15_times[j]) egy TF-periódus múlva zár.
+        while (m15_ptr + 1 < len(m15_times)
+               and m15_times[m15_ptr + 1] + _m15_delta <= m1_time):
             m15_ptr += 1
-
-        if m15_ptr < len(m15_times):
-            m15_row = m15.iloc[m15_ptr]
-            state = strategy.bt_on_high_close(state, m15_row, params)
+            state = strategy.bt_on_high_close(state, m15.iloc[m15_ptr], params)
 
         # Nyitott pozíciók kezelése (SL/TP/breakeven/trailing) — BID/ASK modellel
         _sp = _spread_arr[i] if _spread_arr is not None else float("nan")
@@ -971,11 +977,17 @@ def run_pair(
         occupied = sum(1 for t in open_trades if not t.risk_free)
         free_slots = trading_cfg["max_open_slots"] - occupied
 
-        # M1 belépési jelzés ellenőrzés
-        if prev_m1_row is not None and free_slots > 0:
+        # M1 belépési jelzés. A jelzés-ÁLLAPOTGÉP (bt_on_low_close) MINDEN M1-báron fut —
+        # az arming a nyitott pozíció (foglalt slot) ÉS a tiltott óra alatt is megőrződik,
+        # különben a szünet/pozíció után elveszne a felfegyverzés, és valós belépők
+        # maradnának ki (pl. a délutáni trend). A tényleges BELÉPŐ-nyitást a szabad slot
+        # ÉS az óra-szűrő kapuzza — élesben is így: a M1-figyelés folyamatos, csak a
+        # végrehajtás gátolt.
+        if prev_m1_row is not None:
             signal = strategy.bt_on_low_close(state, prev_m1_row, m1_row, params)
 
-            if signal != "NONE" and m15_ptr < len(m15_times):
+            if (signal != "NONE" and free_slots > 0 and not _off_hour
+                    and m15_ptr < len(m15_times)):
                 m15_row = m15.iloc[m15_ptr]
 
                 # ── Végrehajtási kapuk (él-paritás) — a stratégia-jel ELŐTT ─────
@@ -993,9 +1005,9 @@ def run_pair(
                             prev_m1_row = m1_row
                             continue
                     if _tf_eval is not None:
-                        # a belépő M1-gyertya ZÁRÁSÁRA értékelünk (index = nyitó idő)
-                        _ecu = int(m1_time.timestamp()) + _lo_secs
-                        if not _tf_eval(_ecu, signal):
+                        # a belépő M1-gyertya NYITÓ-idejére (mint a viz: times1[j]) →
+                        # a formálódó TF-gyertyát nézi, egyezően az él/viz kapujával
+                        if not _tf_eval(int(m1_time.timestamp()), signal):
                             prev_m1_row = m1_row
                             continue
 
@@ -1331,7 +1343,6 @@ def run_portfolio_backtest(
     # ── Végrehajtási kapuk (él-paritás, opcionális) — UGYANAZ, mint a run_pair-ben ──
     from core import spread_gate as _spread_gate
     _exec_gates = bool(exec_gates)
-    _lo_secs    = int(strategy.timeframes()[1].minutes) * 60
 
     # Risky mód forrásai: (1) kézi kapcsoló (data/risky_mode.json) + (2) auto:
     # a Közepes/Gyenge/Rossz minősítésű pár CSAK risky módban futhat (mint élőben).
@@ -1673,8 +1684,8 @@ def run_portfolio_backtest(
                                         _sp_e / pip_size, float(_atr_e), pip_size, params)[0]:
                                     _gate_ok = False
                             if _gate_ok and info.get("tf_eval") is not None:
-                                _ecu = int(m1_time.timestamp()) + _lo_secs
-                                if not info["tf_eval"](_ecu, signal):
+                                # NYITÓ-idő (mint a viz/él): formálódó TF-gyertya
+                                if not info["tf_eval"](int(m1_time.timestamp()), signal):
                                     _gate_ok = False
 
                         # A stratégia adja a pozíciótervet (SL/TP + saját szűrők)
