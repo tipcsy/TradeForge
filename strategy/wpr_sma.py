@@ -27,6 +27,7 @@ from strategy import visual as viz
 from core.indicator_engine import compute_indicators
 from core.signal_detector import PairState, check_m15_signal, check_m1_entry
 from core.risk_manager import calc_sl_tp_pips, calc_swing_sl_tp_pips
+from core import spread_gate
 
 
 # ---------------------------------------------------------------------------
@@ -480,6 +481,17 @@ class WprSmaStrategy(Strategy):
         m1_wprs  = m1["wpr"].values
         m1_close = m1["close"].values
         times1   = [int(t.timestamp()) for t in m1.index]
+        # A VÉGREHAJTÁSI szűrők (mint a backtest/él): a jel-replay CSAK azokat a
+        # belépőket rajzolja ki, amiket a motor TÉNYLEGESEN megkötne — így a chart a
+        # valós kötéseket mutatja (a kikapcsolt kapuknál több lesz, ez is látszik).
+        #  • volatilitás-szűrő: a bt_entry HOOK (atr_min_pct/atr_max_pct); baseline az
+        #    ablak ATR-átlaga (mint a bt_indicators atr_avg oszlopa).
+        #  • spread-kapu: ha a bárokon van spread-adat (close_spread/avg_spread/spread).
+        #  • TF-együttállás: már a md.entry_gate intézi (lentebb).
+        _atr_avg = float(np.nanmean(atr15)) if np.isfinite(atr15).any() else 0.0
+        _sp_col = next((c for c in ("close_spread", "avg_spread", "spread")
+                        if c in m1.columns), None)
+        _sp_arr = m1[_sp_col].values if _sp_col else None
         if tl_t and getattr(md, "show_signals", True):
             p = 0
             # PERZISZTENS M1-állapot: az M1 belépő állapotgép (felfegyverez az extrémnél
@@ -516,6 +528,18 @@ class WprSmaStrategy(Strategy):
                 atr_v = tl_atr[p]
                 if math.isnan(atr_v):
                     continue
+                # ── VÉGREHAJTÁSI szűrők (UGYANAZ, mint a backtest/él) ──────────
+                # Volatilitás-szűrő: a bt_entry hook (None → a motor SEM lépne be,
+                # tehát a jelölő se jelenjen meg). Ugyanaz az atr_min/max_pct logika.
+                if self.bt_entry({"atr": float(atr_v), "atr_avg": _atr_avg},
+                                 md.params, pip) is None:
+                    continue
+                # Spread-kapu (ha van spread-adat a bárokon): a közös core.spread_gate.
+                if _sp_arr is not None:
+                    _spv = _sp_arr[j]
+                    if _spv > 0 and not spread_gate.spread_ok(
+                            float(_spv) / pip, float(atr_v), pip, md.params)[0]:
+                        continue
                 entry = float(m1_close[j])
                 # SL-módszer: `swing20` → az utolsó N M1 gyertya swingjéből (a live/
                 # backtest belépővel EGYEZŐEN), különben a régi ATR-méret.

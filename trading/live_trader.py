@@ -208,7 +208,16 @@ def get_candles(symbol: str, timeframe, count: int) -> Optional[pd.DataFrame]:
     df["time"] = pd.to_datetime(df["time"], unit="s", utc=True)
     df.set_index("time", inplace=True)
     df.rename(columns={"tick_volume": "volume"}, inplace=True)
-    return df[["open", "high", "low", "close", "volume"]]
+    cols = ["open", "high", "low", "close", "volume"]
+    # A bar-onkénti spread (pont → ÁR) — a viz spread-kapujához (mint a backtest
+    # close_spread-je). Enélkül a chart-jelölők a spread-kaput nem modelleznék.
+    if "spread" in df.columns:
+        info = mt5.symbol_info(symbol)
+        pt = getattr(info, "point", 0.0) if info else 0.0
+        if pt and pt > 0:
+            df["spread"] = df["spread"].astype(float) * pt
+            cols.append("spread")
+    return df[cols]
 
 
 def open_position(
