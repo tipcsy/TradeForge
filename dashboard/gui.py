@@ -2881,9 +2881,16 @@ class DashboardWindow:
         self._start_history_download(symbol)
 
     def _start_history_download(self, symbol: str, on_done=None):
-        """Előzmény-adat (M15/M1…) letöltése HÁTTÉRSZÁLON, a sor Opt-státuszában
-        visszajelezve. Az engedélyezett stratégiák időkereteit tölti (union), hogy
-        minden stratégia backtestje/optimalizálása futtatható legyen.
+        """Előzmény-adat (M15/M1…) letöltése KÜLÖN PROCESSZBEN, a sor Opt-státuszában
+        (és a naplóban) visszajelezve. Az engedélyezett stratégiák időkereteit tölti
+        (union), hogy minden stratégia backtestje/optimalizálása futtatható legyen.
+
+        Miért külön processz és nem szál? A tick→bar `resample()` CPU-kötött pandas-
+        munka, ami havonta több millió tick felett fut és TARTJA a Python GIL-t — egy
+        háttérszál emiatt ugyanúgy befagyasztotta a Tkinter főciklust (a watchdog
+        „a FŐ SZÁL … nem frissült" jelzései). Külön processznek SAJÁT GIL-je (és saját
+        MT5-sessionje) van → a GUI végig reszponzív marad. A processzek közti
+        parquet-ütközést a `download_history._history_lock` fájl-alapú zára gátolja.
 
         `on_done`: opcionális callback(ok: bool, msg: str) a FŐ szálon."""
         try:
@@ -2896,25 +2903,66 @@ class DashboardWindow:
         except Exception:
             tfs = ["M15", "M1"]
 
-        def _work():
-            from tools.download_history import ensure_history
+        def _short(line: str) -> str:
+            """A letöltő stdout-sorából tömör sor-státusz (a cella keskeny)."""
+            s = line.strip()
+            if s.startswith("[státusz]"):
+                return s[len("[státusz]"):].strip() or "letöltés…"
+            # havi haladás: „2025-08 ... 7,704,574 tick -> 42,214 bar  (5.5s)"
+            if len(s) >= 8 and s[4] == "-" and s[7] == " " and s[:4].isdigit():
+                return f"Letöltés: {s[:7]} …"
+            # naplósor: „… INFO  BTCJPY M1 — … mentve …" → az üzenet-rész
+            for lvl in ("WARNING", "ERROR", "INFO"):
+                i = s.find(lvl)
+                if i != -1:
+                    tail = s[i + len(lvl):].strip()
+                    if tail:
+                        return tail[:60]
+            return s[:60]
 
-            def _st(msg):
-                self.optimizer_status[symbol] = msg
-
+        def _reader():
+            import os
+            import subprocess
+            import logging as _logging
+            _log = _logging.getLogger("history")
+            cmd = [sys.executable, "-u",
+                   str(ROOT / "tools" / "download_history.py"),
+                   "--symbol", symbol, "--tfs", ",".join(tfs)]
+            kwargs = dict(cwd=str(ROOT), stdout=subprocess.PIPE,
+                          stderr=subprocess.STDOUT, text=True,
+                          encoding="utf-8", errors="replace", bufsize=1)
+            if os.name == "nt":
+                kwargs["creationflags"] = 0x08000000   # CREATE_NO_WINDOW
             try:
-                ok, msg = ensure_history(symbol, self.cfg, tuple(tfs), status=_st)
+                proc = subprocess.Popen(cmd, **kwargs)
             except Exception as ex:
-                ok, msg = False, f"letöltési hiba: {ex}"
-            self.optimizer_status[symbol] = ("Adat kész ✓" if ok else f"Hiba: {msg}")
+                self.optimizer_status[symbol] = f"Hiba: {ex}"
+                if on_done is not None:
+                    try:
+                        self.root.after(0, lambda: on_done(False, str(ex)))
+                    except Exception:
+                        pass
+                return
+
+            last = ""
+            for line in proc.stdout:
+                line = line.rstrip()
+                if not line:
+                    continue
+                last = line
+                self.optimizer_status[symbol] = _short(line)
+                _log.info("[%s] %s", symbol, line)   # a napló is lássa a haladást
+            ok = (proc.wait() == 0)
+            self.optimizer_status[symbol] = (
+                "Adat kész ✓" if ok else f"Hiba: {_short(last) or 'letöltés sikertelen'}")
             if on_done is not None:
                 try:
-                    self.root.after(0, lambda: on_done(ok, msg))
+                    self.root.after(0, lambda: on_done(ok, last))
                 except Exception:
                     pass
 
         self.optimizer_status[symbol] = "Előzmény letöltése..."
-        threading.Thread(target=_work, daemon=True,
+        threading.Thread(target=_reader, daemon=True,
                          name=f"History-{symbol}").start()
 
     # ── JSON szintaxis-színezés (Text widgethez) ─────────────────────────

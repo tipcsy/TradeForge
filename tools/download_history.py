@@ -123,27 +123,30 @@ def _download_via_ticks(symbol: str, tf_str: str, start: datetime, end: datetime
 
     while cur < end:
         chunk_end = min(_next_month(cur), end)
-        print(f"      {cur.strftime('%Y-%m')} ...", end="", flush=True)
+        month = cur.strftime("%Y-%m")
         t0 = time.time()
 
         with _MT5_LOCK:
             ticks_raw = mt5.copy_ticks_range(symbol, cur, chunk_end, mt5.COPY_TICKS_ALL)
 
+        # EGY sor / hónap (nem `end=""` darabolva) — így ha a stdout-ot egy másik
+        # processz (GUI) sorosan olvassa, nem csúszik össze a naplósorokkal.
         if ticks_raw is None or len(ticks_raw) == 0:
             err = mt5.last_error()
             note = str(err) if err[0] != 0 else "üres időszak"
-            print(f" nincs adat ({note})")
+            print(f"      {month} ... nincs adat ({note})", flush=True)
             cur = _next_month(cur)
             continue
 
         ohlcv = _ticks_to_bars(ticks_raw, freq)
         if ohlcv.empty:
-            print(f" {len(ticks_raw):,} tick -> 0 bar")
+            print(f"      {month} ... {len(ticks_raw):,} tick -> 0 bar", flush=True)
             cur = _next_month(cur)
             continue
 
         frames.append(ohlcv)
-        print(f" {len(ticks_raw):>8,} tick -> {len(ohlcv):>5,} bar  ({time.time()-t0:.1f}s)")
+        print(f"      {month} ... {len(ticks_raw):>8,} tick -> "
+              f"{len(ohlcv):>5,} bar  ({time.time()-t0:.1f}s)", flush=True)
         cur = _next_month(cur)
         time.sleep(0.05)
 
@@ -272,13 +275,66 @@ def download_pair(symbol: str, tf_str: str, start: datetime, overwrite: bool, en
 # Per-szimbólum zár: a GUI-ban két út is kérhet letöltést UGYANARRA a párra
 # (új instrumentum auto-letöltése + Opt/Backtest) — ugyanazt a parquet-et írnák
 # egyszerre. A zár sorba állítja őket (a második már a kész fájlt találja).
+#
+# FONTOS: az új instrumentum letöltése KÜLÖN PROCESSZBEN fut (a GUI ne fagyjon a
+# GIL-től), a Backtest/Opt út viszont a GUI processzében hív ensure_history-t —
+# ezért a zárnak PROCESSZEK KÖZÖTT is érvényesnek kell lennie. Egy in-process
+# threading.Lock (gyors, ugyanazon processz szálai közt) + egy fájl-alapú zár
+# (processzek közti) párosa adja ezt.
 _HISTORY_LOCKS: dict = {}
 _HISTORY_LOCKS_GUARD = threading.Lock()
 
 
-def _history_lock(symbol: str) -> threading.Lock:
+def _thread_lock(symbol: str) -> threading.Lock:
     with _HISTORY_LOCKS_GUARD:
         return _HISTORY_LOCKS.setdefault(symbol, threading.Lock())
+
+
+try:                                    # Windows
+    import msvcrt
+
+    def _flock_acquire(fh):
+        while True:
+            try:
+                msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+                return
+            except OSError:
+                time.sleep(0.2)         # foglalt — várunk a másik processzre
+
+    def _flock_release(fh):
+        try:
+            fh.seek(0)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+except ImportError:                     # POSIX
+    import fcntl
+
+    def _flock_acquire(fh):
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+
+    def _flock_release(fh):
+        fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+
+
+from contextlib import contextmanager
+
+
+@contextmanager
+def _history_lock(symbol: str):
+    """Per-szimbólum zár, ami PROCESSZEK KÖZÖTT is soroba állít (lásd fent)."""
+    with _thread_lock(symbol):
+        lock_dir = ROOT / "data"
+        lock_dir.mkdir(parents=True, exist_ok=True)
+        fh = open(lock_dir / f".{symbol}.history.lock", "w")
+        try:
+            _flock_acquire(fh)
+            yield
+        finally:
+            try:
+                _flock_release(fh)
+            finally:
+                fh.close()
 
 
 def ensure_history(symbol: str, cfg: dict, tf_labels=("M15", "M1"),
@@ -352,8 +408,39 @@ def _ensure_history(symbol, cfg, tf_labels, status) -> tuple[bool, str]:
 # ---------------------------------------------------------------------------
 
 def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Historikus M15/M1 adat letöltése MT5-ből.")
+    parser.add_argument(
+        "--symbol",
+        help="EGYETLEN szimbólum letöltése (a GUI hívja külön processzben új "
+             "instrumentum felvételekor). Elhagyva: az összes aktív pár.")
+    parser.add_argument(
+        "--tfs", default="M15,M1",
+        help="Vesszővel elválasztott időkeretek (pl. M15,M1).")
+    args = parser.parse_args()
+
     from strategy.settings import load_config
     cfg = load_config(ROOT / "config.json")
+
+    # ── Egy-szimbólumos mód (GUI külön processz) ─────────────────────────────
+    # A haladást stdout-ra írjuk (a szülő GUI sorosan olvassa és a sor-státuszba
+    # + a naplóba teszi). A connect()-et az ensure_history maga intézi.
+    if args.symbol:
+        tf_labels = tuple(t.strip() for t in args.tfs.split(",") if t.strip()) \
+                    or ("M15", "M1")
+
+        def _st(msg):
+            print(f"[státusz] {msg}", flush=True)
+
+        ok, msg = ensure_history(args.symbol, cfg, tf_labels, status=_st)
+        print(msg, flush=True)
+        try:
+            mt5_connector.disconnect()
+        except Exception:
+            pass
+        sys.exit(0 if ok else 1)
 
     if not mt5_connector.connect(cfg):
         sys.exit(1)
