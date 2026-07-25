@@ -1285,19 +1285,21 @@ from core.params_store import (
 
 
 def _advance_m15_state(pd_info: dict, m1_time: pd.Timestamp, strategy) -> None:
-    """M15 pointer előrehaladása és állapot frissítése (egy pár adatain)."""
+    """M15 pointer előrehaladása és állapot frissítése (egy pár adatain).
+
+    Minden ÚJONNAN ZÁRT M15 gyertyát EGYSZER dolgozunk fel, a LEZÁRT bart használva
+    (nem a formálódót) — különben look-ahead ÉS az M1 arming ismételt újraszámítása
+    minden M1-ticknél → valós belépők maradnának ki. (Ugyanaz a fix, mint a run_pair.)"""
     m15_times = pd_info["m15_times"]
     m15_df    = pd_info["m15"]
     params    = pd_info["params"]
+    delta     = pd_info["m15_delta"]
 
-    while (pd_info["m15_ptr"] < len(m15_times) - 1 and
-           m15_times[pd_info["m15_ptr"] + 1] <= m1_time):
+    while (pd_info["m15_ptr"] + 1 < len(m15_times)
+           and m15_times[pd_info["m15_ptr"] + 1] + delta <= m1_time):
         pd_info["m15_ptr"] += 1
-
-    ptr = pd_info["m15_ptr"]
-    if ptr < len(m15_times):
         pd_info["state"] = strategy.bt_on_high_close(
-            pd_info["state"], m15_df.iloc[ptr], params)
+            pd_info["state"], m15_df.iloc[pd_info["m15_ptr"]], params)
 
 
 def run_portfolio_backtest(
@@ -1441,6 +1443,7 @@ def run_portfolio_backtest(
             "m1":        m1,
             "m15_times": m15.index.tolist(),
             "m15_ptr":   0,
+            "m15_delta": pd.Timedelta(minutes=strategy.timeframes()[0].minutes),
             "params":    params,
             "pair_cfg":  cfg["pairs"][sym],
             "risky":     pair_risky.get(sym, False),
@@ -1637,11 +1640,6 @@ def run_portfolio_backtest(
         occupied = sum(1 for t in open_trades.values() if not t.risk_free)
 
         for sym, info in pair_data.items():
-            if sym in open_trades:
-                continue
-            if occupied >= max_slots:
-                break
-
             m1_df    = info["m1"]
             params   = info["params"]
             pair_cfg = info["pair_cfg"]
@@ -1650,16 +1648,20 @@ def run_portfolio_backtest(
                 continue
             row  = m1_df.loc[m1_time]
             hour = m1_time.hour
-            if not (pair_cfg.get("sess_start", 0) <= hour < pair_cfg.get("sess_end", 24)):
-                info["prev_row"] = row
-                continue
+            _sess_ok = (pair_cfg.get("sess_start", 0) <= hour
+                        < pair_cfg.get("sess_end", 24))
 
             prev_row = info["prev_row"]
+            info["prev_row"] = row       # a következő bárhoz (MINDIG frissül)
 
             if prev_row is not None:
+                # M1 jelzés-ÁLLAPOTGÉP MINDEN M1-báron fut (arming megőrzése) — a
+                # nyitott pozíció / off-session / betelt slot alatt is; csak a tényleges
+                # NYITÁST gátoljuk. (Ugyanaz a fix, mint a run_pair-ben.)
                 signal = strategy.bt_on_low_close(info["state"], prev_row, row, params)
 
-                if signal != "NONE":
+                if (signal != "NONE" and sym not in open_trades
+                        and occupied < max_slots and _sess_ok):
                     ptr = info["m15_ptr"]
                     m15_df = info["m15"]
                     if ptr < len(m15_df):
@@ -1730,8 +1732,6 @@ def run_portfolio_backtest(
                                     else _rrm.PRESET_SHIELD)
                             open_trades[sym] = trade
                             occupied += 1
-
-            info["prev_row"] = row
 
     # ── Végeredmény ───────────────────────────────────────────────────────
     if progress_callback:
