@@ -39,6 +39,7 @@ from core import position_build as _position_build
 from core import viz_prefs as _vp
 from core import trade_mode as _tmode
 from core import adopted
+from core import spread_gate
 from core.indicator_engine import atr as atr_indicator
 from core.risk_manager import (calc_lot, calc_effective_slots, SlotManager,
                                calc_swing_sl_tp_pips)
@@ -1068,16 +1069,15 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
     spread_ok = True
     sym_info  = mt5.symbol_info(symbol)
     if sym_info and atr_val is not None and sym_info.point > 0:
-        current_spread_pts = sym_info.spread
-        atr_pts    = int(atr_val / sym_info.point)
-        ratio      = params.get("max_spread_atr_ratio", 0.20)
-        pip_to_pt  = max(1, round(pip_size / sym_info.point))
-        min_pts    = max(1, int(params.get("min_spread_pips", 2.0) * pip_to_pt))
-        max_spread_pts = max(min_pts, int(atr_pts * ratio))
-        spread_ok = (current_spread_pts <= max_spread_pts)
+        # A spread-kaput a KÖZÖS core.spread_gate dönti — UGYANAZ a képlet, amit a
+        # backtest is használ (egy forrás → sose csúszik szét). A bróker pont-alapú
+        # spreadjét pipbe váltjuk (spread_pts × point / pip_size).
+        current_spread_pips = sym_info.spread * sym_info.point / pip_size
+        spread_ok, _cap_pips = spread_gate.spread_ok(
+            current_spread_pips, atr_val, pip_size, params)
         if not spread_ok:
-            log.debug("%s — spread túl nagy: %d pt > %d pt max, kihagyva.",
-                      symbol, current_spread_pts, max_spread_pts)
+            log.debug("%s — spread túl nagy: %.2f pip > %.2f pip max, kihagyva.",
+                      symbol, current_spread_pips, _cap_pips)
 
     # --- Pozíció menedzsment ---
     # A magicjével nyitottak MELLETT a felületről hozzárendelt (örökbefogadott)

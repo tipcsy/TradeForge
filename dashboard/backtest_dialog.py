@@ -306,6 +306,20 @@ class BacktestDialog:
                        selectcolor=BG_HEADER, font=self._sf, activebackground=BG,
                        activeforeground=FG_WHITE).pack(side="left")
 
+        # ── Végrehajtási kapuk (él-paritás) ─────────────────────────────────
+        # Bekapcsolva a backtest UGYANAZT a két VÉGREHAJTÁSI kaput modellezi, amit az
+        # él: spread-kapu (core.spread_gate) + TF-együttállás (ha az adott stratégiára/
+        # instrumentumra a configban be van kapcsolva). Így a backtest nem nyit olyan
+        # belépőt, amit élesben egy kapu kiszűrne. Alap: BE. KI → nyers jelek.
+        grow = tk.Frame(body, bg=BG)
+        grow.pack(anchor="w", padx=12, pady=(0, 4))
+        self._exec_gates_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(grow,
+                       text="Reális végrehajtási kapuk (TF-együttállás + spread, mint élesben)",
+                       variable=self._exec_gates_var, bg=BG, fg=FG_GRAY,
+                       selectcolor=BG_HEADER, font=self._sf, activebackground=BG,
+                       activeforeground=FG_WHITE).pack(side="left")
+
         # ── Slotok ──────────────────────────────────────────────────────────
         # FIGYELEM: egy páron amúgy is legfeljebb EGY pozíció fut (a ráépítés
         # ugyanannak a kötésnek a lábai), így itt a slot-szám NEM a pozíciók
@@ -890,6 +904,7 @@ class BacktestDialog:
         build_cfg = self._current_build_cfg()      # az ablakban választott (feltáró) építés
         allowed = self._allowed_hours()            # None = minden óra; különben trade_hours
         tcfg = self._run_trading_cfg()             # a `Slotok` mezővel felülírt méretezés
+        _exec_gates = bool(self._exec_gates_var.get())  # él-paritású végrehajtási kapuk
 
         # Kényelmi beállítások megjegyzése (per stratégia+pár): időszak + nyitó
         # összeg + slotok. A következő megnyitáskor visszatöltődnek.
@@ -920,7 +935,8 @@ class BacktestDialog:
                                   build=build_cfg, allowed_hours=allowed,
                                   test_start=start, test_end=end,
                                   progress_callback=cb, record_events=True,
-                                  stop_flag=stop_flag)
+                                  stop_flag=stop_flag,
+                                  cfg=self.cfg, exec_gates=_exec_gates)
                 if stop_flag.is_set():
                     # Megszakítva: a részeredményt eldobjuk (nincs összegzés/CSV).
                     cancelled = True

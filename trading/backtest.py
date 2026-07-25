@@ -517,6 +517,66 @@ def _build_exit_evaluator(m15: pd.DataFrame, rr_spec: dict):
     return _at
 
 
+def _build_tf_align_evaluator(cfg, symbol, strategy_name, df_m1):
+    """A TF-együttállás VÉGREHAJTÁSI kapu historikus kiértékelője a backtesthez —
+    UGYANAZ a logika, mint az él (`core.tf_align`) és a viz jel-replay-e
+    (`live_trader.tf_align_gate_fn`), csak az adat a backtest saját M1-jéből jön.
+
+    A kapu idősíkonként `sign(close − SMA(sma_period))`; a belépő csak akkor enged,
+    ha MINDEN figyelt idősík a jel irányába állt. A magasabb idősíkokat (M5/M15…) az
+    M1-ből mintázzuk újra, a `tf_align` SAJÁT `sma_period`-jával és idősíkjaival
+    (per-pár felülírható) — így a backtest bitre azt a kaput modellezi, amit az él.
+
+    A `df_m1` a TELJES (nem a test-ablakra vágott) M1 → a magasabb idősíkok SMA-ja
+    a test-ablak elején is warmupolt (nem blokkol feleslegesen). LOOK-AHEAD nincs:
+    a kiértékelés a belépő M1-gyertya ZÁRÁSÁRA történik, és idősíkonként csak a
+    MÁR LEZÁRT (close_time ≤ belépő zárása) gyertyát nézi.
+
+    Visszaad: `fn(entry_close_unix, direction) -> bool`, vagy None, ha a kapu erre a
+    stratégiára/instrumentumra nincs bekapcsolva, vagy nincs elég adat (fail-open)."""
+    try:
+        import numpy as _np
+        from core import tf_align as _tfa
+        en, tfs, sma, gate = _tfa.config_for(cfg, symbol)
+        if not en or strategy_name not in gate or not tfs:
+            return None
+        if "close" not in df_m1.columns or len(df_m1) < sma + 1:
+            return None
+        close_m1 = df_m1["close"]
+        series = []   # (close_unix_ndarray, sign_ndarray) idősíkonként
+        for tf in tfs:
+            tf = int(tf)
+            if tf <= 1:
+                closes = close_m1
+            else:
+                closes = close_m1.resample(f"{tf}min").last().dropna()
+            if len(closes) < sma + 1:
+                return None   # adathiány → fail-open (nem szűrünk sehol)
+            c = closes.to_numpy(dtype=float)
+            smv = pd.Series(c).rolling(sma).mean().to_numpy()
+            sign = _np.sign(c - smv)
+            open_unix = closes.index.view("int64") // 1_000_000_000  # ns → s (UTC)
+            close_unix = open_unix.astype(_np.int64) + tf * 60       # gyertya ZÁRÁSA
+            series.append((close_unix, sign))
+
+        def _at(entry_close_unix, direction):
+            t = int(entry_close_unix)
+            for close_unix, sign in series:
+                idx = int(_np.searchsorted(close_unix, t, side="right")) - 1
+                if idx < 0:
+                    return True     # a sorozat előtti időre nem szűrünk (fail-open)
+                s = sign[idx]
+                if _np.isnan(s) or s == 0:
+                    return False    # semleges/hiányos → nincs teljes együttállás
+                if ("BUY" if s > 0 else "SELL") != direction:
+                    return False    # legalább egy idősík nem a jel irányába → blokk
+            return True
+
+        return _at
+    except Exception:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Fő szimuláció egy párra
 # ---------------------------------------------------------------------------
@@ -539,6 +599,8 @@ def run_pair(
     build: "dict | None" = None,
     record_events: bool = False,
     stop_flag=None,
+    cfg: "dict | None" = None,
+    exec_gates: bool = False,
 ) -> BacktestResult:
     # A jelzést/indikátorokat a STRATÉGIA adja (seam); a végrehajtás (SL/TP/
     # breakeven/trailing, slot, lot) a motoré. strategy=None → config szerinti.
@@ -643,6 +705,18 @@ def run_pair(
         _build_cfg = None
 
     prev_m1_row = None
+
+    # ── Végrehajtási kapuk (él-paritás, opcionális) ─────────────────────────
+    # exec_gates=True → a backtest ugyanazokat a VÉGREHAJTÁSI kapukat modellezi,
+    # amiket az él: (1) spread-kapu (core.spread_gate — közös képlet), (2) TF-
+    # együttállás (core.tf_align, ha a `cfg`-ben erre a stratégiára be van kapcsolva).
+    # Alap KI → a meglévő hívók (optimizer stb.) BITAZONOSAK maradnak. A TF-kaput a
+    # TELJES (vágatlan) df_m1-ből építjük, hogy a magasabb idősíkok SMA-ja warmupolt.
+    from core import spread_gate as _spread_gate
+    _exec_gates = bool(exec_gates)
+    _lo_secs    = int(strategy.timeframes()[1].minutes) * 60
+    _tf_eval    = (_build_tf_align_evaluator(cfg, symbol, strategy.name, df_m1)
+                   if (_exec_gates and cfg is not None) else None)
 
     # ── BID/ASK modell előkészítés (MT5-hű) ─────────────────────────────────
     # Az MT5 chart/tester gyertyái BID árak; ask-gyertya NINCS. A mi adatunk is
@@ -903,6 +977,28 @@ def run_pair(
 
             if signal != "NONE" and m15_ptr < len(m15_times):
                 m15_row = m15.iloc[m15_ptr]
+
+                # ── Végrehajtási kapuk (él-paritás) — a stratégia-jel ELŐTT ─────
+                # Ugyanaz a két kapu, ami élesben is szűr: spread (közös képlet) és
+                # TF-együttállás. Kihagyás → a jel megvan, de a belépő nem hajtódik
+                # végre (mint az él „belépő KIHAGYVA" ága).
+                if _exec_gates:
+                    _atr_e = m15_row.get("atr", float("nan"))
+                    if _atr_e and not pd.isna(_atr_e):
+                        _sp_e = _cspread_arr[i] if _cspread_arr is not None else float("nan")
+                        if not (_sp_e > 0):
+                            _sp_e = _spread_arr[i] if _spread_arr is not None else _spread_fallback
+                        if not _spread_gate.spread_ok(
+                                _sp_e / pip_size, float(_atr_e), pip_size, params)[0]:
+                            prev_m1_row = m1_row
+                            continue
+                    if _tf_eval is not None:
+                        # a belépő M1-gyertya ZÁRÁSÁRA értékelünk (index = nyitó idő)
+                        _ecu = int(m1_time.timestamp()) + _lo_secs
+                        if not _tf_eval(_ecu, signal):
+                            prev_m1_row = m1_row
+                            continue
+
                 # A stratégia adja a pozíciótervet (SL/TP + saját szűrők); None → kihagyás
                 plan = strategy.bt_entry(m15_row, params, pip_size)
 
