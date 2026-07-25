@@ -765,8 +765,12 @@ class BacktestDialog:
 
     def _collect_params(self):
         """Az Entry-k tartalma → típusos paraméter-dict (a megnyitáskori típus
-        szerint). A nem szerkeszthető (_ kezdetű) kulcsokat átvisszük. Hiba → None."""
-        new = {k: v for k, v in self.params.items() if str(k).startswith("_")}
+        szerint). MINDEN megnyitáskori kulcsot megőrzünk (a szerkeszthetők felülírják),
+        hogy a nem szerkeszthető, de a motornak KELLŐ mentett kulcsok se vesszenek el:
+        pl. `atr_avg_ref` (fix volatilitás-mérce), `max_spread_atr_ratio`,
+        `min_spread_pips`. (Korábban csak a `_` kezdetűek maradtak → ezek a defaultra
+        estek vissza.) Hiba → None."""
+        new = dict(self.params)
         for k in self._param_keys:
             raw = self._pentries[k].get().strip()
             orig = self._init_params.get(k)

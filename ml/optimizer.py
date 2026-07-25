@@ -959,6 +959,22 @@ def optimize_symbol(symbol, df_m15, df_m1, cfg, initial_balance, progress=None,
         log.warning("  %s — TEST hiba: %s", symbol, e)
         test_summary = {}
 
+    # Fix volatilitás-MÉRCE mentése a paraméterek közé: az optimalizált atr_period-del
+    # számolt ATR ÁTLAGA a betöltött adaton — EGY szám, amit a backtest, a viz és az él
+    # is használ (ablak-függetlenül) → a három egyezik, és a backtest reprodukálható
+    # (több letöltött előzmény nem billenti el az eredményt). Fallback marad az ablak-
+    # átlag, ha ez hiányzik (régi params / a stratégia nem ad atr_avg-ot).
+    try:
+        _m15_ind, _ = strategy.bt_indicators(
+            df_m15, df_m1, {**result["params"], "symbol": symbol,
+                            "pip_size": pair_cfg.get("pip_size", 0.0001)})
+        if "atr_avg" in _m15_ind.columns and len(_m15_ind):
+            _av = float(_m15_ind["atr_avg"].iloc[0])
+            if _av > 0:
+                result["params"]["atr_avg_ref"] = _av
+    except Exception:
+        pass
+
     return {
         "train_summary": result["train_summary"],
         "test_summary":  test_summary,

@@ -691,11 +691,14 @@ class WprSmaStrategy(Strategy):
         atr_v = hi_row.get("atr", 0)
         if not atr_v or pd.isna(atr_v) or atr_v <= 0:
             return None
-        # Volatilitás-szűrő: a túl csendes/kaotikus gyertyák kizárása. Baseline az
-        # ablak ATR-átlaga (atr_avg oszlop, a bt_indicators teszi rá). 0 = kikapcs.
-        # A backtest ÉS a live belépés-kapuja is (v1.31.0 óta a live_trader is ezt
-        # a hookot hívja) — a live spread-kapuja ettől független védőháló.
-        atr_avg = hi_row.get("atr_avg", 0)
+        # Volatilitás-szűrő: a túl csendes/kaotikus gyertyák kizárása.
+        # A MÉRCE (baseline) elsősorban a MENTETT, fix `atr_avg_ref` (optimalizáláskor
+        # számolt, ablak-FÜGGETLEN) → a backtest, a viz ÉS az él UGYANAZT az egy számot
+        # használja, így a három egyezik és a backtest reprodukálható. Fallback az
+        # ablak ATR-átlaga (atr_avg oszlop, a bt_indicators teszi rá), ha nincs mentve
+        # (régi params). 0 = a szűrő kikapcsolva. A backtest ÉS a live belépés-kapuja is
+        # (v1.31.0 óta a live_trader is ezt a hookot hívja).
+        atr_avg = params.get("atr_avg_ref") or hi_row.get("atr_avg", 0)
         if atr_avg and atr_avg > 0:
             atr_min_pct = float(params.get("atr_min_pct", 0.0))
             atr_max_pct = float(params.get("atr_max_pct", 0.0))
