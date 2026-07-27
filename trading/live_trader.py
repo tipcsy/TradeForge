@@ -39,6 +39,7 @@ from core import position_build as _position_build
 from core import viz_prefs as _vp
 from core import trade_mode as _tmode
 from core import adopted
+from core import order_exec
 from core import spread_gate
 from core.indicator_engine import atr as atr_indicator
 from core.risk_manager import (calc_lot, calc_effective_slots, SlotManager,
@@ -238,6 +239,12 @@ def open_position(
 
     price = tick.ask if direction == "BUY" else tick.bid
 
+    # A megbízás BRÓKER-FÜGGŐ paraméterei (core.order_exec — közös forrás):
+    #   • deviation: enélkül 0 pont csúszást engedne, azaz gyors piacon requote /
+    #     „Invalid price" a válasz, és a jel elveszik;
+    #   • type_filling: a szimbólum TÁMOGATOTT módja (a fixen bedrótozott IOC ott,
+    #     ahol a bróker FOK-ot vár, minden kötést elbukott — retcode 10030).
+    _info = mt5.symbol_info(symbol)
     request = {
         "action":    mt5.TRADE_ACTION_DEAL,
         "symbol":    symbol,
@@ -246,16 +253,23 @@ def open_position(
         "price":     price,
         "sl":        sl,
         "tp":        tp,
+        "deviation": order_exec.deviation_points(symbol, _run_cfg, _info),
         "magic":     magic,
         "comment":   comment,
         "type_time": mt5.ORDER_TIME_GTC,
-        "type_filling": mt5.ORDER_FILLING_IOC,
+        "type_filling": order_exec.filling_mode(symbol, _info),
     }
 
     result = mt5.order_send(request)
     if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
-        log.error("%s — pozíció nyitás hiba: %s", symbol,
-                  result.comment if result else mt5.last_error())
+        # A retcode is kell, ne csak a szöveg: 10030 = nem támogatott kitöltési mód,
+        # 10016 = érvénytelen stop, 10004/10021 = requote/nincs ár. Enélkül nem
+        # derül ki, MIÉRT nem ment ki a kötés.
+        log.error("%s — pozíció nyitás hiba: retcode=%s %s | lot=%.2f SL=%g TP=%g "
+                  "deviation=%s filling=%s", symbol,
+                  getattr(result, "retcode", "—"),
+                  result.comment if result else mt5.last_error(),
+                  lot, sl, tp, request["deviation"], request["type_filling"])
         return None
 
     log.info("✅ [%s] %s %s | Lot: %.2f | SL: %.5f | TP: %.5f | Ticket: %d | magic: %d",
@@ -268,10 +282,12 @@ def modify_sl(ticket: int, new_sl: float) -> bool:
     if not position:
         return False
     pos = position[0]
+    # Az SL a szimbólum rácsára igazítva (tick_size/digits) — a hívó pip-alapú
+    # kerekítése önmagában érvénytelen árat adhat a nem tizedes lépésű piacokon.
     request = {
         "action":   mt5.TRADE_ACTION_SLTP,
         "symbol":   pos.symbol,
-        "sl":       new_sl,
+        "sl":       order_exec.normalize_price(new_sl, mt5.symbol_info(pos.symbol)),
         "tp":       pos.tp,
         "position": ticket,
     }
@@ -280,8 +296,8 @@ def modify_sl(ticket: int, new_sl: float) -> bool:
     if not ok:
         # Gyakori ok: az új SL túl közel az árhoz (bróker min. stop-távolság) →
         # a hívó a stops_level figyelembevételével számolja az új SL-t.
-        log.debug("%s #%d — SL módosítás elutasítva (%s): %s",
-                  pos.symbol, ticket, new_sl,
+        log.debug("%s #%d — SL módosítás elutasítva (%s): retcode=%s %s",
+                  pos.symbol, ticket, new_sl, getattr(result, "retcode", "—"),
                   result.comment if result else mt5.last_error())
     return ok
 
@@ -1666,19 +1682,38 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
                              "(kevés M1 gyertya / a belépő a swingen túl).", symbol, signal)
                     return
                 sl_pips, tp_pips = _sw
+            # ── A bróker MINIMUM stop-távolsága (trade_stops_level) ───────────
+            # Ennél közelebbi SL-lel a megbízást `10016 Invalid stops`-szal
+            # utasítja el, azaz a jel némán elveszik. Ilyenkor az SL-t a minimumra
+            # tágítjuk, a TP-t ugyanazzal az aránnyal (az R:R marad). A MÉRETEZÉS
+            # ELŐTT, hogy a nagyobb SL-táv kisebb lotot adjon → a kockázati keret
+            # ($) NEM nő, csak a stop kerül messzebb.
+            sl_pips, tp_pips, _widened = order_exec.enforce_min_sl_pips(
+                sl_pips, tp_pips, sym_info, pip_size)
+            if _widened:
+                log.info("↔ %s %s — az SL a bróker minimum stop-távolságára tágítva "
+                         "(%.1f pip); a lot ennek megfelelően kisebb, az R:R változatlan.",
+                         symbol, signal, sl_pips)
             eff_slots = calc_effective_slots(balance, sl_pips, pair_cfg, ctf)
             lot = calc_lot(balance, sl_pips, pair_cfg, ctf, eff_slots)
 
             tick = mt5.symbol_info_tick(symbol)
             if tick:
+                # Az árak a szimbólum RÁCSÁRA igazítva (tick_size többszöröse,
+                # digits szerint) — a fix 5 tizedes a nem tizedes tick-méretű
+                # szimbólumokon érvénytelen árat adott (`10015 Invalid price`).
                 if signal == "BUY":
                     open_price = tick.ask
-                    sl_price   = round(open_price - pip_to_price(sl_pips, pip_size), 5)
-                    tp_price   = round(open_price + pip_to_price(tp_pips, pip_size), 5)
+                    sl_price   = order_exec.normalize_price(
+                        open_price - pip_to_price(sl_pips, pip_size), sym_info)
+                    tp_price   = order_exec.normalize_price(
+                        open_price + pip_to_price(tp_pips, pip_size), sym_info)
                 else:
                     open_price = tick.bid
-                    sl_price   = round(open_price + pip_to_price(sl_pips, pip_size), 5)
-                    tp_price   = round(open_price - pip_to_price(tp_pips, pip_size), 5)
+                    sl_price   = order_exec.normalize_price(
+                        open_price + pip_to_price(sl_pips, pip_size), sym_info)
+                    tp_price   = order_exec.normalize_price(
+                        open_price - pip_to_price(tp_pips, pip_size), sym_info)
 
                 # ── „Csak jelzés" mód: megbízás NEM megy ki ────────────────
                 # Minden fenti számítás (kapuk, SL/TP, lot) ugyanúgy lefutott —

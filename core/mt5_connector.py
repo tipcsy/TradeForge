@@ -4,6 +4,8 @@ import threading
 from pathlib import Path
 from typing import Optional
 
+from core import order_exec
+
 log = logging.getLogger(__name__)
 
 # MT5 Python API nem thread-safe — minden hívást ezen a lockon keresztül kell intézni
@@ -368,6 +370,9 @@ def close_position(ticket: int) -> bool:
                 return False
             close_type = mt5.ORDER_TYPE_SELL if p.type == 0 else mt5.ORDER_TYPE_BUY
             price = tick.bid if p.type == 0 else tick.ask
+            # Csúszás-tűrés + a szimbólum által TÁMOGATOTT kitöltési mód: enélkül a
+            # zárás pont akkor bukhat el (requote / 10030), amikor a legfontosabb.
+            info = mt5.symbol_info(p.symbol)
             req = {
                 "action":       mt5.TRADE_ACTION_DEAL,
                 "symbol":       p.symbol,
@@ -375,14 +380,21 @@ def close_position(ticket: int) -> bool:
                 "type":         close_type,
                 "position":     ticket,
                 "price":        price,
+                "deviation":    order_exec.deviation_points(p.symbol, None, info),
                 "magic":        p.magic,
                 "comment":      "panic_close",
                 "type_time":    mt5.ORDER_TIME_GTC,
-                "type_filling": mt5.ORDER_FILLING_IOC,
+                "type_filling": order_exec.filling_mode(p.symbol, info),
             }
             res = mt5.order_send(req)
-        return res is not None and res.retcode == mt5.TRADE_RETCODE_DONE
-    except Exception:
+        if res is None or res.retcode != mt5.TRADE_RETCODE_DONE:
+            log.error("%s #%d — zárás SIKERTELEN: retcode=%s %s", p.symbol, ticket,
+                      getattr(res, "retcode", "—"),
+                      res.comment if res else mt5.last_error())
+            return False
+        return True
+    except Exception as e:
+        log.error("#%d — zárás kivétel: %s", ticket, e)
         return False
 
 
@@ -411,6 +423,8 @@ def close_position_partial(ticket: int, volume: float) -> bool:
                 return False   # a lezárt rész vagy a runner min_lot alá menne
             close_type = mt5.ORDER_TYPE_SELL if p.type == 0 else mt5.ORDER_TYPE_BUY
             price = tick.bid if p.type == 0 else tick.ask
+            # A RÉSZLEGES zárás IOC-t igényel (a FOK a rész-mennyiséget elutasítja),
+            # de csak akkor, ha a szimbólum engedi — ezt az order_exec dönti el.
             req = {
                 "action":       mt5.TRADE_ACTION_DEAL,
                 "symbol":       p.symbol,
@@ -418,14 +432,21 @@ def close_position_partial(ticket: int, volume: float) -> bool:
                 "type":         close_type,
                 "position":     ticket,
                 "price":        price,
+                "deviation":    order_exec.deviation_points(p.symbol, None, info),
                 "magic":        p.magic,
                 "comment":      "rr_partial",
                 "type_time":    mt5.ORDER_TIME_GTC,
-                "type_filling": mt5.ORDER_FILLING_IOC,
+                "type_filling": order_exec.filling_mode(p.symbol, info),
             }
             res = mt5.order_send(req)
-        return res is not None and res.retcode == mt5.TRADE_RETCODE_DONE
-    except Exception:
+        if res is None or res.retcode != mt5.TRADE_RETCODE_DONE:
+            log.error("%s #%d — RÉSZLEGES zárás (%.2f lot) SIKERTELEN: retcode=%s %s",
+                      p.symbol, ticket, vol, getattr(res, "retcode", "—"),
+                      res.comment if res else mt5.last_error())
+            return False
+        return True
+    except Exception as e:
+        log.error("#%d — részleges zárás kivétel: %s", ticket, e)
         return False
 
 
@@ -452,15 +473,21 @@ def modify_position_sl(ticket: int, new_sl: float) -> bool:
             if not pos:
                 return False
             p = pos[0]
+            info = mt5.symbol_info(p.symbol)
             req = {
                 "action":   mt5.TRADE_ACTION_SLTP,
                 "symbol":   p.symbol,
                 "position": ticket,
-                "sl":       new_sl,
+                "sl":       order_exec.normalize_price(new_sl, info),
                 "tp":       p.tp,
             }
             res = mt5.order_send(req)
-        return res is not None and res.retcode == mt5.TRADE_RETCODE_DONE
+        if res is None or res.retcode != mt5.TRADE_RETCODE_DONE:
+            log.debug("%s #%d — SL módosítás elutasítva (%s): retcode=%s %s",
+                      p.symbol, ticket, new_sl, getattr(res, "retcode", "—"),
+                      res.comment if res else mt5.last_error())
+            return False
+        return True
     except Exception:
         return False
 
@@ -476,16 +503,24 @@ def modify_position_sltp(ticket: int, new_sl: float, new_tp: float) -> bool:
             if not pos:
                 return False
             p = pos[0]
+            info = mt5.symbol_info(p.symbol)
             req = {
                 "action":   mt5.TRADE_ACTION_SLTP,
                 "symbol":   p.symbol,
                 "position": ticket,
-                "sl":       new_sl,
-                "tp":       new_tp,
+                "sl":       order_exec.normalize_price(new_sl, info),
+                # tp=0 a TP TÖRLÉSE — azt nem szabad a rácsra igazítani.
+                "tp":       order_exec.normalize_price(new_tp, info) if new_tp else 0.0,
             }
             res = mt5.order_send(req)
-        return res is not None and res.retcode == mt5.TRADE_RETCODE_DONE
-    except Exception:
+        if res is None or res.retcode != mt5.TRADE_RETCODE_DONE:
+            log.error("%s #%d — SL/TP beállítás SIKERTELEN (sl=%s tp=%s): retcode=%s %s",
+                      p.symbol, ticket, new_sl, new_tp, getattr(res, "retcode", "—"),
+                      res.comment if res else mt5.last_error())
+            return False
+        return True
+    except Exception as e:
+        log.error("#%d — SL/TP beállítás kivétel: %s", ticket, e)
         return False
 
 
@@ -532,7 +567,6 @@ def _breakeven_plan(p, info):
     a helyes oldalra mozgatható-e (nettó ≥ 0 zárás). `feasible=False`, ha a profit még
     nem fedezi a spread+jutalék+swap költséget. Nincs order_send. HívóJA fogja a
     MT5_LOCK-ot (a _position_costs_price deal-history-t olvashat)."""
-    digits       = info.digits
     point        = info.point
     spread_price = info.spread * point
     entry        = p.price_open
@@ -540,9 +574,13 @@ def _breakeven_plan(p, info):
     sign         = 1 if is_buy else -1
     cost_price   = _position_costs_price(p, info)
     buffer_price = cost_price + max(spread_price, point)   # költség + spread cushion (≥1 pont)
-    target_sl    = round(entry + sign * buffer_price, digits)
+    target_sl    = order_exec.normalize_price(entry + sign * buffer_price, info)
     cur          = p.price_current
-    feasible     = (target_sl < cur) if is_buy else (target_sl > cur)
+    # A bróker MINIMUM stop-távolsága: az árhoz ennél közelebbi SL-t `10016 Invalid
+    # stops`-szal utasít vissza. Enélkül a BE „megvalósíthatónak" látszott, a
+    # mozgatás mégis némán elbukott (és a GUI BE-gombja is engedélyezett maradt).
+    gap = order_exec.min_stop_price(info)
+    feasible = ((cur - target_sl) > gap) if is_buy else ((target_sl - cur) > gap)
     return target_sl, feasible
 
 

@@ -56,6 +56,8 @@
     "daily_loss_limit_usd": 0,
     "_comment_slots": "Egyszerre max ennyi nyitott pozíció (összes pár együtt). AI optimalizálható: 2-8",
     "max_open_slots": 4,
+    "_comment_deviation": "Piaci megbizasnal megengedett csuszas PONTBAN. Az effektiv ertek max(ez, aktualis spread pontban) - gyors piacon enelkul requote / 'Invalid price' a valasz es a jel elveszik. Paronkent felulirhato: pairs.<sym>.deviation_points. Hianyzik -> 10.",
+    "deviation_points": 10,
     "_comment_session": "Globális nyitás/zárás UTC-ben. Páronként felülírható a pairs.sess_start/sess_end-del",
     "global_session_start_utc": 10,
     "global_session_end_utc": 21,
