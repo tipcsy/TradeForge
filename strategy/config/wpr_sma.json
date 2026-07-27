@@ -153,7 +153,7 @@
     },
     "wpr_m1_period": {
       "min": 3,
-      "max": 20,
+      "max": 30,
       "step": 1
     },
     "wpr_m15_sell_extreme": {
