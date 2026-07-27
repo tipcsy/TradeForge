@@ -1871,53 +1871,122 @@ def manual_build(symbol: str) -> bool:
     add_lot   = float(rt.get("next_lot") or 0.0)
     if direction not in ("BUY", "SELL") or add_lot <= 0:
         return False
-    with mt5_connector.MT5_LOCK:
+    with MT5_LOCK:
         positions = mt5.positions_get(symbol=symbol)
+        info      = mt5.symbol_info(symbol)
     if not positions:
         build_runtime.pop(symbol, None)
         return False
     magic = positions[0].magic
+    digits = info.digits if info else 5
     # Ha az alap-pozíció ÖRÖKBEFOGADOTT (kézzel nyitott), a magicje nem a stratégiáé
     # — az adalék ugyanazt a magicet örökli, tehát önmagában kimaradna a stratégia
     # pozícióiból. Ezért az új lábat is hozzárendeljük ugyanahhoz a stratégiához.
     _base_strat = adopted.strategy_of(positions[0].ticket)
 
-    # 1) Az adalék megnyitása (nincs fix TP; az SL-t mindjárt az átlagárra tesszük).
-    ticket = open_position(symbol, direction, add_lot, sl=0.0, tp=0.0, magic=magic,
+    # A MEGLÉVŐ csomag stopja — az új láb EZZEL nyílik, nem védtelenül. A csomag
+    # legkonzervatívabb (legtávolabbi) stopja: BUY-nál a legalacsonyabb, SELL-nél a
+    # legmagasabb. Ez biztosan ÉRVÉNYES szint (a többi láb már használja), tehát az
+    # adalék a nyitás pillanatától védve van — akkor is, ha az átlagárra húzás
+    # utána elbukik.
+    _sls = [float(p.sl) for p in positions if p.sl]
+    if not _sls:
+        # A csomagnak NINCS stopja → a ráépítés 1. szabálya (kockázatmentesség)
+        # eleve sérül; ilyenkor nem építünk, mert az adalék sem kaphatna stopot.
+        # AUTO módban a jel kitarthat, ezért csak EGYSZER naplózunk (a ciklus 10
+        # mp-enként fut); a jelölés a következő sikeres ráépítéskor törlődik.
+        if not rt.get("_no_sl_warned"):
+            rt["_no_sl_warned"] = True
+            log.warning("➕ %s — ráépítés ELMARAD: a meglévő pozíció(k)nak nincs "
+                        "stopja (a ráépítés csak kockázatmentes csomagra épülhet).",
+                        symbol)
+        return False
+    rt.pop("_no_sl_warned", None)
+    _seed_sl = min(_sls) if direction == "BUY" else max(_sls)
+
+    # 1) Az adalék megnyitása. TP nincs (a csomag EGYBEN fut); SL = a meglévő
+    #    csomag-stop, hogy a láb SOSE legyen védtelen.
+    ticket = open_position(symbol, direction, add_lot, sl=_seed_sl, tp=0.0, magic=magic,
                            comment="build", strategy_name="build")
     if not ticket:
         return False
+    # A jel-őrt AZONNAL elsütjük: innentől a láb NYITVA van, tehát a hívó (AUTO mód)
+    # semmiképp ne építhessen rá még egyszer ugyanarra a jelre. Ezért is ad ez a
+    # függvény a nyitás után MINDIG True-t — a stop-áthelyezés hibáját a naplóval és
+    # a kockázatmentes-jelölés ELMARADÁSÁVAL jelezzük, nem a visszatérési értékkel.
+    rt["ready"] = False
     if _base_strat:
         adopted.adopt(ticket, _base_strat, symbol)
     if _run_slot_mgr is not None:
-        _run_slot_mgr.add(ticket)
-        _run_slot_mgr.set_risk_free(ticket)   # a build kockázatmentes (SL az átlagáron)
+        _run_slot_mgr.add(ticket)   # foglalja a slotot, amíg nem bizonyítottan nulla-kockázatú
 
-    # 2) Új átlagár az ÖSSZES (immár bővült) pozícióból + minden stop oda (null pont).
-    with mt5_connector.MT5_LOCK:
-        positions = mt5.positions_get(symbol=symbol) or positions
-        info = mt5.symbol_info(symbol)
-    digits = info.digits if info else 5
-    avg = round(_position_build.average_price(
-        [(p.price_open, p.volume) for p in positions]), digits)
-    for p in positions:
-        # Minden láb SL-je az átlagárra, ÉS a TP TÖRLÉSE (tp=0): különben az induló láb
-        # a saját TP-jén ÖNÁLLÓAN zárna, otthagyva a TP nélküli adalékokat (ez okozta,
-        # hogy „lezárta a kezdeti pozíciót, és csak a veszteségesek maradtak"). Így a
-        # csomag EGYBEN fut → az átlagár-stopig / kiszállási jelig / kézi zárásig.
-        mt5_connector.modify_position_sltp(p.ticket, avg, 0.0)
-        if _run_slot_mgr is not None:
-            _run_slot_mgr.set_risk_free(p.ticket)
-        position_state.setdefault(p.ticket, {})["be_done"] = True
+    # 2) FRISS pozíciólista, amiben BENNE VAN az új láb. A régi kód `or positions`
+    #    tartalékkal a RÉGI listára esett vissza — abból az adalék hiányzott, így az
+    #    átlagár rossz lett, és a friss láb sosem kapta meg a közös stopot.
+    positions_new = None
+    for _ in range(3):
+        with MT5_LOCK:
+            _fetched = mt5.positions_get(symbol=symbol)
+        if _fetched and any(p.ticket == ticket for p in _fetched):
+            positions_new = _fetched
+            break
+        time.sleep(0.2)
+    if positions_new is None:
+        log.error("➕ %s #%d — a ráépített láb NEM jelent meg a pozíciólistában; a "
+                  "közös (átlagár) stop NEM állt be. A láb a csomag korábbi stopjával "
+                  "(%.*f) fut — ELLENŐRIZD KÉZZEL!", symbol, ticket, digits, _seed_sl)
+        return True
 
-    # 3) Referencia-frissítés: a KÖVETKEZŐ ráépítéshez az árnak túl kell esnie az
+    # 3) Közös stop = az új átlagár (null pont), a bróker minimum stop-távolságára
+    #    vágva. Vágás esetén a csomag NEM pontosan nullán áll → nem jelöljük
+    #    kockázatmentesnek (a slot foglalt marad, és a BE sincs kész).
+    avg = _position_build.average_price(
+        [(p.price_open, p.volume) for p in positions_new])
+    with MT5_LOCK:
+        _tick = mt5.symbol_info_tick(symbol)
+    _price_now = (_tick.bid if direction == "BUY" else _tick.ask) if _tick else 0.0
+    _stop, _clamped = _position_build.package_stop(
+        avg, direction, _price_now,
+        order_exec.min_stop_price(info), getattr(info, "point", 0.0) or 0.0)
+    _stop = order_exec.normalize_price(_stop, info)
+
+    # Minden láb SL-je a közös stopra, ÉS a TP TÖRLÉSE (tp=0): különben az induló láb
+    # a saját TP-jén ÖNÁLLÓAN zárna, otthagyva a TP nélküli adalékokat (ez okozta,
+    # hogy „lezárta a kezdeti pozíciót, és csak a veszteségesek maradtak"). Így a
+    # csomag EGYBEN fut → az átlagár-stopig / kiszállási jelig / kézi zárásig.
+    _failed = []
+    for p in positions_new:
+        if not mt5_connector.modify_position_sltp(p.ticket, _stop, 0.0):
+            _failed.append(p.ticket)
+            continue
+        # CSAK a ténylegesen beállt, nulla-kockázatú stop után jelölünk. Vágott
+        # stopnál a csomag kis mínuszban zárna → se BE, se felszabaduló slot.
+        if not _clamped:
+            position_state.setdefault(p.ticket, {})["be_done"] = True
+            if _run_slot_mgr is not None:
+                _run_slot_mgr.set_risk_free(p.ticket)
+
+    # 4) Referencia-frissítés: a KÖVETKEZŐ ráépítéshez az árnak túl kell esnie az
     #    aktuális ráépítés árán (a fill ár jó proxy a gyertya-záróra).
-    _new = next((p for p in positions if p.ticket == ticket), None)
+    _new = next((p for p in positions_new if p.ticket == ticket), None)
     if _new is not None:
         rt["ref_close"] = float(_new.price_open)
-    rt["ready"] = False
-    log.info("➕ %s — kézi ráépítés: +%.2f lot %s | átlagár SL=%.*f | %d pozíció",
-             symbol, add_lot, direction, digits, avg, len(positions))
+
+    if _failed:
+        log.error("➕ %s — a közös stop (%.*f) %d lábra NEM állt be: %s. Ezek a "
+                  "korábbi stopjukkal futnak, és NEM számítanak kockázatmentesnek "
+                  "— ELLENŐRIZD KÉZZEL!", symbol, digits, _stop, len(_failed),
+                  ", ".join(f"#{t}" for t in _failed))
+    elif _clamped:
+        log.warning("➕ %s — kézi ráépítés: +%.2f lot %s | a közös stop %.*f "
+                    "(az átlagár %.*f a bróker minimum stop-távolságán belülre esett, "
+                    "ezért a legszorosabb ENGEDÉLYEZETT szintre került) | %d pozíció "
+                    "— a csomag még NEM nulla-kockázatú.",
+                    symbol, add_lot, direction, digits, _stop, digits, avg,
+                    len(positions_new))
+    else:
+        log.info("➕ %s — kézi ráépítés: +%.2f lot %s | átlagár SL=%.*f | %d pozíció",
+                 symbol, add_lot, direction, digits, _stop, len(positions_new))
     return True
 
 

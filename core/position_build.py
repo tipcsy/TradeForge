@@ -134,3 +134,34 @@ def average_price(positions) -> float:
     if tot_v <= 0:
         return 0.0
     return sum(float(p) * float(v) for p, v in positions) / tot_v
+
+
+def package_stop(avg: float, direction: str, price_now: float,
+                 min_gap: float, point: float = 0.0) -> tuple[float, bool]:
+    """A csomag KÖZÖS stopja: az átlagár (null pont), a bróker MINIMUM
+    stop-távolságára vágva. Visszaad: `(stop, vágtunk-e)`.
+
+    Miért kell: ráépítéskor az új átlagár tipikusan KÖZEL van a piaci árhoz (épp
+    akkor építünk, amikor az ár túlüt a referencián). Ha közelebb, mint a bróker
+    `trade_stops_level`-je, a stop-áthelyezést `10016 Invalid stops`-szal utasítja
+    el — és eddig ez NÉMÁN történt: a friss láb stop NÉLKÜL maradt, miközben a
+    motor kockázatmentesnek jelölte.
+
+    Ilyenkor a legszorosabb ENGEDÉLYEZETT stopot adjuk (egy ponttal a határon
+    belül). Ez BUY-nál az átlagár ALATT, SELL-nél FÖLÖTT van, tehát a csomag
+    ilyenkor NEM pontosan nullán áll — ezt a `vágtunk-e` jelzi, és a hívónak
+    emiatt NEM szabad kockázatmentesnek jelölnie a lábakat.
+
+    `min_gap` és `point` ÁR-egységben; `min_gap <= 0` (nincs korlát) → nincs vágás.
+    """
+    if min_gap <= 0 or price_now <= 0:
+        return avg, False
+    if direction == "BUY":
+        cap = price_now - min_gap - point      # a stop legfeljebb eddig lehet FÖNT
+        if avg > cap:
+            return cap, True
+    else:
+        cap = price_now + min_gap + point      # a stop legalább eddig LENT
+        if avg < cap:
+            return cap, True
+    return avg, False
