@@ -44,7 +44,7 @@ from core import spread_gate
 from core.indicator_engine import atr as atr_indicator
 from core.risk_manager import (calc_lot, calc_effective_slots, SlotManager,
                                calc_swing_sl_tp_pips)
-from strategy import get_strategy
+from strategy import get_strategy, get_strategy_by_name
 from strategy.base import MarketData
 
 logging.basicConfig(
@@ -157,11 +157,13 @@ optimizer_status: dict[str, str] = {}
 # (trailing ki/be, kézi BE jelzése).
 position_state: dict[int, dict] = {}
 
-# Per-szimbólum POZÍCIÓÉPÍTÉS-futásidejű állapot (a motor tölti, a GUI olvassa a „＋"
-# gombhoz és a manuális építéshez). Kulcsonként:
-#   {"mode","ready","direction","avg_price","ref_close","next_lot","size_factor"}
+# POZÍCIÓÉPÍTÉS-futásidejű állapot (a motor tölti, a GUI olvassa a „＋" gombhoz és a
+# manuális építéshez). Kulcs: **(szimbólum, stratégia-név)** — egy instrumentumon több
+# stratégia is futhat, mindegyiknek SAJÁT csomagja (átlagár, referencia, következő lot)
+# van, és nem írhatják felül egymás állapotát. Érték:
+#   {"mode","ready","direction","avg_price","ref_close","next_lot","size_factor",…}
 # A `ref_close` a legutóbbi ráépítés referencia-záróára (a GUI frissíti add-kor).
-build_runtime: dict[str, dict] = {}
+build_runtime: dict[tuple, dict] = {}
 
 # A manuális építés (manual_build) eléréséhez — a run() tölti indításkor.
 _run_cfg: dict = {}
@@ -395,6 +397,50 @@ def owns_closed_ticket(ticket: int, deal_magic: int, deal_symbol: str,
     if owner is not None:
         return owner == strategy_name
     return deal_magic == magic
+
+
+# magic → stratégia-név. A `run()` tölti indításkor; a `strategy_of_ticket` ebből
+# oldja fel a NEM örökbefogadott (a motor által nyitott) pozíciók gazdáját.
+_magic_to_strategy: dict[int, str] = {}
+
+
+def strategy_of_ticket(ticket: int, magic=None) -> "str | None":
+    """MELYIK stratégiához tartozik ez a pozíció? (A stratégia-hozzárendelés NEM az
+    MT5-ben él — a magic utólag nem írható át.)
+
+    Két forrás, ebben a sorrendben:
+      1. `core.adopted` — a felületről egy KÉZZEL nyitott pozícióhoz rendelt
+         stratégia. Ez teszi lehetővé a „csak jelzés" munkamódot: a program jelez,
+         te kötsz kézzel, majd a pozíciót ráosztod a stratégiára, és onnantól a
+         motor kezeli (BE, trailing, kockázatcsökkentés, ráépítés).
+      2. a MAGIC — amivel a motor maga nyitotta.
+
+    None, ha egyik sem mondja meg (idegen/kézi, nem hozzárendelt pozíció)."""
+    name = adopted.strategy_of(ticket)
+    if name:
+        return name
+    if magic is None:
+        return None
+    try:
+        return _magic_to_strategy.get(int(magic))
+    except (TypeError, ValueError):
+        return None
+
+
+def strategy_positions(symbol: str, strategy_name: str, positions=None) -> list:
+    """A `strategy_name`-hez RENDELT, `symbol` szimbólumú nyitott pozíciók — és CSAK
+    azok. Ez a stratégia „csomagja": a magicjével nyitottak + a felületről
+    hozzárendelt (örökbefogadott) kézi pozíciók.
+
+    Ehhez a halmazhoz nyúlhat a pozícióépítés (átlagár, közös stop) — a szimbólum
+    ÖSSZES pozíciójához NEM: több stratégia futhat egy instrumentumon, és az egyik
+    nem írhatja át a másik stopjait/TP-jét."""
+    try:
+        magic = get_strategy_by_name(strategy_name).magic(_run_cfg)
+    except Exception:
+        return []
+    return [p for p in get_open_positions(magic, strategy_name, positions=positions)
+            if p.symbol == symbol]
 
 
 def pip_to_price(pips: float, pip_size: float) -> float:
@@ -654,7 +700,8 @@ def tf_align_gate_fn(symbol: str, strategy_name: str, params: dict):
         return None
 
 
-def actual_trade_objects(symbol: str, since_ts: int) -> list:
+def actual_trade_objects(symbol: str, since_ts: int,
+                         strategy_name: "str | None" = None) -> list:
     """A VALÓS kötések (MT5 deal-history) rétege — a replay jel-vonalaktól eltérő:
       • belépő-NYÍL a tényleges betöltési áron (fel=BUY / le=SELL),
       • valós SL (piros) és TP (zöld) SZAGGATOTT vonal a belépőtől a záró idejéig.
@@ -748,8 +795,13 @@ def actual_trade_objects(symbol: str, since_ts: int) -> list:
     # (a) ÁTLAGÁR: ha ≥2 nyitott pozíció van, a volumen-súlyozott átlagár vízszintes
     #     vonala MAGENTA, TÖMÖR + felirat (ide kerülnek a stopok = null pont). A régi
     #     sárga szaggatott nehezen látszott.
-    if positions and len(positions) >= 2:
-        _avg = _position_build.average_price([(p.price_open, p.volume) for p in positions])
+    #     A csomag = a STRATÉGIA saját lábai (magic + örökbefogadott) — ugyanaz a
+    #     halmaz, amire a ráépítés dolgozik. Így a chart azt a null pontot mutatja,
+    #     amit a motor tényleg használ (nem a szimbólum összes pozícióját keverve).
+    _pkg = (strategy_positions(symbol, strategy_name, positions=positions)
+            if strategy_name else list(positions or []))
+    if _pkg and len(_pkg) >= 2:
+        _avg = _position_build.average_price([(p.price_open, p.volume) for p in _pkg])
         if _avg > 0:
             objs.append(viz.Trend(
                 name="build_avg", t1=int(since_ts), p1=_avg,
@@ -761,9 +813,9 @@ def actual_trade_objects(symbol: str, since_ts: int) -> list:
     # (b) RÁÉPÍTÉS-KÜSZÖB: a build_runtime ref_close-a — a KÖVETKEZŐ ráépítés akkor
     #     tüzel, ha egy ZÁRT gyertya E FÖLÉ (BUY) / E ALÁ (SELL) zár. Így LÁTOD, mehet-e
     #     tovább, vagy még várni kell. Zöld (lime) = MEHET (ready); cián = még vár.
-    _rt = build_runtime.get(symbol)
+    _rt = build_runtime.get((symbol, strategy_name)) if strategy_name else None
     _lvl = _rt.get("next_level") if _rt else None
-    if _rt and _lvl and _rt.get("mode") not in (None, "off") and positions:
+    if _rt and _lvl and _rt.get("mode") not in (None, "off") and _pkg:
         _lvl   = float(_lvl)
         _ready = bool(_rt.get("ready"))
         _dir   = _rt.get("direction", "BUY")
@@ -838,7 +890,8 @@ def pair_visual_lines(symbol: str, params: dict, strategy, pip_size: float,
     #   látszanak (a „K" gomb a jel-replay-t kapcsolja, nem a tényleges kötéseket).
     m1 = bars.get("M1")
     if m1 is not None and len(m1):
-        objects = objects + actual_trade_objects(symbol, int(m1.index[0].timestamp()))
+        objects = objects + actual_trade_objects(
+            symbol, int(m1.index[0].timestamp()), strategy.name)
     # + a TF-együttállás figyelő SMA-vonalai (a bekapcsolt idősíkokra) — #4.
     objects = objects + tf_align_visual_objects(symbol)
     from strategy.visual import tag_line
@@ -1569,7 +1622,7 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
         _bdir  = "BUY" if _rf_pos[0].type == mt5.ORDER_TYPE_BUY else "SELL"
         _avg   = _pb.average_price([(p.price_open, p.volume) for p in symbol_positions])
         _bcfg  = _bs.get_config(symbol)
-        _rt    = build_runtime.setdefault(symbol, {})
+        _rt    = build_runtime.setdefault((symbol, strategy.name), {})
         _ref   = _rt.get("ref_close")
         if _ref is None:   # első alkalom → a (legkorábbi) belépő ára a kiindulás
             _ref = (min(p.price_open for p in symbol_positions) if _bdir == "BUY"
@@ -1613,12 +1666,13 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
         if (_bmode == _pb.MODE_AUTO and _rt.get("ready")
                 and _bbars is not None and len(_bbars) >= 2):
             _bar_t = int(_bbars.index[-2].timestamp())
-            if _rt.get("last_build_bar") != _bar_t and manual_build(symbol):
+            if (_rt.get("last_build_bar") != _bar_t
+                    and manual_build(symbol, strategy.name)):
                 _rt["last_build_bar"] = _bar_t
                 _rt["ref_close"] = float(_bbars["close"].iloc[-2])
                 _rt["ready"] = False
     else:
-        build_runtime.pop(symbol, None)
+        build_runtime.pop((symbol, strategy.name), None)
 
     # Lezárt pozíciók észlelése — a TELJES (minden magicot tartalmazó) nyitott
     # halmazhoz mérve, és csak a SAJÁT ticketekre könyvelve.
@@ -1859,23 +1913,53 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
 # Fő ciklus
 # ---------------------------------------------------------------------------
 
-def manual_build(symbol: str) -> bool:
+def _resolve_build_strategy(symbol: str, strategy_name: "str | None") -> "str | None":
+    """A ráépítés STRATÉGIÁJA. Ha a hívó megadta, azt használjuk; ha nem, akkor
+    csak úgy oldjuk fel, ha a szimbólumon PONTOSAN EGY stratégia épít éppen —
+    különben nem tippelünk (rossz csomagra építeni veszélyes)."""
+    if strategy_name:
+        return strategy_name
+    keys = [k for k in build_runtime if k[0] == symbol]
+    if len(keys) == 1:
+        return keys[0][1]
+    log.warning("➕ %s — ráépítés ELMARAD: nem egyértelmű, MELYIK stratégia "
+                "csomagjára (%d épít éppen). Add meg a stratégiát.",
+                symbol, len(keys))
+    return None
+
+
+def manual_build(symbol: str, strategy_name: "str | None" = None) -> bool:
     """Kézi ráépítés (a GUI „＋" gombja hívja). A `build_runtime` alapján nyit egy
-    piramidális adalék-pozíciót AZONOS irányba, majd az ÖSSZES azonos-szimbólumú
-    stopot az új ÁTLAGÁRRA húzza (1. szabály: kockázatmentesség). Visszaad: True, ha
-    a ráépítés megtörtént; False, ha nem alkalmas (nincs jel / pozíció / méret)."""
-    rt = build_runtime.get(symbol)
+    piramidális adalék-pozíciót AZONOS irányba, majd a STRATÉGIA SAJÁT lábainak
+    stopját az új ÁTLAGÁRRA húzza (1. szabály: kockázatmentesség).
+
+    A „csomag" = amit a `strategy_positions` ad: a stratégia magicjével nyitottak +
+    a felületről HOZZÁRENDELT (örökbefogadott) kézi pozíciók. Így a „csak jelzés"
+    munkamód is teljes értékű: a program jelez, te kötsz kézzel, ráosztod a
+    pozíciót a stratégiára — és onnantól az építés is arra a csomagra dolgozik.
+    Egy MÁSIK stratégia (vagy hozzá nem rendelt kézi) pozícióihoz SOSEM nyúlunk.
+
+    Visszaad: True, ha a ráépítés megtörtént; False, ha nem alkalmas (nincs jel /
+    pozíció / méret / nem azonosítható stratégia)."""
+    strategy_name = _resolve_build_strategy(symbol, strategy_name)
+    if strategy_name is None:
+        return False
+    rt = build_runtime.get((symbol, strategy_name))
     if not rt or not rt.get("ready"):
         return False
     direction = rt.get("direction")
     add_lot   = float(rt.get("next_lot") or 0.0)
     if direction not in ("BUY", "SELL") or add_lot <= 0:
         return False
+    # CSAK a stratégiához RENDELT pozíciók: a magicjével nyitottak + a felületről
+    # hozzárendelt (örökbefogadott) kéziek. Korábban a szimbólum ÖSSZES pozícióját
+    # kezelte, magictől függetlenül — így több stratégiánál a másik lábainak is
+    # átírta az SL-jét és TÖRÖLTE a TP-jüket.
     with MT5_LOCK:
-        positions = mt5.positions_get(symbol=symbol)
-        info      = mt5.symbol_info(symbol)
+        info = mt5.symbol_info(symbol)
+    positions = strategy_positions(symbol, strategy_name)
     if not positions:
-        build_runtime.pop(symbol, None)
+        build_runtime.pop((symbol, strategy_name), None)
         return False
     magic = positions[0].magic
     digits = info.digits if info else 5
@@ -1925,8 +2009,7 @@ def manual_build(symbol: str) -> bool:
     #    átlagár rossz lett, és a friss láb sosem kapta meg a közös stopot.
     positions_new = None
     for _ in range(3):
-        with MT5_LOCK:
-            _fetched = mt5.positions_get(symbol=symbol)
+        _fetched = strategy_positions(symbol, strategy_name)
         if _fetched and any(p.ticket == ticket for p in _fetched):
             positions_new = _fetched
             break
@@ -2034,6 +2117,10 @@ def run(cfg: dict, slot_mgr: SlotManager):
                             magic_to_strat[_m].name, _st.name, _m)
             else:
                 magic_to_strat.setdefault(_m, _st)
+    # Publikáljuk a magic → stratégia-név térképet: a `strategy_of_ticket` (és rajta
+    # keresztül a GUI „＋" gombja) ebből azonosítja egy pozíció gazdáját.
+    _magic_to_strategy.clear()
+    _magic_to_strategy.update({_m: _st.name for _m, _st in magic_to_strat.items()})
 
     # (symbol, strat_name) → LivePairState
     pair_states: dict = {}

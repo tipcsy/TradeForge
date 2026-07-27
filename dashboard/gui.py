@@ -1953,13 +1953,16 @@ class PositionRow:
             self.btn_be.config(text="BE", bg=BTN_OPT_BG, fg=BTN_OPT_FG, state="normal")
             self._be_tip_text = ""
 
-        # Építés MÓD + „＋" gomb — a motor build_runtime-jából (per szimbólum). A mód
-        # a soron állítható (Ép-gomb); a „＋" csak Kézi módban + a gyertyás jelre aktív.
+        # Építés MÓD + „＋" gomb — a motor build_runtime-jából. A kulcs
+        # (szimbólum, STRATÉGIA): egy instrumentumon több stratégia is építhet, és a
+        # sor annak a csomagnak az állapotát mutatja, amelyikhez EZ a pozíció tartozik.
+        # A mód a soron állítható (Ép-gomb); a „＋" csak Kézi módban + a jelre aktív.
         sym = pos.get("symbol")
         _rt = None
         try:
             from trading.live_trader import build_runtime as _br
-            _rt = _br.get(sym) if sym else None
+            _strat = self._strategy_of_position(pos)
+            _rt = _br.get((sym, _strat)) if (sym and _strat) else None
         except Exception:
             _rt = None
         # A tényleges mód: a build_runtime-ból, vagy közvetlenül a build_state-ből
@@ -4174,20 +4177,36 @@ class DashboardWindow:
         threading.Thread(target=_w, daemon=True, name="ManualBE").start()
 
     def _pos_build(self, ticket: int):
-        """A „＋" gomb: kézi ráépítés a ticket SZIMBÓLUMÁRA (a motor manual_build-jét
-        hívja háttérszálon — az nyit egy piramidális adalékot + átlagár-stopokat)."""
+        """A „＋" gomb: kézi ráépítés ENNEK a pozíciónak a CSOMAGJÁRA (a motor
+        manual_build-jét hívja háttérszálon — az nyit egy piramidális adalékot +
+        közös átlagár-stopot).
+
+        A csomagot a pozíció STRATÉGIÁJA azonosítja (örökbefogadás vagy magic), nem
+        pusztán a szimbólum: egy instrumentumon több stratégia is futhat, és a
+        ráépítés csak a saját lábakra nyúlhat."""
         pos = next((p for p in getattr(self, "_mt5_cache", {}).get("positions_detail", [])
                     if p["ticket"] == ticket), None)
         if not pos:
             return
         symbol = pos["symbol"]
+        strat  = self._strategy_of_position(pos)
         def _w():
             import logging as _logging
             from trading.live_trader import manual_build
-            if not manual_build(symbol):
+            if not manual_build(symbol, strat):
                 _logging.getLogger(__name__).info(
                     "%s — ráépítés kihagyva (nincs érvényes építés-jel).", symbol)
         threading.Thread(target=_w, daemon=True, name="ManualBuild").start()
+
+    @staticmethod
+    def _strategy_of_position(pos: dict) -> "str | None":
+        """Egy pozíció-sor stratégiája: a felületről hozzárendelt (örökbefogadott),
+        különben a magic alapján. None, ha egyikből sem derül ki."""
+        try:
+            from trading.live_trader import strategy_of_ticket
+            return strategy_of_ticket(pos.get("ticket"), pos.get("magic"))
+        except Exception:
+            return None
 
     def _pos_build_mode(self, symbol: str):
         """Az „Ép:" gomb: a SZIMBÓLUM építés-módját körbe-váltja (Ki → Kézi → Auto),
