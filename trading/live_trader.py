@@ -2276,6 +2276,8 @@ def run(cfg: dict, slot_mgr: SlotManager):
     import threading as _threading
     _threading.Thread(target=_viz_worker, daemon=True, name="TradeForgeViz").start()
 
+    _last_srv_off = 0.0     # a szerver-eltolás utolsó frissítése (napi limit napja)
+
     while True:
         try:
             # ── Kapcsolat-felügyelet ─────────────────────────────────────────
@@ -2296,6 +2298,17 @@ def run(cfg: dict, slot_mgr: SlotManager):
                             "(a hibás méretezés elkerülésére).", balance)
                 time.sleep(10)
                 continue
+
+            # A BRÓKER-idő eltolása — ehhez igazodik a napi limit napjának határa
+            # (`server_day_bounds`). Ritkán változik (nyári időszámítás), ezért
+            # elég 5 percenként, és elég néhány szimbólum tickje. Fejetlen (GUI
+            # nélküli) futásnál is meg kell lennie: a napi veszteséglimit függ tőle.
+            if time.time() - _last_srv_off >= 300:
+                try:
+                    mt5_connector.server_offset_sec(list(all_pairs)[:3])
+                except Exception:
+                    pass
+                _last_srv_off = time.time()
 
             # Risky állapot óránkénti újraolvasása (külső program írhatja)
             if time.time() - last_risky_reload >= risky_reload_sec:

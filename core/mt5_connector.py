@@ -279,19 +279,26 @@ def account_currency() -> str:
 
 def daily_pnl() -> Optional[float]:
     """
-    Mai nap lezárt ügyletek összesített P&L-je MT5-ből.
+    A mai (BRÓKER-nap) lezárt ügyletek összesített P&L-je MT5-ből.
     None ha nem kapcsolódtunk, 0.0 ha nem volt kereskedés.
-    """
+
+    A nap határa a `server_day_bounds`-ból jön (nem a gép helyi dátumából) — ez a
+    napi veszteséglimit kapuja, tehát a határ csúszása azt jelentené, hogy a limit
+    rossz időpontban nullázódik.
+
+    Az összegzés MINDEN záró dealt tartalmaz: az `OUT` mellett az `OUT_BY`-t is (a
+    fedező pozíciók egymással szembeni zárása). Eddig csak az `entry == 1` (OUT)
+    számított, így a close-by-jal zárt ügyletek P&L-je kimaradt a napi limitből —
+    miközben a „Lezárt ma" fül (`closed_positions_today`) már mindkettőt vette,
+    tehát a két kijelzés ellentmondott egymásnak."""
     try:
-        from datetime import date, datetime, timezone, timedelta
-        today    = datetime.combine(date.today(), datetime.min.time()).replace(tzinfo=timezone.utc)
-        tomorrow = today + timedelta(days=1)
+        frm, to = server_day_bounds()
         with MT5_LOCK:
-            deals = mt5.history_deals_get(today, tomorrow)
+            deals = mt5.history_deals_get(frm, to)
         if deals is None:
             return None
-        return sum(d.profit + d.commission + d.swap
-                   for d in deals if d.entry == 1)
+        return sum(d.profit + d.commission + d.swap for d in deals
+                   if d.entry in (mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_OUT_BY))
     except Exception:
         return None
 
@@ -400,7 +407,9 @@ def open_positions_detailed() -> list:
 
 
 def closed_positions_today() -> list:
-    """A MAI napon (UTC) LEZÁRT pozíciók — a „Lezárt napi pozíciók" fülhöz.
+    """A MAI napon (a BRÓKER naptára szerint) LEZÁRT pozíciók — a „Lezárt napi
+    pozíciók" fülhöz. A felület felirata („MT5 szerver-idő") eddig nem teljesült:
+    a nap határa a gép HELYI dátumából jött, UTC-nek címkézve.
 
     Az MT5 deal-előzményből pozíciónként összegzi: nyitó/záró ár, irány, lot,
     P&L (a záró deal-ök profit+jutalék+swap-ja — a daily_pnl konvenciójával
@@ -408,11 +417,9 @@ def closed_positions_today() -> list:
     lekéri. Rendezve zárási idő szerint.
     """
     try:
-        from datetime import date, datetime, timezone, timedelta
-        today    = datetime.combine(date.today(), datetime.min.time()).replace(tzinfo=timezone.utc)
-        tomorrow = today + timedelta(days=1)
+        frm, to = server_day_bounds()          # a BRÓKER napja (nem a gép helyi dátuma)
         with MT5_LOCK:
-            deals = mt5.history_deals_get(today, tomorrow)
+            deals = mt5.history_deals_get(frm, to)
         if not deals:
             return []
         agg: dict = {}
@@ -816,13 +823,22 @@ def is_connected() -> bool:
         return False
 
 
+# A legutóbb mért szerver-eltolás. A `server_offset_sec` frissíti, a nap-határt
+# számoló `server_day_bounds` pedig ebből dolgozik — így a napi limit akkor is a
+# BRÓKER napjához igazodik, ha épp nincs friss tick (pl. hétvégén).
+_server_offset = {"v": None}
+
+
 def server_offset_sec(symbols) -> Optional[float]:
     """A bróker/szerver-idő eltolása a valós UTC-hez képest, MÁSODPERCben.
 
     A megadott szimbólumok LEGFRISSEBB tickjéből (a bróker faliórája epoch-ként).
     EHHEZ igazodik az óra-kapu (trade_hours), a chart és a no-trade szürke sáv —
     ezért a felületen a BRÓKER-időt ebből számoljuk. None, ha nincs elérhető tick
-    (pl. nincs kapcsolat). Zárt piacon a legutóbbi tick alapján közelít."""
+    (pl. nincs kapcsolat). Zárt piacon a legutóbbi tick alapján közelít.
+
+    A mért értéket eltesszük (`_server_offset`), hogy a nap-határ számítása is
+    elérje — az a kereskedési nap definíciója a napi veszteséglimithez."""
     try:
         latest = None
         with MT5_LOCK:
@@ -832,10 +848,34 @@ def server_offset_sec(symbols) -> Optional[float]:
                     latest = int(tick.time)
         if latest is not None:
             from datetime import datetime, timezone
-            return float(latest - datetime.now(timezone.utc).timestamp())
+            off = float(latest - datetime.now(timezone.utc).timestamp())
+            _server_offset["v"] = off
+            return off
     except Exception:
         pass
     return None
+
+
+def server_day_bounds():
+    """A MAI kereskedési nap határai a bróker naptára szerint: `(tól, ig)` — olyan
+    datetime-ok, amiket a `history_deals_get` közvetlenül megkap.
+
+    MIÉRT NEM `date.today()`: az a GÉP HELYI dátuma volt, `.replace(tzinfo=utc)`-val
+    UTC-nek CÍMKÉZVE. A kettő nem ugyanaz, és a különbség a napi veszteséglimitet
+    érinti: a helyi éjfél (nyáron 22:00 UTC) után a lekérdezés egy MÉG EL SEM KEZDŐDÖTT
+    napra mutatott → a `daily_pnl` 0.0-t adott, azaz **a napi limit órákkal korábban
+    lenullázódott**, és a 22:00–24:00 UTC közti veszteség nem számított bele.
+
+    Az MT5 deal-időbélyegei a BRÓKER faliórájában értendők (a felület „Lezárt ma
+    (MT5 szerver-idő)" felirata is ezt ígéri — eddig nem ez teljesült). Ezért a
+    határt a szerver-eltolással számoljuk. Ha az eltolás ismeretlen (nincs még
+    tick), a valós UTC-napra esünk vissza — az is helyesebb a helyi dátumnál."""
+    from datetime import datetime, timedelta, timezone
+    off = _server_offset["v"] or 0.0
+    now_srv = datetime.now(timezone.utc).timestamp() + off      # a bróker faliórája
+    day_start = (now_srv // 86400) * 86400                      # szerver-éjfél
+    return (datetime.fromtimestamp(day_start, tz=timezone.utc),
+            datetime.fromtimestamp(day_start + 86400, tz=timezone.utc))
 
 
 def connection_info(cfg: dict) -> dict:
