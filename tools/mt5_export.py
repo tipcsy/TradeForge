@@ -62,12 +62,14 @@ def _rows_legacy(t, symbol: str, params: dict, pair_cfg: dict,
     a régi OFF-derivált OPEN (kezdeti SL/TP + BE/trail trigger) + CLOSE sorok."""
     pip        = float(pair_cfg.get("pip_size", 0.0001))
     be_pct     = float(params.get("breakeven_pct", 0.5))
-    trail_act  = float(params.get("trail_activation_pips", 8))
-    trail_dist = float(params.get("trail_distance_pips", 6))
+    # ATR-szorzó × a kötés belépéskori ATR-je (ÁRban)
+    _atr       = float(getattr(t, "entry_atr", 0.0) or 0.0)
+    trail_act  = float(params.get("trail_activation_atr", 0.5)) * _atr
+    trail_dist = float(params.get("trail_distance_atr", 0.4)) * _atr
     sign    = 1 if t.direction == "BUY" else -1
     init_sl = round(t.open_price - sign * t.sl_pips * pip, 5)
     be_trig = round(t.open_price + sign * (t.tp - t.open_price) * be_pct, 5) if be_pct > 0 else 0.0
-    tr_trig = round(t.open_price + sign * trail_act * pip, 5) if trail_act > 0 else 0.0
+    tr_trig = round(t.open_price + sign * trail_act, 5) if trail_act > 0 else 0.0
     o_ts    = pd.Timestamp(t.open_time) + pd.Timedelta(minutes=BAR_MINUTES)
     out = [(o_ts, [
         "OPEN", _fmt(o_ts), symbol, t.direction,

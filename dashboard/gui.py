@@ -4255,12 +4255,17 @@ class DashboardWindow:
 
     def _trail_default(self, symbol: str) -> Optional[int]:
         """Egy szimbólum optimalizált trail-távolsága PONTBAN (a Pozíciók fül
-        mezőjéhez). A paraméter pipben van tárolva → pont = pip × pip_size / point.
-        Ha a 'point' még nem ismert (MT5 adat nélkül), None-t ad."""
-        pips = self._pos_params(symbol).get("trail_distance_pips")
-        if pips is None:
-            pips = self.cfg.get("position_mgmt", {}).get("trail_distance_pips")
-        if pips is None:
+        mezőjéhez). A paraméter ATR-SZORZÓKÉNT van tárolva → pont =
+        szorzó × ATR / point. Ha az ATR vagy a 'point' még nem ismert (MT5 adat
+        nélkül), None-t ad — a mező üresen marad, mint eddig."""
+        mult = self._pos_params(symbol).get("trail_distance_atr")
+        if mult is None:
+            mult = self.cfg.get("position_mgmt", {}).get("trail_distance_atr")
+        if mult is None:
+            return None
+        _ds = self.dashboard_ref.get(symbol)
+        atr_price = getattr(_ds, "atr_price", None) if _ds else None
+        if not atr_price:
             return None
         pair_cfg = self.cfg["pairs"].get(symbol, {})
         pip_size = pair_cfg.get("pip_size")
@@ -4289,7 +4294,7 @@ class DashboardWindow:
                 pass
         if not pip_size or not point:
             return None
-        return int(round(float(pips) * pip_size / point))
+        return int(round(float(mult) * float(atr_price) / point))
 
     def _handle_connect(self):
         # A connect() blokkoló MT5-login — háttérszálon, hogy a UI ne fagyjon.

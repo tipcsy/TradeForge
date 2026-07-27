@@ -57,6 +57,10 @@ class Trade:
     pip_size: float
     pv1_usd: float
     sl_pips: float
+    # A BELÉPÉSKORI ATR (árban). A trailing ehhez méri az aktiválást és a követési
+    # távolságot (`trail_activation_atr` / `trail_distance_atr`) — így a puffer
+    # együtt mozog a piac zajszintjével, és nem kell instrumentumonként hangolni.
+    entry_atr: float = 0.0
     close_time: Optional[pd.Timestamp] = None
     close_price: Optional[float] = None
     pnl_usd: float = 0.0        # NETTÓ (a jutalék és a swap már benne)
@@ -275,8 +279,18 @@ def _update_stops(trade: "Trade", high: float, low: float, params: dict,
     if len(trade.legs) > 1:
         return
     be_pct     = params.get("breakeven_pct", 0.5)
-    trail_act  = 0.0 if risky else params.get("trail_activation_pips", 8)
-    trail_dist = params.get("trail_distance_pips", 6) * (RISKY_TRAIL_FACTOR if risky else 1.0)
+    # A trailing aktiválása és követési távolsága a BELÉPÉSKORI ATR szorzója.
+    # Miért nem abszolút távolság: az önmagában instrumentum-függő lenne (ugyanaz
+    # a szám EURUSD-n és egy indexen mást jelent), ezért az optimalizálónak
+    # páronként kellett kompenzálnia. Az ATR-szorzó instrumentumra ÉS volatilitási
+    # rezsimre is normalizál, tehát egyetlen közös keresési tartomány elég.
+    # FONTOS: az ismeretlen ATR csak a TRAILINGET tiltja, a BREAKEVEN-t nem — az
+    # nem függ az ATR-től, és a kockázatmentesítés a fontosabb a kettő közül.
+    _atr = float(getattr(trade, "entry_atr", 0.0) or 0.0)
+    _trail_ok  = _atr > 0
+    trail_act  = 0.0 if risky else params.get("trail_activation_atr", 0.5) * _atr
+    trail_dist = (params.get("trail_distance_atr", 0.4) * _atr
+                  * (RISKY_TRAIL_FACTOR if risky else 1.0))
 
     if trade.direction == "BUY":
         if (risky or be_pct > 0) and not trade.risk_free:
@@ -285,10 +299,10 @@ def _update_stops(trade: "Trade", high: float, low: float, params: dict,
             if high >= be_trigger:
                 trade.sl = trade.open_price
                 trade.risk_free = True
-        if trade.risk_free:
-            trail_trigger = trade.open_price + pip_to_price(trail_act, pip_size)
+        if trade.risk_free and _trail_ok:
+            trail_trigger = trade.open_price + trail_act      # ÁRban (ATR × szorzó)
             if high >= trail_trigger:
-                new_sl = high - pip_to_price(trail_dist, pip_size)
+                new_sl = high - trail_dist
                 if new_sl > trade.sl:
                     trade.sl = new_sl
     else:  # SELL
@@ -298,10 +312,10 @@ def _update_stops(trade: "Trade", high: float, low: float, params: dict,
             if low <= be_trigger:
                 trade.sl = trade.open_price
                 trade.risk_free = True
-        if trade.risk_free:
-            trail_trigger = trade.open_price - pip_to_price(trail_act, pip_size)
+        if trade.risk_free and _trail_ok:
+            trail_trigger = trade.open_price - trail_act      # ÁRban (ATR × szorzó)
             if low <= trail_trigger:
-                new_sl = low + pip_to_price(trail_dist, pip_size)
+                new_sl = low + trail_dist
                 if new_sl < trade.sl:
                     trade.sl = new_sl
 
@@ -1060,6 +1074,9 @@ def run_pair(
                         pip_size=pip_size,
                         pv1_usd=pv1_usd,
                         sl_pips=sl_pips,
+                        # a belépéskori ATR (ÁRban) — ehhez mér a trailing
+                        entry_atr=(float(m15_row.get("atr", 0.0) or 0.0)
+                                   if not pd.isna(m15_row.get("atr", float("nan"))) else 0.0),
                         entry_balance=balance,
                         risk_usd=risk_usd,
                         risk_pct=risk_usd / balance * 100 if balance > 0 else 0,
@@ -1741,6 +1758,9 @@ def run_portfolio_backtest(
                                 open_time=m1_time, open_price=open_price,
                                 sl=sl_price, tp=tp_price, lot=lot,
                                 pip_size=pip_size, pv1_usd=pv1_usd, sl_pips=sl_pips,
+                                entry_atr=(float(m15_row.get("atr", 0.0) or 0.0)
+                                           if not pd.isna(m15_row.get("atr", float("nan")))
+                                           else 0.0),
                                 entry_balance=balance,
                                 risk_usd=risk_usd,
                                 risk_pct=risk_usd / balance * 100 if balance > 0 else 0,

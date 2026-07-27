@@ -28,8 +28,8 @@
   "position_mgmt": {
     "_comment": "Kockázatmentesítés és trailing — a keretrendszer végrehajtási presetjeihez (mint a wpr_sma-nál).",
     "breakeven_pct": 0.5,
-    "trail_activation_pips": 8.0,
-    "trail_distance_pips": 6.0,
+    "trail_activation_atr": 0.5,
+    "trail_distance_atr": 0.4,
     "no_trade_resets_signal": false
   },
   "param_meta": {
@@ -41,17 +41,50 @@
       "Egyéb"
     ],
     "params": {
-      "ml_warmup_bars":         {"category": "ML modell", "comment": "Élő feature-ablak mélysége (M15 gyertya) — min. ~700 kell az indikátor-bemelegítéshez"},
-      "dynamic_sltp":           {"category": "SL / TP", "comment": "true: SL = ATR14 × szorzó; false: fix sl_pips/tp_pips"},
-      "sl_atr_mult":            {"category": "SL / TP", "comment": "SL = ATR14 × ez (dynamic_sltp esetén)"},
-      "tp_rr_ratio":            {"category": "SL / TP", "comment": "TP = SL × ez (kockázat/hozam arány)"},
-      "sl_pips":                {"category": "SL / TP", "comment": "Fix SL pipben (dynamic_sltp=false esetén; a tanítás írja páronként)"},
-      "tp_pips":                {"category": "SL / TP", "comment": "Fix TP pipben (dynamic_sltp=false esetén)"},
-      "atr_period":             {"category": "SL / TP", "comment": "ATR periódus a keretrendszer spread-kapujához"},
-      "breakeven_pct":          {"category": "Kockázatkezelés", "comment": "BE: a TP hány %-ánál húzzuk az SL-t a belépőre (0 = ki)"},
-      "trail_activation_pips":  {"category": "Kockázatkezelés", "comment": "Trailing ennyi pip profit UTÁN indul"},
-      "trail_distance_pips":    {"category": "Kockázatkezelés", "comment": "Trailing követési távolság (pip)"},
-      "no_trade_resets_signal": {"category": "Kockázatkezelés", "comment": "A no-trade (szürke) óra resetelje-e a jelzést (ML-nél nincs mély állapot — hatástalan)"}
+      "ml_warmup_bars": {
+        "category": "ML modell",
+        "comment": "Élő feature-ablak mélysége (M15 gyertya) — min. ~700 kell az indikátor-bemelegítéshez"
+      },
+      "dynamic_sltp": {
+        "category": "SL / TP",
+        "comment": "true: SL = ATR14 × szorzó; false: fix sl_pips/tp_pips"
+      },
+      "sl_atr_mult": {
+        "category": "SL / TP",
+        "comment": "SL = ATR14 × ez (dynamic_sltp esetén)"
+      },
+      "tp_rr_ratio": {
+        "category": "SL / TP",
+        "comment": "TP = SL × ez (kockázat/hozam arány)"
+      },
+      "sl_pips": {
+        "category": "SL / TP",
+        "comment": "Fix SL pipben (dynamic_sltp=false esetén; a tanítás írja páronként)"
+      },
+      "tp_pips": {
+        "category": "SL / TP",
+        "comment": "Fix TP pipben (dynamic_sltp=false esetén)"
+      },
+      "atr_period": {
+        "category": "SL / TP",
+        "comment": "ATR periódus a keretrendszer spread-kapujához"
+      },
+      "breakeven_pct": {
+        "category": "Kockázatkezelés",
+        "comment": "BE: a TP hány %-ánál húzzuk az SL-t a belépőre (0 = ki)"
+      },
+      "trail_activation_atr": {
+        "category": "Kockázatkezelés",
+        "comment": "Trailing ennyi pip profit UTÁN indul"
+      },
+      "trail_distance_atr": {
+        "category": "Kockázatkezelés",
+        "comment": "Trailing követési távolság (pip)"
+      },
+      "no_trade_resets_signal": {
+        "category": "Kockázatkezelés",
+        "comment": "A no-trade (szürke) óra resetelje-e a jelzést (ML-nél nincs mély állapot — hatástalan)"
+      }
     }
   },
   "optimizer": {

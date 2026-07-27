@@ -108,6 +108,7 @@ class PairDashboardState:
     opt_grade_reason: str  = ""               # mi húzza le a minősítést
     corr_conflict:    bool = False            # korrelált kitettség-ütközés (villog)
     corr_tip:         str  = ""               # ütközés magyarázata (tooltip)
+    atr_price:        Optional[float] = None  # aktuális ATR ÁRban (a trail ATR-szorzójához)
     spread_pts:       int  = 0      # aktuális spread pontban (MT5 egység)
     max_spread_pts:   int  = 0      # megengedett max spread pontban
     timeframe_remaining: dict = field(default_factory=dict)  # {percek: hátralévő mp}
@@ -152,7 +153,8 @@ instrument_state: dict[str, str] = {}
 optimizer_status: dict[str, str] = {}
 
 # Per-ticket pozíció-állapot (GUI ↔ motor megosztott):
-#   {ticket: {"original_sl": float, "trailing_enabled": bool, "be_done": bool}}
+#   {ticket: {"original_sl": float, "trailing_enabled": bool, "be_done": bool,
+#            "entry_atr": float}}   — az entry_atr a trailing ATR-szorzójához
 # A motor tölti/karbantartja; a Pozíciók fül ebből olvas és ezt billenti
 # (trailing ki/be, kézi BE jelzése).
 position_state: dict[int, dict] = {}
@@ -1070,12 +1072,20 @@ def _apply_be_and_trailing(symbol, pos, ticket, pstate, is_rf, risky,
         if override_points is not None:
             dist_price = override_points * point
         else:
-            base_pips  = params.get("trail_distance_pips", 6)
-            dist_price = pip_to_price(base_pips, pip_size) * (0.5 if risky else 1.0)
+            # ATR-szorzó a BELÉPÉSKORI ATR-re (pstate["entry_atr"]). Abszolút
+            # távolság helyett azért, mert az instrumentum-függő lenne — így a
+            # puffer a pár és a pillanat zajszintjéhez igazodik.
+            _atr = float(pstate.get("entry_atr") or 0.0)
+            if _atr <= 0:
+                return                     # ismeretlen ATR → nincs trailing (a BE
+                                           # ekkor MÁR lefutott feljebb ebben a
+                                           # függvényben — azt nem hagyjuk ki)
+            dist_price = (params.get("trail_distance_atr", 0.4) * _atr
+                          * (0.5 if risky else 1.0))
         min_stop_price = (sym_info.trade_stops_level * point) if sym_info else 0.0
         eff_price = max(dist_price, min_stop_price + point)
-        act_price = 0.0 if risky else pip_to_price(
-            params.get("trail_activation_pips", 8), pip_size)
+        act_price = (0.0 if risky
+                     else params.get("trail_activation_atr", 0.5) * _atr)
         if pos.type == mt5.ORDER_TYPE_BUY:
             if pos.price_current >= pos.price_open + act_price:
                 new_sl = round(pos.price_current - eff_price, digits)
@@ -1185,7 +1195,8 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
                     _ps = position_state.setdefault(_p.ticket, {
                         "original_sl": _p.sl, "trailing_enabled": True,
                         "be_done": slot_mgr.is_risk_free(_p.ticket),
-                        "trail_points": None, "trail_moved": False})
+                        "trail_points": None, "trail_moved": False,
+                        "entry_atr": 0.0})
                     _apply_be_and_trailing(
                         symbol, _p, _p.ticket, _ps, slot_mgr.is_risk_free(_p.ticket),
                         risky, params, pip_size, _sinfo, slot_mgr)
@@ -1287,6 +1298,8 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
     spread_ok = True
     with MT5_LOCK:
         sym_info = mt5.symbol_info(symbol)
+    if ds is not None and atr_val is not None:
+        ds.atr_price = float(atr_val)
     if sym_info and atr_val is not None and sym_info.point > 0:
         # A spread-kaput a KÖZÖS core.spread_gate dönti — UGYANAZ a képlet, amit a
         # backtest is használ (egy forrás → sose csúszik szét). A bróker pont-alapú
@@ -1360,7 +1373,13 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
         # felülírás PONTBAN a Pozíciók fülről), trail_moved (a trailing már húzott-e).
         pstate = position_state.setdefault(ticket, {
             "original_sl": pos.sl, "trailing_enabled": True, "be_done": is_rf,
-            "trail_points": None, "trail_moved": False})
+            "trail_points": None, "trail_moved": False, "entry_atr": 0.0})
+        # A trailing a BELÉPÉSKORI ATR szorzójával dolgozik. Ha még nincs eltéve
+        # (frissen nyitott pozíció, vagy újraindítás utáni helyreállítás), az AKTUÁLIS
+        # ATR-rel töltjük fel — újraindításnál ez a legjobb elérhető közelítés, és
+        # enélkül a trailing egyáltalán nem indulna el.
+        if not pstate.get("entry_atr") and atr_val:
+            pstate["entry_atr"] = float(atr_val)
 
         # SL-mozgás naplózása a viz lépcsős SL-vonalához: ha a pos.sl változott az
         # utóbb látott értékhez képest, feljegyezzük (idő = pos.time_update = a
@@ -1580,26 +1599,32 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
 
             # Követési távolság ÁR-ban:
             #   • kézi felülírás (Pozíciók fül) PONTBAN → pontos érték, risky NEM felezi
-            #   • egyébként az optimalizált trail_distance_pips → ár, risky felezi
+            #   • egyébként a BELÉPÉSKORI ATR szorzója (trail_distance_atr), risky felezi
             override_points = pstate.get("trail_points")
+            _atr = float(pstate.get("entry_atr") or 0.0)
             if override_points is not None:
                 dist_price = override_points * point
+            elif _atr > 0:
+                dist_price = (params.get("trail_distance_atr", 0.4) * _atr
+                              * (0.5 if risky else 1.0))
             else:
-                base_pips  = params.get("trail_distance_pips", 6)
-                dist_price = pip_to_price(base_pips, pip_size) * (0.5 if risky else 1.0)
+                dist_price = None          # ismeretlen ATR → nem trailelünk
 
             # A bróker MINIMUM stop-távolsága: ha az új SL ennél közelebb esne az
             # árhoz, a modify csendben elutasításra kerül → a trailing sosem fog
             # profitot. Ezért az effektív követés a min. stop-távolság + 1 pont alá
             # NEM mehet — így a legkorábbi (kb. 1 pontnyi) profitot is lekötjük.
             min_stop_price = (sym_info.trade_stops_level * point) if sym_info else 0.0
-            eff_price = max(dist_price, min_stop_price + point)
+            eff_price = (max(dist_price, min_stop_price + point)
+                         if dist_price is not None else None)
 
             # Risky mód: a trailing AZONNAL induljon (nem várunk aktiválási profitra).
-            act_price = 0.0 if risky else pip_to_price(
-                params.get("trail_activation_pips", 8), pip_size)
+            act_price = (0.0 if risky
+                         else params.get("trail_activation_atr", 0.5) * _atr)
 
-            if pos.type == mt5.ORDER_TYPE_BUY:
+            if eff_price is None:
+                pass                       # ATR ismeretlen (pl. újraindítás után)
+            elif pos.type == mt5.ORDER_TYPE_BUY:
                 if pos.price_current >= pos.price_open + act_price:
                     new_sl = round(pos.price_current - eff_price, digits)
                     if new_sl > pos.sl and modify_sl(ticket, new_sl):
