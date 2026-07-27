@@ -339,12 +339,40 @@ class MlAiStrategy(Strategy):
         return {**cfg.get("indicators", {}), **cfg.get("sltp", {}),
                 **cfg.get("position_mgmt", {})}
 
+    # A VÉGREHAJTÁSI spread-kapu söpört értékei. A modell tanítása (fit) ettől
+    # FÜGGETLEN — ezek nem tanulási jellemzők, hanem azt döntik el, hogy a kész
+    # modell jelzését milyen piaci spread mellett hajtjuk végre. Ezért egyetlen
+    # tanítás után is végigpróbálhatók: minden kombináció csak egy backtest.
+    SPREAD_RATIOS = (0.10, 0.15, 0.20, 0.30, 0.45)
+    SPREAD_MULTS  = (1.0, 1.5, 2.5)
+
     def param_space(self, cfg: dict, base_params: dict, method: str,
                     max_trials: int) -> list[dict]:
-        # Az ML-stratégiánál nincs paraméter-rács: az „optimalizálás" a modell
-        # tanítása (fit). Egyetlen alap-kombináció, hogy a meglévő optimizer-
-        # életciklus (teszt-backtest, minősítés) lefuthasson.
-        return [dict(base_params)]
+        """Az ML-stratégiánál nincs INDIKÁTOR-rács: az „optimalizálás" a modell
+        tanítása (fit). A VÉGREHAJTÁSI kaput viszont hangolni kell — eddig az
+        ml_ai mindig a beépített alapértékkel ment, tehát instrumentumonként nem
+        tudott alkalmazkodni (a spread-kapu GOLD-on gyakorlatilag süket volt,
+        UK100-on a kötések harmadát vágta).
+
+        Ezért a rács a spread-kapu két paraméterén söpör:
+          • `max_spread_atr_ratio` — a megengedett spread az ATR hányada,
+          • `min_spread_mult`      — a padló az instrumentum normál spreadjének
+                                     ennyiszerese.
+        Az első kombináció mindig az ALAP (visszafelé kompatibilis: ha az
+        optimalizáló csak egy próbát futtat, a régi viselkedést kapja)."""
+        out = [dict(base_params)]
+        seen = {(base_params.get("max_spread_atr_ratio"),
+                 base_params.get("min_spread_mult"))}
+        for ratio in self.SPREAD_RATIOS:
+            for mult in self.SPREAD_MULTS:
+                if (ratio, mult) in seen:
+                    continue
+                seen.add((ratio, mult))
+                p = dict(base_params)
+                p["max_spread_atr_ratio"] = ratio
+                p["min_spread_mult"] = mult
+                out.append(p)
+        return out[:max_trials] if max_trials and max_trials > 0 else out
 
     def fit(self, symbol: str, df_m15, cfg: dict, pair_cfg: dict,
             test_start: str, progress_callback=None) -> dict:

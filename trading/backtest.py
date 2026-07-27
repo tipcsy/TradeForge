@@ -1000,7 +1000,8 @@ def run_pair(
                         if not (_sp_e > 0):
                             _sp_e = _spread_arr[i] if _spread_arr is not None else _spread_fallback
                         if not _spread_gate.spread_ok(
-                                _sp_e / pip_size, float(_atr_e), pip_size, params)[0]:
+                                _sp_e / pip_size, float(_atr_e), pip_size, params,
+                                pair_cfg.get("backtest_spread_pips"))[0]:
                             prev_m1_row = m1_row
                             continue
                     if _tf_eval is not None:
@@ -1701,7 +1702,8 @@ def run_portfolio_backtest(
                                 if not (_sp_e > 0):
                                     _sp_e = pip_to_price(sp, pip_size)
                                 if not _spread_gate.spread_ok(
-                                        _sp_e / pip_size, float(_atr_e), pip_size, params)[0]:
+                                        _sp_e / pip_size, float(_atr_e), pip_size, params,
+                                        pair_cfg.get("backtest_spread_pips"))[0]:
                                     _gate_ok = False
                             if _gate_ok and info.get("tf_eval") is not None:
                                 # A döntéskor ISMERT árral (az M1-gyertya záróára) —

@@ -16,18 +16,61 @@ a saját egységéből ide konvertál). Adathiány (nincs ATR / pip_size) → fa
 
 Paraméterek (a stratégia `params`-ából, visszafelé kompatibilis alapértékekkel):
   • max_spread_atr_ratio (0.20) — a megengedett spread az ATR hányada
-  • min_spread_pips      (2.0)  — abszolút alsó küszöb pipben (csendes piacon is
-                                   enged ennyit, hogy a szűrő ne legyen túl szigorú)
+  • min_spread_mult      (1.5)  — az ALSÓ küszöb az instrumentum SAJÁT tipikus
+                                   spreadjének ennyiszerese
+  • min_spread_pips             — ha meg van adva, EZ az abszolút alsó küszöb
+                                   (kézi felülírás; a mult helyett)
+
+MIÉRT RELATÍV A PADLÓ. Korábban fix 2.0 „pip" volt az alsó küszöb — csakhogy a
+„pip" instrumentumonként mást jelent: EURUSD-n 20 pont, indexen és EURJPY-n 200.
+Mérés a valós előzményen (mennyit blokkolt a kapu):
+
+    GOLD    padló 200 pont, tipikus spread  45  →  0,1%   gyakorlatilag süket
+    EURJPY  padló 200 pont, tipikus spread  25  →  0,8%   gyakorlatilag süket
+    UsaInd  padló 200 pont, tipikus spread 309  →  0,4%   (ott az ATR-tag laza)
+    UK100   padló 200 pont, tipikus spread 139  → 30,2%   szűrt
+
+Vagyis ugyanaz a szám az egyik páron mindent átengedett, a másikon a kötések
+harmadát vágta. A padló mostantól az instrumentum SAJÁT normál spreadjéhez mér
+(`pair_cfg.backtest_spread_pips`, amit a `tools/refresh_pip_values.py` a valós
+előzmény mediánjából tölt) — így minden páron ugyanazt JELENTI: „a szokásosnál
+ennyivel tágabb spreadet még elfogadunk".
 """
 
 from __future__ import annotations
 
 DEFAULT_RATIO = 0.20
-DEFAULT_MIN_PIPS = 2.0
+DEFAULT_MIN_MULT = 1.5      # a padló az instrumentum normál spreadjének ennyiszerese
+DEFAULT_MIN_PIPS = 2.0      # tartalék, ha a normál spread nem ismert (régi config)
 
 
-def max_spread_pips(atr_price: "float | None", pip_size: float, params: dict) -> float:
-    """A megengedett max spread PIPBEN. Adathiány → float('inf') (nem szűr)."""
+def spread_floor_pips(params: dict, normal_spread_pips: "float | None") -> float:
+    """A kapu ALSÓ küszöbe pipben.
+
+    Sorrend: (1) kézzel megadott `min_spread_pips`, (2) az instrumentum normál
+    spreadje × `min_spread_mult`, (3) a régi fix alapérték, ha a normál spread
+    ismeretlen (így a hiányos configok viselkedése nem változik)."""
+    explicit = params.get("min_spread_pips")
+    if explicit is not None:
+        try:
+            return float(explicit)
+        except (TypeError, ValueError):
+            pass
+    try:
+        normal = float(normal_spread_pips) if normal_spread_pips else 0.0
+    except (TypeError, ValueError):
+        normal = 0.0
+    if normal > 0:
+        return normal * float(params.get("min_spread_mult", DEFAULT_MIN_MULT))
+    return DEFAULT_MIN_PIPS
+
+
+def max_spread_pips(atr_price: "float | None", pip_size: float, params: dict,
+                    normal_spread_pips: "float | None" = None) -> float:
+    """A megengedett max spread PIPBEN. Adathiány → float('inf') (nem szűr).
+
+    `normal_spread_pips`: az instrumentum tipikus spreadje (a hívó a
+    `pair_cfg["backtest_spread_pips"]`-et adja) — ehhez mér a relatív padló."""
     if not pip_size or pip_size <= 0 or atr_price is None:
         return float("inf")
     try:
@@ -37,16 +80,20 @@ def max_spread_pips(atr_price: "float | None", pip_size: float, params: dict) ->
     if atr_price <= 0:
         return float("inf")
     ratio    = float(params.get("max_spread_atr_ratio", DEFAULT_RATIO))
-    min_pips = float(params.get("min_spread_pips", DEFAULT_MIN_PIPS))
+    min_pips = spread_floor_pips(params, normal_spread_pips)
     atr_pips = atr_price / pip_size
     return max(min_pips, atr_pips * ratio)
 
 
 def spread_ok(spread_pips: float, atr_price: "float | None", pip_size: float,
-              params: dict) -> tuple[bool, float]:
+              params: dict,
+              normal_spread_pips: "float | None" = None) -> tuple[bool, float]:
     """True, ha a spread (pip) belefér a piac-kapuba. Visszaad: (ok, max_pips) — a
-    második a diagnosztikához/loghoz. Fail-open, ha nincs érvényes ATR/pip_size."""
-    cap = max_spread_pips(atr_price, pip_size, params)
+    második a diagnosztikához/loghoz. Fail-open, ha nincs érvényes ATR/pip_size.
+
+    `normal_spread_pips`: az instrumentum tipikus spreadje a relatív padlóhoz
+    (a hívó a `pair_cfg["backtest_spread_pips"]`-et adja)."""
+    cap = max_spread_pips(atr_price, pip_size, params, normal_spread_pips)
     try:
         sp = float(spread_pips)
     except (TypeError, ValueError):

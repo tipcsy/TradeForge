@@ -1293,7 +1293,8 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
         # spreadjét pipbe váltjuk (spread_pts × point / pip_size).
         current_spread_pips = sym_info.spread * sym_info.point / pip_size
         spread_ok, _cap_pips = spread_gate.spread_ok(
-            current_spread_pips, atr_val, pip_size, params)
+            current_spread_pips, atr_val, pip_size, params,
+            pair_cfg.get("backtest_spread_pips"))
         if not spread_ok:
             log.debug("%s — spread túl nagy: %.2f pip > %.2f pip max, kihagyva.",
                       symbol, current_spread_pips, _cap_pips)
