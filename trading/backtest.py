@@ -30,6 +30,7 @@ sys.path.insert(0, str(ROOT))
 
 from core.risk_manager import calc_lot, calc_effective_slots, calc_swing_sl_tp_pips
 from core import risky_mode
+from core import trade_costs as _costs
 from strategy import get_strategy, get_strategy_by_name
 
 logging.basicConfig(
@@ -58,7 +59,9 @@ class Trade:
     sl_pips: float
     close_time: Optional[pd.Timestamp] = None
     close_price: Optional[float] = None
-    pnl_usd: float = 0.0
+    pnl_usd: float = 0.0        # NETTÓ (a jutalék és a swap már benne)
+    commission_usd: float = 0.0  # levont jutalék (pozitív = költség)
+    swap_usd: float = 0.0        # felhalmozott swap, ELŐJELES (negatív = levonás)
     pnl_pips: float = 0.0
     status: str = "open"    # "open" | "tp" | "sl" | "be_trail"
     risk_free: bool = False  # SL átment breakeven-re
@@ -947,6 +950,13 @@ def run_pair(
                 # A részleges zárás(ok)ból már realizált P&L hozzáadása a runner
                 # (maradék lot) záró P&L-jéhez → teljes trade P&L.
                 trade.pnl_usd += trade.booked_pnl
+                # BRÓKER-KÖLTSÉG: jutalék (oda-vissza) + swap (éjfelenként). Eddig
+                # csak a spread volt modellezve — a Felező/Pajzs runnere viszont épp
+                # a hosszú tartással szedi össze a swapot, tehát a technika hozadéka
+                # költség nélkül szisztematikusan optimista volt.
+                trade.pnl_usd, trade.commission_usd, trade.swap_usd = _costs.apply(
+                    trade.pnl_usd, trade.lot, trade.direction,
+                    trade.open_time.timestamp(), m1_time.timestamp(), pair_cfg)
                 # pnl_pips számítás (kozmetikai, a runner mozgásából)
                 if trade.direction == "BUY":
                     trade.pnl_pips = (trade.close_price - trade.open_price) / trade.pip_size - spread_pips
@@ -1141,7 +1151,8 @@ def _save_backtest_results(trades: list, summaries: list[dict],
         w = csv.writer(f)
         w.writerow(["symbol", "direction", "open_time", "close_time", "status",
                     "open_price", "close_price", "sl", "tp", "lot",
-                    "sl_pips", "risk_usd", "risk_pct", "pnl_pips", "pnl_usd"])
+                    "sl_pips", "risk_usd", "risk_pct", "pnl_pips", "pnl_usd",
+                    "commission_usd", "swap_usd"])
         for t in sorted(trades, key=lambda x: x.open_time):
             w.writerow([
                 t.symbol, t.direction,
@@ -1151,6 +1162,7 @@ def _save_backtest_results(trades: list, summaries: list[dict],
                 round(t.sl_pips, 1),
                 round(t.risk_usd, 2), round(t.risk_pct, 3),
                 round(t.pnl_pips, 2), round(t.pnl_usd, 2),
+                round(t.commission_usd, 2), round(t.swap_usd, 2),
             ])
 
     # ── 2) daily CSV ─────────────────────────────────────────────────────────
@@ -1224,6 +1236,17 @@ def _save_backtest_results(trades: list, summaries: list[dict],
         f.write(f"Átl nyerő : ${avg_w:+.2f}   Átl vesztes: ${avg_l:+.2f}   Arány: {abs(avg_w/avg_l) if avg_l else 0:.2f}x\n")
         f.write(f"Profit F. : {pf:.2f}\n")
         f.write(f"Total P&L : ${total_pnl:+.2f}  ({ret_pct:+.1f}%)\n")
+        # KÖLTSÉG: az eredmény nettó-e? Ha egyik páron sincs jutalék/swap beállítva,
+        # ezt KI KELL írni — különben egy költségmentes szám valós eredménynek látszik.
+        _com = sum(t.commission_usd for t in trades)
+        _swp = sum(t.swap_usd for t in trades)
+        if _com or _swp:
+            f.write(f"Költség   : jutalék ${_com:.2f}  swap ${_swp:+.2f}  "
+                    f"(a P&L NETTÓ)\n")
+        else:
+            f.write("Költség   : ⚠ NINCS modellezve (csak spread) — a P&L BRUTTÓ, "
+                    "a valóságnál kedvezőbb.\n"
+                    "            Kitöltés: python tools/refresh_costs.py --write\n")
         f.write(f"Kezdő     : ${initial_balance:.0f}   Záró: ${final_bal:.0f}\n")
         f.write(f"Max DD    : {mdd:.2f}%\n")
         dp = sum(1 for v in daily_pnl.values() if v >= initial_balance * 0.01)
@@ -1616,6 +1639,10 @@ def run_portfolio_backtest(
 
             if closed:
                 trade.pnl_usd += trade.booked_pnl   # a részleges zárás(ok) realizált P&L-je
+                # Bróker-költség (jutalék + swap) — ugyanaz, mint a run_pair-ben.
+                trade.pnl_usd, trade.commission_usd, trade.swap_usd = _costs.apply(
+                    trade.pnl_usd, trade.lot, trade.direction,
+                    trade.open_time.timestamp(), m1_time.timestamp(), pair_cfg)
                 del open_trades[sym]
                 closed_trades.append(trade)
                 balance += trade.pnl_usd
