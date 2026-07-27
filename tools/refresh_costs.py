@@ -49,8 +49,22 @@ SWAP_MODE_POINTS = 1          # pontban → ár-egység → számladeviza a tick
 SWAP_MODE_CURRENCY_SYMBOL = 2  # a szimbólum bázisdevizájában
 SWAP_MODE_CURRENCY_MARGIN = 3  # margin-devizában
 SWAP_MODE_CURRENCY_DEPOSIT = 4  # MÁR a számla devizájában → közvetlenül használható
+SWAP_MODE_INTEREST_CURRENT = 5  # ÉVES KAMAT% a pozíció AKTUÁLIS értékére (CFD-k)
+
+# Az INTEREST módok banki éve (MQL5: „standard bank year is 360 days").
+BANK_YEAR_DAYS = 360
 
 MIN_SWAP_SAMPLES = 3          # ennyi mért éjszaka alatt nem hiszünk a mérésnek
+
+
+def mt5_day_to_weekday(mt5_day: int) -> int:
+    """MT5 `ENUM_DAY_OF_WEEK` (VASÁRNAP=0 … SZOMBAT=6) → Python `weekday()`
+    (HÉTFŐ=0 … VASÁRNAP=6).
+
+    Enélkül a `swap_rollover3days` nyers értéke rossz napot jelölne: az indexeknél
+    az 5 PÉNTEKET jelent, Python-indexben viszont az 5 SZOMBAT — a 3×-os swap
+    sosem esett volna egy tényleges kereskedési napra."""
+    return (int(mt5_day) - 1) % 7
 
 
 def _pip_size(info) -> float:
@@ -122,16 +136,44 @@ def swap_from_symbol(mt5, info, pip_size: float) -> tuple:
     mode = int(getattr(info, "swap_mode", 0) or 0)
     sl = float(getattr(info, "swap_long", 0.0) or 0.0)
     ss = float(getattr(info, "swap_short", 0.0) or 0.0)
+    tv = float(getattr(info, "trade_tick_value", 0.0) or 0.0)
+    ts = float(getattr(info, "trade_tick_size", 0.0) or 0.0)
+    pt = float(getattr(info, "point", 0.0) or 0.0)
+
     if mode == SWAP_MODE_CURRENCY_DEPOSIT:
         return sl, ss                      # már a számla devizájában
+
     if mode == SWAP_MODE_POINTS:
-        tv = float(getattr(info, "trade_tick_value", 0.0) or 0.0)
-        ts = float(getattr(info, "trade_tick_size", 0.0) or 0.0)
-        pt = float(getattr(info, "point", 0.0) or 0.0)
         if tv > 0 and ts > 0 and pt > 0:
             per_point = tv / ts * pt       # 1 pont értéke 1 lotra, számladevizában
             return sl * per_point, ss * per_point
+        return None, None
+
+    if mode == SWAP_MODE_INTEREST_CURRENT:
+        # A swap ÉVES KAMAT% a pozíció aktuális értékére (a CFD-k tipikus módja):
+        #     éjszakai swap = ár × lot × kontraktus × (kamat% / 100 / 360)
+        # a szimbólum PROFIT-devizájában. Számladevizára a `tick_value/tick_size`
+        # arány vált (az MT5 a tick-értéket MÁR a számla devizájában adja), és
+        # ebben a kontraktus-méret kiesik:
+        #     per_lot_night = ár × (kamat% / 100 / 360) × tick_value / tick_size
+        #
+        # FIGYELEM: ez az AKTUÁLIS árra vonatkozik, tehát PILLANATKÉP — ugyanúgy
+        # frissíteni kell időnként, mint a `pv1_usd`-t.
+        with_price = _mid_price(mt5, info)
+        if with_price and tv > 0 and ts > 0:
+            f = with_price * (tv / ts) / (100.0 * BANK_YEAR_DAYS)
+            return sl * f, ss * f
+        return None, None
+
     return None, None
+
+
+def _mid_price(mt5, info) -> float:
+    """Az aktuális közép-ár (a kamat-alapú swap alapja). 0.0, ha nincs tick."""
+    tick = mt5.symbol_info_tick(info.name)
+    if tick and tick.bid and tick.ask:
+        return (float(tick.bid) + float(tick.ask)) / 2.0
+    return float(getattr(info, "bid", 0.0) or 0.0)
 
 
 def main() -> int:
@@ -199,7 +241,8 @@ def main() -> int:
                 pc["swap_long_per_lot"] = round(float(sw_l), 4)
                 pc["swap_short_per_lot"] = round(float(sw_s), 4)
                 if w3 is not None:
-                    pc["swap_3x_weekday"] = int(w3)
+                    # MT5 ENUM_DAY_OF_WEEK → Python weekday() (lásd a fenti helper)
+                    pc["swap_3x_weekday"] = mt5_day_to_weekday(w3)
     finally:
         mc.disconnect()
 
