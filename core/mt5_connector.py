@@ -8,8 +8,18 @@ from core import order_exec
 
 log = logging.getLogger(__name__)
 
-# MT5 Python API nem thread-safe — minden hívást ezen a lockon keresztül kell intézni
-MT5_LOCK = threading.Lock()
+# MT5 Python API nem thread-safe — minden hívást ezen a lockon keresztül kell intézni.
+#
+# RE-ENTRÁNS (RLock), szándékosan: a hívási láncok mélyek (pl. a viz-szál →
+# get_candles → symbol_info), és egy sima Lock-nál egyetlen véletlen egymásba
+# ágyazás AZONNALI HOLTPONTOT okozna — a kereskedési szál némán megállna, nyitott
+# pozíciókkal. Az RLock ugyanazon a szálon újra fogható; a szálak közti kizárás
+# (ami a cél) változatlan.
+#
+# A lockot RÖVIDEN kell fogni: csak a konkrét MT5-hívás idejére, sosem a rá épülő
+# Python-számítás (indikátorok, rajz-objektumok) alatt — különben a viz-szál
+# kiéheztetné a kereskedést.
+MT5_LOCK = threading.RLock()
 
 
 def _init_kwargs(mt5_cfg: dict) -> dict:
@@ -152,6 +162,107 @@ def disconnect():
     with MT5_LOCK:
         mt5.shutdown()
     log.info("MT5 kapcsolat lezárva.")
+
+
+# ---------------------------------------------------------------------------
+# Kapcsolat-felügyelet (a kereskedési ciklus hívja minden körben)
+# ---------------------------------------------------------------------------
+# Eddig NEM volt újrakapcsolódás: ha az MT5 terminál újraindult (pl. éjszakai
+# bróker-frissítés) vagy megszakadt a kapcsolat, a `copy_rates` None-t adott, a
+# `process_pair` csendben visszatért — a motor tétlen maradt, a NYITOTT pozíciók
+# pedig menedzsment (breakeven, trailing, kiszállási jel) NÉLKÜL, és semmi nem jelezte.
+
+RECONNECT_BACKOFF_SEC = (5, 15, 30, 60, 120, 300)   # növekvő várakozás a próbák közt
+
+_conn_state = {
+    "next_try":  0.0,    # ekkor próbálkozhatunk újra (monoton óra)
+    "attempt":   0,      # hányadik sikertelen próba sorozatban
+    "was_down":  False,  # naplózás: a „megszakadt" üzenet egyszer menjen ki
+    "last_note": "",     # az utoljára naplózott ok (ne ismétlődjön 10 mp-enként)
+}
+
+
+def connection_lost_since() -> bool:
+    """Épp szakadt állapotban vagyunk-e (a felület jelzéséhez)."""
+    return bool(_conn_state["was_down"])
+
+
+def _note_once(msg: str, *args) -> None:
+    """Ugyanazt az okot ne írjuk ki minden körben (10 mp-enként), csak változáskor."""
+    key = msg % args if args else msg
+    if _conn_state["last_note"] != key:
+        _conn_state["last_note"] = key
+        log.warning("%s", key)
+
+
+def ensure_connected(cfg: dict) -> bool:
+    """A kereskedéshez HASZNÁLHATÓ-e most az MT5? Ha nem, megpróbálja helyreállítani.
+
+    Két, KÜLÖNBÖZŐ kezelést igénylő szakadás van:
+
+      • **Terminál ↔ szerver**: a terminál fut, de nincs bróker-kapcsolat
+        (`terminal_info().connected == False`). Újrainicializálni FELESLEGES —
+        várni kell. Ilyenkor False-t adunk, de nem bántjuk a kapcsolatot.
+      • **Python ↔ terminál**: az `account_info()` üres (a terminál újraindult, a
+        session elszállt). Ezt ÚJRA-INICIALIZÁLÁSSAL lehet helyreállítani — ezt
+        teszi a `connect()`, a fiók-ellenőrzésével együtt (sosem dolgozunk rossz
+        fiókon), NÖVEKVŐ várakozással a próbák közt (ne ostromoljuk a terminált).
+
+    True → mehet a kereskedés. False → ezt a kört ki kell hagyni.
+    """
+    import time as _t
+    now = _t.monotonic()
+
+    try:
+        with MT5_LOCK:
+            info = mt5.account_info()
+            term = mt5.terminal_info()
+    except Exception:
+        info = term = None
+
+    if info is not None:
+        # Van API-kapcsolat — de a terminál össze van-e kötve a szerverrel?
+        if term is not None and not getattr(term, "connected", True):
+            _note_once("MT5: a terminál NINCS összekötve a bróker szerverével — "
+                       "várakozás (ÚJ belépő nem nyílik, a meglévők kezelése is szünetel).")
+            _conn_state["was_down"] = True
+            return False
+        if _conn_state["was_down"]:
+            log.info("MT5 kapcsolat HELYREÁLLT (%s, login %s). A kereskedés folytatódik.",
+                     info.server, info.login)
+            _conn_state.update(was_down=False, attempt=0, next_try=0.0, last_note="")
+        return True
+
+    # ── Python ↔ terminál szakadás → újrakapcsolódás, backoff-fal ──────────
+    _conn_state["was_down"] = True
+    _note_once("MT5 KAPCSOLAT MEGSZAKADT (account_info üres). Újrakapcsolódás "
+               "folyamatban — amíg nem áll helyre, a motor NEM kereskedik és a "
+               "nyitott pozíciókat sem tudja kezelni!")
+    if now < _conn_state["next_try"]:
+        return False
+
+    attempt = _conn_state["attempt"]
+    wait = RECONNECT_BACKOFF_SEC[min(attempt, len(RECONNECT_BACKOFF_SEC) - 1)]
+    _conn_state["next_try"] = now + wait
+    _conn_state["attempt"]  = attempt + 1
+
+    log.warning("MT5 újrakapcsolódási kísérlet #%d…", attempt + 1)
+    try:
+        with MT5_LOCK:
+            mt5.shutdown()          # a fél-holt session eltakarítása az új initialize előtt
+    except Exception:
+        pass
+    try:
+        ok = connect(cfg)           # initialize + login + FIÓK-ELLENŐRZÉS
+    except Exception as e:
+        log.error("MT5 újrakapcsolódás kivétel: %s", e)
+        ok = False
+    if ok:
+        log.info("MT5 újrakapcsolódás SIKERES (%d. kísérlet).", attempt + 1)
+        _conn_state.update(was_down=False, attempt=0, next_try=0.0, last_note="")
+        return True
+    log.warning("MT5 újrakapcsolódás sikertelen — következő próba %d mp múlva.", wait)
+    return False
 
 
 def account_balance() -> float:

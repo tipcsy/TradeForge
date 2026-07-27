@@ -60,6 +60,11 @@ from core.params_store import (
     PARAMS_DIR, params_file, set_active_strategy, migrate_flat_layout,
     resolve_trade_hours,
 )
+
+# Az MT5 Python API nem thread-safe. A motor, a GUI szálai ÉS (a #8 óta) a
+# viz-szál is hívja — minden közvetlen `mt5.*` hívás EZEN keresztül megy.
+# RÖVIDEN fogjuk: csak a hívás idejére, sosem a rá épülő Python-számítás alatt.
+MT5_LOCK = mt5_connector.MT5_LOCK
 TRADES_CSV   = ROOT / "trades.csv"
 
 
@@ -202,7 +207,10 @@ def request_viz_clear(symbol: str) -> None:
 # ---------------------------------------------------------------------------
 
 def get_candles(symbol: str, timeframe, count: int) -> Optional[pd.DataFrame]:
-    rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, count)
+    # Csak a LEKÉRÉS van lock alatt — a DataFrame-építés (a drágább rész) nem,
+    # különben a mély viz-ablakok (~43 000 M1 gyertya) kiéheztetnék a kereskedést.
+    with MT5_LOCK:
+        rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, count)
     if rates is None or len(rates) == 0:
         return None
     df = pd.DataFrame(rates)
@@ -213,7 +221,8 @@ def get_candles(symbol: str, timeframe, count: int) -> Optional[pd.DataFrame]:
     # A bar-onkénti spread (pont → ÁR) — a viz spread-kapujához (mint a backtest
     # close_spread-je). Enélkül a chart-jelölők a spread-kaput nem modelleznék.
     if "spread" in df.columns:
-        info = mt5.symbol_info(symbol)
+        with MT5_LOCK:
+            info = mt5.symbol_info(symbol)
         pt = getattr(info, "point", 0.0) if info else 0.0
         if pt and pt > 0:
             df["spread"] = df["spread"].astype(float) * pt
@@ -232,7 +241,8 @@ def open_position(
     strategy_name: str = "",
 ) -> Optional[int]:
     order_type = mt5.ORDER_TYPE_BUY if direction == "BUY" else mt5.ORDER_TYPE_SELL
-    tick = mt5.symbol_info_tick(symbol)
+    with MT5_LOCK:
+        tick = mt5.symbol_info_tick(symbol)
     if tick is None:
         log.error("%s — nem sikerült az ár lekérdezés.", symbol)
         return None
@@ -244,7 +254,8 @@ def open_position(
     #     „Invalid price" a válasz, és a jel elveszik;
     #   • type_filling: a szimbólum TÁMOGATOTT módja (a fixen bedrótozott IOC ott,
     #     ahol a bróker FOK-ot vár, minden kötést elbukott — retcode 10030).
-    _info = mt5.symbol_info(symbol)
+    with MT5_LOCK:
+        _info = mt5.symbol_info(symbol)
     request = {
         "action":    mt5.TRADE_ACTION_DEAL,
         "symbol":    symbol,
@@ -260,7 +271,8 @@ def open_position(
         "type_filling": order_exec.filling_mode(symbol, _info),
     }
 
-    result = mt5.order_send(request)
+    with MT5_LOCK:
+        result = mt5.order_send(request)
     if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
         # A retcode is kell, ne csak a szöveg: 10030 = nem támogatott kitöltési mód,
         # 10016 = érvénytelen stop, 10004/10021 = requote/nincs ár. Enélkül nem
@@ -278,20 +290,22 @@ def open_position(
 
 
 def modify_sl(ticket: int, new_sl: float) -> bool:
-    position = mt5.positions_get(ticket=ticket)
+    with MT5_LOCK:
+        position = mt5.positions_get(ticket=ticket)
     if not position:
         return False
     pos = position[0]
     # Az SL a szimbólum rácsára igazítva (tick_size/digits) — a hívó pip-alapú
     # kerekítése önmagában érvénytelen árat adhat a nem tizedes lépésű piacokon.
-    request = {
-        "action":   mt5.TRADE_ACTION_SLTP,
-        "symbol":   pos.symbol,
-        "sl":       order_exec.normalize_price(new_sl, mt5.symbol_info(pos.symbol)),
-        "tp":       pos.tp,
-        "position": ticket,
-    }
-    result = mt5.order_send(request)
+    with MT5_LOCK:
+        request = {
+            "action":   mt5.TRADE_ACTION_SLTP,
+            "symbol":   pos.symbol,
+            "sl":       order_exec.normalize_price(new_sl, mt5.symbol_info(pos.symbol)),
+            "tp":       pos.tp,
+            "position": ticket,
+        }
+        result = mt5.order_send(request)
     ok = result is not None and result.retcode == mt5.TRADE_RETCODE_DONE
     if not ok:
         # Gyakori ok: az új SL túl közel az árhoz (bróker min. stop-távolság) →
@@ -316,7 +330,8 @@ def get_open_positions(magic: int, strategy_name: str | None = None,
     „saját" halmaz ugyanabból a pillanatképből képződik, amihez a lezárás-
     detektálás is mér. None → saját lekérés (a régi viselkedés)."""
     if positions is None:
-        positions = mt5.positions_get()
+        with MT5_LOCK:
+            positions = mt5.positions_get()
     if positions is None:
         return []
     own = [p for p in positions if p.magic == magic]
@@ -349,7 +364,8 @@ def closed_deal_summary(ticket: int):
     értékével (a záró deal-ök profit+jutalék+swap összege), hogy a felület, a napi
     limit és a trades.csv ugyanazt a számot mutassa."""
     try:
-        history = mt5.history_deals_get(position=ticket)
+        with MT5_LOCK:
+            history = mt5.history_deals_get(position=ticket)
     except Exception:
         return None
     if not history:
@@ -837,11 +853,16 @@ def write_pair_visuals(symbol: str, params: dict, strategy, pip_size: float,
         symbol, pair_visual_lines(symbol, params, strategy, pip_size, pair_cfg))
 
 
-def _write_symbol_viz(symbol, pair_cfg, strats, pair_states):
+def _write_symbol_viz(symbol, pair_cfg, strats, params_by_strat: dict):
     """Egy szimbólum chart-vizualizációja: MINDEN élő, engedélyezett stratégia
     rajza EGY `TFV_<symbol>.csv` fájlba, stratégia-taggel (az MQL5 `InpStrategy`
     input szerint szűr → az egyik chart-ablak az A-t, a másik a B-t mutatja).
-    Throttle-olva; a viz MEGJELENÍTÉS → kereskedési szünetben is frissül."""
+    Throttle-olva; a viz MEGJELENÍTÉS → kereskedési szünetben is frissül.
+
+    A DEDIKÁLT VIZ-SZÁL hívja (`_viz_worker`), NEM a kereskedési ciklus. Ezért
+    NEM kapja meg az élő `pair_states` szótárat (amit a motor közben módosít),
+    csak egy `{stratégia_név: params}` PILLANATKÉPET — így nincs megosztott,
+    változó állapot a két szál közt."""
     ds = dashboard.get(symbol)
     if not (VIZ_ENABLED and ds is not None):
         return
@@ -866,12 +887,11 @@ def _write_symbol_viz(symbol, pair_cfg, strats, pair_states):
         return
     lines = []
     for st in strats:
-        key = (symbol, st.name)
-        if key not in pair_states or st.name not in _viz_names:
+        if st.name not in params_by_strat or st.name not in _viz_names:
             continue
         try:
             # A LEGFRISSEBB JSON-paraméter (követi az instrumentum-ablak Mentését).
-            vparams = load_pair_params(symbol, st.name) or pair_states[key].params
+            vparams = load_pair_params(symbol, st.name) or params_by_strat[st.name]
             lines += pair_visual_lines(symbol, vparams, st, pip_size, pair_cfg)
         except Exception as e:
             log.debug("%s/%s — viz sor hiba: %s", symbol, st.name, e)
@@ -889,6 +909,64 @@ def _write_symbol_viz(symbol, pair_cfg, strats, pair_states):
         mt5_visual.write_lines(symbol, lines, clear_first=clear_first)
     except Exception as e:
         log.debug("%s — viz írás hiba: %s", symbol, e)
+
+
+# ---------------------------------------------------------------------------
+# Viz-szál (a rajzolás LEVÁLASZTVA a kereskedésről)
+# ---------------------------------------------------------------------------
+# A chart-vizualizáció szimbólumonként és stratégiánként MÉLY adatablakot tölt
+# (a wpr_sma-nál ~43 000 M1 + ~3 000 M15 gyertya), Python-ciklusban játssza vissza
+# a jelzéseket, és egy hónapnyi deal-history-t is lekér. Ez a KERESKEDÉSI szálban
+# futott, 15 mp-enként, 10 instrumentumra — így a 10 mp-es kör túlcsúszott, és
+# KÉSETT a breakeven, a trailing és a kiszállási jel. (A ui_watchdog.log 2-3 mp-es
+# főszál-blokkolásokat is naplózott.)
+#
+# Mostantól dedikált szálon fut. A két szál NEM oszt változó állapotot: a
+# kereskedési ciklus körönként PUBLIKÁL egy kész munkalistát (egyetlen atomi
+# referencia-csere), a viz-szál pedig csak olvassa. Az MT5-hívások a közös
+# MT5_LOCK alatt mennek (rövid szakaszokban), így a rajz nem versenyez a
+# megbízásokkal — csak sorbaáll mögöttük.
+
+# [(symbol, pair_cfg, strats, {strat_név: params}), …] — a kereskedési ciklus írja.
+_viz_jobs: list = []
+
+VIZ_POLL_SEC = 1.0     # a szál ilyen sűrűn néz rá; a tényleges ütemet a per-szimbólum
+                       # throttle (VIZ_INTERVAL_SEC) szabja meg
+
+
+def _viz_worker():
+    """A viz-szál fő ciklusa. Sosem hal meg: minden hiba naplózódik és megy tovább —
+    a rajz megszakadása nem állíthatja meg a kereskedést (és fordítva sem)."""
+    log.info("Viz-szál elindult (rajzolás a kereskedési szálon KÍVÜL).")
+    while True:
+        try:
+            for symbol, pair_cfg, strats, params_by_strat in _viz_jobs:
+                try:
+                    _write_symbol_viz(symbol, pair_cfg, strats, params_by_strat)
+                except Exception as e:
+                    log.debug("%s — viz hiba: %s", symbol, e)
+        except Exception as e:
+            log.debug("viz-szál hiba: %s", e)
+        time.sleep(VIZ_POLL_SEC)
+
+
+def _publish_viz_jobs(all_pairs: dict, strats_by_symbol: dict, pair_states: dict):
+    """A viz-szál munkalistájának frissítése a kereskedési ciklus végén.
+
+    ÚJ listát épít és EGY értékadással cseréli le (atomi referencia-csere) — a
+    viz-szál így sosem lát félkész állapotot, és nem iterál olyan szótáron, amit
+    a motor közben módosít (`dictionary changed size during iteration`)."""
+    global _viz_jobs
+    jobs = []
+    for symbol, pair_cfg in all_pairs.items():
+        if instrument_state.get(symbol) not in ("LIVE", "CLOSING"):
+            continue
+        strats = strats_by_symbol.get(symbol) or []
+        params = {st.name: pair_states[(symbol, st.name)].params
+                  for st in strats if (symbol, st.name) in pair_states}
+        if params:
+            jobs.append((symbol, pair_cfg, list(strats), params))
+    _viz_jobs = jobs
 
 
 def _apply_be_and_trailing(symbol, pos, ticket, pstate, is_rf, risky,
@@ -1020,7 +1098,8 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
     # Az óra a SZERVER/CHART idő (a bar-idővel és az óránkénti bontással egyező),
     # NEM a valós UTC — így a trade_hours pontosan azt jelenti, amit a charton
     # látsz, és a no-trade szürke sáv is illeszkedik. (A tick.time szerver-epoch.)
-    _tick = mt5.symbol_info_tick(symbol)
+    with MT5_LOCK:
+        _tick = mt5.symbol_info_tick(symbol)
     hour = (datetime.fromtimestamp(_tick.time, tz=timezone.utc).hour
             if _tick else datetime.now(timezone.utc).hour)
     # STRATÉGIA-hatókörű óra-kapu: a stratégia saját `{symbol}_hours.json`-ja (ha
@@ -1043,7 +1122,8 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
         # stop-húzás a tradeable ágban fut.
         if _preset in (_rr.PRESET_OFF, _rr.PRESET_RISKY):
             try:
-                _sinfo = mt5.symbol_info(symbol)
+                with MT5_LOCK:
+                    _sinfo = mt5.symbol_info(symbol)
                 for _p in get_open_positions(magic, _sn):
                     if _p.symbol != symbol:
                         continue
@@ -1150,7 +1230,8 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
         atr_val = None
 
     spread_ok = True
-    sym_info  = mt5.symbol_info(symbol)
+    with MT5_LOCK:
+        sym_info = mt5.symbol_info(symbol)
     if sym_info and atr_val is not None and sym_info.point > 0:
         # A spread-kaput a KÖZÖS core.spread_gate dönti — UGYANAZ a képlet, amit a
         # backtest is használ (egy forrás → sose csúszik szét). A bróker pont-alapú
@@ -1167,7 +1248,8 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
     # halmaza ÉS ehhez mér a lezárás-detektálás is (lásd lentebb) — így a kettő
     # sosem csúszhat szét. A None (MT5-hiba) megkülönböztetve az ÜREStől: hiba
     # esetén nem szabad mindent „lezártnak" venni.
-    _pos_snapshot  = mt5.positions_get()
+    with MT5_LOCK:
+        _pos_snapshot = mt5.positions_get()
     _snapshot_ok   = _pos_snapshot is not None
     _all_positions = list(_pos_snapshot or [])
 
@@ -1697,7 +1779,8 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
             eff_slots = calc_effective_slots(balance, sl_pips, pair_cfg, ctf)
             lot = calc_lot(balance, sl_pips, pair_cfg, ctf, eff_slots)
 
-            tick = mt5.symbol_info_tick(symbol)
+            with MT5_LOCK:
+                tick = mt5.symbol_info_tick(symbol)
             if tick:
                 # Az árak a szimbólum RÁCSÁRA igazítva (tick_size többszöröse,
                 # digits szerint) — a fix 5 tizedes a nem tizedes tick-méretű
@@ -1944,7 +2027,8 @@ def run(cfg: dict, slot_mgr: SlotManager):
     # UGYANÍGY helyreállnak: a `get_open_positions` a stratégia nevével azokat is
     # visszaadja. Előbb takarítás: a program állása közben lezárt bejegyzések.
     try:
-        _all_now = mt5.positions_get() or []
+        with MT5_LOCK:
+            _all_now = mt5.positions_get() or []
         adopted.prune({p.ticket for p in _all_now})
     except Exception:
         pass
@@ -1994,9 +2078,31 @@ def run(cfg: dict, slot_mgr: SlotManager):
     log.info("Élő kereskedés indul | %d LIVE pár (%d stratégia-állapot)",
              len({_s for (_s, _n) in pair_states}), len(pair_states))
 
+    # A chart-rajzolás DEDIKÁLT szálon (lásd `_viz_worker`) — így a mély
+    # adatablakok betöltése nem késlelteti a breakeven/trailing/kiszállás útját.
+    import threading as _threading
+    _threading.Thread(target=_viz_worker, daemon=True, name="TradeForgeViz").start()
+
     while True:
         try:
+            # ── Kapcsolat-felügyelet ─────────────────────────────────────────
+            # Ha nincs használható MT5-kapcsolat, ezt a kört KIHAGYJUK (és az
+            # `ensure_connected` a háttérben újrakapcsolódik, növekvő várakozással).
+            # Enélkül a motor csendben tétlen maradt, a nyitott pozíciók pedig
+            # menedzsment nélkül — most legalább naplózza, és magától helyreáll.
+            if not mt5_connector.ensure_connected(cfg):
+                time.sleep(10)
+                continue
+
             balance = mt5_connector.account_balance()
+            # Nulla/negatív egyenleg = SIKERTELEN lekérés (nem valós állapot). Ilyenkor
+            # a `calc_lot` nulla kockázatot számolna, és MIN_LOT-tal kötne — rossz
+            # méretezéssel. Inkább kihagyjuk a kört.
+            if balance <= 0:
+                log.warning("MT5: az egyenleg nem olvasható (%.2f) — a kör kihagyva "
+                            "(a hibás méretezés elkerülésére).", balance)
+                time.sleep(10)
+                continue
 
             # Risky állapot óránkénti újraolvasása (külső program írhatja)
             if time.time() - last_risky_reload >= risky_reload_sec:
@@ -2089,8 +2195,11 @@ def run(cfg: dict, slot_mgr: SlotManager):
                         key = (symbol, st.name)
                         if key in pair_states:
                             process_pair(pair_states[key], slot_mgr, balance, st)
-                    # Chart-viz: minden élő stratégia EGY fájlba (stratégia-taggel).
-                    _write_symbol_viz(symbol, pair_cfg, strats, pair_states)
+
+            # A chart-vizualizációt a VIZ-SZÁL rajzolja — itt csak a munkalistát
+            # frissítjük (egy atomi referencia-csere). Így a mély adatablakok
+            # betöltése nem tolja ki a kör idejét a 10 mp fölé.
+            _publish_viz_jobs(all_pairs, strats_by_symbol, pair_states)
 
             time.sleep(10)
 
