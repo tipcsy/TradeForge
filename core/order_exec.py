@@ -170,14 +170,31 @@ def enforce_min_sl_pips(sl_pips: float, tp_pips: float, info,
 
     FONTOS: ezt a méretezés ELŐTT kell hívni. A nagyobb SL-táv kisebb lotot ad
     (`calc_lot`), tehát a kockázati keret ($) NEM nő — csak a stop kerül messzebb.
+
+    A SPREAD IS BELESZÁMÍT, és ez nem finomság — enélkül a megbízás elbukik:
+
+      • BUY-nál a belépő az ASK-on történik, a stop viszont a BID-en triggerel;
+      • SELL-nél a belépő a BID-en, a stop az ASK-on.
+
+    Vagyis a bróker által ellenőrzött távolság MINDIG egy spreaddel kevesebb, mint
+    amit a belépő árhoz mérve számolunk. (A TP-nél ez fordítva van — az ugyanennyit
+    NYER —, ezért a TP-t nem kell tágítani.)
+
+    Valós eset a naplóból: UK100 SELL, SL-táv 1,933, `stops_level` 1,500 → látszólag
+    rendben. A spread viszont 1,410 volt, tehát a bróker 1,933 − 1,410 = 0,523-at
+    mért, és `10016 Invalid stops`-szal elutasította — a jel elveszett.
+
     Egy pont ráhagyás, hogy a határon álló érték se bukjon el."""
     if pip_size <= 0 or sl_pips <= 0:
         return sl_pips, tp_pips, False
     point = float(getattr(info, "point", 0.0) or 0.0) if info is not None else 0.0
-    floor_price = min_stop_price(info)
-    if floor_price <= 0:
+    spread_price = (float(getattr(info, "spread", 0) or 0) * point
+                    if info is not None else 0.0)
+    # A ténylegesen szükséges táv: bróker-minimum + spread (+1 pont ráhagyás).
+    need_price = min_stop_price(info) + spread_price + point
+    if need_price <= 0:
         return sl_pips, tp_pips, False
-    min_pips = (floor_price + point) / pip_size      # +1 pont ráhagyás
+    min_pips = need_price / pip_size
     if sl_pips >= min_pips:
         return sl_pips, tp_pips, False
     scale = min_pips / sl_pips
