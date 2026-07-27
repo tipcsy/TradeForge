@@ -286,14 +286,21 @@ def modify_sl(ticket: int, new_sl: float) -> bool:
     return ok
 
 
-def get_open_positions(magic: int, strategy_name: str | None = None) -> list:
+def get_open_positions(magic: int, strategy_name: str | None = None,
+                       positions=None) -> list:
     """A stratégia „sajátjai": a MAGIC-jével nyitott pozíciók + a felületről
     hozzárendelt (örökbefogadott) KÉZI pozíciók.
 
     A magic utólag nem módosítható az MT5-ben, ezért a kézzel nyitott pozíció
     nem kaphat magicet — a hozzárendelést a `core.adopted` tartja nyilván
-    (ticket → stratégia). Innentől a motor számára ugyanaz a két halmaz."""
-    positions = mt5.positions_get()
+    (ticket → stratégia). Innentől a motor számára ugyanaz a két halmaz.
+
+    `positions`: egy MÁR lekért teljes pozíció-pillanatkép (a hívó egyszer kéri le
+    a körre, és a szűréshez ideadja) — így nem megy fölösleges MT5-hívás, és a
+    „saját" halmaz ugyanabból a pillanatképből képződik, amihez a lezárás-
+    detektálás is mér. None → saját lekérés (a régi viselkedés)."""
+    if positions is None:
+        positions = mt5.positions_get()
     if positions is None:
         return []
     own = [p for p in positions if p.magic == magic]
@@ -305,6 +312,57 @@ def get_open_positions(magic: int, strategy_name: str | None = None) -> list:
     seen = {p.ticket for p in own}
     return own + [p for p in positions
                   if p.ticket in extra and p.ticket not in seen]
+
+
+def closed_deal_summary(ticket: int):
+    """Egy LEZÁRT pozíció deal-összegzése a naplózáshoz/elszámoláshoz, vagy None,
+    ha a pozíció NEM zárult le (vagy hiányos a history).
+
+    Visszaad: `(magic, symbol, pnl)` — a NYITÓ deal magicje és szimbóluma (ez
+    mondja meg, MELYIK stratégiáé a pozíció, miután az MT5-ből már eltűnt), és a
+    teljes realizált P&L.
+
+    KÉT dolgot old meg, amit a régi „utolsó deal" logika elrontott:
+      • CSAK akkor ad vissza értéket, ha van ZÁRÓ (OUT) deal — egy NYITOTT pozíció
+        history-ja csak a nyitó dealt tartalmazza, azt tehát sosem lehet tévedésből
+        „lezártként" elkönyvelni (a `positions_get` pillanatnyi hibája esetén sem);
+      • az ÖSSZES záró dealt összegzi, nem csak az utolsót — a Felező/Pajzs
+        részleges zárása külön deal, ami eddig kimaradt a naplózott P&L-ből.
+
+    A P&L konvenciója AZONOS a `mt5_connector.daily_pnl`/`closed_positions_today`
+    értékével (a záró deal-ök profit+jutalék+swap összege), hogy a felület, a napi
+    limit és a trades.csv ugyanazt a számot mutassa."""
+    try:
+        history = mt5.history_deals_get(position=ticket)
+    except Exception:
+        return None
+    if not history:
+        return None
+    entry_deal = next((d for d in history if d.entry == mt5.DEAL_ENTRY_IN), None)
+    out_deals  = [d for d in history
+                  if d.entry in (mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_OUT_BY)]
+    if entry_deal is None or not out_deals:
+        return None                    # még nyitva / hiányos history → nem könyvelünk
+    pnl = sum(d.profit + d.commission + d.swap for d in out_deals)
+    return int(entry_deal.magic), entry_deal.symbol, pnl
+
+
+def owns_closed_ticket(ticket: int, deal_magic: int, deal_symbol: str,
+                       symbol: str, magic: int, strategy_name: str) -> bool:
+    """EZ a (szimbólum, stratégia) páros felelős-e a LEZÁRT ticket elszámolásáért?
+
+    Több stratégia futhat UGYANAZON az instrumentumon, külön magickel — ezért a
+    szimbólum-egyezés önmagában NEM azonosít (ez okozta, hogy az egyik stratégia
+    a másik NYITOTT pozícióját is „lezártnak" vette). A tulajdonos:
+      • örökbefogadott (kézzel nyitott) pozíciónál a hozzárendelt stratégia,
+      • különben a nyitó deal MAGICJE — ezt a `close_position`/SL/TP zárás sem
+        változtatja meg, és a pozíció eltűnése után is olvasható a history-ból."""
+    if deal_symbol != symbol:
+        return False
+    owner = adopted.strategy_of(ticket)
+    if owner is not None:
+        return owner == strategy_name
+    return deal_magic == magic
 
 
 def pip_to_price(pips: float, pip_size: float) -> float:
@@ -1089,9 +1147,18 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
                       symbol, current_spread_pips, _cap_pips)
 
     # --- Pozíció menedzsment ---
+    # EGY teljes pozíció-pillanatkép a körre: ebből képződik a stratégia „saját"
+    # halmaza ÉS ehhez mér a lezárás-detektálás is (lásd lentebb) — így a kettő
+    # sosem csúszhat szét. A None (MT5-hiba) megkülönböztetve az ÜREStől: hiba
+    # esetén nem szabad mindent „lezártnak" venni.
+    _pos_snapshot  = mt5.positions_get()
+    _snapshot_ok   = _pos_snapshot is not None
+    _all_positions = list(_pos_snapshot or [])
+
     # A magicjével nyitottak MELLETT a felületről hozzárendelt (örökbefogadott)
     # kézi pozíciók is ide tartoznak — ugyanaz a kezelés vonatkozik rájuk.
-    open_positions = get_open_positions(magic, strategy.name)
+    open_positions = get_open_positions(magic, strategy.name,
+                                        positions=_all_positions)
     symbol_positions = [p for p in open_positions if p.symbol == symbol]
 
     # Cost-cut (idő-stop, tananyag 2.6): ha bekapcsolt, a nyitás után N fő-tf
@@ -1455,44 +1522,54 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
     else:
         build_runtime.pop(symbol, None)
 
-    # Lezárt pozíciók észlelése — a GLOBÁLIS nyitott halmazhoz mérve!
-    # (Korábbi hiba: az aktuális szimbólum pozícióihoz mértünk, így egy MÁSIK
-    #  pár feldolgozása tévesen "lezártnak" vette és kivette e pár ticketjeit a
-    #  slot-kezelőből → felszabadult a slot → korlátlan túlnyitás ugyanarra a párra.)
-    all_open_tickets = {p.ticket for p in open_positions}
-    for ticket in slot_mgr.all_tickets():
-        still_open = ticket in all_open_tickets
-        if not still_open:
-            # Lezárva — kereskedési napló
-            history = mt5.history_deals_get(position=ticket)
-            if history:
-                last_deal = history[-1]
-                # Csak a SAJÁT szimbólum ticketjeit kezeljük — másik pár
-                # feldolgozási körében ne írjuk rá ennek P&L-jét a wrong ds/state-re.
-                # (Ez okozta az UKOUSD zárt kereskedés P&L-jének EURUSD sorba kerülését.)
-                if last_deal.symbol != symbol:
-                    continue
-                pnl = last_deal.profit + last_deal.commission + last_deal.swap
-                state.daily_pnl += pnl
-                ds.daily_pnl     = state.daily_pnl
-                ds.position_pnl  = None
-                ds.risk_free      = False
-                slot_mgr.remove(ticket)
-                position_state.pop(ticket, None)
-                # Örökbefogadott pozíció: a bejegyzés lezártként megjelölve (a
-                # „Lezárt ma" fül még a stratégiához köti; a prune takarítja).
-                adopted.mark_closed(ticket)
-                log.info("📋 [%s] %s #%d zárt | P&L: %.2f$",
-                         strategy.name, symbol, ticket, pnl)
-                log_trade({
-                    "time":     datetime.now(timezone.utc).isoformat(),
-                    "event":    "close",
-                    "strategy": strategy.name,
-                    "symbol":   symbol,
-                    "ticket":   ticket,
-                    "magic":    magic,
-                    "pnl_usd":  pnl,
-                })
+    # Lezárt pozíciók észlelése — a TELJES (minden magicot tartalmazó) nyitott
+    # halmazhoz mérve, és csak a SAJÁT ticketekre könyvelve.
+    #
+    # KORÁBBI HIBA: a `still_open` a stratégia SAJÁT (magic szerint szűrt)
+    # pozícióihoz mért, a tulajdonost pedig pusztán a SZIMBÓLUM azonosította. Ha egy
+    # instrumentumon TÖBB stratégia fut (Ger40/UsaTec: wpr_sma + ml_ai), akkor a
+    # másik stratégia NYITOTT pozíciója itt „lezártnak" látszott: 10 mp-enként hamis
+    # close-sor a trades.csv-be, a `state.daily_pnl` felduzzadt, a `position_state`
+    # (original_sl!) törlődött — így a Felező/Pajzs 1R-triggere a MÁR ELMOZDÍTOTT
+    # stopból számolt (≈0 kockázati táv → azonnali részleges zárás) —, a
+    # kockázatmentes jelölés elveszett, és egy NYITOTT örökbefogadott pozíció
+    # lezártként lett megjelölve.
+    #
+    # Most: (1) a nyitott halmaz a teljes pillanatkép, (2) a `closed_deal_summary`
+    # csak ZÁRÓ deal megléte esetén ad értéket, (3) az `owns_closed_ticket` a nyitó
+    # deal MAGICJE (illetve az örökbefogadás) alapján dönti el a tulajdonost. A nem
+    # sajátot érintetlenül hagyjuk — azt a saját stratégiája számolja el.
+    all_open_tickets = {p.ticket for p in _all_positions}
+    for ticket in (slot_mgr.all_tickets() if _snapshot_ok else []):
+        if ticket in all_open_tickets:
+            continue
+        summary = closed_deal_summary(ticket)
+        if summary is None:
+            continue                     # nincs záró deal → mégsem zárult le
+        deal_magic, deal_symbol, pnl = summary
+        if not owns_closed_ticket(ticket, deal_magic, deal_symbol,
+                                  symbol, magic, strategy.name):
+            continue                     # másik (szimbólum, stratégia) ticketje
+        state.daily_pnl += pnl
+        ds.daily_pnl     = state.daily_pnl
+        ds.position_pnl  = None
+        ds.risk_free      = False
+        slot_mgr.remove(ticket)
+        position_state.pop(ticket, None)
+        # Örökbefogadott pozíció: a bejegyzés lezártként megjelölve (a
+        # „Lezárt ma" fül még a stratégiához köti; a prune takarítja).
+        adopted.mark_closed(ticket)
+        log.info("📋 [%s] %s #%d zárt | P&L: %.2f$",
+                 strategy.name, symbol, ticket, pnl)
+        log_trade({
+            "time":     datetime.now(timezone.utc).isoformat(),
+            "event":    "close",
+            "strategy": strategy.name,
+            "symbol":   symbol,
+            "ticket":   ticket,
+            "magic":    magic,
+            "pnl_usd":  pnl,
+        })
 
     # --- Belépés a stratégia jelzése alapján ---
     # Egy szimbólumon EGYSZERRE csak egy pozíció lehet — soha ne halmozzon
