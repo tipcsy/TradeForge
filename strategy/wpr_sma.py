@@ -523,7 +523,10 @@ class WprSmaStrategy(Strategy):
                 # TF-együttállás kapu (ha a keret bekötötte): a kapu által BLOKKOLT
                 # belépő nem jelenik meg a charton (csak az látszik, ami élesben is
                 # végrehajtódott volna).
-                if md.entry_gate is not None and not md.entry_gate(t, sig):
+                # A `cw` a DÖNTÉST hozó M1-gyertya záróára — a kapunak pontosan ez az
+                # „akkor ismert ár" kell (a formálódó TF-gyertya close-a), különben
+                # look-ahead lenne benne (lásd core.tf_align.build_historical_gate).
+                if md.entry_gate is not None and not md.entry_gate(t, float(cw), sig):
                     continue
                 atr_v = tl_atr[p]
                 if math.isnan(atr_v):

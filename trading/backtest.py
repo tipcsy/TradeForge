@@ -528,52 +528,41 @@ def _build_tf_align_evaluator(cfg, symbol, strategy_name, df_m1):
     (per-pár felülírható) — így a backtest bitre azt a kaput modellezi, amit az él.
 
     A `df_m1` a TELJES (nem a test-ablakra vágott) M1 → a magasabb idősíkok SMA-ja
-    a test-ablak elején is warmupolt (nem blokkol feleslegesen). KONVENCIÓ: az élő
-    és a viz (`tf_align_gate_fn`) a jel pillanatában FORMÁLÓDÓ TF-gyertyát nézi
-    (nyitó-idő ≤ t), a bar aktuális close-jával — ezt tükrözzük itt is (nyitó-idős
-    `searchsorted`), különben a backtest más belépőket engedne, mint az él/viz.
+    a test-ablak elején is warmupolt (nem blokkol feleslegesen).
 
-    Visszaad: `fn(entry_close_unix, direction) -> bool`, vagy None, ha a kapu erre a
-    stratégiára/instrumentumra nincs bekapcsolva, vagy nincs elég adat (fail-open)."""
+    KONVENCIÓ (közös a viz-replay-jel, `core.tf_align.build_historical_gate`): a jel
+    pillanatában FORMÁLÓDÓ TF-gyertyát nézzük, de annak a záróára az AKKOR ISMERT ár
+    (a döntést hozó M1-gyertya close-a), NEM a gyertya végleges záróára. Ez utóbbi
+    LOOK-AHEAD volt: egy M15-kapunál akár 15 percnyi jövőbelátás, amitől a backtest
+    más belépőket engedett át, mint az él.
+
+    Visszaad: `fn(entry_unix, price, direction) -> bool`, vagy None, ha a kapu erre a
+    stratégiára/instrumentumra nincs bekapcsolva."""
     try:
         import numpy as _np
         from core import tf_align as _tfa
         en, tfs, sma, gate = _tfa.config_for(cfg, symbol)
         if not en or strategy_name not in gate or not tfs:
             return None
-        if "close" not in df_m1.columns or len(df_m1) < sma + 1:
+        if "close" not in df_m1.columns:
             return None
         close_m1 = df_m1["close"]
-        series = []   # (close_unix_ndarray, sign_ndarray) idősíkonként
+        bars_by_tf = {}
         for tf in tfs:
             tf = int(tf)
-            if tf <= 1:
-                closes = close_m1
-            else:
-                closes = close_m1.resample(f"{tf}min").last().dropna()
-            if len(closes) < sma + 1:
-                return None   # adathiány → fail-open (nem szűrünk sehol)
-            c = closes.to_numpy(dtype=float)
-            smv = pd.Series(c).rolling(sma).mean().to_numpy()
-            sign = _np.sign(c - smv)
-            # NYITÓ-idő (mint a viz/él): a jel pillanatában FORMÁLÓDÓ gyertyát nézzük.
+            closes = (close_m1 if tf <= 1
+                      else close_m1.resample(f"{tf}min").last().dropna())
             open_unix = (closes.index.view("int64") // 1_000_000_000).astype(_np.int64)
-            series.append((open_unix, sign))
-
-        def _at(entry_unix, direction):
-            t = int(entry_unix)
-            for open_unix, sign in series:
-                idx = int(_np.searchsorted(open_unix, t, side="right")) - 1
-                if idx < 0:
-                    return True     # a sorozat előtti időre nem szűrünk (fail-open)
-                s = sign[idx]
-                if _np.isnan(s) or s == 0:
-                    return False    # semleges/hiányos → nincs teljes együttállás
-                if ("BUY" if s > 0 else "SELL") != direction:
-                    return False    # legalább egy idősík nem a jel irányába → blokk
-            return True
-
-        return _at
+            bars_by_tf[tf] = (open_unix, closes.to_numpy(dtype=float))
+            if len(closes) < sma:
+                # Az él ilyenkor BLOKKOLNA (nincs elég gyertya az SMA-hoz), ezért a
+                # backtest is blokkol — de szóljunk, különben „miért nincs egy kötés
+                # sem?" lesz belőle.
+                log.warning("%s/%s — a TF-együttállás kapu M%d idősíkján csak %d "
+                            "gyertya van (SMA %d kell) → a kapu MINDENT blokkol, "
+                            "ahogy élesben is. Tölts le hosszabb előzményt.",
+                            symbol, strategy_name, tf, len(closes), sma)
+        return _tfa.build_historical_gate(bars_by_tf, sma)
     except Exception:
         return None
 
@@ -1005,9 +994,11 @@ def run_pair(
                             prev_m1_row = m1_row
                             continue
                     if _tf_eval is not None:
-                        # a belépő M1-gyertya NYITÓ-idejére (mint a viz: times1[j]) →
-                        # a formálódó TF-gyertyát nézi, egyezően az él/viz kapujával
-                        if not _tf_eval(int(m1_time.timestamp()), signal):
+                        # A belépő M1-gyertya nyitó-idejére, a DÖNTÉSKOR ISMERT árral
+                        # (ennek az M1-gyertyának a záróára) — a formálódó TF-gyertya
+                        # záróára ez, nem a (még ismeretlen) végleges close.
+                        if not _tf_eval(int(m1_time.timestamp()),
+                                        float(m1_row["close"]), signal):
                             prev_m1_row = m1_row
                             continue
 
@@ -1686,8 +1677,10 @@ def run_portfolio_backtest(
                                         _sp_e / pip_size, float(_atr_e), pip_size, params)[0]:
                                     _gate_ok = False
                             if _gate_ok and info.get("tf_eval") is not None:
-                                # NYITÓ-idő (mint a viz/él): formálódó TF-gyertya
-                                if not info["tf_eval"](int(m1_time.timestamp()), signal):
+                                # A döntéskor ISMERT árral (az M1-gyertya záróára) —
+                                # a formálódó TF-gyertya close-a ez, nem a végleges.
+                                if not info["tf_eval"](int(m1_time.timestamp()),
+                                                       float(row["close"]), signal):
                                     _gate_ok = False
 
                         # A stratégia adja a pozíciótervet (SL/TP + saját szűrők)

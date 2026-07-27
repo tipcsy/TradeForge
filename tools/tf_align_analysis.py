@@ -34,6 +34,7 @@ sys.path.insert(0, str(ROOT))
 from strategy.settings import load_config
 from strategy import get_strategy
 from core.params_store import params_file, set_active_strategy
+from core import tf_align as _tfa
 from trading.backtest import load_data, run_pair
 
 _SMA_N = 50    # trend-irány idősíkonként: close vs SMA(_SMA_N)
@@ -51,6 +52,13 @@ def _resample(df: pd.DataFrame, rule: str) -> pd.DataFrame:
 def _trend_sign(df: pd.DataFrame, n: int = _SMA_N) -> pd.Series:
     sma = df["close"].rolling(n).mean()
     return np.sign(df["close"] - sma)
+
+
+def _bars(df: pd.DataFrame):
+    """(nyitó-idő unix, záróár) — a `core.tf_align` historikus kiértékelőjének
+    bemenete."""
+    return ((df.index.view("int64") // 1_000_000_000).astype(np.int64),
+            df["close"].to_numpy(dtype=float))
 
 
 def _mean_se(rs):
@@ -81,10 +89,18 @@ def analyze(symbol, cfg, strategy, ib, oos_frac=0.4, with_m1=False):
         return
 
     # Idősík-jelek: M5 (M1-ből), M15 (nyers), H1 (M1-ből). Opcionálisan M1 (zajos).
-    sm5  = _trend_sign(_resample(df1, "5min")).sort_index()
-    sm15 = _trend_sign(df15).sort_index()
-    sh1  = _trend_sign(_resample(df1, "60min")).sort_index()
-    sm1  = _trend_sign(df1).sort_index() if with_m1 else None
+    # A trend-előjelek a KÖZÖS, look-ahead-mentes magból (core.tf_align). Korábban
+    # `sign(bar_close − SMA)` volt, `asof(nyitó_idő)`-vel kiolvasva: az a kötés
+    # idejét TARTALMAZÓ gyertya VÉGLEGES záróárából számolt — vagyis a besorolás
+    # jövőt látott (H1-nél akár egy órányit), és ez torzította a mért „élt".
+    # Mostantól a formálódó gyertya záróára a kötés BELÉPŐ ÁRA (ami akkor ismert
+    # volt), az SMA-ba pedig csak lezárt gyertyák mennek — mint élesben.
+    _tfs = {5: _bars(_resample(df1, "5min")), 15: _bars(df15),
+            60: _bars(_resample(df1, "60min"))}
+    if with_m1:
+        _tfs[1] = _bars(df1)
+    _order = [5, 15, 60] + ([1] if with_m1 else [])
+    signs_at = _tfa.build_historical_signs({k: _tfs[k] for k in _order}, _SMA_N)
 
     split_ts = df15.index[int(len(df15) * (1 - oos_frac))]
     params = _params_for(symbol, cfg, strategy)
@@ -101,9 +117,7 @@ def analyze(symbol, cfg, strategy, ib, oos_frac=0.4, with_m1=False):
               "mixed":           {"IS": [], "OOS": []}}
     for t in trades:
         ot = t.open_time
-        signs = [sm5.asof(ot), sm15.asof(ot), sh1.asof(ot)]
-        if with_m1:
-            signs.append(sm1.asof(ot))
+        signs = signs_at(int(ot.timestamp()), float(t.open_price))
         d = 1 if t.direction == "BUY" else -1
         if all(s == 1 for s in signs):
             grp = "with_aligned" if d == 1 else "against_aligned"
