@@ -115,6 +115,50 @@ def min_stop_price(info) -> float:
     return max(0.0, level * point)
 
 
+def pip_value(symbol: str, pip_size: float, info=None) -> "float | None":
+    """1 lot × 1 pip értéke a SZÁMLA devizájában, MT5-ből — a `pv1_usd` ÉLŐ párja.
+
+    `trade_tick_value / trade_tick_size × pip_size`. Ugyanaz a képlet, amivel a
+    felület egy új instrumentum felvételekor kiszámolja a config `pv1_usd`-jét —
+    de EZ minden méretezéskor frissen kérdez.
+
+    Miért kell: a config `pv1_usd`-je egyetlen PILLANATKÉP a felvétel idejéről. A
+    nem számla-devizás instrumentumoknál (EUR-számlán minden USD/GBP/JPY-alapú)
+    az érték az ÁRFOLYAMMAL sodródik, tehát a tényleges kockázat eltér a
+    beállított %-tól. Ráadásul a kézzel felvett indexeknél kerek 1.0 maradt, ami
+    UK100-on ~15% alulbecslés (túl nagy lot).
+
+    None, ha az adat nem elérhető → a hívó a config értékére esik vissza."""
+    if not pip_size or pip_size <= 0:
+        return None
+    if info is None:
+        info = mt5.symbol_info(symbol)
+    if info is None:
+        return None
+    tv = float(getattr(info, "trade_tick_value", 0.0) or 0.0)
+    ts = float(getattr(info, "trade_tick_size", 0.0) or 0.0)
+    if tv <= 0 or ts <= 0:
+        return None
+    return tv / ts * float(pip_size)
+
+
+def volume_bounds(info) -> "tuple[float, float, float] | None":
+    """(min_lot, max_lot, lot_step) a brókertől, vagy None ha nem elérhető.
+
+    A config-beli értékek elavulhatnak (a bróker módosíthatja a kontraktus-
+    korlátokat); az MT5 mindig a MOST érvényeset mondja. A `volume_max` eddig
+    sehol nem volt figyelembe véve — nagy egyenlegnél/szűk stopnál a számított lot
+    fölé mehetett, és a bróker `10014 Invalid volume`-mal utasította el."""
+    if info is None:
+        return None
+    vmin = float(getattr(info, "volume_min", 0.0) or 0.0)
+    vmax = float(getattr(info, "volume_max", 0.0) or 0.0)
+    vstep = float(getattr(info, "volume_step", 0.0) or 0.0)
+    if vmin <= 0 or vstep <= 0:
+        return None
+    return vmin, (vmax if vmax > 0 else float("inf")), vstep
+
+
 def enforce_min_sl_pips(sl_pips: float, tp_pips: float, info,
                         pip_size: float) -> tuple[float, float, bool]:
     """(sl_pips, tp_pips, tágítottunk-e) — az SL-táv felhúzva a bróker minimumára.

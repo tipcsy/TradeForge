@@ -25,6 +25,13 @@ def load_cfg() -> dict:
     return load_config(CFG_PATH)
 
 
+def _setup_log():
+    """Perzisztens (forgó) futásnapló: data/tradeforge.log. A konzolos kimenet
+    marad — ez csak kiegészíti, hogy utólag is visszakereshető legyen, mi történt."""
+    from core import applog
+    applog.setup()
+
+
 def cmd_download():
     from tools.download_history import main
     main()
@@ -126,6 +133,7 @@ if __name__ == "__main__":
 
     cmd = sys.argv[1]
     fn, arg_spec = COMMANDS[cmd]
+    _setup_log()
 
     if arg_spec == "symbols":
         symbols = sys.argv[2:] if len(sys.argv) > 2 else None

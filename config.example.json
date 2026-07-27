@@ -89,7 +89,7 @@
     "overwrite_existing": false
   },
   "pairs": {
-    "_comment": "pip_size: 1 pip értéke az árfolyamban. min_lot/lot_step: MT5 korlátok. sess_start/end: UTC óra. viz_enabled: a chart-vizualizáció (V gomb) per pár. show_trades: a JEL-REPLAY réteg (K gomb) — a sűrű zöld/piros belépő-jelzés vonalak + Entry/TP/SL (alap: true); a tényleges MT5-kötések ettől függetlenül látszanak. Új párt a GUI-ból is felvehetsz (a bróker adataival automatikusan kitölti), vagy ide kézzel az alábbi minták szerint.",
+    "_comment": "pip_size: 1 pip értéke az árfolyamban. pv1_usd: 1 lot × 1 pip értéke a SZÁMLA DEVIZÁJÁBAN (a név történelmi — nem feltétlenül USD!); a felület a bróker trade_tick_value-jából számolja felvételkor. FIGYELEM: ez PILLANATKÉP — a nem számla-devizás instrumentumoknál az árfolyammal sodródik, ezért időnként futtasd: python tools/refresh_pip_values.py --write. Az ÉLŐ motor MT5-ből frissíti, a backteszt/optimalizálás viszont EBBŐL dolgozik. min_lot/lot_step/max_lot: MT5 kontraktus-korlátok (max_lot hiányzik = nincs felső korlát). sess_start/end: UTC óra. viz_enabled: a chart-vizualizáció (V gomb) per pár. show_trades: a JEL-REPLAY réteg (K gomb) — a sűrű zöld/piros belépő-jelzés vonalak + Entry/TP/SL (alap: true); a tényleges MT5-kötések ettől függetlenül látszanak. Új párt a GUI-ból is felvehetsz (a bróker adataival automatikusan kitölti), vagy ide kézzel az alábbi minták szerint.",
     "EURUSD": {
       "_comment": "Forex-pár minta",
       "enabled": true,

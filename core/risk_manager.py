@@ -59,18 +59,28 @@ def calc_lot(
     total_risk    = balance * risk_pct
     risk_per_slot = total_risk / effective_slots
 
-    pip_value  = pair_cfg["pv1_usd"]   # 1 lot, 1 pip mozgás USD értéke
+    # 1 lot × 1 pip mozgás értéke a SZÁMLA devizájában. (A kulcs neve történeti —
+    # NEM feltétlenül USD: a felület a bróker trade_tick_value-jából számolja, ami
+    # mindig a számla devizájában van. Élesben a motor ezt MT5-ből frissíti.)
+    pip_value  = pair_cfg["pv1_usd"]
     # min_lot/lot_step hiányozhat (pl. GUI-ból hozzáadott vagy hiányos config) →
     # biztonságos alapérték, hogy az optimalizálás/backteszt ne szálljon el csendben.
     lot_step   = pair_cfg.get("lot_step", 0.01)
     min_lot    = pair_cfg.get("min_lot", 0.01)
+    max_lot    = pair_cfg.get("max_lot")     # a bróker volume_max-ja (None = nincs)
 
     if sl_pips <= 0 or pip_value <= 0:
         return min_lot
 
     raw_lot = risk_per_slot / (sl_pips * pip_value)
     lot = math.floor(raw_lot / lot_step) * lot_step
-    return max(lot, min_lot)
+    lot = max(lot, min_lot)
+    # A bróker FELSŐ korlátja: enélkül nagy egyenlegnél / szűk stopnál a számított
+    # lot fölé mehetett, és a megbízás `10014 Invalid volume`-mal elbukott (a jel
+    # némán elveszett). A vágás a kockázatot csak CSÖKKENTI.
+    if max_lot:
+        lot = min(lot, float(max_lot))
+    return lot
 
 
 def calc_effective_slots(

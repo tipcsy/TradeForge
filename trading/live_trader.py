@@ -1830,8 +1830,36 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
                 log.info("↔ %s %s — az SL a bróker minimum stop-távolságára tágítva "
                          "(%.1f pip); a lot ennek megfelelően kisebb, az R:R változatlan.",
                          symbol, signal, sl_pips)
-            eff_slots = calc_effective_slots(balance, sl_pips, pair_cfg, ctf)
-            lot = calc_lot(balance, sl_pips, pair_cfg, ctf, eff_slots)
+            # ── ÉLŐ méretezési adatok a brókertől ────────────────────────────
+            # A config `pv1_usd`-je egyetlen PILLANATKÉP az instrumentum
+            # felvételekor. EUR-számlán minden USD/GBP/JPY-alapú instrumentum
+            # pip-értéke az ÁRFOLYAMMAL sodródik, a kézzel felvett indexeknél
+            # pedig kerek 1.0 maradt (UK100-on ~15% alulbecslés = túl nagy lot).
+            # Ezért a méretezéshez MT5-ből kérjük az értéket; ha nem elérhető, a
+            # config marad (a backteszt/optimalizálás úgyis abból dolgozik).
+            _sizing_cfg = pair_cfg
+            _live_pv1 = order_exec.pip_value(symbol, pip_size, sym_info)
+            _vb = order_exec.volume_bounds(sym_info)
+            if _live_pv1 or _vb:
+                _sizing_cfg = dict(pair_cfg)
+                if _live_pv1:
+                    _sizing_cfg["pv1_usd"] = _live_pv1
+                    _cfg_pv1 = float(pair_cfg.get("pv1_usd") or 0.0)
+                    # Nagy eltérésnél szólunk: a configból dolgozó BACKTESZT és
+                    # OPTIMALIZÁLÁS ilyenkor más mérettel számol, mint az él.
+                    if _cfg_pv1 > 0 and abs(_live_pv1 - _cfg_pv1) / _cfg_pv1 > 0.05:
+                        log.warning("%s — a config pv1_usd (%.4f) %.0f%%-kal eltér a "
+                                    "bróker aktuális pip-értékétől (%.4f). Az ÉL a "
+                                    "helyessel méretez, de a backteszt/optimalizálás a "
+                                    "configból dolgozik → futtasd a "
+                                    "tools/refresh_pip_values.py-t.",
+                                    symbol, _cfg_pv1,
+                                    abs(_live_pv1 - _cfg_pv1) / _cfg_pv1 * 100, _live_pv1)
+                if _vb:
+                    _sizing_cfg["min_lot"], _sizing_cfg["max_lot"], \
+                        _sizing_cfg["lot_step"] = _vb
+            eff_slots = calc_effective_slots(balance, sl_pips, _sizing_cfg, ctf)
+            lot = calc_lot(balance, sl_pips, _sizing_cfg, ctf, eff_slots)
 
             with MT5_LOCK:
                 tick = mt5.symbol_info_tick(symbol)
@@ -1889,6 +1917,26 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
                         "magic":     magic,
                     })
                     return
+
+                # ── Fedezet-ellenőrzés ────────────────────────────────────────
+                # A megbízás `10019 No money` / `10018 Market closed`-ig jutna, és a
+                # jel elveszne. Inkább ELŐRE megkérdezzük a szükséges fedezetet, és
+                # beszédesen kihagyjuk — így a naplóból kiderül, hogy nem a
+                # stratégia, hanem a tőkeáttétel/egyenleg a korlát.
+                try:
+                    with MT5_LOCK:
+                        _need = mt5.order_calc_margin(
+                            mt5.ORDER_TYPE_BUY if signal == "BUY" else mt5.ORDER_TYPE_SELL,
+                            symbol, lot, open_price)
+                        _acct = mt5.account_info()
+                    _free = float(getattr(_acct, "margin_free", 0.0) or 0.0) if _acct else 0.0
+                    if _need is not None and _free > 0 and float(_need) > _free:
+                        log.warning("⏭ %s %s jel — belépő KIHAGYVA: nincs elég szabad "
+                                    "fedezet (%.2f kell, %.2f szabad | lot %.2f).",
+                                    symbol, signal, float(_need), _free, lot)
+                        return
+                except Exception as _e:
+                    log.debug("%s — fedezet-ellenőrzés kihagyva: %s", symbol, _e)
 
                 ticket = open_position(symbol, signal, lot, sl_price, tp_price, magic,
                                        comment=strategy.name, strategy_name=strategy.name)
@@ -2372,6 +2420,8 @@ def run(cfg: dict, slot_mgr: SlotManager):
 # ---------------------------------------------------------------------------
 
 def main():
+    from core import applog
+    applog.setup()          # perzisztens (forgó) futásnapló: data/tradeforge.log
     from strategy.settings import load_config
     cfg = load_config(ROOT / "config.json")
 

@@ -2829,7 +2829,7 @@ class DashboardWindow:
         # és a widget-építés a FŐ szálon (tkinter csak onnan biztonságos).
         def _work():
             pip_size, pv1_usd, spread_pips = 0.0001, 10.0, 1.5
-            min_lot, lot_step = 0.01, 0.01
+            min_lot, lot_step, max_lot = 0.01, 0.01, 0.0
             description = ""
             try:
                 import MetaTrader5 as _mt5
@@ -2852,19 +2852,23 @@ class DashboardWindow:
                     # Lot-korlátok a brókertől — enélkül az optimalizálás/backteszt elszáll
                     min_lot  = getattr(info, "volume_min", 0.01) or 0.01
                     lot_step = getattr(info, "volume_step", 0.01) or 0.01
+                    # FELSŐ korlát is: nagy egyenlegnél / szűk stopnál a számított lot
+                    # fölé mehet, és a megbízás `10014 Invalid volume`-mal bukna el.
+                    max_lot  = getattr(info, "volume_max", 0.0) or 0.0
             except Exception:
                 pass
             try:
                 self.root.after(
                     0, lambda: self._finalize_add_instrument(
                         symbol, pip_size, pv1_usd, spread_pips, description,
-                        min_lot, lot_step))
+                        min_lot, lot_step, max_lot))
             except Exception:
                 pass
         threading.Thread(target=_work, daemon=True, name="MT5AddInstr").start()
 
     def _finalize_add_instrument(self, symbol, pip_size, pv1_usd, spread_pips,
-                                 description="", min_lot=0.01, lot_step=0.01):
+                                 description="", min_lot=0.01, lot_step=0.01,
+                                 max_lot=0.0):
         """A fő szálon fut: config-írás + dashboard state + új tábla-sor."""
         if symbol in self.rows:
             return
@@ -2874,6 +2878,8 @@ class DashboardWindow:
             "backtest_spread_pips": spread_pips, "sess_start": 0, "sess_end": 24,
             "description": description,
         }
+        if max_lot:
+            self.cfg["pairs"][symbol]["max_lot"] = max_lot
         self._save_main_config()
 
         from trading.live_trader import PairDashboardState
