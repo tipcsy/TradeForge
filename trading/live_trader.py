@@ -447,11 +447,21 @@ def pip_to_price(pips: float, pip_size: float) -> float:
     return pips * pip_size
 
 
-def seconds_to_candle_close(timeframe_minutes: int) -> int:
-    now = datetime.now(timezone.utc)
-    seconds_in_tf = timeframe_minutes * 60
-    elapsed = (now.minute % timeframe_minutes) * 60 + now.second
-    return seconds_in_tf - elapsed
+def seconds_to_candle_close(timeframe_minutes: int,
+                            server_offset_sec: float = 0.0) -> int:
+    """Hány másodperc van hátra az adott idősík gyertyájának zárásáig.
+
+    A régi képlet `(now.minute % tf) * 60 + now.second` volt: mivel a perc mindig
+    < 60, egy ÓRÁNÁL NAGYOBB idősíkon (H4 = 240 perc) a `% tf` semmit nem vont le,
+    így a visszaszámláló a gyertya elejét mutatta minden órában. M1…H1-en helyes
+    volt (60-nál a maradék épp a perc), ezért maradt észrevétlen.
+
+    Most epoch-alapú: a gyertyahatárok a `tf` másodperces rácsra esnek. A rács a
+    BRÓKER óráján áll, ezért az eltolást is figyelembe vesszük — H4-nél ez órákat
+    számít (M1…H1-en nem, mert az eltolás egész óra)."""
+    period = max(1, int(timeframe_minutes)) * 60
+    now_srv = datetime.now(timezone.utc).timestamp() + (server_offset_sec or 0.0)
+    return int(period - (now_srv % period))
 
 
 # A trades.csv KANONIKUS oszlopsémája (nyitás és zárás egyaránt ezt tölti; a
@@ -1018,7 +1028,10 @@ def _apply_be_and_trailing(symbol, pos, ticket, pstate, is_rf, risky,
     pozíció trailingje/BE-je akkor is dolgozzon. A logika AZONOS a `process_pair` fő
     ágának off/risky BE+trailing részével (csak kiemelve, hogy a szünet-ág is hívhassa);
     a Felező/Pajzs részleges zárás + RUNNER_EXIT (ami bart igényel) marad a fő ágban.
-    A `pstate`-et módosítja, MT5-öt hív."""
+    A `pstate`-et módosítja, MT5-öt hív.
+
+    ⚠ IKERPÁR: a `process_pair` off/risky ágában ugyanez a logika fut (ott a
+    preset-elágazás részeként). HA ITT VÁLTOZTATSZ, azt is módosítsd."""
     # Kézi/külső SL-húzás felismerése (mint a fő ágban): ha az SL már a költség-
     # tudatos BE-n van, „BE kész" → slot fel, trailing indulhat (szünet-órákban is).
     # Olcsó elő-szűrő: csak ha az SL a profit oldalon van (különben nincs connector-hívás).
@@ -1529,6 +1542,12 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
             # ── off/risky: költség-tudatos breakeven (VÁLTOZATLAN) ──
             # A tényleges SL nem pontos BE, hanem BE + spread puffer (lásd
             # mt5_connector.move_to_breakeven): spread×2 → ×1 → pontos BE fallback.
+            #
+            # ⚠ IKERPÁR: ugyanez a logika él a `_apply_be_and_trailing`-ben is (azt a
+            # no-trade órák ága hívja, ahol nincs bar). A kettő SZÁNDÉKOSAN külön: itt
+            # a preset-elágazás része, ott önálló, bar-független függvény — az
+            # összevonás a preset-diszpécser átszervezését jelentené a legkritikusabb
+            # úton. HA ITT VÁLTOZTATSZ, a `_apply_be_and_trailing`-et is módosítsd.
             be_pct = params.get("breakeven_pct", 0.5)
             if (risky or be_pct > 0) and not is_rf:
                 if pos.type == mt5.ORDER_TYPE_BUY:

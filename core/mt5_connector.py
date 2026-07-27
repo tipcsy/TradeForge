@@ -583,32 +583,10 @@ def has_partial_close(ticket: int) -> bool:
     return False
 
 
-def modify_position_sl(ticket: int, new_sl: float) -> bool:
-    """Egy pozíció SL szintjének módosítása (TP marad)."""
-    try:
-        with MT5_LOCK:
-            pos = mt5.positions_get(ticket=ticket)
-            if not pos:
-                return False
-            p = pos[0]
-            info = mt5.symbol_info(p.symbol)
-            req = {
-                "action":   mt5.TRADE_ACTION_SLTP,
-                "symbol":   p.symbol,
-                "position": ticket,
-                "sl":       order_exec.normalize_price(new_sl, info),
-                "tp":       p.tp,
-            }
-            res = mt5.order_send(req)
-        if res is None or res.retcode != mt5.TRADE_RETCODE_DONE:
-            log.debug("%s #%d — SL módosítás elutasítva (%s): retcode=%s %s",
-                      p.symbol, ticket, new_sl, getattr(res, "retcode", "—"),
-                      res.comment if res else mt5.last_error())
-            return False
-        return True
-    except Exception:
-        return False
-
+# MEGJEGYZÉS: a korábbi `modify_position_sl` (csak SL, TP marad) INNEN TÖRÖLVE —
+# egyetlen hívója sem volt. Az élő trailing/BE a `live_trader.modify_sl`-t
+# használja, a ráépítés pedig az alábbi `modify_position_sltp`-t (az törli a TP-t
+# is, hogy a csomag egyben fusson). Két, majdnem azonos SL-író út félrevezető volt.
 
 def modify_position_sltp(ticket: int, new_sl: float, new_tp: float) -> bool:
     """SL ÉS TP egyidejű beállítása (new_tp=0 → a TP TÖRLÉSE). A pozícióépítés ezzel

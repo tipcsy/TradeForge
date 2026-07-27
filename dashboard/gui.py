@@ -4845,8 +4845,11 @@ class DashboardWindow:
         # Visszaszámlálók a stratégia időkereteire (közös felső sáv + per-pár állapot)
         try:
             from trading.live_trader import seconds_to_candle_close
+            # A gyertyahatár a BRÓKER óráján áll — H1 fölött (H4) az eltolás órákat
+            # számít a visszaszámlálóban.
+            _soff = getattr(self, "_mt5_cache", {}).get("server_offset_sec") or 0.0
             for tf in self.strategy.timeframes():
-                rem = seconds_to_candle_close(tf.minutes)
+                rem = seconds_to_candle_close(tf.minutes, _soff)
                 for ds in self.dashboard_ref.values():
                     ds.timeframe_remaining[tf.minutes] = rem
                 lbl = getattr(self, "_countdown_lbls", {}).get(tf.minutes)

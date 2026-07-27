@@ -36,8 +36,10 @@ DATEFMT       = "%Y-%m-%d %H:%M:%S"
 _MARKER = "_tradeforge_file_log"   # az idempotenciához (a handleren jelöljük)
 
 
-def _harden_console() -> None:
-    """A konzolos kimenet ne szálljon el a naplóban használt ikonokon (✦ ↗ ⏭ 📋).
+def harden_console() -> None:
+    """A konzolos kimenet ne szálljon el a nem-latin karaktereken (✦ ↗ ⏭ 📋 ≠).
+
+    A napló mellett a `tools/` parancssori eszközök is hívhatják.
 
     A Windows-konzol kódlapja (cp1250) ezeket nem tudja leképezni, és a
     `StreamHandler` `UnicodeEncodeError`-t dob — a `logging` ezt ugyan elnyeli
@@ -57,7 +59,7 @@ def setup(level: int = logging.INFO) -> "Path | None":
     nem sikerült — ilyenkor a konzolos naplózás változatlanul megy tovább, a
     program nem áll meg egy naplózási hiba miatt)."""
     root = logging.getLogger()
-    _harden_console()
+    harden_console()
     for h in root.handlers:
         if getattr(h, _MARKER, False):
             return LOG_PATH               # már be van kapcsolva
