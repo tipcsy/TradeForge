@@ -49,6 +49,30 @@ _METRIC_COLS = frozenset({
 _MANUAL_RANK_BASE = 501
 
 
+def _fmt_ranges(nums, max_runs: int = 3) -> str:
+    """Egész sorszámok TÖMÖR felsorolása: az egymást követőket tartományba vonja.
+
+        [501…575]            → "501–575"
+        [501, 502, 505]      → "501–502, 505"
+
+    Miért: a kézi sorszámok tételes felsorolása (`501, 502, 503, …`) néhány tucat
+    bejegyzésnél méterekre kitolta a paraméter-ablakot jobbra. `max_runs` fölött
+    az elejét mutatjuk + a darabszámot, így a felirat hossza felülről korlátos."""
+    nums = sorted(set(int(n) for n in nums))
+    if not nums:
+        return ""
+    runs = [[nums[0], nums[0]]]
+    for n in nums[1:]:
+        if n == runs[-1][1] + 1:
+            runs[-1][1] = n
+        else:
+            runs.append([n, n])
+    parts = [(f"{a}" if a == b else f"{a}–{b}") for a, b in runs[:max_runs]]
+    if len(runs) > max_runs:
+        parts.append(f"… ({len(nums)} db)")
+    return ", ".join(parts)
+
+
 def _num(s):
     """Magyar-tizedes ('1,75') vagy sima szám → float; hiba esetén None."""
     try:
@@ -727,7 +751,7 @@ class InstrumentParamsDialog:
 
         avail = f"Elérhető: 1–{max(opt_ranks)}" if opt_ranks else "Elérhető: —"
         if man_ranks:
-            avail += f"  (kézi: {', '.join(str(r) for r in man_ranks)})"
+            avail += f"  (kézi: {_fmt_ranges(man_ranks)})"
         tk.Label(bar, text=avail, bg=BG, fg=FG_GRAY_DIM,
                  font=self._sf).pack(side="left", padx=(8, 0))
 
