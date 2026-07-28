@@ -1023,6 +1023,18 @@ def _publish_viz_jobs(all_pairs: dict, strats_by_symbol: dict, pair_states: dict
     _viz_jobs = jobs
 
 
+def _refresh_position(ticket: int):
+    """A pozíció FRISS pillanatképe (vagy None). Akkor kell, ha a körön belül mi
+    magunk módosítottuk az SL-t: a ciklus elején vett `pos` ilyenkor elavult, és a
+    ráépülő döntések (trailing) a RÉGI stophoz hasonlítanának."""
+    try:
+        with MT5_LOCK:
+            r = mt5.positions_get(ticket=ticket)
+        return r[0] if r else None
+    except Exception:
+        return None
+
+
 def _apply_be_and_trailing(symbol, pos, ticket, pstate, is_rf, risky,
                            params, pip_size, sym_info, slot_mgr):
     """Egy nyitott (off/risky) pozíció költség-tudatos BREAKEVEN + TRAILING kezelése —
@@ -1063,6 +1075,7 @@ def _apply_be_and_trailing(symbol, pos, ticket, pstate, is_rf, risky,
             pstate["be_done"] = True
             log.info("✦ %s #%d — költség-tudatos breakeven beállítva%s", symbol, ticket,
                      " (risky)" if risky else "")
+            pos = _refresh_position(ticket) or pos   # elavult SL a pillanatképben
     # ── Trailing (kockázatmentes után, ha kézzel nincs kikapcsolva) ──
     is_rf = slot_mgr.is_risk_free(ticket)
     if is_rf and pstate.get("trailing_enabled", True):
@@ -1086,10 +1099,14 @@ def _apply_be_and_trailing(symbol, pos, ticket, pstate, is_rf, risky,
         eff_price = max(dist_price, min_stop_price + point)
         act_price = (0.0 if risky
                      else params.get("trail_activation_atr", 0.5) * _atr)
+        # INVARIÁNS (mint a fő ágban): BE után a stop sosem lehet a belépőnél rosszabb.
+        _be_floor = pos.price_open if pstate.get("be_done") else None
         if pos.type == mt5.ORDER_TYPE_BUY:
             if pos.price_current >= pos.price_open + act_price:
                 new_sl = round(pos.price_current - eff_price, digits)
-                if new_sl > pos.sl and modify_sl(ticket, new_sl):
+                if (new_sl > pos.sl
+                        and (_be_floor is None or new_sl >= _be_floor)
+                        and modify_sl(ticket, new_sl)):
                     pstate["trail_moved"] = True
                     log.info("↗ %s #%d trailing SL → %.*f (%d pont követés%s)",
                              symbol, ticket, digits, new_sl,
@@ -1097,7 +1114,9 @@ def _apply_be_and_trailing(symbol, pos, ticket, pstate, is_rf, risky,
         else:
             if pos.price_current <= pos.price_open - act_price:
                 new_sl = round(pos.price_current + eff_price, digits)
-                if new_sl < pos.sl and modify_sl(ticket, new_sl):
+                if (new_sl < pos.sl
+                        and (_be_floor is None or new_sl <= _be_floor)
+                        and modify_sl(ticket, new_sl)):
                     pstate["trail_moved"] = True
                     log.info("↘ %s #%d trailing SL → %.*f (%d pont követés%s)",
                              symbol, ticket, digits, new_sl,
@@ -1583,6 +1602,12 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
                     pstate["be_done"] = True
                     log.info("✦ %s #%d — költség-tudatos breakeven beállítva%s", symbol, ticket,
                              " (risky)" if risky else "")
+                    # A `pos` pillanatkép SL-je ELAVULT: a BE az imént átállította.
+                    # Enélkül a lentebbi trailing a RÉGI SL-hez hasonlítana
+                    # (`new_sl > pos.sl`), és VISSZAHÚZNÁ a stopot a BE alá — risky
+                    # módban ez garantáltan bekövetkezett, mert ott a BE és a
+                    # trailing ugyanabban a körben fut.
+                    pos = _refresh_position(ticket) or pos
 
         # Trailing stop (kockázatmentes után, és csak ha kézzel nincs kikapcsolva).
         # MINDEN számítás PONTBAN (bróker-egység), hogy a kijelzés és a motor
@@ -1622,12 +1647,21 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
             act_price = (0.0 if risky
                          else params.get("trail_activation_atr", 0.5) * _atr)
 
+            # ── INVARIÁNS: kockázatmentesből sosem lehet kockázatos ──────
+            # Ha a BE már megtörtént, a trailing SOSEM tehet a belépőnél rosszabb
+            # stopot — akkor sem, ha bármilyen okból elavult SL-hez hasonlítana.
+            # (Ez fogta volna meg a 2026-07-28-i esetet: a BE utáni körben a
+            # trailing a régi pillanatkép alapján a belépő ALÁ húzta a stopot,
+            # miközben a slot már felszabadult.)
+            _be_floor = pos.price_open if pstate.get("be_done") else None
             if eff_price is None:
                 pass                       # ATR ismeretlen (pl. újraindítás után)
             elif pos.type == mt5.ORDER_TYPE_BUY:
                 if pos.price_current >= pos.price_open + act_price:
                     new_sl = round(pos.price_current - eff_price, digits)
-                    if new_sl > pos.sl and modify_sl(ticket, new_sl):
+                    if (new_sl > pos.sl
+                            and (_be_floor is None or new_sl >= _be_floor)
+                            and modify_sl(ticket, new_sl)):
                         pstate["trail_moved"] = True
                         log.info("↗ %s #%d trailing SL → %.*f (%d pont követés%s)",
                                  symbol, ticket, digits, new_sl,
@@ -1635,7 +1669,9 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
             else:
                 if pos.price_current <= pos.price_open - act_price:
                     new_sl = round(pos.price_current + eff_price, digits)
-                    if new_sl < pos.sl and modify_sl(ticket, new_sl):
+                    if (new_sl < pos.sl
+                            and (_be_floor is None or new_sl <= _be_floor)
+                            and modify_sl(ticket, new_sl)):
                         pstate["trail_moved"] = True
                         log.info("↘ %s #%d trailing SL → %.*f (%d pont követés%s)",
                                  symbol, ticket, digits, new_sl,
