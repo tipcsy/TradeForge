@@ -227,6 +227,12 @@ def _proba_cell(p_long: float, p_short: float, thr_long: float, thr_short: float
 class MlAiStrategy(Strategy):
     name = "ml_ai"
 
+    # A modell CÍMKÉJE ATR-alapú stopra épül (`ml_train.label_outcomes`:
+    # SL = ATR14 × sl_atr_mult, TP = SL × tp_rr_ratio), és a `sl_tp_pips` is ezt
+    # adja. A stop-módszernek tehát EGYEZNIE kell ezzel — különben a modell egy
+    # MÁSIK kötés kimenetelére adna predikciót, mint amit a motor végrehajt.
+    default_sl_method = "atr"
+
     # --- Megjelenítés -----------------------------------------------------
 
     def timeframes(self) -> list[Timeframe]:

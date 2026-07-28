@@ -1878,7 +1878,10 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
             # SL-módszer: `swing20` → az utolsó N M1 gyertya swingjéből (ATR helyett):
             # BUY = legalacsonyabb LOW − spread, SELL = legmagasabb HIGH + spread; a TP
             # marad tp_rr_ratio × SL-táv. A döntő (zárt) M1 gyertya záróárához mérve.
-            if params.get("sl_method", "swing20") == "swing20":
+            # Az ALAPÉRTELMEZETT SL-módszert a STRATÉGIA mondja meg (nem a motor
+            # tippeli): a wpr_sma swing20, az ml_ai atr — utóbbi a modell CÍMKÉJÉVEL
+            # egyezik, különben a predikció más kötésre vonatkozna, mint a végrehajtás.
+            if params.get("sl_method", strategy.default_sl_method) == "swing20":
                 _sw = calc_swing_sl_tp_pips(
                     float(df_lo["close"].iloc[-2]), signal,
                     df_lo["low"].to_numpy(), df_lo["high"].to_numpy(),

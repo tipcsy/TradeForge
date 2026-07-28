@@ -293,6 +293,16 @@ class Strategy(ABC):
         """Az alsó tf egy ZÁRT gyertyája → 'BUY' | 'SELL' | 'NONE'."""
         raise NotImplementedError
 
+    # A stratégia ALAPÉRTELMEZETT SL-módszere, ha a paraméterek nem mondanak mást.
+    # A motor (live_trader + backtest) EZT kérdezi meg — korábban `"swing20"` volt
+    # bedrótozva a közös útba, ami a wpr_sma sajátja. Emiatt az ml_ai belépői
+    # SWING-stopot kaptak, holott a modellje ATR-alapú stopra TANULT: a végrehajtott
+    # kötés más volt, mint amire a predikció vonatkozott (tanítás ↔ végrehajtás
+    # eltérés). Mérve, mintán kívül: PF 0,51 → 0,81 (UK100), 0,06 → 0,40 (EURGBP).
+    #
+    # Aki ATR-alapú SL/TP-t ad a `sl_tp_pips`-ben, az írja felül `"atr"`-re.
+    default_sl_method = "swing20"
+
     def sl_tp_pips(self, hi_row, params, pip_size):
         """A pozíció SL/TP mérete PIPBEN a magasabb tf aktuális ZÁRT sorából
         (hi_row): `(sl_pips, tp_pips)` VAGY `None` (nincs érvényes méret).

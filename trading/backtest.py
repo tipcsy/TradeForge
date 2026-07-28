@@ -1035,7 +1035,8 @@ def run_pair(
                     # SL-módszer: `swing20` → az utolsó N M1 gyertya swingjéből (ATR
                     # helyett): BUY = legalacsonyabb LOW − spread, SELL = legmagasabb
                     # HIGH + spread; a TP marad tp_rr_ratio × SL-táv. (`atr` = a régi.)
-                    if params.get("sl_method", "swing20") == "swing20":
+                    # Az alapértelmezést a STRATÉGIA adja (lásd Strategy.default_sl_method).
+                    if params.get("sl_method", strategy.default_sl_method) == "swing20":
                         _nb = int(params.get("sl_swing_bars", 20) or 20)
                         _lo = m1["low"].iloc[max(0, i - _nb + 1):i + 1].to_numpy()
                         _hi = m1["high"].iloc[max(0, i - _nb + 1):i + 1].to_numpy()
