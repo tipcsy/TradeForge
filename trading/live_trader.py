@@ -527,6 +527,12 @@ class LivePairState:
     # Az első bemelegítés MÉLY M15-ablakból történik (a jelzés-állapotgép a teljes
     # előzménytől függ → egyezzen a vizzel); utána inkrementális, sekély fetch elég.
     signal_warmed: bool = False
+    # A stratégiát MENET KÖZBEN kikapcsolták az instrumentum-ablakban („Aktív
+    # stratégia" pipa), de van nyitott pozíciója → tovább KEZELJÜK (breakeven,
+    # trailing, kiszállás), ÚJ belépőt viszont nem nyitunk. Ugyanaz az elv, mint a
+    # pár-szintű KIVEZETÉS-nél; ott az egész instrumentum áll le, itt csak ez az
+    # egy stratégia (a többi zavartalanul kereskedhet ugyanazon a páron).
+    disabled_closing: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -1818,10 +1824,12 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
     # KIVEZETÉS: a felhasználó megállította a párt, de volt nyitott pozíciója. A
     # meglévőt tovább kezeljük (ez a függvény fentebb már megtette), ÚJAT viszont
     # nem nyitunk — a pár akkor lesz valódi STOPPED, ha a pozíció lezárult.
-    closing = instrument_state.get(symbol) == "CLOSING"
+    closing = (instrument_state.get(symbol) == "CLOSING"
+               or bool(getattr(state, "disabled_closing", False)))
 
     if signal != "NONE":
-        _block = ("kivezetés alatt (Stop kérve — csak a nyitott pozíció fut ki)"
+        _block = ("kivezetés alatt (a stratégiát kikapcsolták / Stop — csak a "
+                  "nyitott pozíció fut ki)"
                   if closing else
                   "már van nyitott pozíció ezen a páron" if already_open else
                   f"napi veszteség-limit elérve ({_day_pnl:+.2f}$ ≤ -{daily_limit:.0f}$)"
@@ -2441,7 +2449,36 @@ def run(cfg: dict, slot_mgr: SlotManager):
 
             for symbol, pair_cfg in all_pairs.items():
                 state_now = instrument_state.get(symbol, "STOPPED")
-                strats = strats_by_symbol[symbol]
+                # Az ENGEDÉLYEZETT stratégiák listáját KÖRÖNKÉNT olvassuk újra: az
+                # instrumentum-ablak „Aktív stratégia" pipája máskülönben csak
+                # ÚJRAINDÍTÁS után hatna — miközben a mellette lévő kapcsolók
+                # (Vizualizáció, Kötések látszanak, Kötés módja) azonnal élnek.
+                # Ez a néma eltérés okozta, hogy egy kikapcsolt stratégia tovább
+                # kereskedett. Olcsó: config-olvasás, nem MT5-hívás.
+                strats = strategies_for(cfg, symbol)
+                if [st.name for st in strats] != [st.name for st in
+                                                  strats_by_symbol.get(symbol, [])]:
+                    strats_by_symbol[symbol] = strats
+                _enabled = {st.name for st in strats}
+                # A menet közben KIKAPCSOLT stratégiák: nyitott pozíció nélkül
+                # azonnal leállnak; nyitott pozícióval kivezetésbe mennek (a
+                # meglévőt tovább kezeljük, újat nem nyitunk).
+                for (_s, _n) in [k for k in pair_states if k[0] == symbol]:
+                    if _n in _enabled:
+                        continue
+                    _ps = pair_states[(_s, _n)]
+                    _has_pos = any(p.symbol == symbol for p in
+                                   strategy_positions(symbol, _n))
+                    if _has_pos:
+                        if not _ps.disabled_closing:
+                            _ps.disabled_closing = True
+                            log.info("%s/%s — a stratégiát KIKAPCSOLTAD: a nyitott "
+                                     "pozíciót tovább kezeljük, új belépő nem nyílik.",
+                                     symbol, _n)
+                    else:
+                        del pair_states[(_s, _n)]
+                        log.info("%s/%s — a stratégiát KIKAPCSOLTAD → leállítva.",
+                                 symbol, _n)
 
                 # Play → LIVE: a hiányzó (symbol, strat) állapotok létrehozása friss
                 # params-szal (minden engedélyezett, tanított stratégiához).
