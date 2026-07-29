@@ -33,6 +33,20 @@ def configured_symbols() -> set:
     return {s for s, v in (cfg.get("pairs") or {}).items() if isinstance(v, dict)}
 
 
+def _case_sensitive_fs() -> bool:
+    """Kis-nagybetű-ÉRZÉKENY-e a `data/` fájlrendszere? Windows/macOS: nem.
+    Ténylegesen kipróbáljuk (a platform-név nem elég megbízható: hálózati és
+    konténeres kötések máshogy viselkedhetnek)."""
+    import tempfile
+    try:
+        with tempfile.TemporaryDirectory(dir=str(DATA) if DATA.exists() else None) as d:
+            probe = Path(d) / "CaseProbe.tmp"
+            probe.write_text("x", encoding="ascii")
+            return not (Path(d) / "caseprobe.tmp").exists()
+    except Exception:
+        return False        # bizonytalanság esetén NEM jelölünk (nem törlünk)
+
+
 def scan(symbols: set) -> list:
     """[(fájl, indok)] — az elárvult fájlok. A szimbólum-nevet a fájlnév ELEJÉRŐL
     olvassuk ki (a `_study.done`, `_trials.csv`, `_hours.json` utótagokat levágva)."""
@@ -45,7 +59,13 @@ def scan(symbols: set) -> list:
                 return name[: -len(suf)]
         return Path(name).stem
 
-    # A kis-nagybetű eltérés külön indok: a motor a config szerinti alakot írja.
+    # KIS-NAGYBETŰ. Windows/macOS alatt a fájlrendszer ÉRZÉKETLEN, tehát a
+    # `GER40.csv` és a `Ger40.csv` UGYANAZ a fájl — a motor a config szerinti
+    # alakkal nyitja meg, és a meglévő tartalomhoz fűz. Ilyenkor a más írásmód NEM
+    # árva, hanem az ÉLŐ napló; törölni ADATVESZTÉS lenne. (Ez egyszer meg is
+    # történt: a `sl_moves/GER40.csv` a Ger40 aktív SL-naplója volt.)
+    # Csak KIS-NAGYBETŰ-ÉRZÉKENY fájlrendszeren van értelme külön kezelni.
+    case_sensitive = _case_sensitive_fs()
     lower = {s.lower(): s for s in symbols}
 
     for sub in ("models", "optimized_params", "sl_moves"):
@@ -58,6 +78,8 @@ def scan(symbols: set) -> list:
             s = sym_of(path.name)
             if s in symbols:
                 continue
+            if not case_sensitive and s.lower() in lower:
+                continue          # a fájlrendszer szemében UGYANAZ a fájl → nem árva
             if s.lower() in lower:
                 out.append((path, f"kis-nagybetu elteres: '{s}' helyett '{lower[s.lower()]}' az ervenyes"))
             else:
