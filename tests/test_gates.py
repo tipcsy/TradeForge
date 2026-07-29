@@ -100,6 +100,13 @@ check("10 kapu -> 10 szegmens, tovabbra sincs betu",
 
 # ══ 6. A badge: SZAMMAL mondja meg a lenyeget ════════════════════════════
 check("minden tiszta -> pipa", g.badge(g.evaluate(ctx(market_name=None))) == "✓")
+# A badge CSAK a blokkolast jelzi. Az elso valtozat a preset-hatasu kapu
+# "atenged" allapatara is glifat tett -> az MINDEN soron ott ult volna, holott
+# semmi nem tortent. A kerdes egy dolog: akadalyozza-e valami MOST a kotest?
+check("aktiv (de nem blokkolo) piac-kapu MELLETT is pipa",
+      g.badge(g.evaluate(ctx())) == "✓", g.badge(g.evaluate(ctx())))
+check("...a preset-hatas a PANELEN latszik, nem a badge-ben",
+      any(s["key"] == g.MARKET and s["detail"] for s in g.evaluate(ctx())))
 b2 = g.badge(g.evaluate(ctx(spread_points=250, tf_align_dir=None,
                             tf_align_signs=[1, -1, 1])))
 check("ket blokkolo -> a SZAM ketto", b2.endswith("2"), b2)

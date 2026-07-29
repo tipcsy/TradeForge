@@ -158,18 +158,16 @@ def strip(states) -> str:
 
 
 def badge(states) -> str:
-    """A csík melletti rövid összefoglaló: `⛔2` ha blokkol, `✓` ha minden tiszta.
+    """A csík melletti rövid összefoglaló: `⛔2` ha blokkol, `✓` ha semmi nem.
 
-    A méret/preset hatásokat külön jelöljük — azok nem akadályozzák a kötést, de
-    megváltoztatják, HOGYAN köt."""
+    SZÁNDÉKOSAN csak a blokkolást jelzi. Az első változat a méret/preset hatású
+    kapuk „átenged" állapotára is glifát tett (`◈`) — de az egy BEKAPCSOLT
+    piac-előszűrőnél MINDEN soron ott ült volna, holott semmi nem történt. A
+    badge kérdése egy dolog: „akadályozza-e valami MOST a kötést?". Hogy egy
+    kapu hogyan alakítja a méretet vagy a presetet, az a csík szegmensében és a
+    kapu-panelen látszik, ahol el is fér a magyarázat."""
     blk = blocking(states)
-    if blk:
-        return f"{EFFECT_GLYPH[EFFECT_BLOCK]}{len(blk)}"
-    act = [s for s in (states or [])
-           if s.get("state") == PASS and s.get("effect") != EFFECT_BLOCK]
-    if act:
-        return EFFECT_GLYPH[effect_of(act[0]["key"])] if len(act) == 1 else "◈"
-    return "✓"
+    return f"{EFFECT_GLYPH[EFFECT_BLOCK]}{len(blk)}" if blk else "✓"
 
 
 def is_blocked(states) -> bool:
