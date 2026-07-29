@@ -2370,6 +2370,16 @@ def run(cfg: dict, slot_mgr: SlotManager):
 
     _last_srv_off = 0.0     # a szerver-eltolás utolsó frissítése (napi limit napja)
 
+    # Config-frissesség: a `pv1_point` és a swap PILLANATKÉP-értékek, amik a bróker
+    # oldalán elmozdulhatnak. Az él MT5-ből frissít, a BACKTESZT viszont a configból
+    # dolgozik — ha szétcsúsznak, a mért eredmény mást mond, mint a valóság. Egyszer,
+    # induláskor ellenőrizzük, és egy összevont sorban szólunk (nem javítunk).
+    try:
+        from core import config_freshness
+        config_freshness.log_report(cfg)
+    except Exception as _e:
+        log.debug("config-frissesség ellenőrzés kihagyva: %s", _e)
+
     while True:
         try:
             # ── Kapcsolat-felügyelet ─────────────────────────────────────────

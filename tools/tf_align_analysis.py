@@ -78,7 +78,16 @@ def _params_for(symbol, cfg, strategy):
     return strategy.base_params(cfg)
 
 
+def _harden():
+    """A cp1250 konzol elszáll a nyilakon/ékezeteken — a `logging` ezt elnyeli, a
+    `print` viszont KIVÉTELT dob és megszakítja a mérést. (Meg is tette: a Ger40
+    riport a 3. sornál elhasalt.)"""
+    from core import applog
+    applog.harden_console()
+
+
 def analyze(symbol, cfg, strategy, ib, oos_frac=0.4, with_m1=False):
+    _harden()
     df15, df1 = load_data(symbol)
     if df15 is None:
         print(f"  {symbol}: nincs adat.")
@@ -95,12 +104,25 @@ def analyze(symbol, cfg, strategy, ib, oos_frac=0.4, with_m1=False):
     # jövőt látott (H1-nél akár egy órányit), és ez torzította a mért „élt".
     # Mostantól a formálódó gyertya záróára a kötés BELÉPŐ ÁRA (ami akkor ismert
     # volt), az SMA-ba pedig csak lezárt gyertyák mennek — mint élesben.
-    _tfs = {5: _bars(_resample(df1, "5min")), 15: _bars(df15),
-            60: _bars(_resample(df1, "60min"))}
-    if with_m1:
-        _tfs[1] = _bars(df1)
-    _order = [5, 15, 60] + ([1] if with_m1 else [])
-    signs_at = _tfa.build_historical_signs({k: _tfs[k] for k in _order}, _SMA_N)
+    # Az idősíkokat és az SMA-t a PÁR TÉNYLEGES kapu-beállításából vesszük
+    # (`tf_align.config_for`), nem bedrótozva. Enélkül a mérés MÁS definíciót
+    # vizsgálna, mint amit a motor a belépő-kapuban használ — a válasz így nem a
+    # feltett kérdésre vonatkozna.
+    _en, _tfl, _sma, _gate = _tfa.config_for(cfg, symbol)
+    if with_m1 and 1 not in _tfl:
+        _tfl = [1] + list(_tfl)
+    _RULE = {1: "1min", 5: "5min", 15: "15min", 30: "30min", 60: "60min", 240: "240min"}
+    _tfs = {}
+    for _tf in _tfl:
+        _tf = int(_tf)
+        if _tf == 15:
+            _tfs[_tf] = _bars(df15)                       # natív M15
+        elif _tf == 1:
+            _tfs[_tf] = _bars(df1)                        # natív M1
+        else:
+            _tfs[_tf] = _bars(_resample(df1, _RULE.get(_tf, f"{_tf}min")))
+    _order = [int(t) for t in _tfl]
+    signs_at = _tfa.build_historical_signs({k: _tfs[k] for k in _order}, _sma)
 
     split_ts = df15.index[int(len(df15) * (1 - oos_frac))]
     params = _params_for(symbol, cfg, strategy)
@@ -128,7 +150,9 @@ def analyze(symbol, cfg, strategy, ib, oos_frac=0.4, with_m1=False):
         r = t.pnl_usd / t.risk_usd
         groups[grp]["IS" if ot < split_ts else "OOS"].append(r)
 
-    n_tf = "M1/M5/M15/H1" if with_m1 else "M5/M15/H1"
+    n_tf = "/".join(f"M{t}" for t in _order) + f" · SMA{_sma}"
+    if _en and strategy.name in _gate:
+        n_tf += "  [a KAPU aktív ezen a páron]"
     n_oos = sum(len(g["OOS"]) for g in groups.values())
     print(f"\n  {symbol}  |  OOS {n_oos} kötés  |  idősíkok: {n_tf}  |  OOS-tól: {split_ts.date()}")
     print(f"  {'Csoport':<17} {'IS_n':>5} {'IS_R':>6}  {'OOS_n':>5} {'OOS_R':>6} {'OOS 95%CI':>16}  {'megoszl.':>8}")
@@ -173,7 +197,7 @@ def main():
                [s for s, p in cfg.get("pairs", {}).items()
                 if isinstance(p, dict) and p.get("enabled", False)])
     print(f"TF-összhang teszt | stratégia: {strategy.name} | OOS-hányad: {args.oos_frac}"
-          f" | SMA{_SMA_N}")
+          f" | az idősíkok/SMA a pár tf_align beállításából")
     for sym in symbols:
         try:
             analyze(sym, cfg, strategy, ib, args.oos_frac, args.with_m1)
