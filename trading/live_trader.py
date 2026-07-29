@@ -41,6 +41,7 @@ from core import trade_mode as _tmode
 from core import adopted
 from core import order_exec
 from core import spread_gate
+from core import symbol_policy as _sym_policy
 from core.indicator_engine import atr as atr_indicator
 from core.risk_manager import (calc_lot, calc_effective_slots, SlotManager,
                                calc_swing_sl_tp_points)
@@ -1801,8 +1802,26 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
 
     # --- Belépés a stratégia jelzése alapján ---
     # Egy szimbólumon EGYSZERRE csak egy pozíció lehet — soha ne halmozzon
-    # ugyanarra a párra (ez okozta a 8 GBPAUD-pozíciót 4 slotra).
+    # ugyanarra a párra (ez okozta a 8 GBPAUD-pozíciót 4 slotra). Ez a stratégia
+    # SAJÁT pozícióira vonatkozik, és MINDIG érvényes.
     already_open = len(symbol_positions) > 0
+    # Szimbólum-házirend: mit tehet EGY páron TÖBB stratégia egyszerre (config —
+    # lásd core/symbol_policy). Csak SZIGORÍTHAT az `independent` alaphoz képest,
+    # tehát a bekapcsolása sosem nyit váratlanul új pozíciót.
+    _policy_block = None
+    if signal != "NONE" and not already_open:
+        _pol = _sym_policy.resolve(_run_cfg, symbol)
+        if _pol != _sym_policy.INDEPENDENT:
+            _mine = {p.ticket for p in symbol_positions}
+            _book = []
+            for _p in _all_positions:
+                if _p.symbol != symbol or _p.ticket in _mine:
+                    continue
+                # csak a MOTOR által kezelt pozíciók (bármelyik stratégiánké)
+                if strategy_of_ticket(_p.ticket, _p.magic) is None:
+                    continue
+                _book.append("BUY" if _p.type == mt5.ORDER_TYPE_BUY else "SELL")
+            _policy_block = _sym_policy.blocks(_pol, signal, _book)
     # ── TF-együttállás kapu (opcionális, per-instrumentum config + per-stratégia
     # bekapcsolás): ha EZ a stratégia kapuzva van ezen az instrumentumon, csak a
     # trenddel EGYEZŐ jel léphet (az összes figyelt idősík a jel irányába mutat).
@@ -1832,6 +1851,7 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
                   "nyitott pozíció fut ki)"
                   if closing else
                   "már van nyitott pozíció ezen a páron" if already_open else
+                  _policy_block if _policy_block else
                   f"napi veszteség-limit elérve ({_day_pnl:+.2f}$ ≤ -{daily_limit:.0f}$)"
                   if daily_limit_hit else
                   "nincs érvényes ATR (adathiány)" if atr_val is None else
@@ -1842,7 +1862,8 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
         if _block:
             log.info("⏭ %s %s jel — belépő KIHAGYVA: %s", symbol, signal, _block)
 
-    if (signal != "NONE" and not closing and not already_open and not daily_limit_hit
+    if (signal != "NONE" and not closing and not already_open and not _policy_block
+            and not daily_limit_hit
             and atr_val is not None and slot_mgr.can_open() and spread_ok
             and tf_gate_ok):
         # ── Korreláció / devizakitettség kapu ──────────────────────────────
