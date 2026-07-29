@@ -3393,26 +3393,84 @@ class DashboardWindow:
                        bg=BG, fg=FG_WHITE, selectcolor=BG_HEADER, font=self._small_font,
                        activebackground=BG, activeforeground=FG_WHITE).pack(anchor="w", padx=20)
 
+        # ── „Minden instrumentumra" ─────────────────────────────────────────
+        # SZÁNDÉKOSAN nem az egész ablakot viszi át, hanem CSAK AZT, AMIT ITT
+        # MEGVÁLTOZTATTÁL. Egy mindent-átmásoló pipa ugyanis a nem piszkált
+        # sorokat (pl. a kötés-módot) is ráhúzná minden párra — az pénzt érintő,
+        # néma mellékhatás lenne. Így a jelentés kiszámítható: „amit itt
+        # átállítottam, az menjen mindenhová".
+        _init = {
+            "strategies": sorted(cur),
+            "viz":    {n: bool(_vp.viz_on(self.cfg, symbol, n))    for n in _names},
+            "trades": {n: bool(_vp.trades_on(self.cfg, symbol, n)) for n in _names},
+            "mode":   {n: _tm.mode_of(self.cfg, symbol, n)         for n in _names},
+            "market":     (_ms.market_name_of(_pc0) or "Nincs"),
+            "market_viz": bool(_pc0.get("market_viz", True)),
+        }
+        all_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(popup, text="A MÓDOSÍTOTT sorokat minden instrumentumra",
+                       variable=all_var, bg=BG, fg=FG_YELLOW, selectcolor=BG_HEADER,
+                       font=self._small_font, activebackground=BG,
+                       activeforeground=FG_YELLOW).pack(anchor="w", padx=12, pady=(10, 0))
+        tk.Label(popup, text="Csak azok a sorok kerülnek át, amiket ebben az ablakban "
+                             "megváltoztattál. Mentés előtt megmutatom, mi és hol változna.",
+                 bg=BG, fg=FG_GRAY_DIM, font=self._small_font,
+                 wraplength=360, justify="left").pack(anchor="w", padx=32, pady=(0, 2))
+
         lbl = tk.Label(popup, text="", bg=BG, fg=FG_GRAY, font=self._small_font,
                        wraplength=360, justify="left")
         lbl.pack(anchor="w", padx=12, pady=(8, 0))
 
-        def _save():
-            chosen = [n for n in _names if _vars[(1, n)].get()]
-            if not chosen:
-                lbl.config(text="Legalább egy stratégia legyen aktív.", fg=FG_RED)
-                return
-            pc = self.cfg.setdefault("pairs", {}).setdefault(symbol, {})
-            # ── Per-stratégia megjelenítési kapcsolók (a V/K pipák) ──────────
-            for n in _names:
-                _vp.set_on(self.cfg, symbol, n, _vp.VIZ,    _vars[(2, n)].get())
-                _vp.set_on(self.cfg, symbol, n, _vp.TRADES, _vars[(3, n)].get())
-            _vp.prune(self.cfg, symbol, _names)
-            # Kötés-mód per stratégia (a „Jelzés" nem köt, csak riaszt).
-            _lbl2mode = {v: k for k, v in _tm.LABELS.items()}
-            for n in _names:
-                _tm.set_mode(self.cfg, symbol, n,
-                             _lbl2mode.get(_mode_vars[n].get(), _tm.MODE_LIVE))
+        def _current():
+            """Az ablak MOSTANI állapota — ugyanabban az alakban, mint az `_init`,
+            hogy a kettő közvetlenül összevethető legyen."""
+            _l2m = {v: k for k, v in _tm.LABELS.items()}
+            return {
+                "strategies": sorted(n for n in _names if _vars[(1, n)].get()),
+                "viz":    {n: bool(_vars[(2, n)].get()) for n in _names},
+                "trades": {n: bool(_vars[(3, n)].get()) for n in _names},
+                "mode":   {n: _l2m.get(_mode_vars[n].get(), _tm.MODE_LIVE)
+                           for n in _names},
+                "market":     ms_var.get(),
+                "market_viz": bool(viz_var.get()),
+            }
+
+        # A sor-metaadat és a „mi terjed" döntés a core.bulk_apply-ban él (tiszta
+        # függvények, tkinter nélkül) — így egy sorban tesztelhető, hogy egy
+        # tömeges mentés pontosan mihez nyúl hozzá.
+        from core import bulk_apply as _ba
+
+        def _apply_to(sym: str, rows: set, chosen: list, cur_vals: dict):
+            """A megadott SOROK alkalmazása EGY instrumentumra.
+
+            A `rows` szűkítése miatt egy tömeges mentés nem nyúl a nem piszkált
+            beállításokhoz — ezért lehet biztonságosan minden párra ráengedni."""
+            pc = self.cfg.setdefault("pairs", {}).setdefault(sym, {})
+            if "viz" in rows or "trades" in rows:
+                for n in _names:
+                    if "viz" in rows:
+                        _vp.set_on(self.cfg, sym, n, _vp.VIZ, cur_vals["viz"][n])
+                    if "trades" in rows:
+                        _vp.set_on(self.cfg, sym, n, _vp.TRADES, cur_vals["trades"][n])
+                _vp.prune(self.cfg, sym, _names)
+            if "mode" in rows:
+                for n in _names:
+                    _tm.set_mode(self.cfg, sym, n, cur_vals["mode"][n])
+            if "strategies" in rows:
+                if chosen == [default_strategy_name(self.cfg)]:
+                    pc.pop("strategies", None)
+                else:
+                    pc["strategies"] = list(chosen)
+            if "market" in rows:
+                if cur_vals["market"] in ("Nincs", "", "none"):
+                    pc.pop("market_strategy", None)
+                else:
+                    pc["market_strategy"] = cur_vals["market"]
+            if "market_viz" in rows:
+                if cur_vals["market_viz"]:
+                    pc.pop("market_viz", None)     # True az alap → ne szennyezze
+                else:
+                    pc["market_viz"] = False
             # A chart azonnal kövesse: egyszeri CLEAR + friss pillanatkép, hogy a
             # kikapcsolt stratégia objektumai eltűnjenek (a viz-modell nem töröl
             # magától). Ha EGYIK stratégia rajza sem látszik, a motor meg sem
@@ -3421,40 +3479,74 @@ class DashboardWindow:
             try:
                 from trading import live_trader as _lt
                 from core import mt5_visual as _viz
-                if _vp.any_viz_on(self.cfg, symbol, chosen):
-                    _lt._viz_pending_clear[symbol] = True
-                    _lt._viz_last_write.pop(symbol, None)
+                _act = (list(chosen) if "strategies" in rows
+                        else enabled_strategy_names(self.cfg, sym))
+                if _vp.any_viz_on(self.cfg, sym, _act):
+                    _lt._viz_pending_clear[sym] = True
+                    _lt._viz_last_write.pop(sym, None)
                 else:
-                    _viz.clear(symbol)
+                    _viz.clear(sym)
             except Exception:
                 pass
-            # Ha csak az elsődleges → ne szennyezzük a configot (default viselkedés).
-            if chosen == [default_strategy_name(self.cfg)]:
-                pc.pop("strategies", None)
-            else:
-                pc["strategies"] = chosen
-            # Piac-előszűrő + chart-sáv kapcsoló
-            msname = ms_var.get()
-            if msname in ("Nincs", "", "none"):
-                pc.pop("market_strategy", None)
-            else:
-                pc["market_strategy"] = msname
-            if viz_var.get():
-                pc.pop("market_viz", None)     # True az alap → ne szennyezze
-            else:
-                pc["market_viz"] = False
-            # A tábla szürkítése/piac-cellája azonnal követi (a következő frissítéskor);
-            # a KERESKEDÉS a következő botindításkor veszi át.
-            ds = self.dashboard_ref.get(symbol)
+            ds = self.dashboard_ref.get(sym)
             if ds is not None:
-                ds.enabled_strategies = chosen
-                ds.market_strategy = pc.get("market_strategy")
+                if "strategies" in rows:
+                    ds.enabled_strategies = list(chosen)
+                if "market" in rows:
+                    ds.market_strategy = pc.get("market_strategy")
+
+        def _save():
+            chosen = [n for n in _names if _vars[(1, n)].get()]
+            if not chosen:
+                lbl.config(text="Legalább egy stratégia legyen aktív.", fg=FG_RED)
+                return
+            now = _current()
+            changed = _ba.changed_rows(_init, now)
+
+            targets = [symbol]
+            if all_var.get():
+                if not changed:
+                    lbl.config(text="Nincs módosított sor — nincs mit átvinni a "
+                                    "többi instrumentumra.", fg=FG_YELLOW)
+                    return
+                others = _ba.targets(self.cfg.get("pairs"), symbol, True)[1:]
+                # MEGERŐSÍTÉS: tételesen kiírjuk, MI és HÁNY páron változik. Enélkül
+                # egy pipa csendben átírná 10 instrumentum kötés-módját.
+                _warn = ("\n\nEZ PÉNZT ÉRINT: a változás valódi megbízásokat "
+                         "kapcsolhat be/ki minden páron."
+                         if _ba.affects_money(changed) else "")
+                from tkinter import messagebox
+                if not messagebox.askyesno(
+                        "Minden instrumentumra",
+                        f"A következő sorok kerülnek át {len(others)} további "
+                        f"instrumentumra:\n\n{_ba.summary(changed)}\n\n"
+                        f"Érintett: {', '.join(others)}\n\n"
+                        f"A többi beállításukhoz NEM nyúlok.{_warn}\n\nMehet?",
+                        parent=popup):
+                    return
+                targets += others
+
+            for _sym in targets:
+                _apply_to(_sym, changed if all_var.get() else set(_ba.ROWS),
+                          chosen, now)
             try:
                 self._save_main_config()
-                _mstxt = msname if msname != "Nincs" else "nincs piac-előszűrő"
-                lbl.config(text=f"Mentve: {', '.join(chosen)} | piac: {_mstxt}. A tábla "
-                                f"azonnal követi; a kereskedés a következő botindításkor.",
-                           fg=FG_GREEN)
+                _mstxt = (now["market"] if now["market"] != "Nincs"
+                          else "nincs piac-előszűrő")
+                if len(targets) > 1:
+                    _rows = ", ".join(sorted(_ba.label_of(k) for k in changed))
+                    lbl.config(text=f"Mentve {len(targets)} instrumentumra: {_rows}. "
+                                    f"A tábla azonnal követi; a kereskedés a "
+                                    f"következő botindításkor.", fg=FG_GREEN)
+                else:
+                    lbl.config(text=f"Mentve: {', '.join(chosen)} | piac: {_mstxt}. "
+                                    f"A tábla azonnal követi; a kereskedés a "
+                                    f"következő botindításkor.", fg=FG_GREEN)
+                # Az ablak állapota lesz az ÚJ kiindulás: különben egy második
+                # Mentés ugyanazokat a sorokat „módosítottnak" látná, és a pipa
+                # újra szétterítené őket.
+                _init.update({k: (dict(v) if isinstance(v, dict) else v)
+                              for k, v in now.items()})
             except Exception as ex:
                 lbl.config(text=f"Mentési hiba: {ex}", fg=FG_RED)
 

@@ -43,7 +43,13 @@ def main() -> int:
     total = passed = 0
     failed: list = []
     for f in files:
-        r = subprocess.run([sys.executable, str(f)], cwd=str(ROOT),
+        # PYTHONIOENCODING: a gyerek-processz stdoutja cso, amit a Python a
+        # LOCALE szerint kodol (Windowson cp1250) — egy ekezeten tuli karakter
+        # (pl. ⚠) ott UnicodeEncodeError-t dobna, es a teszt a HIBAJA HELYETT
+        # kodolasi hibaval bukna. Itt fentrol rendezzuk, minden teszthez.
+        import os
+        env = dict(os.environ, PYTHONIOENCODING="utf-8")
+        r = subprocess.run([sys.executable, str(f)], cwd=str(ROOT), env=env,
                            capture_output=True, text=True,
                            encoding="utf-8", errors="replace")
         out = (r.stdout or "") + (r.stderr or "")
