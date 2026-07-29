@@ -93,6 +93,34 @@ def apply(pnl_gross: float, lot: float, direction: str,
     return pnl_gross - comm + swp, comm, swp
 
 
+def package_stop_buffer(lot: float, direction: str, open_ts: float, now_ts: float,
+                        pair_cfg: dict, spread_price: float = 0.0) -> float:
+    """A pozícióépítés csomag-stopjához szükséges ÁR-puffer a CONFIG költségeiből.
+
+    A `core.mt5_connector.package_cost_buffer` backteszt-párja: ott a bróker
+    tick-adatai az igazság, itt a config. Ugyanaz a mennyiség, hogy a modell és az
+    él NE csússzon szét — a nyers átlagáron zárt csomag mindkét helyen nettó
+    mínusz lenne.
+
+    A swap az EDDIG felhalmozott (nyitástól `now_ts`-ig), mint élesben a
+    `position.swap`. A stop beállítása után tovább gyűlő swapot egyik oldal sem
+    fedezi — ez ismert, dokumentált alulbecslés, de LEGALÁBB azonos a kettőben.
+
+    Az ártávolság a projekt invariánsából: pénz = (ártáv / point_size) × pv1_point × lot."""
+    if lot <= 0:
+        return 0.0
+    cfg = pair_cfg or {}
+    cost_ccy = (commission_usd(lot, cfg)
+                + max(0.0, -swap_usd(lot, direction, open_ts, now_ts, cfg)))
+    point_size = float(cfg.get("point_size") or 0.0)
+    pv1        = float(cfg.get("pv1_point") or 0.0)
+    buf = 0.0
+    if cost_ccy > 0 and point_size > 0 and pv1 > 0:
+        buf = cost_ccy * point_size / (pv1 * lot)
+    # Spread-cushion: a BUY a BID-en zár, tehát az árrés önmagában is költség.
+    return buf + max(spread_price, point_size)
+
+
 def configured(pair_cfg: dict) -> bool:
     """Van-e EGYÁLTALÁN költség beállítva erre a párra? (A jelentés ezzel tudja
     kiírni, hogy az eredmény költségmentes — nehogy valósnak tűnjön.)"""

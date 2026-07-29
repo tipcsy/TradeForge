@@ -626,11 +626,15 @@ def modify_position_sltp(ticket: int, new_sl: float, new_tp: float) -> bool:
 _commission_cache: dict = {}
 
 
-def _position_costs_price(p, info) -> float:
-    """A pozíció TELJES kilépési költsége ÁR-egységben kifejezve (jutalék
-    round-trip + felhalmozott negatív swap). Ennyivel kell az SL-t az entry
-    FÖLÉ (BUY) / ALÁ (SELL) tolni, hogy a zárás nettó (jutalék+swap után) ne
-    legyen mínusz. Ha az adat nem elérhető → 0.0 (csak a spread-puffer marad)."""
+def _position_cost_ccy(p) -> float:
+    """A pozíció kilépési költsége a SZÁMLA DEVIZÁJÁBAN: jutalék round-trip +
+    a felhalmozott NEGATÍV swap. A pozitív swap szándékosan nem számít — az nem
+    ad plusz kockázatot a záráshoz. Hiba/hiányzó adat → 0.0.
+
+    KÖZÖS forrás: a költség-tudatos breakeven (`_breakeven_plan`) és a
+    pozícióépítés csomag-stopja (`package_cost_buffer`) is EZT használja, hogy a
+    két hely ne csúszhasson szét. (Egyszer már szétcsúszott: a csomag-stop a
+    NYERS átlagárra került, és a csomag nettó mínuszban zárt.)"""
     try:
         # Jutalék a nyitó deal(ek)ből (cache-elve); a zárás ~ugyanannyi → round-trip ≈ ×2.
         pid = getattr(p, "identifier", None)
@@ -644,18 +648,52 @@ def _position_costs_price(p, info) -> float:
             if pid is not None:
                 _commission_cache[pid] = commission
         swap = getattr(p, "swap", 0.0) or 0.0
-        # Csak a levonás számít (negatív swap); a pozitív swap nem ad plusz kockázatot.
-        cost_ccy = 2.0 * abs(commission) + max(0.0, -swap)
-        if cost_ccy <= 0:
-            return 0.0
-        tick_value = getattr(info, "trade_tick_value", 0.0) or 0.0
-        tick_size  = getattr(info, "trade_tick_size", 0.0) or info.point
-        vol = getattr(p, "volume", 0.0) or 0.0
-        if tick_value > 0 and tick_size > 0 and vol > 0:
-            return cost_ccy * tick_size / (tick_value * vol)
+        return 2.0 * abs(commission) + max(0.0, -swap)
     except Exception:
-        pass
+        return 0.0
+
+
+def _ccy_to_price(cost_ccy: float, volume: float, info) -> float:
+    """Számla-devizás összeg → ÁR-távolság az adott (össz)volumenre. 0.0, ha nem
+    számolható. A képlet a bróker tick-adataiból jön, nem a configból — élesben az
+    MT5 az igazság."""
+    if cost_ccy <= 0 or volume <= 0:
+        return 0.0
+    tick_value = getattr(info, "trade_tick_value", 0.0) or 0.0
+    tick_size  = getattr(info, "trade_tick_size", 0.0) or info.point
+    if tick_value > 0 and tick_size > 0:
+        return cost_ccy * tick_size / (tick_value * volume)
     return 0.0
+
+
+def _position_costs_price(p, info) -> float:
+    """A pozíció TELJES kilépési költsége ÁR-egységben kifejezve (jutalék
+    round-trip + felhalmozott negatív swap). Ennyivel kell az SL-t az entry
+    FÖLÉ (BUY) / ALÁ (SELL) tolni, hogy a zárás nettó (jutalék+swap után) ne
+    legyen mínusz. Ha az adat nem elérhető → 0.0 (csak a spread-puffer marad)."""
+    return _ccy_to_price(_position_cost_ccy(p),
+                         getattr(p, "volume", 0.0) or 0.0, info)
+
+
+def package_cost_buffer(positions, info) -> float:
+    """A CSOMAG (több láb) nettó null pontjához szükséges ÁR-puffer: a lábak
+    összköltsége + spread-cushion. A `position_build.package_stop` `cost_buffer`
+    argumentuma.
+
+    Miért nem a lábankénti puffer ÖSSZEGE: a költséget a csomag ÖSSZVOLUMENE
+    fizeti ki, ezért az összeget devizában kell összeadni, és EGYSZER átváltani az
+    összvolumennel. A lábankénti ártávolságok összege nagyságrenddel túlbecsülne.
+
+    A spread-cushion (≥1 pont) ugyanaz, mint a breakevennél: a BUY a BID-en zár,
+    tehát az árrés önmagában is költség."""
+    legs = list(positions or [])
+    if not legs:
+        return 0.0
+    total_vol = sum((getattr(p, "volume", 0.0) or 0.0) for p in legs)
+    cost_ccy  = sum(_position_cost_ccy(p) for p in legs)
+    point        = getattr(info, "point", 0.0) or 0.0
+    spread_price = (getattr(info, "spread", 0) or 0) * point
+    return _ccy_to_price(cost_ccy, total_vol, info) + max(spread_price, point)
 
 
 def _breakeven_plan(p, info):

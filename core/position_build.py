@@ -137,31 +137,48 @@ def average_price(positions) -> float:
 
 
 def package_stop(avg: float, direction: str, price_now: float,
-                 min_gap: float, point: float = 0.0) -> tuple[float, bool]:
-    """A csomag KÖZÖS stopja: az átlagár (null pont), a bróker MINIMUM
-    stop-távolságára vágva. Visszaad: `(stop, vágtunk-e)`.
+                 min_gap: float, point: float = 0.0,
+                 cost_buffer: float = 0.0) -> tuple[float, bool]:
+    """A csomag KÖZÖS stopja: a NETTÓ null pont, a bróker MINIMUM stop-távolságára
+    vágva. Visszaad: `(stop, vágtunk-e)`.
 
-    Miért kell: ráépítéskor az új átlagár tipikusan KÖZEL van a piaci árhoz (épp
+    A cél a `cost_buffer`-rel a PROFIT oldalra tolt átlagár:
+
+        BUY  → avg + cost_buffer          SELL → avg − cost_buffer
+
+    Miért nem a nyers átlagár: az átlagár a **bruttó** null pont. A zárás fizeti a
+    spreadet, a jutalékot és a felhalmozott swapot, ezért a nyers átlagáron zárt
+    csomag **nettó MÍNUSZ** — pontosan ez adta a bejelentett GOLD-esetet
+    (+2,12 € / −2,16 € = −0,04 €). Az egyedi pozíció breakevenje régóta
+    költség-tudatos (`mt5_connector._breakeven_plan`); ez a két hely csúszott szét.
+    A `cost_buffer` ugyanaz a mennyiség, csak a csomag EGÉSZÉRE számolva.
+
+    Miért kell a vágás: ráépítéskor a cél tipikusan KÖZEL van a piaci árhoz (épp
     akkor építünk, amikor az ár túlüt a referencián). Ha közelebb, mint a bróker
     `trade_stops_level`-je, a stop-áthelyezést `10016 Invalid stops`-szal utasítja
     el — és eddig ez NÉMÁN történt: a friss láb stop NÉLKÜL maradt, miközben a
     motor kockázatmentesnek jelölte.
 
     Ilyenkor a legszorosabb ENGEDÉLYEZETT stopot adjuk (egy ponttal a határon
-    belül). Ez BUY-nál az átlagár ALATT, SELL-nél FÖLÖTT van, tehát a csomag
-    ilyenkor NEM pontosan nullán áll — ezt a `vágtunk-e` jelzi, és a hívónak
-    emiatt NEM szabad kockázatmentesnek jelölnie a lábakat.
+    belül), és `vágtunk-e = True`. **A hívónak ilyenkor NEM szabad
+    kockázatmentesnek jelölnie a lábakat.** A `cost_buffer` óta ez erősebb
+    állítás: `vágtunk-e = False` mostantól azt jelenti, hogy a csomag **nettó**
+    (költség után) sem zár mínuszban — korábban csak bruttó nullát garantált.
+    Ezért a köztes eset (a nyers átlagár még elérhető, a költség-fedezett cél már
+    nem) SZÁNDÉKOSAN vágottnak számít: ott a zárás nettó mínusz lenne.
 
-    `min_gap` és `point` ÁR-egységben; `min_gap <= 0` (nincs korlát) → nincs vágás.
+    `min_gap`, `point` és `cost_buffer` ÁR-egységben; `min_gap <= 0` (nincs korlát)
+    → nincs vágás. `cost_buffer=0.0` (alapérték) → a korábbi viselkedés bitazonos.
     """
+    target = avg + (cost_buffer if direction == "BUY" else -cost_buffer)
     if min_gap <= 0 or price_now <= 0:
-        return avg, False
+        return target, False
     if direction == "BUY":
         cap = price_now - min_gap - point      # a stop legfeljebb eddig lehet FÖNT
-        if avg > cap:
+        if target > cap:
             return cap, True
     else:
         cap = price_now + min_gap + point      # a stop legalább eddig LENT
-        if avg < cap:
+        if target < cap:
             return cap, True
-    return avg, False
+    return target, False

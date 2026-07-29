@@ -2170,17 +2170,23 @@ def manual_build(symbol: str, strategy_name: "str | None" = None) -> bool:
                   "(%.*f) fut — ELLENŐRIZD KÉZZEL!", symbol, ticket, digits, _seed_sl)
         return True
 
-    # 3) Közös stop = az új átlagár (null pont), a bróker minimum stop-távolságára
-    #    vágva. Vágás esetén a csomag NEM pontosan nullán áll → nem jelöljük
-    #    kockázatmentesnek (a slot foglalt marad, és a BE sincs kész).
+    # 3) Közös stop = az új átlagár a KÖLTSÉGGEL a profit oldalra tolva (nettó null
+    #    pont), a bróker minimum stop-távolságára vágva. Vágás esetén a csomag nettó
+    #    mínuszban zárna → nem jelöljük kockázatmentesnek (a slot foglalt marad, és a
+    #    BE sincs kész).
+    #    A puffer a lábak jutaléka + negatív swapja + spread — ugyanabból a
+    #    költség-forrásból, mint a költség-tudatos breakeven. A nyers átlagár BRUTTÓ
+    #    null pont: azon zárva a csomag a költséggel MÍNUSZBAN végez.
     avg = _position_build.average_price(
         [(p.price_open, p.volume) for p in positions_new])
     with MT5_LOCK:
         _tick = mt5.symbol_info_tick(symbol)
+        _cost_buf = mt5_connector.package_cost_buffer(positions_new, info)
     _price_now = (_tick.bid if direction == "BUY" else _tick.ask) if _tick else 0.0
     _stop, _clamped = _position_build.package_stop(
         avg, direction, _price_now,
-        order_exec.min_stop_price(info), getattr(info, "point", 0.0) or 0.0)
+        order_exec.min_stop_price(info), getattr(info, "point", 0.0) or 0.0,
+        cost_buffer=_cost_buf)
     _stop = order_exec.normalize_price(_stop, info)
 
     # Minden láb SL-je a közös stopra, ÉS a TP TÖRLÉSE (tp=0): különben az induló láb

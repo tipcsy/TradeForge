@@ -948,11 +948,20 @@ def run_pair(
                                         if trade.direction == "BUY" else m1_row["close"])
                         trade.legs.append((_add_px, _add))
                         trade.lot = round(sum(l[1] for l in trade.legs), 8)
-                        trade.sl  = round(_posbuild.average_price(trade.legs), 6)
+                        # A stop a NETTÓ null pont: az átlagár + költség (jutalék,
+                        # eddigi negatív swap, spread) a profit oldalra tolva. A nyers
+                        # átlagár BRUTTÓ nulla → a csomag a költséggel mínuszban zárna.
+                        # Él-paritás: core.mt5_connector.package_cost_buffer.
+                        _cbuf = _costs.package_stop_buffer(
+                            trade.lot, trade.direction, trade.open_time.timestamp(),
+                            m1_time.timestamp(), pair_cfg, _sp)
+                        trade.sl  = round(_posbuild.package_stop(
+                            _posbuild.average_price(trade.legs), trade.direction,
+                            0.0, 0.0, 0.0, cost_buffer=_cbuf)[0], 6)
                         trade.build_ref = _bc_close
                         if record_events:
-                            # Ráépítés: új láb (piaci áron) + az SL az új ÁTLAGÁRRA,
-                            # és a csomag TP nélkül fut (minden láb TP-je törölve).
+                            # Ráépítés: új láb (piaci áron) + az SL az új NETTÓ null
+                            # pontra, és a csomag TP nélkül fut (minden láb TP-je törölve).
                             trade.events.append(("BUILD_ADD", m1_time,
                                                  round(float(m1_row["close"]), 6),
                                                  round(trade.sl, 6), 0.0,
@@ -1653,7 +1662,15 @@ def run_portfolio_backtest(
                     if _add > 0:
                         trade.legs.append((float(row["close"]), _add))
                         trade.lot = round(sum(l[1] for l in trade.legs), 8)
-                        trade.sl  = round(_pb.average_price(trade.legs), 6)
+                        # NETTÓ null pont (nem a nyers átlagár) — lásd a run_pair
+                        # ágát és a core.mt5_connector.package_cost_buffer-t.
+                        # Itt az `sp` PONTBAN van (a run_pair-ben árban), ezért ×point_size.
+                        _cbuf = _costs.package_stop_buffer(
+                            trade.lot, trade.direction, trade.open_time.timestamp(),
+                            m1_time.timestamp(), _pc, sp * point_size)
+                        trade.sl  = round(_pb.package_stop(
+                            _pb.average_price(trade.legs), trade.direction,
+                            0.0, 0.0, 0.0, cost_buffer=_cbuf)[0], 6)
                         trade.build_ref = _bc_cl
 
             if closed:
