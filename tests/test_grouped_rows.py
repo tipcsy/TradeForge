@@ -108,7 +108,21 @@ else:
     try:
         ir = InstrumentRow(body, "GOLD", 0, mono, small)
         ir.frame.pack()
+        # Regi alak: (kesz, osszes) — visszafele kompatibilis
         ir.update(DSPos(), "LIVE", True, (1, 2))
+        check("visszafele komp.: (ok, total) alak is mukodik",
+              len(ir._ready_dots) == 2, str(len(ir._ready_dots)))
+        # UJ alak: per-strategia allapot NEVVEL -> a pont megmondja, MELYIK akadt meg
+        ir.update(DSPos(), "LIVE", False,
+                  [("wpr_sma", True), ("ml_ai", False)])
+        check("per-strategia pontok: kettobol egy piros",
+              [d.cget("text") for d in ir._ready_dots] == ["●", "○"],
+              str([d.cget("text") for d in ir._ready_dots]))
+        check("...es a szinuk is elter",
+              ir._ready_dots[0].cget("fg") != ir._ready_dots[1].cget("fg"))
+        ir.update(DSPos(), "LIVE", False, [("a", True), ("b", True), ("c", False)])
+        check("harom strategia -> harom pont (nem duplazodik)",
+              len(ir._ready_dots) == 3, str(len(ir._ready_dots)))
         sr = StrategyRow(body, "GOLD", "wpr_sma", 1, mono, small,
                          instrument_indent(mono))
         sr.frame.pack()

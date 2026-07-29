@@ -26,7 +26,7 @@ from dashboard import theme as _theme
 from dashboard import grouped_layout as _gl
 from dashboard.grouped_layout import (INSTRUMENT_COLUMNS, STRATEGY_COLUMNS,
                                       ready_badge)
-from dashboard.theme import (BG_INACTIVE, BG_OPT_ROW, BG_ROW_EVEN, BG_ROW_ODD,
+from dashboard.theme import (BG_HEADER, BG_INACTIVE, BG_OPT_ROW, BG_ROW_EVEN, BG_ROW_ODD,
                              BG_UNTRAINED, BTN_DIS_BG, BTN_DIS_FG, BTN_OPT_BG,
                              BTN_OPT_FG, BTN_PLAY_BG, BTN_PLAY_FG, BTN_STOP_BG,
                              BTN_STOP_FG, FG_GRAY, FG_GRAY_DIM, FG_GREEN,
@@ -60,6 +60,22 @@ class InstrumentRow:
             self.exp.bind("<Button-1>", lambda e: on_toggle(symbol))
 
         for col in INSTRUMENT_COLUMNS:
+            if col.key == "ready":
+                # STRATEGIANKENT egy pont, SAJAT szinnel. Egyetlen szoveg-cimke
+                # csak annyit tudna mondani, hogy "kettobol egy kesz" — azt nem,
+                # hogy MELYIK. Csukott allapotban pont ez a lenyeg: ne kelljen
+                # kinyitni ahhoz, hogy lasd, melyik strategia akadt meg.
+                # (A betukod-erv itt NEM all: strategiabol 2-3 van, te valasztottad
+                # oket, a pozicio megjegyezheto — a kapuknal 10 is lehet.)
+                cell = tk.Frame(self.frame, bg=self._bg,
+                                width=mono_font.measure("●") * 4 + 8,
+                                height=mono_font.metrics("linespace") + 6)
+                cell.pack(side="left")
+                cell.pack_propagate(False)
+                self._ready_cell = cell
+                self._ready_dots: list = []
+                self.labels[col.key] = cell
+                continue
             lbl = tk.Label(self.frame, text="—", width=col.width, anchor=col.anchor,
                            bg=self._bg, fg=FG_GRAY, font=mono_font, padx=4, pady=3)
             lbl.pack(side="left")
@@ -91,8 +107,11 @@ class InstrumentRow:
         self.frame.config(bg=bg)
         self.ctrl.config(bg=bg)
         self.exp.config(bg=bg, text="▼" if expanded else "▶")
-        for lbl in self.labels.values():
+        for key, lbl in self.labels.items():
             lbl.config(bg=bg)
+            if key == "ready":
+                for d in getattr(self, "_ready_dots", []):
+                    d.config(bg=bg)
 
         _f = _theme.fonts()
         if not connected:
@@ -118,11 +137,7 @@ class InstrumentRow:
         sp = getattr(ds, "spread_pts", 0)
         self.labels["spread"].config(text=f"{sp:.0f}" if sp else "—", fg=FG_GRAY)
 
-        ok, total = ready
-        self.labels["ready"].config(
-            text=ready_badge(ok, total),
-            fg=(FG_GREEN if total and ok == total else
-                FG_YELLOW if ok else FG_RED))
+        self._render_ready(ready, bg)
         # Az instrumentum ÖSSZESÍTETT napi eredménye; a per-stratégia bontás a
         # gyerek-sorokban van (a felhasználó mindkettőt kérte).
         dp = getattr(ds, "daily_pnl", 0.0) or 0.0
@@ -138,6 +153,59 @@ class InstrumentRow:
         self.btn_del.config(bg=BG_INACTIVE if _delok else BTN_DIS_BG,
                             fg=FG_RED if _delok else BTN_DIS_FG,
                             state="normal" if _delok else "disabled")
+
+    def _render_ready(self, ready, bg):
+        """A „Kész" cella: stratégiánként egy pont.
+
+        `ready` lehet `(ok, total)` — visszafelé kompatibilis, ilyenkor nincs
+        per-stratégia bontás —, VAGY `[(név, kész?), …]`, és akkor minden pont a
+        SAJÁT stratégiája állapotát mutatja. A név tooltipben (a pont maga nem
+        fér feliratozni), így nem kell fejből tudni a sorrendet."""
+        if ready and isinstance(ready, (list, tuple)) and ready                 and isinstance(ready[0], (list, tuple)):
+            items = list(ready)
+        else:
+            ok, total = (ready or (0, 0))
+            items = [(None, i < ok) for i in range(total)]
+        if len(self._ready_dots) != len(items):
+            for d in self._ready_dots:
+                d.destroy()
+            self._ready_dots = []
+            for _ in items:
+                d = tk.Label(self._ready_cell, text="", bg=bg, font=self._mono, padx=0)
+                d.pack(side="left")
+                self._ready_dots.append(d)
+        if not items:
+            return
+        for d, (name, ok_) in zip(self._ready_dots, items):
+            d.config(text="●" if ok_ else "○",
+                     fg=FG_GREEN if ok_ else FG_RED, bg=bg)
+            if name:
+                d.config(cursor="hand2")
+                _tip = f"{name}: {'kereskedésre kész' if ok_ else 'blokkolva'}"
+                d.bind("<Enter>", lambda e, t=_tip: self._tip_show(e, t))
+                d.bind("<Leave>", self._tip_hide)
+
+    _tip_win = None
+
+    def _tip_show(self, event, text):
+        self._tip_hide()
+        try:
+            w = tk.Toplevel(event.widget)
+            w.wm_overrideredirect(True)
+            w.wm_geometry(f"+{event.x_root + 12}+{event.y_root + 12}")
+            tk.Label(w, text=text, bg=BG_HEADER, fg=FG_WHITE,
+                     font=self._mono, padx=6, pady=2).pack()
+            self._tip_win = w
+        except Exception:
+            self._tip_win = None
+
+    def _tip_hide(self, _event=None):
+        if self._tip_win is not None:
+            try:
+                self._tip_win.destroy()
+            except Exception:
+                pass
+            self._tip_win = None
 
 
 class StrategyRow:
