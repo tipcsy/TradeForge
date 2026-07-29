@@ -126,7 +126,8 @@ class FlatRow:
     """Egy (instrumentum × stratégia) sor — semmi nincs elrejtve."""
 
     def __init__(self, parent, symbol, strategy, group_idx, mono_font, small_font,
-                 on_gates=None, on_params=None, on_opt=None, on_name=None):
+                 on_gates=None, on_params=None, on_opt=None, on_name=None,
+                 on_run=None):
         self.symbol = symbol
         self.strategy = strategy
         self._mono = mono_font
@@ -174,6 +175,16 @@ class FlatRow:
             self.labels["symbol"].config(cursor="hand2")
             self.labels["symbol"].bind("<Button-1>", lambda e: on_name(symbol))
 
+        # Play/Stop PER STRATEGIA: a `core.run_state` szandeka mar igy is
+        # (symbol, strategy) kulcsu, tehat itt a helyes granularitas. Igy egy
+        # paron elinditható az egyik strategia a masik nelkul — a klasszikus
+        # tablan ez nem volt kifejezheto.
+        self.btn_run = tk.Button(self.frame, text="▶", width=3, bg=BTN_DIS_BG,
+                                 fg=BTN_DIS_FG, font=small_font, relief="flat",
+                                 bd=0, highlightthickness=0, padx=0, pady=0,
+                                 command=(lambda: on_run(symbol, strategy))
+                                 if on_run else None)
+        self.btn_run.pack(side="left", padx=(4, 1), pady=1)
         self.btn_opt = tk.Button(self.frame, text="OPT", width=9, bg=BTN_DIS_BG,
                                  fg=BTN_DIS_FG, font=small_font, relief="flat",
                                  bd=0, highlightthickness=0, padx=0, pady=0,
@@ -250,6 +261,15 @@ class FlatRow:
             text=f"{daily:+.2f}" if daily else "—",
             fg=dim or (FG_GREEN if daily > 0 else
                        FG_RED if daily < 0 else FG_GRAY))
+
+        # Play/Stop morph: ELO -> Stop (■), egyebkent Play (▶). A tanitatlan
+        # strategiat nem indítjuk (a klasszikus tabla is így viselkedett).
+        _running = state in ("position", "blocked", "signal", "live")
+        self.btn_run.config(
+            text="■" if _running else "▶",
+            bg=BTN_STOP_BG if _running else (BTN_PLAY_BG if trained else BTN_DIS_BG),
+            fg=BTN_STOP_FG if _running else (BTN_PLAY_FG if trained else BTN_DIS_FG),
+            state="normal" if (_running or trained) else "disabled")
 
         busy = bool(opt_status)
         self.btn_opt.config(text=f"OPT {opt_status}" if busy else "OPT",
