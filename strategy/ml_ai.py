@@ -62,6 +62,9 @@ def model_path(symbol: str) -> Path:
 
 # (symbol) → (mtime, bundle) — újratanítás után (mtime változás) automatikus reload
 _bundle_cache: dict[str, tuple[float, Optional[dict]]] = {}
+# Azok a szimbolumok, ahol a modell LETEZIK, de ELAVULT egységgel tanult
+# (pip→pont migráció). A hívó ezeknél „tanítsd újra" üzenetet ad.
+_stale_unit_syms: set = set()
 
 
 def load_bundle(symbol: str) -> Optional[dict]:
@@ -86,12 +89,19 @@ def load_bundle(symbol: str) -> Optional[dict]:
     # a `compute_smc` PONTBAN normalizál; egy régi, PIP-skálán tanított modell
     # bemenete 10-100×-osra ugrana — a predikció értelmetlen lenne, de a rendszer
     # ezt magától nem venné észre. Inkább NEM kereskedünk vele, és megmondjuk, miért.
-    if bundle is not None and (bundle.get("meta") or {}).get("feature_unit") != "point":
+    stale_unit = (bundle is not None
+                  and (bundle.get("meta") or {}).get("feature_unit") != "point")
+    if stale_unit:
         log.warning("%s — az ML modell RÉGI (pip-skálájú) jellemzőkkel tanult, a motor "
                     "viszont PONTBAN normalizál → a predikció érvénytelen lenne. "
                     "A modell KIHAGYVA; tanítsd újra (Opt gomb / "
                     "`python main.py optimize %s`).", symbol, symbol)
         bundle = None
+    # A gyorsítótár megjegyzi az ELUTASÍTÁS OKÁT is: így a hívó pontos üzenetet ad
+    # („elavult modell" vs. „nincs modell-fájl") — a kettő más teendőt jelent.
+    _stale_unit_syms.discard(symbol)
+    if stale_unit:
+        _stale_unit_syms.add(symbol)
     _bundle_cache[symbol] = (mtime, bundle)
     return bundle
 
@@ -421,7 +431,9 @@ class MlAiStrategy(Strategy):
         feats = mlf.build_feature_frame(df_hi, float(pip))
         bundle = load_bundle(symbol)
         if bundle is None:
-            log.warning("%s — nincs tanított ML modell (%s), a stratégia nem ad jelet",
+            log.warning("%s — ELAVULT ML modell (%s): tanítsd újra, a stratégia addig "
+                        "nem ad jelet" if symbol in _stale_unit_syms else
+                        "%s — nincs tanított ML modell (%s), a stratégia nem ad jelet",
                         symbol, model_path(symbol).name)
         p_long, p_short = _predict_frame(feats, bundle)
         thr_l, thr_s = _thresholds(bundle)
