@@ -967,7 +967,7 @@ def optimize_symbol(symbol, df_m15, df_m1, cfg, initial_balance, progress=None,
     try:
         _m15_ind, _ = strategy.bt_indicators(
             df_m15, df_m1, {**result["params"], "symbol": symbol,
-                            "pip_size": pair_cfg.get("pip_size", 0.0001)})
+                            "point_size": pair_cfg.get("point_size", 0.0001)})
         if "atr_avg" in _m15_ind.columns and len(_m15_ind):
             _av = float(_m15_ind["atr_avg"].iloc[0])
             if _av > 0:

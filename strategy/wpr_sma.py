@@ -26,7 +26,7 @@ from strategy.base import (
 from strategy import visual as viz
 from core.indicator_engine import compute_indicators
 from core.signal_detector import PairState, check_m15_signal, check_m1_entry
-from core.risk_manager import calc_sl_tp_pips, calc_swing_sl_tp_pips
+from core.risk_manager import calc_sl_tp_points, calc_swing_sl_tp_points
 from core import spread_gate
 
 
@@ -402,7 +402,7 @@ class WprSmaStrategy(Strategy):
             szélességben. A szürke no-trade sávot a küldő (live_trader) maszkolja rá.
           • Feltétel 3 — minden M1 BELÉPŐnél HÁROM vízszintes trendvonal a
             belépőre CENTRÁLVA (−3…+3 gyertya, 6 hosszú): NARANCS a belépő
-            árszintjén, zöld TP, piros SL (ATR-ből, a motor `calc_sl_tp_pips`-ével)
+            árszintjén, zöld TP, piros SL (ATR-ből, a motor `calc_sl_tp_points`-ével)
             + FÜGGŐLEGES irány-jelzés a belépő idejénél (zöld BUY / piros SELL).
           • Beállítás-táblázat a chart bal-felső sarkában (Label).
 
@@ -477,7 +477,7 @@ class WprSmaStrategy(Strategy):
         # JEL-REPLAY: a per-jel belépő-jelzések (függőleges irány-vonal + Entry/TP/SL).
         # A „K" gombbal kikapcsolható (md.show_signals=False) → a chart nem zsúfolódik
         # tele az összes jellel; az SMA-szalag/sáv-állapot és a tényleges kötések maradnak.
-        pip = md.params.get("pip_size", 0.0001)
+        pip = md.params.get("point_size", 0.0001)
         m1_wprs  = m1["wpr"].values
         m1_close = m1["close"].values
         times1   = [int(t.timestamp()) for t in m1.index]
@@ -548,20 +548,20 @@ class WprSmaStrategy(Strategy):
                 # backtest belépővel EGYEZŐEN), különben a régi ATR-méret.
                 if md.params.get("sl_method", "swing20") == "swing20":
                     _nb = int(md.params.get("sl_swing_bars", 20) or 20)
-                    _sw = calc_swing_sl_tp_pips(
+                    _sw = calc_swing_sl_tp_points(
                         entry, sig,
                         m1["low"].to_numpy()[max(0, j - _nb + 1):j + 1],
                         m1["high"].to_numpy()[max(0, j - _nb + 1):j + 1],
-                        md.params, pip, md.params.get("backtest_spread_pips", 1.5))
+                        md.params, pip, md.params.get("backtest_spread_points", 1.5))
                     if _sw is None:
                         continue
-                    sl_pips, tp_pips = _sw
+                    sl_points, tp_points = _sw
                 else:
-                    sl_pips, tp_pips = calc_sl_tp_pips(float(atr_v), {**md.params, "pip_size": pip})
+                    sl_points, tp_points = calc_sl_tp_points(float(atr_v), {**md.params, "point_size": pip})
                 if sig == "BUY":
-                    sl, tp = entry - sl_pips * pip, entry + tp_pips * pip
+                    sl, tp = entry - sl_points * pip, entry + tp_points * pip
                 else:
-                    sl, tp = entry + sl_pips * pip, entry - tp_pips * pip
+                    sl, tp = entry + sl_points * pip, entry - tp_points * pip
                 # Három vízszintes trendvonal a belépőre CENTRÁLVA: −3…+3 M1
                 # gyertya → 6 hosszú. TP zöld (fent BUY-nál), belépő NARANCS az
                 # entry árszintjén, SL piros. + FÜGGŐLEGES irány-jelzés a belépő
@@ -681,15 +681,15 @@ class WprSmaStrategy(Strategy):
             return "NONE"
         return check_m1_entry(state, float(prev_wpr), float(cur_wpr), params)
 
-    def sl_tp_pips(self, hi_row, params, pip_size):
+    def sl_tp_points(self, hi_row, params, point_size):
         """SL/TP méretezés ATR-ből (szűrő nélkül). None → nincs érvényes ATR."""
         atr_v = hi_row.get("atr", 0)
         if not atr_v or pd.isna(atr_v) or atr_v <= 0:
             return None
-        sl_pips, tp_pips = calc_sl_tp_pips(float(atr_v), {**params, "pip_size": pip_size})
-        return sl_pips, tp_pips
+        sl_points, tp_points = calc_sl_tp_points(float(atr_v), {**params, "point_size": point_size})
+        return sl_points, tp_points
 
-    def bt_entry(self, hi_row, params, pip_size):
+    def bt_entry(self, hi_row, params, point_size):
         """Backtest: volatilitás-szűrő + ATR-méretezés. None → kihagyás."""
         atr_v = hi_row.get("atr", 0)
         if not atr_v or pd.isna(atr_v) or atr_v <= 0:
@@ -709,4 +709,4 @@ class WprSmaStrategy(Strategy):
                 return None
             if atr_max_pct > 0 and atr_v > atr_avg * atr_max_pct:
                 return None
-        return self.sl_tp_pips(hi_row, params, pip_size)
+        return self.sl_tp_points(hi_row, params, point_size)

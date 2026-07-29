@@ -12,7 +12,7 @@ Eltérés a forrástól (Trading-with-ai/ml_backtest.py):
   • A H1 feature-öket EGY H1 gyertyával eltoljuk (shift), hogy CSAK lezárt H1
     vödörből származzanak → nincs look-ahead (a forrás backtestje a teljes-órás
     H1 sort ffill-elte, ami az óra közepén enyhe jövőbelátás volt).
-  • A pip-normalizálás paraméter (`pip_size`), nem globális PAIRS lookup.
+  • A pip-normalizálás paraméter (`point_size`), nem globális PAIRS lookup.
 """
 
 from __future__ import annotations
@@ -58,7 +58,7 @@ def wma(s: pd.Series, n: int) -> pd.Series:
 # SMC (LiquiditySMC) — piaci struktúra, EQH/EQL, sweep
 # ---------------------------------------------------------------------------
 
-def compute_smc(df: pd.DataFrame, pip_size: float,
+def compute_smc(df: pd.DataFrame, point_size: float,
                 swing_len: int = 5,
                 eq_tol: float = 0.001,     # 0.1% tolerancia EQH/EQL-hez
                 sweep_ratio: float = 0.50,
@@ -171,11 +171,11 @@ def compute_smc(df: pd.DataFrame, pip_size: float,
         hh_a[i]   = last_hh
         hl_a[i]   = last_hl
         if eqH > 0:
-            d = (eqH - cl[i]) / pip_size
+            d = (eqH - cl[i]) / point_size
             eqh_dist_a[i] = d
             near_eqh_a[i] = 1 if abs(d) <= 5 else 0
         if eqL > 0:
-            d = (cl[i] - eqL) / pip_size
+            d = (cl[i] - eqL) / point_size
             eql_dist_a[i] = d
             near_eql_a[i] = 1 if abs(d) <= 5 else 0
         sweep_bull_a[i] = 1 if i <= bull_sw_end else 0
@@ -306,7 +306,7 @@ FEATURES = [
 WARMUP_BARS = 700
 
 
-def build_feature_frame(df_m15: pd.DataFrame, pip_size: float) -> pd.DataFrame:
+def build_feature_frame(df_m15: pd.DataFrame, point_size: float) -> pd.DataFrame:
     """A teljes feature-készlet kiszámítása egy M15 OHLC frame-re.
 
     A bemenet UTC/szerver-idő indexű M15 OHLC(V) — CSAK ZÁRT gyertyák (a hívó
@@ -314,7 +314,7 @@ def build_feature_frame(df_m15: pd.DataFrame, pip_size: float) -> pd.DataFrame:
     másolata + az összes feature oszlop; az i. sor feature-ei az i. gyertya
     ZÁRÁSÁIG ismert adatból számolódnak (nincs look-ahead)."""
     df = df_m15.copy()
-    pip = float(pip_size)
+    pip = float(point_size)
 
     # ── Alap indikátorok ──────────────────────────────────────────────────
     df["ema8"]    = ema(df["close"], 8)

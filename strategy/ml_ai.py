@@ -82,6 +82,16 @@ def load_bundle(symbol: str) -> Optional[dict]:
     except Exception as ex:
         log.warning("%s — ML modell betöltési hiba (%s): %s", symbol, p.name, ex)
         bundle = None
+    # A jellemzők egysége EGYEZZEN a modellével. A pip→pont migráció (v1.67.0) óta
+    # a `compute_smc` PONTBAN normalizál; egy régi, PIP-skálán tanított modell
+    # bemenete 10-100×-osra ugrana — a predikció értelmetlen lenne, de a rendszer
+    # ezt magától nem venné észre. Inkább NEM kereskedünk vele, és megmondjuk, miért.
+    if bundle is not None and (bundle.get("meta") or {}).get("feature_unit") != "point":
+        log.warning("%s — az ML modell RÉGI (pip-skálájú) jellemzőkkel tanult, a motor "
+                    "viszont PONTBAN normalizál → a predikció érvénytelen lenne. "
+                    "A modell KIHAGYVA; tanítsd újra (Opt gomb / "
+                    "`python main.py optimize %s`).", symbol, symbol)
+        bundle = None
     _bundle_cache[symbol] = (mtime, bundle)
     return bundle
 
@@ -228,7 +238,7 @@ class MlAiStrategy(Strategy):
     name = "ml_ai"
 
     # A modell CÍMKÉJE ATR-alapú stopra épül (`ml_train.label_outcomes`:
-    # SL = ATR14 × sl_atr_mult, TP = SL × tp_rr_ratio), és a `sl_tp_pips` is ezt
+    # SL = ATR14 × sl_atr_mult, TP = SL × tp_rr_ratio), és a `sl_tp_points` is ezt
     # adja. A stop-módszernek tehát EGYEZNIE kell ezzel — különben a modell egy
     # MÁSIK kötés kimenetelére adna predikciót, mint amit a motor végrehajt.
     default_sl_method = "atr"
@@ -263,7 +273,7 @@ class MlAiStrategy(Strategy):
         cells = dict(_MARKS_EMPTY)
         cells["ml_proba"] = Cell("—", "muted")
         df15 = md.bars.get("M15")
-        pip = md.params.get("pip_size")
+        pip = md.params.get("point_size")
         if df15 is None or len(df15) < 3 or not pip:
             return cells
         bundle = load_bundle(md.symbol)
@@ -293,7 +303,7 @@ class MlAiStrategy(Strategy):
         """Új ZÁRT M15 gyertyánál predikció → jel. A hívás M1-ütemű; ugyanarra a
         zárt M15 gyertyára csak EGYSZER értékelünk (és tüzelünk)."""
         df15 = md.bars.get("M15")
-        pip = md.params.get("pip_size")
+        pip = md.params.get("point_size")
         if df15 is None or len(df15) < 3 or not pip:
             return state, "NONE"
 
@@ -402,11 +412,11 @@ class MlAiStrategy(Strategy):
         ciklusban futnak — soronkénti predict tiltó lassú volna). A p_long/p_short
         oszlop a SAJÁT sora záróadatából számolt predikció; a kauzális eltolást
         (előző zárt sor jele) a bt-állapotgép végzi. Igényli: params['symbol'] és
-        params['pip_size'] (a motor injektálja a pair configból)."""
-        pip = params.get("pip_size")
+        params['point_size'] (a motor injektálja a pair configból)."""
+        pip = params.get("point_size")
         symbol = params.get("symbol", "")
         if not pip:
-            raise ValueError("ml_ai.bt_indicators: hiányzó pip_size a params-ból "
+            raise ValueError("ml_ai.bt_indicators: hiányzó point_size a params-ból "
                              "(a hívónak a pair configból kell injektálnia)")
         feats = mlf.build_feature_frame(df_hi, float(pip))
         bundle = load_bundle(symbol)
@@ -456,16 +466,16 @@ class MlAiStrategy(Strategy):
         state.pending = "NONE"
         return sig
 
-    def sl_tp_pips(self, hi_row, params, pip_size):
+    def sl_tp_points(self, hi_row, params, point_size):
         """SL/TP méret: ATR-alapú (dynamic_sltp, alap) vagy fix pip. Az ATR a
         hi_row atr14 oszlopából (a feature-motor számolja)."""
         if params.get("dynamic_sltp", True):
             atr_v = hi_row.get("atr14", 0)
             if not atr_v or pd.isna(atr_v) or atr_v <= 0:
                 return None
-            sl = float(atr_v) / float(pip_size) * float(params.get("sl_atr_mult", 1.5))
+            sl = float(atr_v) / float(point_size) * float(params.get("sl_atr_mult", 1.5))
         else:
-            sl = float(params.get("sl_pips", 0) or 0)
+            sl = float(params.get("sl_points", 0) or 0)
             if sl <= 0:
                 return None
         tp = sl * float(params.get("tp_rr_ratio", 2.0))

@@ -33,14 +33,14 @@ from strategy import ml_ai
 # Címkézés — UGYANAZZAL az SL/TP sémával, amivel a stratégia méretez
 # ---------------------------------------------------------------------------
 
-def label_outcomes(feats: pd.DataFrame, params: dict, pip_size: float,
+def label_outcomes(feats: pd.DataFrame, params: dict, point_size: float,
                    lookahead: int) -> pd.DataFrame:
     """Gyertyánként: ha a záráson belépnék LONG-ba (ill. SHORT-ba), a TP előbb
     üt-e, mint az SL, a következő `lookahead` gyertyán belül? label = 1 (TP) /
     0 (SL vagy kifutás). A long és a short független.
 
-    Az SL/TP a stratégia `sl_tp_pips` sémája: dynamic_sltp → ATR14 × sl_atr_mult,
-    TP = SL × tp_rr_ratio; különben fix sl_pips/tp_pips. Így a modell PONTOSAN
+    Az SL/TP a stratégia `sl_tp_points` sémája: dynamic_sltp → ATR14 × sl_atr_mult,
+    TP = SL × tp_rr_ratio; különben fix sl_points/tp_points. Így a modell PONTOSAN
     arra a kérdésre tanul, amit a végrehajtás feltesz."""
     closes = feats["close"].values
     highs  = feats["high"].values
@@ -51,7 +51,7 @@ def label_outcomes(feats: pd.DataFrame, params: dict, pip_size: float,
     dynamic = bool(params.get("dynamic_sltp", True))
     sl_mult = float(params.get("sl_atr_mult", 1.5))
     rr      = float(params.get("tp_rr_ratio", 2.0))
-    fix_sl  = float(params.get("sl_pips", 0) or 0) * pip_size
+    fix_sl  = float(params.get("sl_points", 0) or 0) * point_size
     fix_tp  = fix_sl * rr
 
     label_long  = np.zeros(n, dtype=np.int8)
@@ -235,7 +235,7 @@ def train_symbol(symbol: str, df_m15: pd.DataFrame, cfg: dict, pair_cfg: dict,
     from strategy import get_strategy_by_name
     strategy = get_strategy_by_name("ml_ai")
     params = strategy.base_params(cfg)
-    pip = float(pair_cfg["pip_size"])
+    pip = float(pair_cfg["point_size"])
 
     # ── Feature-ök + címkék ────────────────────────────────────────────────
     feats = mlf.build_feature_frame(df_m15, pip)
@@ -293,6 +293,12 @@ def train_symbol(symbol: str, df_m15: pd.DataFrame, cfg: dict, pair_cfg: dict,
 
     # ── Mentés a modelltárba ───────────────────────────────────────────────
     bundle["meta"] = {
+        # A jellemzők NORMALIZÁLÁSI EGYSÉGE. Az SMC-távolságok ezzel osztódnak
+        # (`compute_smc`), tehát a modell + scaler ehhez az egységhez van illesztve.
+        # A v1.67.0-s pip→pont migráció ezt megváltoztatta: a régi (pip-skálájú)
+        # modellek bemenete 10-100×-osra ugrott volna — NÉMÁN, értelmetlen
+        # predikciókkal. Ezért bélyegezzük, és a betöltés ellenőrzi.
+        "feature_unit": "point",
         "trained_at":   datetime.now(timezone.utc).isoformat(),
         "test_start":   str(ts_test.date()),
         "train_rows":   len(train_all),
@@ -303,7 +309,7 @@ def train_symbol(symbol: str, df_m15: pd.DataFrame, cfg: dict, pair_cfg: dict,
                          "dynamic_sltp": bool(params.get("dynamic_sltp", True)),
                          "sl_atr_mult": params.get("sl_atr_mult"),
                          "tp_rr_ratio": params.get("tp_rr_ratio"),
-                         "sl_pips": params.get("sl_pips")},
+                         "sl_points": params.get("sl_points")},
         "stats":        dir_stats,
     }
     ml_ai.MODELS_DIR.mkdir(parents=True, exist_ok=True)

@@ -2,51 +2,51 @@
 Portfólió szintű kockázatkezelés.
 
 Alapelv: account × risk_pct = az összes slot EGYÜTTES kockázata.
-  - Normál eset: lot = (teljes_cél / max_slots) / (sl_pips × pip_value)  → FLOOR-ra kerekítve
+  - Normál eset: lot = (teljes_cél / max_slots) / (sl_points × point_value)  → FLOOR-ra kerekítve
   - Kis számla (min_lot kényszer): effective_slots = ROUND(cél / tényleges_kockázat × max_slots)
 """
 
 import math
 
 
-def calc_sl_tp_pips(atr_value: float, params: dict) -> tuple[float, float]:
-    """SL és TP pip értéke ATR alapján."""
-    sl_pips = atr_value / params.get("pip_size", 0.0001) * params["sl_atr_mult"]
-    tp_pips = sl_pips * params["tp_rr_ratio"]
-    return sl_pips, tp_pips
+def calc_sl_tp_points(atr_value: float, params: dict) -> tuple[float, float]:
+    """SL és TP mérete PONTBAN, ATR alapján."""
+    sl_points = atr_value / params.get("point_size", 0.0001) * params["sl_atr_mult"]
+    tp_points = sl_points * params["tp_rr_ratio"]
+    return sl_points, tp_points
 
 
-def calc_swing_sl_tp_pips(entry_price: float, direction: str, lows, highs,
-                          params: dict, pip_size: float, spread_pips: float):
+def calc_swing_sl_tp_points(entry_price: float, direction: str, lows, highs,
+                          params: dict, point_size: float, spread_points: float):
     """SL az utolsó N M1 gyertya SWINGJÉBŐL (ATR helyett, `sl_method="swing20"`):
       • BUY  → SL = a legalacsonyabb LOW − spread  (a támasz ALÁ),
       • SELL → SL = a legmagasabb HIGH + spread     (az ellenállás FÖLÉ).
-    `sl_pips` = |entry − SL_szint| / pip; `tp_pips` = sl_pips × tp_rr_ratio (R marad).
+    `sl_points` = |entry − SL_szint| / point_size; `tp_points` = sl_points × tp_rr_ratio (R marad).
     `lows`/`highs`: az M1 gyertyák low/high tömbje (az utolsó `sl_swing_bars` számít).
     None, ha degenerált (kevés adat, vagy a belépő a swingen túl → nem-pozitív SL)."""
     bars = int(params.get("sl_swing_bars", 20) or 20)
-    if bars <= 0 or entry_price <= 0 or pip_size <= 0:
+    if bars <= 0 or entry_price <= 0 or point_size <= 0:
         return None
     lo_w = list(lows)[-bars:]
     hi_w = list(highs)[-bars:]
     if not lo_w or not hi_w:
         return None
-    sp    = float(spread_pips) * pip_size
+    sp    = float(spread_points) * point_size
     tp_rr = float(params.get("tp_rr_ratio", 1.5))
     if direction == "BUY":
         sl_level = min(lo_w) - sp
-        sl_pips  = (entry_price - sl_level) / pip_size
+        sl_points  = (entry_price - sl_level) / point_size
     else:
         sl_level = max(hi_w) + sp
-        sl_pips  = (sl_level - entry_price) / pip_size
-    if not (sl_pips > 0):
+        sl_points  = (sl_level - entry_price) / point_size
+    if not (sl_points > 0):
         return None
-    return sl_pips, sl_pips * tp_rr
+    return sl_points, sl_points * tp_rr
 
 
 def calc_lot(
     balance: float,
-    sl_pips: float,
+    sl_points: float,
     pair_cfg: dict,
     trading_cfg: dict,
     effective_slots: int,
@@ -59,20 +59,20 @@ def calc_lot(
     total_risk    = balance * risk_pct
     risk_per_slot = total_risk / effective_slots
 
-    # 1 lot × 1 pip mozgás értéke a SZÁMLA devizájában. (A kulcs neve történeti —
-    # NEM feltétlenül USD: a felület a bróker trade_tick_value-jából számolja, ami
-    # mindig a számla devizájában van. Élesben a motor ezt MT5-ből frissíti.)
-    pip_value  = pair_cfg["pv1_usd"]
+    # 1 lot × 1 PONT mozgás értéke a SZÁMLA devizájában (a név „usd" része
+    # történeti — a bróker trade_tick_value-ja mindig a számla devizájában van).
+    # Élesben a motor ezt MT5-ből frissíti.
+    point_value  = pair_cfg["pv1_point"]
     # min_lot/lot_step hiányozhat (pl. GUI-ból hozzáadott vagy hiányos config) →
     # biztonságos alapérték, hogy az optimalizálás/backteszt ne szálljon el csendben.
     lot_step   = pair_cfg.get("lot_step", 0.01)
     min_lot    = pair_cfg.get("min_lot", 0.01)
     max_lot    = pair_cfg.get("max_lot")     # a bróker volume_max-ja (None = nincs)
 
-    if sl_pips <= 0 or pip_value <= 0:
+    if sl_points <= 0 or point_value <= 0:
         return min_lot
 
-    raw_lot = risk_per_slot / (sl_pips * pip_value)
+    raw_lot = risk_per_slot / (sl_points * point_value)
     lot = math.floor(raw_lot / lot_step) * lot_step
     lot = max(lot, min_lot)
     # A bróker FELSŐ korlátja: enélkül nagy egyenlegnél / szűk stopnál a számított
@@ -85,7 +85,7 @@ def calc_lot(
 
 def calc_effective_slots(
     balance: float,
-    sl_pips: float,
+    sl_points: float,
     pair_cfg: dict,
     trading_cfg: dict,
 ) -> int:
@@ -97,10 +97,10 @@ def calc_effective_slots(
     risk_pct   = trading_cfg["account_risk_pct"]
     total_risk = balance * risk_pct
 
-    pip_value = pair_cfg["pv1_usd"]
+    point_value = pair_cfg["pv1_point"]
     min_lot   = pair_cfg.get("min_lot", 0.01)
 
-    actual_risk = min_lot * sl_pips * pip_value
+    actual_risk = min_lot * sl_points * point_value
 
     if actual_risk <= 0:
         return max_slots

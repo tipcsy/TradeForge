@@ -28,7 +28,7 @@ RESULTS_DIR = Path(__file__).resolve().parents[1] / "data" / "backtest_results"
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from core.risk_manager import calc_lot, calc_effective_slots, calc_swing_sl_tp_pips
+from core.risk_manager import calc_lot, calc_effective_slots, calc_swing_sl_tp_points
 from core import risky_mode
 from core import trade_costs as _costs
 from strategy import get_strategy, get_strategy_by_name
@@ -54,9 +54,9 @@ class Trade:
     sl: float
     tp: float
     lot: float
-    pip_size: float
-    pv1_usd: float
-    sl_pips: float
+    point_size: float
+    pv1_point: float
+    sl_points: float
     # A BELÉPÉSKORI ATR (árban). A trailing ehhez méri az aktiválást és a követési
     # távolságot (`trail_activation_atr` / `trail_distance_atr`) — így a puffer
     # együtt mozog a piac zajszintjével, és nem kell instrumentumonként hangolni.
@@ -66,7 +66,7 @@ class Trade:
     pnl_usd: float = 0.0        # NETTÓ (a jutalék és a swap már benne)
     commission_usd: float = 0.0  # levont jutalék (pozitív = költség)
     swap_usd: float = 0.0        # felhalmozott swap, ELŐJELES (negatív = levonás)
-    pnl_pips: float = 0.0
+    pnl_points: float = 0.0
     status: str = "open"    # "open" | "tp" | "sl" | "be_trail"
     risk_free: bool = False  # SL átment breakeven-re
     entry_balance: float = 0.0
@@ -162,7 +162,7 @@ class BacktestResult:
                 diff = t.close_price - price
                 if t.direction == "SELL":
                     diff = -diff
-                p += (diff / t.pip_size) * lot * t.pv1_usd
+                p += (diff / t.point_size) * lot * t.pv1_point
             b_pnl += p
             if t.risk_usd:
                 b_r += p / t.risk_usd
@@ -231,8 +231,8 @@ def load_data_ensure(symbol: str, cfg: dict, status=None):
     return df15, df1, None
 
 
-def pip_to_price(pips: float, pip_size: float) -> float:
-    return pips * pip_size
+def points_to_price(pips: float, point_size: float) -> float:
+    return pips * point_size
 
 
 def calc_pnl(trade: Trade, close_price: float) -> float:
@@ -244,7 +244,7 @@ def calc_pnl(trade: Trade, close_price: float) -> float:
         diff = close_price - price
         if trade.direction == "SELL":
             diff = -diff
-        total += (diff / trade.pip_size) * lot * trade.pv1_usd
+        total += (diff / trade.point_size) * lot * trade.pv1_point
     return total
 
 
@@ -270,7 +270,7 @@ def _risky_trading_cfg(trading_cfg: dict, risky: bool) -> dict:
 
 
 def _update_stops(trade: "Trade", high: float, low: float, params: dict,
-                  pip_size: float, risky: bool) -> None:
+                  point_size: float, risky: bool) -> None:
     """BE + trailing SL frissítése egy nyitott trade-re (mutálja trade.sl /
     risk_free). risky=False esetén BITAZONOS a korábbi inline logikával; risky=True
     a live_trader-t modellezi (azonnali BE, azonnali trailing, felezett távolság)."""
@@ -342,7 +342,7 @@ def _rr_spec(rr: "dict | None", risky: bool) -> dict:
 
 
 def _manage_position(trade: "Trade", high: float, low: float, params: dict,
-                     pip_size: float, min_lot: float, lot_step: float,
+                     point_size: float, min_lot: float, lot_step: float,
                      rr: dict) -> None:
     """Nyitott trade menedzselése egy bar-on: a preset szerint BE/trailing VAGY
     részleges zárás (Felező/Pajzs) 1R-nél + a runner stopja. Mutálja a trade-et
@@ -360,10 +360,10 @@ def _manage_position(trade: "Trade", high: float, low: float, params: dict,
 
     # off / risky → a régi stop-menedzsment (BITAZONOS a korábbival)
     if preset == _rrm.PRESET_OFF:
-        _update_stops(trade, high, low, params, pip_size, risky=False)
+        _update_stops(trade, high, low, params, point_size, risky=False)
         return
     if preset == _rrm.PRESET_RISKY:
-        _update_stops(trade, high, low, params, pip_size, risky=True)
+        _update_stops(trade, high, low, params, point_size, risky=True)
         return
 
     # fibo → stop-mozgatás a belépő→TP táv fibo_level (61,8%) pontján. NINCS
@@ -397,7 +397,7 @@ def _manage_position(trade: "Trade", high: float, low: float, params: dict,
     if preset == _rrm.PRESET_THIRDS:
         is_buy = trade.direction == "BUY"
         trig, stop1, stop2 = _rrm.thirds_levels(
-            trade.open_price, trade.sl_pips * pip_size, is_buy, rr)
+            trade.open_price, trade.sl_points * point_size, is_buy, rr)
         if not trig:
             return
         if not trade.reduced:
@@ -422,7 +422,7 @@ def _manage_position(trade: "Trade", high: float, low: float, params: dict,
 
     # halving / shield → 1R-nél részleges zárás (egyszer), utána runner-stop
     if not trade.reduced:
-        one_r = trade.sl_pips * pip_size
+        one_r = trade.sl_points * point_size
         hit = (high >= trade.open_price + one_r if trade.direction == "BUY"
                else low <= trade.open_price - one_r)
         if hit:
@@ -432,7 +432,7 @@ def _manage_position(trade: "Trade", high: float, low: float, params: dict,
             trade.rr_technique = plan.effective
             if plan.close_lot > 0.0:
                 # a lezárt lot +1R-t realizál (a 1R áron zárunk részlegesen)
-                trade.booked_pnl += trade.sl_pips * plan.close_lot * trade.pv1_usd
+                trade.booked_pnl += trade.sl_points * plan.close_lot * trade.pv1_point
                 _new_lot = round(trade.lot - plan.close_lot, 8)
                 # A LÁBAKAT is arányosan zsugorítjuk: a P&L a lábakon számolódik
                 # (calc_pnl), így a részleges zárás nélkülük „elveszne" — az épített
@@ -457,7 +457,7 @@ def _manage_position(trade: "Trade", high: float, low: float, params: dict,
                 trade.risk_free = True
         elif trade.runner_mode == _rrm.RUNNER_TRAILING:
             trade.risk_free = True
-            _update_stops(trade, high, low, params, pip_size, risky=False)
+            _update_stops(trade, high, low, params, point_size, risky=False)
         # RUNNER_KEEP → a stop marad az EREDETI (távol) helyén — a videó Pajzsa
 
 
@@ -620,10 +620,10 @@ def run_pair(
         strategy = get_strategy({})
     # A stratégia-hookok pár-azonosító adatai (pl. az ml_ai modell-betöltése és
     # feature-normalizálása): a params-ba injektáljuk a pair config tényadatait.
-    # A symbol/pip_size a pair config-ból AUTORITATÍV; a session default-olható
+    # A symbol/point_size a pair config-ból AUTORITATÍV; a session default-olható
     # (a per-pár optimalizált params felülírhatja). A wpr_sma ezeket nem olvassa
     # → a meglévő viselkedés bitazonos.
-    params = {**params, "symbol": symbol, "pip_size": pair_cfg["pip_size"]}
+    params = {**params, "symbol": symbol, "point_size": pair_cfg["point_size"]}
     params.setdefault("sess_start", pair_cfg.get("sess_start", 0))
     params.setdefault("sess_end",   pair_cfg.get("sess_end", 24))
     from core import risk_reduction as _rrm
@@ -669,8 +669,8 @@ def run_pair(
     # A belépés-szűrőket (pl. volatilitás) és az SL/TP-méretezést a STRATÉGIA adja
     # a `bt_entry` hookban → a motor stratégia-független.
 
-    pip_size = pair_cfg["pip_size"]
-    pv1_usd  = pair_cfg["pv1_usd"]
+    point_size = pair_cfg["point_size"]
+    pv1_point  = pair_cfg["pv1_point"]
     min_lot  = pair_cfg.get("min_lot", 0.01)    # a lot-létrához (részleges zárás)
     lot_step = pair_cfg.get("lot_step", 0.01)
 
@@ -732,9 +732,9 @@ def run_pair(
     #   BUY  → ASK-on lép be (close + s), a SL/TP a BID-en (nyers OHLC) triggerel
     #   SELL → BID-en lép be (close),     a SL/TP az ASK-on (OHLC + s) triggerel
     # Így egy körbeforduló kötés PONTOSAN egy spreadet fizet — mint élesben.
-    # Ha nincs avg_spread (régi adat), a pár `backtest_spread_pips`-e a tartalék.
-    _spread_fallback = pip_to_price(
-        float(pair_cfg.get("backtest_spread_pips", 1.5)), pip_size)
+    # Ha nincs avg_spread (régi adat), a pár `backtest_spread_points`-e a tartalék.
+    _spread_fallback = points_to_price(
+        float(pair_cfg.get("backtest_spread_points", 1.5)), point_size)
     _spread_arr = (m1["avg_spread"].to_numpy(dtype=float)
                    if "avg_spread" in m1.columns else None)
     # A BELÉPŐ a gyertya ZÁRÁSÁN történik → ott a bar UTOLSÓ tickjének spreadje a
@@ -813,7 +813,7 @@ def run_pair(
         _sp = _spread_arr[i] if _spread_arr is not None else float("nan")
         if not (_sp > 0):                       # NaN / hiány → config-tartalék
             _sp = _spread_fallback
-        spread_pips = _sp / pip_size            # a pnl_pips + swing-SL számításhoz
+        spread_points = _sp / point_size            # a pnl_points + swing-SL számításhoz
         # A gyertya BID; az ASK-sorozat = BID + spread. A kilépés mindig a
         # SZEMBENI oldalon történik (BUY→bid, SELL→ask).
         bid_hi, bid_lo = m1_row["high"], m1_row["low"]            # BUY ezen zár
@@ -847,7 +847,7 @@ def run_pair(
                 else:
                     # A BE/trailing is a KILÉPÉSI (bid) oldalon mér
                     _manage_position(trade, bid_hi, bid_lo,
-                                     params, pip_size, min_lot, lot_step, rr_spec)
+                                     params, point_size, min_lot, lot_step, rr_spec)
 
             elif trade.direction == "SELL":
                 # A SELL az ASK-on zár → a TP/SL az ASK-sorozaton triggerel. Ha MINDKETTŐ
@@ -868,21 +868,21 @@ def run_pair(
                     closed = True
                 else:
                     _manage_position(trade, ask_hi, ask_lo,
-                                     params, pip_size, min_lot, lot_step, rr_spec)
+                                     params, point_size, min_lot, lot_step, rr_spec)
 
             # ── Esemény-napló: a menedzsment-fázis (részleges zárás + stop-mozgás)
             # változásai. A TP/SL-záró bar-on a `else` nem futott → nincs változás.
             # (A build-fázis változásait külön, a ráépítés helyén naplózzuk.)
             if record_events and not closed:
                 if trade.reduced and trade.lot < _ev_lot0:
-                    _1r = trade.sl_pips * pip_size
+                    _1r = trade.sl_points * point_size
                     _pp = (trade.open_price + _1r if trade.direction == "BUY"
                            else trade.open_price - _1r)
                     trade.events.append(("PARTIAL_CLOSE", m1_time, round(_pp, 6),
                                          0.0, 0.0, round(_ev_lot0 - trade.lot, 8),
                                          trade.rr_technique or "reduce"))
                 if trade.sl != _ev_sl0:
-                    _be = abs(trade.sl - trade.open_price) < pip_size * 0.5
+                    _be = abs(trade.sl - trade.open_price) < point_size * 0.5
                     trade.events.append(("SL_MODIFY", m1_time, 0.0,
                                          round(trade.sl, 6), 0.0, 0.0,
                                          "BE" if _be else "TRAIL"))
@@ -931,9 +931,9 @@ def run_pair(
                     _fired = ((_bc_close > trade.build_ref) if trade.direction == "BUY"
                               else (_bc_close < trade.build_ref))
                 else:
-                    # R-alapú: R = a kezdeti SL-távolság árban (sl_pips×pip); az n_add-adik
+                    # R-alapú: R = a kezdeti SL-távolság árban (sl_points×pip); az n_add-adik
                     # (= len(legs)) R-szintet éri-e el a gyertyazáró. Determinisztikus.
-                    _rp  = trade.sl_pips * pip_size
+                    _rp  = trade.sl_points * point_size
                     _lvl = _posbuild.r_level(trade.open_price, _rp, trade.direction,
                                              len(trade.legs), _build_cfg)
                     _fired = _lvl is not None and (
@@ -971,11 +971,11 @@ def run_pair(
                 trade.pnl_usd, trade.commission_usd, trade.swap_usd = _costs.apply(
                     trade.pnl_usd, trade.lot, trade.direction,
                     trade.open_time.timestamp(), m1_time.timestamp(), pair_cfg)
-                # pnl_pips számítás (kozmetikai, a runner mozgásából)
+                # pnl_points számítás (kozmetikai, a runner mozgásából)
                 if trade.direction == "BUY":
-                    trade.pnl_pips = (trade.close_price - trade.open_price) / trade.pip_size - spread_pips
+                    trade.pnl_points = (trade.close_price - trade.open_price) / trade.point_size - spread_points
                 else:
-                    trade.pnl_pips = (trade.open_price - trade.close_price) / trade.pip_size - spread_pips
+                    trade.pnl_points = (trade.open_price - trade.close_price) / trade.point_size - spread_points
                 if record_events:
                     trade.events.append(("CLOSE", m1_time,
                                          round(trade.close_price, 6), 0.0, 0.0,
@@ -1014,8 +1014,8 @@ def run_pair(
                         if not (_sp_e > 0):
                             _sp_e = _spread_arr[i] if _spread_arr is not None else _spread_fallback
                         if not _spread_gate.spread_ok(
-                                _sp_e / pip_size, float(_atr_e), pip_size, params,
-                                pair_cfg.get("backtest_spread_pips"))[0]:
+                                _sp_e / point_size, float(_atr_e), point_size, params,
+                                pair_cfg.get("backtest_spread_points"))[0]:
                             prev_m1_row = m1_row
                             continue
                     if _tf_eval is not None:
@@ -1028,10 +1028,10 @@ def run_pair(
                             continue
 
                 # A stratégia adja a pozíciótervet (SL/TP + saját szűrők); None → kihagyás
-                plan = strategy.bt_entry(m15_row, params, pip_size)
+                plan = strategy.bt_entry(m15_row, params, point_size)
 
                 if plan is not None:
-                    sl_pips, tp_pips = plan
+                    sl_points, tp_points = plan
                     # SL-módszer: `swing20` → az utolsó N M1 gyertya swingjéből (ATR
                     # helyett): BUY = legalacsonyabb LOW − spread, SELL = legmagasabb
                     # HIGH + spread; a TP marad tp_rr_ratio × SL-táv. (`atr` = a régi.)
@@ -1040,14 +1040,14 @@ def run_pair(
                         _nb = int(params.get("sl_swing_bars", 20) or 20)
                         _lo = m1["low"].iloc[max(0, i - _nb + 1):i + 1].to_numpy()
                         _hi = m1["high"].iloc[max(0, i - _nb + 1):i + 1].to_numpy()
-                        _sw = calc_swing_sl_tp_pips(float(m1_row["close"]), signal,
-                                                    _lo, _hi, params, pip_size, spread_pips)
+                        _sw = calc_swing_sl_tp_points(float(m1_row["close"]), signal,
+                                                    _lo, _hi, params, point_size, spread_points)
                         if _sw is None:
                             prev_m1_row = m1_row
                             continue
-                        sl_pips, tp_pips = _sw
-                    eff_slots = calc_effective_slots(balance, sl_pips, pair_cfg, sizing_cfg)
-                    lot = calc_lot(balance, sl_pips, pair_cfg, sizing_cfg, eff_slots)
+                        sl_points, tp_points = _sw
+                    eff_slots = calc_effective_slots(balance, sl_points, pair_cfg, sizing_cfg)
+                    lot = calc_lot(balance, sl_points, pair_cfg, sizing_cfg, eff_slots)
 
                     # A belépő a gyertya ZÁRÁSÁN → a bar UTOLSÓ tickjének spreadje
                     # (`close_spread`) a pontos; tartalék az átlag (_sp).
@@ -1057,13 +1057,13 @@ def run_pair(
                     open_price = m1_row["close"]
                     if signal == "BUY":
                         open_price += _esp          # BUY → ASK-on lép be
-                        sl_price = open_price - pip_to_price(sl_pips, pip_size)
-                        tp_price = open_price + pip_to_price(tp_pips, pip_size)
+                        sl_price = open_price - points_to_price(sl_points, point_size)
+                        tp_price = open_price + points_to_price(tp_points, point_size)
                     else:  # SELL
-                        sl_price = open_price + pip_to_price(sl_pips, pip_size)
-                        tp_price = open_price - pip_to_price(tp_pips, pip_size)
+                        sl_price = open_price + points_to_price(sl_points, point_size)
+                        tp_price = open_price - points_to_price(tp_points, point_size)
 
-                    risk_usd = lot * sl_pips * pv1_usd
+                    risk_usd = lot * sl_points * pv1_point
                     trade = Trade(
                         symbol=symbol,
                         direction=signal,
@@ -1072,9 +1072,9 @@ def run_pair(
                         sl=sl_price,
                         tp=tp_price,
                         lot=lot,
-                        pip_size=pip_size,
-                        pv1_usd=pv1_usd,
-                        sl_pips=sl_pips,
+                        point_size=point_size,
+                        pv1_point=pv1_point,
+                        sl_points=sl_points,
                         # a belépéskori ATR (ÁRban) — ehhez mér a trailing
                         entry_atr=(float(m15_row.get("atr", 0.0) or 0.0)
                                    if not pd.isna(m15_row.get("atr", float("nan"))) else 0.0),
@@ -1170,7 +1170,7 @@ def _save_backtest_results(trades: list, summaries: list[dict],
         w = csv.writer(f)
         w.writerow(["symbol", "direction", "open_time", "close_time", "status",
                     "open_price", "close_price", "sl", "tp", "lot",
-                    "sl_pips", "risk_usd", "risk_pct", "pnl_pips", "pnl_usd",
+                    "sl_points", "risk_usd", "risk_pct", "pnl_points", "pnl_usd",
                     "commission_usd", "swap_usd"])
         for t in sorted(trades, key=lambda x: x.open_time):
             w.writerow([
@@ -1178,9 +1178,9 @@ def _save_backtest_results(trades: list, summaries: list[dict],
                 t.open_time, t.close_time, t.status,
                 round(t.open_price, 5), round(t.close_price or 0, 5),
                 round(t.sl, 5), round(t.tp, 5), t.lot,
-                round(t.sl_pips, 1),
+                round(t.sl_points, 1),
                 round(t.risk_usd, 2), round(t.risk_pct, 3),
-                round(t.pnl_pips, 2), round(t.pnl_usd, 2),
+                round(t.pnl_points, 2), round(t.pnl_usd, 2),
                 round(t.commission_usd, 2), round(t.swap_usd, 2),
             ])
 
@@ -1451,7 +1451,7 @@ def run_portfolio_backtest(
 
         # Pár-azonosító injektálás a stratégia-hookoknak (mint a run_pair-ben).
         _pcfg = cfg["pairs"][sym]
-        params = {**params, "symbol": sym, "pip_size": _pcfg["pip_size"]}
+        params = {**params, "symbol": sym, "point_size": _pcfg["point_size"]}
         params.setdefault("sess_start", _pcfg.get("sess_start", 0))
         params.setdefault("sess_end",   _pcfg.get("sess_end", 24))
 
@@ -1553,8 +1553,8 @@ def run_portfolio_backtest(
             if m1_time not in m1_df.index:
                 continue
             row      = m1_df.loc[m1_time]
-            pip_size = trade.pip_size
-            sp       = info["pair_cfg"].get("backtest_spread_pips", spread_default)
+            point_size = trade.point_size
+            sp       = info["pair_cfg"].get("backtest_spread_points", spread_default)
             rr_spec  = info.get("rr") or _rr_spec(None, info.get("risky", False))
             _pc      = info["pair_cfg"]
             _minlot  = _pc.get("min_lot", 0.01)
@@ -1567,34 +1567,34 @@ def run_portfolio_backtest(
                     trade.close_price = trade.tp
                     trade.close_time  = m1_time
                     trade.pnl_usd     = calc_pnl(trade, trade.tp)
-                    trade.pnl_pips    = (trade.tp - trade.open_price) / pip_size - sp
+                    trade.pnl_points    = (trade.tp - trade.open_price) / point_size - sp
                     trade.status      = "tp";  closed = True
                 elif row["low"] <= trade.sl:
                     trade.close_price = trade.sl
                     trade.close_time  = m1_time
                     trade.pnl_usd     = calc_pnl(trade, trade.sl)
-                    trade.pnl_pips    = (trade.sl - trade.open_price) / pip_size - sp
+                    trade.pnl_points    = (trade.sl - trade.open_price) / point_size - sp
                     trade.status      = "sl";  closed = True
                 else:
                     _manage_position(trade, row["high"], row["low"], params,
-                                     pip_size, _minlot, _lotstep, rr_spec)
+                                     point_size, _minlot, _lotstep, rr_spec)
 
             else:  # SELL
                 if not trade.built and row["low"] <= trade.tp:
                     trade.close_price = trade.tp
                     trade.close_time  = m1_time
                     trade.pnl_usd     = calc_pnl(trade, trade.tp)
-                    trade.pnl_pips    = (trade.open_price - trade.tp) / pip_size - sp
+                    trade.pnl_points    = (trade.open_price - trade.tp) / point_size - sp
                     trade.status      = "tp";  closed = True
                 elif row["high"] >= trade.sl:
                     trade.close_price = trade.sl
                     trade.close_time  = m1_time
                     trade.pnl_usd     = calc_pnl(trade, trade.sl)
-                    trade.pnl_pips    = (trade.open_price - trade.sl) / pip_size - sp
+                    trade.pnl_points    = (trade.open_price - trade.sl) / point_size - sp
                     trade.status      = "sl";  closed = True
                 else:
                     _manage_position(trade, row["high"], row["low"], params,
-                                     pip_size, _minlot, _lotstep, rr_spec)
+                                     point_size, _minlot, _lotstep, rr_spec)
 
             # Runner KISZÁLLÁSI JELRE zárása (mint a run_pair-ben): a részleges zárás
             # UTÁN, a jel az info["m15_ptr"] gyertyán, a gyertyazáró áron.
@@ -1604,9 +1604,9 @@ def run_portfolio_backtest(
                 trade.close_price = row["close"]
                 trade.close_time  = m1_time
                 trade.pnl_usd     = calc_pnl(trade, trade.close_price)
-                trade.pnl_pips    = ((trade.close_price - trade.open_price)
+                trade.pnl_points    = ((trade.close_price - trade.open_price)
                                      if trade.direction == "BUY"
-                                     else (trade.open_price - trade.close_price)) / pip_size - sp
+                                     else (trade.open_price - trade.close_price)) / point_size - sp
                 trade.status      = "exit"
                 closed = True
 
@@ -1622,9 +1622,9 @@ def run_portfolio_backtest(
                     trade.close_price = _px
                     trade.close_time  = m1_time
                     trade.pnl_usd     = calc_pnl(trade, _px)
-                    trade.pnl_pips    = ((_px - trade.open_price)
+                    trade.pnl_points    = ((_px - trade.open_price)
                                          if trade.direction == "BUY"
-                                         else (trade.open_price - _px)) / pip_size - sp
+                                         else (trade.open_price - _px)) / point_size - sp
                     trade.status      = "cut"
                     closed = True
 
@@ -1642,7 +1642,7 @@ def run_portfolio_backtest(
                     _fired = ((_bc_cl > trade.build_ref) if trade.direction == "BUY"
                               else (_bc_cl < trade.build_ref))
                 else:
-                    _rp  = trade.sl_pips * pip_size
+                    _rp  = trade.sl_points * point_size
                     _lvl = _pb.r_level(trade.open_price, _rp, trade.direction,
                                        len(trade.legs), _bcfg)
                     _fired = _lvl is not None and (
@@ -1703,9 +1703,9 @@ def run_portfolio_backtest(
                     m15_df = info["m15"]
                     if ptr < len(m15_df):
                         m15_row = m15_df.iloc[ptr]
-                        pip_size = pair_cfg["pip_size"]
-                        pv1_usd  = pair_cfg["pv1_usd"]
-                        sp       = pair_cfg.get("backtest_spread_pips", spread_default)
+                        point_size = pair_cfg["point_size"]
+                        pv1_point  = pair_cfg["pv1_point"]
+                        sp       = pair_cfg.get("backtest_spread_points", spread_default)
 
                         # ── Végrehajtási kapuk (él-paritás) — UGYANAZ, mint a run_pair ──
                         # spread-kapu (közös core.spread_gate) + TF-együttállás. Bukás →
@@ -1718,10 +1718,10 @@ def run_portfolio_backtest(
                                 if not (_sp_e > 0):
                                     _sp_e = row.get("avg_spread", float("nan"))
                                 if not (_sp_e > 0):
-                                    _sp_e = pip_to_price(sp, pip_size)
+                                    _sp_e = points_to_price(sp, point_size)
                                 if not _spread_gate.spread_ok(
-                                        _sp_e / pip_size, float(_atr_e), pip_size, params,
-                                        pair_cfg.get("backtest_spread_pips"))[0]:
+                                        _sp_e / point_size, float(_atr_e), point_size, params,
+                                        pair_cfg.get("backtest_spread_points"))[0]:
                                     _gate_ok = False
                             if _gate_ok and info.get("tf_eval") is not None:
                                 # A döntéskor ISMERT árral (az M1-gyertya záróára) —
@@ -1731,34 +1731,34 @@ def run_portfolio_backtest(
                                     _gate_ok = False
 
                         # A stratégia adja a pozíciótervet (SL/TP + saját szűrők)
-                        plan = (strategy.bt_entry(m15_row, params, pip_size)
+                        plan = (strategy.bt_entry(m15_row, params, point_size)
                                 if _gate_ok else None)
                         if plan is not None:
-                            sl_pips, tp_pips = plan
+                            sl_points, tp_points = plan
                             # Óvatos (felezett) méret? A kockázatcsökkentő preset dönti
                             # (Risky felezi; a Felező/Pajzs alap: normál méret).
                             from core import risk_reduction as _rrm
                             _rrp = (info.get("rr") or {}).get("preset", _rrm.PRESET_OFF)
                             sizing_cfg = _risky_trading_cfg(trading_cfg,
                                                             _rrm.wants_cautious_size(_rrp))
-                            eff_slots = calc_effective_slots(balance, sl_pips, pair_cfg, sizing_cfg)
-                            lot = calc_lot(balance, sl_pips, pair_cfg, sizing_cfg, eff_slots)
+                            eff_slots = calc_effective_slots(balance, sl_points, pair_cfg, sizing_cfg)
+                            lot = calc_lot(balance, sl_points, pair_cfg, sizing_cfg, eff_slots)
 
                             open_price = float(row["close"])
                             if signal == "BUY":
-                                open_price += pip_to_price(sp, pip_size)
-                                sl_price = open_price - pip_to_price(sl_pips, pip_size)
-                                tp_price = open_price + pip_to_price(tp_pips, pip_size)
+                                open_price += points_to_price(sp, point_size)
+                                sl_price = open_price - points_to_price(sl_points, point_size)
+                                tp_price = open_price + points_to_price(tp_points, point_size)
                             else:
-                                sl_price = open_price + pip_to_price(sl_pips, pip_size)
-                                tp_price = open_price - pip_to_price(tp_pips, pip_size)
+                                sl_price = open_price + points_to_price(sl_points, point_size)
+                                tp_price = open_price - points_to_price(tp_points, point_size)
 
-                            risk_usd = lot * sl_pips * pv1_usd
+                            risk_usd = lot * sl_points * pv1_point
                             trade = Trade(
                                 symbol=sym, direction=signal,
                                 open_time=m1_time, open_price=open_price,
                                 sl=sl_price, tp=tp_price, lot=lot,
-                                pip_size=pip_size, pv1_usd=pv1_usd, sl_pips=sl_pips,
+                                point_size=point_size, pv1_point=pv1_point, sl_points=sl_points,
                                 entry_atr=(float(m15_row.get("atr", 0.0) or 0.0)
                                            if not pd.isna(m15_row.get("atr", float("nan")))
                                            else 0.0),

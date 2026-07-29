@@ -115,21 +115,21 @@ def min_stop_price(info) -> float:
     return max(0.0, level * point)
 
 
-def pip_value(symbol: str, pip_size: float, info=None) -> "float | None":
-    """1 lot × 1 pip értéke a SZÁMLA devizájában, MT5-ből — a `pv1_usd` ÉLŐ párja.
+def point_value(symbol: str, point_size: float, info=None) -> "float | None":
+    """1 lot × 1 PONT értéke a SZÁMLA devizájában, MT5-ből — a `pv1_point` ÉLŐ párja.
 
-    `trade_tick_value / trade_tick_size × pip_size`. Ugyanaz a képlet, amivel a
-    felület egy új instrumentum felvételekor kiszámolja a config `pv1_usd`-jét —
+    `trade_tick_value / trade_tick_size × point_size`. Ugyanaz a képlet, amivel a
+    felület egy új instrumentum felvételekor kiszámolja a config `pv1_point`-jét —
     de EZ minden méretezéskor frissen kérdez.
 
-    Miért kell: a config `pv1_usd`-je egyetlen PILLANATKÉP a felvétel idejéről. A
+    Miért kell: a config `pv1_point`-je egyetlen PILLANATKÉP a felvétel idejéről. A
     nem számla-devizás instrumentumoknál (EUR-számlán minden USD/GBP/JPY-alapú)
     az érték az ÁRFOLYAMMAL sodródik, tehát a tényleges kockázat eltér a
     beállított %-tól. Ráadásul a kézzel felvett indexeknél kerek 1.0 maradt, ami
     UK100-on ~15% alulbecslés (túl nagy lot).
 
     None, ha az adat nem elérhető → a hívó a config értékére esik vissza."""
-    if not pip_size or pip_size <= 0:
+    if not point_size or point_size <= 0:
         return None
     if info is None:
         info = mt5.symbol_info(symbol)
@@ -139,7 +139,7 @@ def pip_value(symbol: str, pip_size: float, info=None) -> "float | None":
     ts = float(getattr(info, "trade_tick_size", 0.0) or 0.0)
     if tv <= 0 or ts <= 0:
         return None
-    return tv / ts * float(pip_size)
+    return tv / ts * float(point_size)
 
 
 def volume_bounds(info) -> "tuple[float, float, float] | None":
@@ -159,9 +159,9 @@ def volume_bounds(info) -> "tuple[float, float, float] | None":
     return vmin, (vmax if vmax > 0 else float("inf")), vstep
 
 
-def enforce_min_sl_pips(sl_pips: float, tp_pips: float, info,
-                        pip_size: float) -> tuple[float, float, bool]:
-    """(sl_pips, tp_pips, tágítottunk-e) — az SL-táv felhúzva a bróker minimumára.
+def enforce_min_sl_points(sl_points: float, tp_points: float, info,
+                        point_size: float) -> tuple[float, float, bool]:
+    """(sl_points, tp_points, tágítottunk-e) — az SL-táv felhúzva a bróker minimumára.
 
     Ha a számított SL közelebb van, mint a `trade_stops_level`, a bróker
     `10016 Invalid stops`-szal utasítja el a megbízást (a jel elveszik). Ilyenkor
@@ -185,17 +185,17 @@ def enforce_min_sl_pips(sl_pips: float, tp_pips: float, info,
     mért, és `10016 Invalid stops`-szal elutasította — a jel elveszett.
 
     Egy pont ráhagyás, hogy a határon álló érték se bukjon el."""
-    if pip_size <= 0 or sl_pips <= 0:
-        return sl_pips, tp_pips, False
+    if point_size <= 0 or sl_points <= 0:
+        return sl_points, tp_points, False
     point = float(getattr(info, "point", 0.0) or 0.0) if info is not None else 0.0
     spread_price = (float(getattr(info, "spread", 0) or 0) * point
                     if info is not None else 0.0)
     # A ténylegesen szükséges táv: bróker-minimum + spread (+1 pont ráhagyás).
     need_price = min_stop_price(info) + spread_price + point
     if need_price <= 0:
-        return sl_pips, tp_pips, False
-    min_pips = need_price / pip_size
-    if sl_pips >= min_pips:
-        return sl_pips, tp_pips, False
-    scale = min_pips / sl_pips
-    return min_pips, tp_pips * scale, True
+        return sl_points, tp_points, False
+    min_points = need_price / point_size
+    if sl_points >= min_points:
+        return sl_points, tp_points, False
+    scale = min_points / sl_points
+    return min_points, tp_points * scale, True

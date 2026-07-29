@@ -300,25 +300,25 @@ class Strategy(ABC):
     # kötés más volt, mint amire a predikció vonatkozott (tanítás ↔ végrehajtás
     # eltérés). Mérve, mintán kívül: PF 0,51 → 0,81 (UK100), 0,06 → 0,40 (EURGBP).
     #
-    # Aki ATR-alapú SL/TP-t ad a `sl_tp_pips`-ben, az írja felül `"atr"`-re.
+    # Aki ATR-alapú SL/TP-t ad a `sl_tp_points`-ben, az írja felül `"atr"`-re.
     default_sl_method = "swing20"
 
-    def sl_tp_pips(self, hi_row, params, pip_size):
+    def sl_tp_points(self, hi_row, params, point_size):
         """A pozíció SL/TP mérete PIPBEN a magasabb tf aktuális ZÁRT sorából
-        (hi_row): `(sl_pips, tp_pips)` VAGY `None` (nincs érvényes méret).
+        (hi_row): `(sl_points, tp_points)` VAGY `None` (nincs érvényes méret).
 
         TISZTA méretezés — szűrő NÉLKÜL. A live_trader ÉS a backtest is EZT hívja,
         így a méretezés stratégia-független (a motor nem ismer 'atr'-t). A stratégia
-        SAJÁT indikátoraiból (pl. ATR) számolja. `pip_size` = a pár tick-mérete."""
+        SAJÁT indikátoraiból (pl. ATR) számolja. `point_size` = a pár tick-mérete."""
         raise NotImplementedError
 
-    def bt_entry(self, hi_row, params, pip_size):
-        """Pozícióterv: belépés-szűrő + méretezés egyben. `(sl_pips,
-        tp_pips)` VAGY `None` (kihagyás — szűrő elbukott / nincs méret).
+    def bt_entry(self, hi_row, params, point_size):
+        """Pozícióterv: belépés-szűrő + méretezés egyben. `(sl_points,
+        tp_points)` VAGY `None` (kihagyás — szűrő elbukott / nincs méret).
 
-        Alap: nincs extra szűrő → csak a méretezés (`sl_tp_pips`). A stratégia
+        Alap: nincs extra szűrő → csak a méretezés (`sl_tp_points`). A stratégia
         felülírhatja, hogy a SAJÁT belépés-szűrőit (pl. volatilitás) is alkalmazza.
         A backtest ÉS a live_trader is EZT hívja a belépőnél (v1.31.0 óta) → az
         élő viselkedés egyezik a modellezettel; a live spread-kapuja külön
         (keretrendszer-szintű) védőháló marad."""
-        return self.sl_tp_pips(hi_row, params, pip_size)
+        return self.sl_tp_points(hi_row, params, point_size)

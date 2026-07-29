@@ -21,8 +21,8 @@
     "dynamic_sltp": true,
     "sl_atr_mult": 1.5,
     "tp_rr_ratio": 2.0,
-    "sl_pips": 0,
-    "tp_pips": 0,
+    "sl_points": 0,
+    "tp_points": 0,
     "atr_period": 14
   },
   "position_mgmt": {
@@ -57,11 +57,11 @@
         "category": "SL / TP",
         "comment": "TP = SL × ez (kockázat/hozam arány)"
       },
-      "sl_pips": {
+      "sl_points": {
         "category": "SL / TP",
         "comment": "Fix SL pipben (dynamic_sltp=false esetén; a tanítás írja páronként)"
       },
-      "tp_pips": {
+      "tp_points": {
         "category": "SL / TP",
         "comment": "Fix TP pipben (dynamic_sltp=false esetén)"
       },

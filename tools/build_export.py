@@ -48,7 +48,7 @@ def rows_from_result(result) -> list[list]:
             diff = t.close_price - price
             if t.direction == "SELL":
                 diff = -diff
-            return (diff / t.pip_size) * lot * t.pv1_usd
+            return (diff / t.point_size) * lot * t.pv1_point
 
         base_pnl = _leg_pnl(base_price, base_lot)
         add_pnl  = sum(_leg_pnl(p, l) for p, l in legs[1:])

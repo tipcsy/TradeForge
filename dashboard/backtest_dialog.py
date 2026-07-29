@@ -768,7 +768,7 @@ class BacktestDialog:
         szerint). MINDEN megnyitáskori kulcsot megőrzünk (a szerkeszthetők felülírják),
         hogy a nem szerkeszthető, de a motornak KELLŐ mentett kulcsok se vesszenek el:
         pl. `atr_avg_ref` (fix volatilitás-mérce), `max_spread_atr_ratio`,
-        `min_spread_pips`. (Korábban csak a `_` kezdetűek maradtak → ezek a defaultra
+        `min_spread_points`. (Korábban csak a `_` kezdetűek maradtak → ezek a defaultra
         estek vissza.) Hiba → None."""
         new = dict(self.params)
         for k in self._param_keys:

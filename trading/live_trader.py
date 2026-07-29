@@ -43,7 +43,7 @@ from core import order_exec
 from core import spread_gate
 from core.indicator_engine import atr as atr_indicator
 from core.risk_manager import (calc_lot, calc_effective_slots, SlotManager,
-                               calc_swing_sl_tp_pips)
+                               calc_swing_sl_tp_points)
 from strategy import get_strategy, get_strategy_by_name
 from strategy.base import MarketData
 
@@ -445,8 +445,8 @@ def strategy_positions(symbol: str, strategy_name: str, positions=None) -> list:
             if p.symbol == symbol]
 
 
-def pip_to_price(pips: float, pip_size: float) -> float:
-    return pips * pip_size
+def points_to_price(pips: float, point_size: float) -> float:
+    return pips * point_size
 
 
 def seconds_to_candle_close(timeframe_minutes: int,
@@ -849,7 +849,7 @@ def actual_trade_objects(symbol: str, since_ts: int,
     return objs
 
 
-def pair_visual_lines(symbol: str, params: dict, strategy, pip_size: float,
+def pair_visual_lines(symbol: str, params: dict, strategy, point_size: float,
                       pair_cfg: dict = None) -> list:
     """Egy stratégia + keretrendszer rajz-objektumainak TAGELT sorai (a stratégia
     nevével — `strategy.visual.tag_line`), hogy több stratégia UGYANABBA a
@@ -870,7 +870,7 @@ def pair_visual_lines(symbol: str, params: dict, strategy, pip_size: float,
     # — a STRATÉGIA-hatókörű órákkal (fájl → különben a config.json legacy).
     th = resolve_trade_hours(symbol, strategy.name, (pair_cfg or {}).get("trade_hours"))
     no_trade_set = (set(range(24)) - {int(h) for h in th}) if th is not None else set()
-    # pip_size a jövőbeli TP/SL-rajzoláshoz (feltétel 3) — a params nem tartalmazza.
+    # point_size a jövőbeli TP/SL-rajzoláshoz (feltétel 3) — a params nem tartalmazza.
     # A no_trade_hours-t a visual_objects ELŐTT állítjuk be → a kék sáv + belépő-
     # jelölések visszajátszása ugyanúgy RESETEL a szüneteknél, mint a live motor.
     # A „Kötések látszanak" kapcsoló (per pár ÉS per STRATÉGIA — az instrumentum-
@@ -883,8 +883,8 @@ def pair_visual_lines(symbol: str, params: dict, strategy, pip_size: float,
     _show_signals = _vp.trades_on({"pairs": {symbol: (pair_cfg or {})}},
                                   symbol, strategy.name)
     md = MarketData(symbol=symbol,
-                    params={**params, "pip_size": pip_size,
-                            "backtest_spread_pips": (pair_cfg or {}).get("backtest_spread_pips", 1.5)},
+                    params={**params, "point_size": point_size,
+                            "backtest_spread_points": (pair_cfg or {}).get("backtest_spread_points", 1.5)},
                     bars=bars, no_trade_hours=no_trade_set, show_signals=_show_signals)
     # TF-együttállás kapu: ha AKTÍV erre a stratégiára, a jel-replay belépőit a
     # történelmi együttállással szűrjük (a blokkoltak nem jelennek meg — BUG-fix).
@@ -905,12 +905,12 @@ def pair_visual_lines(symbol: str, params: dict, strategy, pip_size: float,
     return [tag_line(o.line(), strategy.name) for o in objects]
 
 
-def write_pair_visuals(symbol: str, params: dict, strategy, pip_size: float,
+def write_pair_visuals(symbol: str, params: dict, strategy, point_size: float,
                        pair_cfg: dict = None):
     """Egy stratégia viz-e a szimbólum-fájlba (tool/kompat — pl. viz_render).
     A több-stratégiás élő út a `run()` per-szimbólum koordinátorán megy át."""
     mt5_visual.write_lines(
-        symbol, pair_visual_lines(symbol, params, strategy, pip_size, pair_cfg))
+        symbol, pair_visual_lines(symbol, params, strategy, point_size, pair_cfg))
 
 
 def _write_symbol_viz(symbol, pair_cfg, strats, params_by_strat: dict):
@@ -942,8 +942,8 @@ def _write_symbol_viz(symbol, pair_cfg, strats, params_by_strat: dict):
     if now - _viz_last_write.get(symbol, 0.0) < VIZ_INTERVAL_SEC:
         return
     _viz_last_write[symbol] = now
-    pip_size = pair_cfg.get("pip_size")
-    if not pip_size:
+    point_size = pair_cfg.get("point_size")
+    if not point_size:
         return
     lines = []
     for st in strats:
@@ -952,7 +952,7 @@ def _write_symbol_viz(symbol, pair_cfg, strats, params_by_strat: dict):
         try:
             # A LEGFRISSEBB JSON-paraméter (követi az instrumentum-ablak Mentését).
             vparams = load_pair_params(symbol, st.name) or params_by_strat[st.name]
-            lines += pair_visual_lines(symbol, vparams, st, pip_size, pair_cfg)
+            lines += pair_visual_lines(symbol, vparams, st, point_size, pair_cfg)
         except Exception as e:
             log.debug("%s/%s — viz sor hiba: %s", symbol, st.name, e)
     # A függő riasztások MINDEN pillanatképbe belekerülnek (az MQL5 az alert-id
@@ -1042,7 +1042,7 @@ def _refresh_position(ticket: int):
 
 
 def _apply_be_and_trailing(symbol, pos, ticket, pstate, is_rf, risky,
-                           params, pip_size, sym_info, slot_mgr):
+                           params, point_size, sym_info, slot_mgr):
     """Egy nyitott (off/risky) pozíció költség-tudatos BREAKEVEN + TRAILING kezelése —
     BAR-FÜGGETLEN, ezért a no-trade (szürke) órákban is futtatható, hogy a már nyitott
     pozíció trailingje/BE-je akkor is dolgozzon. A logika AZONOS a `process_pair` fő
@@ -1085,7 +1085,7 @@ def _apply_be_and_trailing(symbol, pos, ticket, pstate, is_rf, risky,
     # ── Trailing (kockázatmentes után, ha kézzel nincs kikapcsolva) ──
     is_rf = slot_mgr.is_risk_free(ticket)
     if is_rf and pstate.get("trailing_enabled", True):
-        point  = sym_info.point if (sym_info and sym_info.point > 0) else pip_size
+        point  = sym_info.point if (sym_info and sym_info.point > 0) else point_size
         digits = sym_info.digits if sym_info else 5
         override_points = pstate.get("trail_points")
         if override_points is not None:
@@ -1146,7 +1146,7 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
     params     = state.params
     trading_cfg = state.trading_cfg
     magic      = state.magic
-    pip_size   = pair_cfg["pip_size"]
+    point_size   = pair_cfg["point_size"]
 
     # Dashboard state (a megjelenítendő cellákat a GUI tölti — itt csak
     # végrehajtási tények: pozíció P&L, napi P&L).
@@ -1224,7 +1224,7 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
                         "entry_atr": 0.0})
                     _apply_be_and_trailing(
                         symbol, _p, _p.ticket, _ps, slot_mgr.is_risk_free(_p.ticket),
-                        risky, params, pip_size, _sinfo, slot_mgr)
+                        risky, params, point_size, _sinfo, slot_mgr)
             except Exception as _e:
                 log.debug("%s — no-trade pozíció-kezelés hiba: %s", symbol, _e)
         # Ha a stratégia be van kapcsolva rá (`no_trade_resets_signal`), a szünet
@@ -1328,14 +1328,14 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
     if sym_info and atr_val is not None and sym_info.point > 0:
         # A spread-kaput a KÖZÖS core.spread_gate dönti — UGYANAZ a képlet, amit a
         # backtest is használ (egy forrás → sose csúszik szét). A bróker pont-alapú
-        # spreadjét pipbe váltjuk (spread_pts × point / pip_size).
-        current_spread_pips = sym_info.spread * sym_info.point / pip_size
+        # spreadjét pipbe váltjuk (spread_pts × point / point_size).
+        current_spread_points = sym_info.spread * sym_info.point / point_size
         spread_ok, _cap_pips = spread_gate.spread_ok(
-            current_spread_pips, atr_val, pip_size, params,
-            pair_cfg.get("backtest_spread_pips"))
+            current_spread_points, atr_val, point_size, params,
+            pair_cfg.get("backtest_spread_points"))
         if not spread_ok:
             log.debug("%s — spread túl nagy: %.2f pip > %.2f pip max, kihagyva.",
-                      symbol, current_spread_pips, _cap_pips)
+                      symbol, current_spread_points, _cap_pips)
 
     # --- Pozíció menedzsment ---
     # EGY teljes pozíció-pillanatkép a körre: ebből képződik a stratégia „saját"
@@ -1625,7 +1625,7 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
                         and not _is_fibo and not _is_thirds and
                         (not _is_partial or pstate.get("runner_mode") == _rr.RUNNER_TRAILING))
         if _do_trailing:
-            point  = sym_info.point if (sym_info and sym_info.point > 0) else pip_size
+            point  = sym_info.point if (sym_info and sym_info.point > 0) else point_size
             digits = sym_info.digits if sym_info else 5
 
             # Követési távolság ÁR-ban:
@@ -1868,11 +1868,11 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
             # volatilitás-szűrő + SL/TP pip) — UGYANAZ a hook, amit a backtest
             # modellez, így az élő viselkedés egyezik az optimalizált/minősített
             # eredménnyel (atr_min_pct/atr_max_pct per instrumentum). None →
-            # kihagyás. Diagnosztika: ha a TISZTA méretező (sl_tp_pips) adott
+            # kihagyás. Diagnosztika: ha a TISZTA méretező (sl_tp_points) adott
             # volna tervet, akkor a volatilitás-kapu blokkolt — írjuk ki külön.
-            plan = strategy.bt_entry(hi_row, params, pip_size) if hi_row is not None else None
+            plan = strategy.bt_entry(hi_row, params, point_size) if hi_row is not None else None
             if plan is None:
-                _sizing = (strategy.sl_tp_pips(hi_row, params, pip_size)
+                _sizing = (strategy.sl_tp_points(hi_row, params, point_size)
                            if hi_row is not None else None)
                 if _sizing is not None:
                     log.info("⏭ %s %s jel — belépő KIHAGYVA: volatilitás-kapu "
@@ -1882,7 +1882,7 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
                     log.info("⏭ %s %s jel — belépő KIHAGYVA: a stratégia nem adott "
                              "érvényes SL/TP méretet (hi_row/indikátor hiány).", symbol, signal)
                 return
-            sl_pips, tp_pips = plan
+            sl_points, tp_points = plan
             # SL-módszer: `swing20` → az utolsó N M1 gyertya swingjéből (ATR helyett):
             # BUY = legalacsonyabb LOW − spread, SELL = legmagasabb HIGH + spread; a TP
             # marad tp_rr_ratio × SL-táv. A döntő (zárt) M1 gyertya záróárához mérve.
@@ -1890,57 +1890,57 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
             # tippeli): a wpr_sma swing20, az ml_ai atr — utóbbi a modell CÍMKÉJÉVEL
             # egyezik, különben a predikció más kötésre vonatkozna, mint a végrehajtás.
             if params.get("sl_method", strategy.default_sl_method) == "swing20":
-                _sw = calc_swing_sl_tp_pips(
+                _sw = calc_swing_sl_tp_points(
                     float(df_lo["close"].iloc[-2]), signal,
                     df_lo["low"].to_numpy(), df_lo["high"].to_numpy(),
-                    params, pip_size, pair_cfg.get("backtest_spread_pips", 1.5))
+                    params, point_size, pair_cfg.get("backtest_spread_points", 1.5))
                 if _sw is None:
                     log.info("⏭ %s %s jel — belépő KIHAGYVA: nincs érvényes swing-SL "
                              "(kevés M1 gyertya / a belépő a swingen túl).", symbol, signal)
                     return
-                sl_pips, tp_pips = _sw
+                sl_points, tp_points = _sw
             # ── A bróker MINIMUM stop-távolsága (trade_stops_level) ───────────
             # Ennél közelebbi SL-lel a megbízást `10016 Invalid stops`-szal
             # utasítja el, azaz a jel némán elveszik. Ilyenkor az SL-t a minimumra
             # tágítjuk, a TP-t ugyanazzal az aránnyal (az R:R marad). A MÉRETEZÉS
             # ELŐTT, hogy a nagyobb SL-táv kisebb lotot adjon → a kockázati keret
             # ($) NEM nő, csak a stop kerül messzebb.
-            sl_pips, tp_pips, _widened = order_exec.enforce_min_sl_pips(
-                sl_pips, tp_pips, sym_info, pip_size)
+            sl_points, tp_points, _widened = order_exec.enforce_min_sl_points(
+                sl_points, tp_points, sym_info, point_size)
             if _widened:
                 log.info("↔ %s %s — az SL a bróker minimum stop-távolságára tágítva "
                          "(%.1f pip); a lot ennek megfelelően kisebb, az R:R változatlan.",
-                         symbol, signal, sl_pips)
+                         symbol, signal, sl_points)
             # ── ÉLŐ méretezési adatok a brókertől ────────────────────────────
-            # A config `pv1_usd`-je egyetlen PILLANATKÉP az instrumentum
+            # A config `pv1_point`-je egyetlen PILLANATKÉP az instrumentum
             # felvételekor. EUR-számlán minden USD/GBP/JPY-alapú instrumentum
             # pip-értéke az ÁRFOLYAMMAL sodródik, a kézzel felvett indexeknél
             # pedig kerek 1.0 maradt (UK100-on ~15% alulbecslés = túl nagy lot).
             # Ezért a méretezéshez MT5-ből kérjük az értéket; ha nem elérhető, a
             # config marad (a backteszt/optimalizálás úgyis abból dolgozik).
             _sizing_cfg = pair_cfg
-            _live_pv1 = order_exec.pip_value(symbol, pip_size, sym_info)
+            _live_pv1 = order_exec.point_value(symbol, point_size, sym_info)
             _vb = order_exec.volume_bounds(sym_info)
             if _live_pv1 or _vb:
                 _sizing_cfg = dict(pair_cfg)
                 if _live_pv1:
-                    _sizing_cfg["pv1_usd"] = _live_pv1
-                    _cfg_pv1 = float(pair_cfg.get("pv1_usd") or 0.0)
+                    _sizing_cfg["pv1_point"] = _live_pv1
+                    _cfg_pv1 = float(pair_cfg.get("pv1_point") or 0.0)
                     # Nagy eltérésnél szólunk: a configból dolgozó BACKTESZT és
                     # OPTIMALIZÁLÁS ilyenkor más mérettel számol, mint az él.
                     if _cfg_pv1 > 0 and abs(_live_pv1 - _cfg_pv1) / _cfg_pv1 > 0.05:
-                        log.warning("%s — a config pv1_usd (%.4f) %.0f%%-kal eltér a "
+                        log.warning("%s — a config pv1_point (%.4f) %.0f%%-kal eltér a "
                                     "bróker aktuális pip-értékétől (%.4f). Az ÉL a "
                                     "helyessel méretez, de a backteszt/optimalizálás a "
                                     "configból dolgozik → futtasd a "
-                                    "tools/refresh_pip_values.py-t.",
+                                    "tools/refresh_point_values.py-t.",
                                     symbol, _cfg_pv1,
                                     abs(_live_pv1 - _cfg_pv1) / _cfg_pv1 * 100, _live_pv1)
                 if _vb:
                     _sizing_cfg["min_lot"], _sizing_cfg["max_lot"], \
                         _sizing_cfg["lot_step"] = _vb
-            eff_slots = calc_effective_slots(balance, sl_pips, _sizing_cfg, ctf)
-            lot = calc_lot(balance, sl_pips, _sizing_cfg, ctf, eff_slots)
+            eff_slots = calc_effective_slots(balance, sl_points, _sizing_cfg, ctf)
+            lot = calc_lot(balance, sl_points, _sizing_cfg, ctf, eff_slots)
 
             with MT5_LOCK:
                 tick = mt5.symbol_info_tick(symbol)
@@ -1951,15 +1951,15 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
                 if signal == "BUY":
                     open_price = tick.ask
                     sl_price   = order_exec.normalize_price(
-                        open_price - pip_to_price(sl_pips, pip_size), sym_info)
+                        open_price - points_to_price(sl_points, point_size), sym_info)
                     tp_price   = order_exec.normalize_price(
-                        open_price + pip_to_price(tp_pips, pip_size), sym_info)
+                        open_price + points_to_price(tp_points, point_size), sym_info)
                 else:
                     open_price = tick.bid
                     sl_price   = order_exec.normalize_price(
-                        open_price + pip_to_price(sl_pips, pip_size), sym_info)
+                        open_price + points_to_price(sl_points, point_size), sym_info)
                     tp_price   = order_exec.normalize_price(
-                        open_price - pip_to_price(tp_pips, pip_size), sym_info)
+                        open_price - points_to_price(tp_points, point_size), sym_info)
 
                 # ── „Csak jelzés" mód: megbízás NEM megy ki ────────────────
                 # Minden fenti számítás (kapuk, SL/TP, lot) ugyanúgy lefutott —
@@ -2259,9 +2259,9 @@ def run(cfg: dict, slot_mgr: SlotManager):
         if _params is None:
             return None
         # Pár-azonosító injektálás a stratégia-hookoknak (mint a backtest
-        # run_pair-ben): symbol/pip_size autoritatív a pair configból, a session
+        # run_pair-ben): symbol/point_size autoritatív a pair configból, a session
         # default-olható. A wpr_sma ezeket nem olvassa → viselkedése változatlan.
-        _params = {**_params, "symbol": symbol, "pip_size": pair_cfg["pip_size"]}
+        _params = {**_params, "symbol": symbol, "point_size": pair_cfg["point_size"]}
         _params.setdefault("sess_start", pair_cfg.get("sess_start", 0))
         _params.setdefault("sess_end",   pair_cfg.get("sess_end", 24))
         return LivePairState(

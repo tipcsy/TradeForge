@@ -3,7 +3,7 @@ Pip-érték és lot-korlátok FRISSÍTÉSE a brókertől a `config.json`-ba.
 
 Miért kell
 ----------
-A `pairs.<sym>.pv1_usd` (1 lot × 1 pip értéke a SZÁMLA devizájában) egyetlen
+A `pairs.<sym>.pv1_point` (1 lot × 1 pip értéke a SZÁMLA devizájában) egyetlen
 PILLANATKÉP arról, amikor az instrumentumot felvetted. Két baja lehet:
 
   • **Elavult.** Nem számla-devizás instrumentumnál (EUR-számlán minden USD/GBP/
@@ -20,15 +20,15 @@ különben a mért eredmény más mérettel számol, mint az él.
 
 Használat
 ---------
-    python tools/refresh_pip_values.py            # csak MEGMUTATJA az eltéréseket
-    python tools/refresh_pip_values.py --write    # be is írja a config.json-ba
-    python tools/refresh_pip_values.py --days 365 # ennyi nap a spread-mediánhoz
+    python tools/refresh_point_values.py            # csak MEGMUTATJA az eltéréseket
+    python tools/refresh_point_values.py --write    # be is írja a config.json-ba
+    python tools/refresh_point_values.py --days 365 # ennyi nap a spread-mediánhoz
 
 Alapból NEM ír (a config.json a te élő beállításod). A `--write` a
-`pv1_usd`, `min_lot`, `lot_step`, `max_lot` és `backtest_spread_pips` mezőket
+`pv1_point`, `min_lot`, `lot_step`, `max_lot` és `backtest_spread_points` mezőket
 frissíti; minden mást (engedélyezés, órák, stratégiák, run_state) érintetlenül hagy.
 
-A `backtest_spread_pips` a VALÓS ELŐZMÉNY mediánjából jön (a `data/m1/<sym>.parquet`
+A `backtest_spread_points` a VALÓS ELŐZMÉNY mediánjából jön (a `data/m1/<sym>.parquet`
 `avg_spread` oszlopa, a kereskedett órákra szűrve), NEM a pillanatnyi tickből — egy
 tick a nap egy véletlen pillanata, a backtestre érvényes szám viszont a tipikus
 spread. Ha nincs elég historikus adat, a tick a tartalék.
@@ -81,7 +81,7 @@ def spread_from_history(symbol: str, pair_cfg: dict, days: int):
     """A TIPIKUS spread pipben a valós előzményből: az `avg_spread` MEDIÁNJA a
     kereskedett órákra szűrve. `(median, n_bar, p75)` vagy None.
 
-    Miért nem a pillanatnyi tick: a `backtest_spread_pips` az EGÉSZ backtestre
+    Miért nem a pillanatnyi tick: a `backtest_spread_points` az EGÉSZ backtestre
     érvényes egyetlen szám, egy tick viszont a nap/hét egy véletlen pillanata.
     A median a napszakok és a hírek zaját is kisimítja; a p75-öt tájékoztatásul
     adjuk vissza (mennyire hosszú a farok)."""
@@ -103,22 +103,17 @@ def spread_from_history(symbol: str, pair_cfg: dict, days: int):
         df = df[df.index.hour.isin(hours)]
     sp = df["avg_spread"].astype(float)
     sp = sp[sp > 0]
-    pip = float(pair_cfg.get("pip_size") or 0.0)
+    pip = float(pair_cfg.get("point_size") or 0.0)
     if pip <= 0 or len(sp) < MIN_SPREAD_BARS:
         return None
     return float(sp.median() / pip), int(len(sp)), float(sp.quantile(0.75) / pip)
 
 
-def _pip_size(info) -> float:
-    """A pip mérete a szimbólum tizedeseiből — ugyanaz a szabály, amit a felület
-    használ új instrumentum felvételekor (a config `pip_size`-a a mérvadó, ez csak
-    tartalék, ha az hiányzik)."""
-    d = info.digits
-    if d in (4, 5):
-        return info.point * 10
-    if d in (2, 3):
-        return info.point * 100
-    return info.point
+def _point_size(info) -> float:
+    """A szimbólum PONT-mérete. A `symbol_info.point` maga — nincs digits-alapú
+    szorzás, mert az a PIP-et adná (5 tizedesnél ×10, 2-3 tizedesnél ×100).
+    Tartalék, ha a config `point_size`-a hiányzik."""
+    return float(getattr(info, "point", 0.0) or 0.0)
 
 
 def main() -> int:
@@ -157,14 +152,14 @@ def main() -> int:
                 rows.append((symbol, "—", "—", "NINCS ilyen szimbolum a brokerne1"))
                 continue
 
-            pip_size = float(pc.get("pip_size") or _pip_size(info))
-            pv1_new  = order_exec.pip_value(symbol, pip_size, info)
+            point_size = float(pc.get("point_size") or _point_size(info))
+            pv1_new  = order_exec.point_value(symbol, point_size, info)
             vb       = order_exec.volume_bounds(info)
             if pv1_new is None:
-                rows.append((symbol, pc.get("pv1_usd"), "—", "nincs tick-ertek"))
+                rows.append((symbol, pc.get("pv1_point"), "—", "nincs tick-ertek"))
                 continue
 
-            pv1_old = float(pc.get("pv1_usd") or 0.0)
+            pv1_old = float(pc.get("pv1_point") or 0.0)
             diff = (abs(pv1_new - pv1_old) / pv1_old) if pv1_old > 0 else 1.0
             note = ""
             if diff > SIGNIFICANT:
@@ -178,16 +173,16 @@ def main() -> int:
             if hist is not None:
                 sp_new, n_bar, sp_p75 = hist
                 sp_src = f"median {n_bar} bar (p75 {sp_p75:.2f})"
-            elif pip_size > 0 and info.point > 0:
-                sp_new = info.spread * info.point / pip_size
+            elif point_size > 0 and info.point > 0:
+                sp_new = info.spread * info.point / point_size
                 sp_src = "PILLANATNYI tick (nincs eleg elozmeny)"
             else:
                 sp_new, sp_src = None, "-"
-            sp_old = pc.get("backtest_spread_pips")
+            sp_old = pc.get("backtest_spread_points")
             spread_rows.append((symbol, sp_old, sp_new, sp_src))
 
             if write:
-                pc["pv1_usd"] = round(pv1_new, 4)
+                pc["pv1_point"] = round(pv1_new, 4)
                 if vb:
                     vmin, vmax, vstep = vb
                     pc["min_lot"]  = vmin
@@ -195,7 +190,7 @@ def main() -> int:
                     if vmax != float("inf"):
                         pc["max_lot"] = vmax
                 if sp_new is not None:
-                    pc["backtest_spread_pips"] = round(sp_new, 2)
+                    pc["backtest_spread_points"] = round(sp_new, 2)
     finally:
         mt5_connector.disconnect()
 
@@ -222,7 +217,7 @@ def main() -> int:
     if not write:
         print(f"\n{changed} instrumentumnal erdemi ({SIGNIFICANT*100:.0f}% folotti) "
               f"elteres. NEM irtam semmit — a beirashoz:")
-        print("    python tools/refresh_pip_values.py --write")
+        print("    python tools/refresh_point_values.py --write")
         return 0
 
     raw["pairs"] = pairs

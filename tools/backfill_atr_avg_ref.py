@@ -30,10 +30,10 @@ from strategy.settings import load_config
 from trading.backtest import load_data
 
 
-def _compute_ref(strategy, df_m15, df_m1, params, pip_size):
+def _compute_ref(strategy, df_m15, df_m1, params, point_size):
     """Az adott (mentett) paraméterekkel az ATR ablak-átlaga — EGY szám, vagy None."""
     m15_ind, _ = strategy.bt_indicators(
-        df_m15, df_m1, {**params, "pip_size": pip_size})
+        df_m15, df_m1, {**params, "point_size": point_size})
     if "atr_avg" in m15_ind.columns and len(m15_ind):
         av = float(m15_ind["atr_avg"].iloc[0])
         return av if av > 0 else None
@@ -91,8 +91,8 @@ def main():
                 skipped += 1
                 continue
             try:
-                pip_size = float(pairs[sym].get("pip_size", 0.0001))
-                ref = _compute_ref(strategy, df_m15, df_m1, params, pip_size)
+                point_size = float(pairs[sym].get("point_size", 0.0001))
+                ref = _compute_ref(strategy, df_m15, df_m1, params, point_size)
             except Exception as ex:
                 print(f"[{strat_name}] {sym}: számítási hiba ({ex})")
                 failed += 1

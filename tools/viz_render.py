@@ -37,9 +37,9 @@ def main():
         strategy = get_strategy(cfg)
         params   = load_pair_params(symbol) or strategy.base_params(cfg)
         pair_cfg = cfg.get("pairs", {}).get(symbol, {})
-        pip_size = pair_cfg.get("pip_size", 0.0001)
+        point_size = pair_cfg.get("point_size", 0.0001)
 
-        write_pair_visuals(symbol, params, strategy, pip_size)
+        write_pair_visuals(symbol, params, strategy, point_size)
         log.info("✅ %s — viz kiírva. Tedd a TradeForgeViz indikátort egy %s M15 "
                  "chartra (vagy futtasd újra, ha már fent van).", symbol, symbol)
     finally:

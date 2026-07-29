@@ -84,15 +84,15 @@
     "overwrite_existing": false
   },
   "pairs": {
-    "_comment": "pip_size: 1 pip értéke az árfolyamban. pv1_usd: 1 lot × 1 pip értéke a SZÁMLA DEVIZÁJÁBAN (a név történelmi — nem feltétlenül USD!); a felület a bróker trade_tick_value-jából számolja felvételkor. FIGYELEM: ez PILLANATKÉP — a nem számla-devizás instrumentumoknál az árfolyammal sodródik, ezért időnként futtasd: python tools/refresh_pip_values.py --write. Az ÉLŐ motor MT5-ből frissíti, a backteszt/optimalizálás viszont EBBŐL dolgozik. min_lot/lot_step/max_lot: MT5 kontraktus-korlátok (max_lot hiányzik = nincs felső korlát). sess_start/end: UTC óra. viz_enabled: a chart-vizualizáció (V gomb) per pár. show_trades: a JEL-REPLAY réteg (K gomb) — a sűrű zöld/piros belépő-jelzés vonalak + Entry/TP/SL (alap: true); a tényleges MT5-kötések ettől függetlenül látszanak. Új párt a GUI-ból is felvehetsz (a bróker adataival automatikusan kitölti), vagy ide kézzel az alábbi minták szerint. commission_per_lot: ODA-VISSZA jutalék 1.0 lotra, a számla devizájában (POZITÍV = költség). swap_long_per_lot / swap_short_per_lot: 1.0 lotra ÉJSZAKÁNKÉNT, ELŐJELESEN (negatív = levonás, MT5-konvenció). swap_3x_weekday: ezen a napon háromszoros a swap (0=hétfő, alap 2=szerda). Hiányzó kulcs = 0.0, azaz KÖLTSÉGMENTES (és így optimista) backteszt — a valós értékeket a SAJÁT előzményedből tölti: python tools/refresh_costs.py --write.",
+    "_comment": "point_size: 1 PONT értéke az árfolyamban (a bróker natív egysége — sosem pip). pv1_point: 1 lot × 1 PONT értéke a SZÁMLA DEVIZÁJÁBAN (a név történelmi — nem feltétlenül USD!); a felület a bróker trade_tick_value-jából számolja felvételkor. FIGYELEM: ez PILLANATKÉP — a nem számla-devizás instrumentumoknál az árfolyammal sodródik, ezért időnként futtasd: python tools/refresh_point_values.py --write. Az ÉLŐ motor MT5-ből frissíti, a backteszt/optimalizálás viszont EBBŐL dolgozik. min_lot/lot_step/max_lot: MT5 kontraktus-korlátok (max_lot hiányzik = nincs felső korlát). sess_start/end: UTC óra. viz_enabled: a chart-vizualizáció (V gomb) per pár. show_trades: a JEL-REPLAY réteg (K gomb) — a sűrű zöld/piros belépő-jelzés vonalak + Entry/TP/SL (alap: true); a tényleges MT5-kötések ettől függetlenül látszanak. Új párt a GUI-ból is felvehetsz (a bróker adataival automatikusan kitölti), vagy ide kézzel az alábbi minták szerint. commission_per_lot: ODA-VISSZA jutalék 1.0 lotra, a számla devizájában (POZITÍV = költség). swap_long_per_lot / swap_short_per_lot: 1.0 lotra ÉJSZAKÁNKÉNT, ELŐJELESEN (negatív = levonás, MT5-konvenció). swap_3x_weekday: ezen a napon háromszoros a swap (0=hétfő, alap 2=szerda). Hiányzó kulcs = 0.0, azaz KÖLTSÉGMENTES (és így optimista) backteszt — a valós értékeket a SAJÁT előzményedből tölti: python tools/refresh_costs.py --write.",
     "EURUSD": {
       "_comment": "Forex-pár minta",
       "enabled": true,
-      "pip_size": 0.0001,
+      "point_size": 1e-05,
       "min_lot": 0.01,
       "lot_step": 0.01,
-      "pv1_usd": 8.6027,
-      "backtest_spread_pips": 1.3,
+      "pv1_point": 0.86027,
+      "backtest_spread_points": 13.0,
       "sess_start": 10,
       "sess_end": 21,
       "contract_size": 100000.0,
@@ -115,11 +115,11 @@
     "GER40": {
       "_comment": "Index/CFD minta",
       "enabled": false,
-      "pip_size": 1.0,
-      "pv1_usd": 1.0,
+      "point_size": 0.01,
+      "pv1_point": 0.01,
       "min_lot": 0.1,
       "lot_step": 0.1,
-      "backtest_spread_pips": 1.6,
+      "backtest_spread_points": 160.0,
       "sess_start": 0,
       "sess_end": 24,
       "description": "GER40 Cash"

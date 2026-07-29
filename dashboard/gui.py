@@ -2230,7 +2230,7 @@ CLOSED_COLUMNS = [
 
 def _r_multiple(c: dict):
     """A trade R-szorzója (ár-alapú): kedvező ármozgás / kezdeti SL-táv. Lot- és
-    pip-érték-független, a klasszikus „R multiple". None, ha nincs érvényes SL."""
+    egység-független, a klasszikus „R multiple". None, ha nincs érvényes SL."""
     sl = c.get("sl")
     po = c.get("price_open")
     if not sl or not po:
@@ -2828,7 +2828,7 @@ class DashboardWindow:
         # MT5 symbol_info lekérés HÁTTÉRSZÁLON (MT5_LOCK alatt), majd a config-írás
         # és a widget-építés a FŐ szálon (tkinter csak onnan biztonságos).
         def _work():
-            pip_size, pv1_usd, spread_pips = 0.0001, 10.0, 1.5
+            point_size, pv1_point, spread_points = 0.0001, 10.0, 1.5
             min_lot, lot_step, max_lot = 0.01, 0.01, 0.0
             description = ""
             try:
@@ -2838,17 +2838,13 @@ class DashboardWindow:
                     info = _mt5.symbol_info(symbol)
                 if info:
                     description = getattr(info, "description", "") or ""
-                    d = info.digits
-                    if d in (4, 5):
-                        pip_size = info.point * 10
-                    elif d in (2, 3):
-                        pip_size = info.point * 100
-                    else:
-                        pip_size = info.point
+                    # A PONT a bróker natív egysége — nincs digits-alapú
+                    # szorzás (az a pipet adná).
+                    point_size = float(info.point)
                     tv, ts = info.trade_tick_value, info.trade_tick_size
-                    pv1_usd = round(tv / ts * pip_size, 4) if ts > 0 else tv
-                    spread_pips = round(info.spread * info.point / pip_size, 1) \
-                                  if pip_size > 0 else 1.5
+                    pv1_point = round(tv / ts * point_size, 4) if ts > 0 else tv
+                    spread_points = round(info.spread * info.point / point_size, 1) \
+                                  if point_size > 0 else 1.5
                     # Lot-korlátok a brókertől — enélkül az optimalizálás/backteszt elszáll
                     min_lot  = getattr(info, "volume_min", 0.01) or 0.01
                     lot_step = getattr(info, "volume_step", 0.01) or 0.01
@@ -2860,22 +2856,22 @@ class DashboardWindow:
             try:
                 self.root.after(
                     0, lambda: self._finalize_add_instrument(
-                        symbol, pip_size, pv1_usd, spread_pips, description,
+                        symbol, point_size, pv1_point, spread_points, description,
                         min_lot, lot_step, max_lot))
             except Exception:
                 pass
         threading.Thread(target=_work, daemon=True, name="MT5AddInstr").start()
 
-    def _finalize_add_instrument(self, symbol, pip_size, pv1_usd, spread_pips,
+    def _finalize_add_instrument(self, symbol, point_size, pv1_point, spread_points,
                                  description="", min_lot=0.01, lot_step=0.01,
                                  max_lot=0.0):
         """A fő szálon fut: config-írás + dashboard state + új tábla-sor."""
         if symbol in self.rows:
             return
         self.cfg["pairs"][symbol] = {
-            "enabled": False, "pip_size": pip_size, "pv1_usd": pv1_usd,
+            "enabled": False, "point_size": point_size, "pv1_point": pv1_point,
             "min_lot": min_lot, "lot_step": lot_step,
-            "backtest_spread_pips": spread_pips, "sess_start": 0, "sess_end": 24,
+            "backtest_spread_points": spread_points, "sess_start": 0, "sess_end": 24,
             "description": description,
         }
         if max_lot:
@@ -4268,7 +4264,7 @@ class DashboardWindow:
         if not atr_price:
             return None
         pair_cfg = self.cfg["pairs"].get(symbol, {})
-        pip_size = pair_cfg.get("pip_size")
+        point_size = pair_cfg.get("point_size")
         ds = self.dashboard_ref.get(symbol)
         point = getattr(ds, "point", None) if ds else None
         # On-demand `point`: ha a szimbólum még nem streamelt point-ot (pl. nem aktívan
@@ -4285,14 +4281,13 @@ class DashboardWindow:
                     point = _info.point
                     if ds is not None:
                         ds.point = point
-                    # pip_size hiánynál (nem konfigurált pár) heurisztikus tartalék a
+                    # point_size hiánynál (nem konfigurált pár) heurisztikus tartalék a
                     # digits alapján (mint a light-poll), hogy a mező akkor is kiírjon.
-                    if not pip_size and _info:
-                        d = getattr(_info, "digits", 5)
-                        pip_size = point * (10 if d in (3, 5) else 100 if d == 6 else 1)
+                    if not point_size and _info:
+                        point_size = point      # a pont maga, nincs szorzó
             except Exception:
                 pass
-        if not pip_size or not point:
+        if not point_size or not point:
             return None
         return int(round(float(mult) * float(atr_price) / point))
 
@@ -4553,9 +4548,9 @@ class DashboardWindow:
                     atr_pts  = int(atr_val / point)
                     ratio    = float(prm.get("max_spread_atr_ratio", 0.20))
                     pair_pip = float(self.cfg["pairs"].get(symbol, {}).get(
-                                     "pip_size", point * 10))
+                                     "point_size", point))
                     pip_to_pt = max(1, round(pair_pip / point))
-                    min_pts  = max(1, int(float(prm.get("min_spread_pips", 2.0)) * pip_to_pt))
+                    min_pts  = max(1, int(float(prm.get("min_spread_points", 2.0)) * pip_to_pt))
                     ds.max_spread_pts = max(min_pts, int(atr_pts * ratio))
             except Exception:
                 pass
@@ -4738,7 +4733,7 @@ class DashboardWindow:
                     # Pár-azonosító injektálás (mint a motoroknál): pl. az ml_ai
                     # feature-számítása/modell-betöltése igényli.
                     sp = {**sp, "symbol": symbol,
-                          "pip_size": _pcfg.get("pip_size", 0.0001)}
+                          "point_size": _pcfg.get("point_size", 0.0001)}
                     sp.setdefault("sess_start", _pcfg.get("sess_start", 0))
                     sp.setdefault("sess_end",   _pcfg.get("sess_end", 24))
                     smd = MarketData(symbol=symbol, params=sp, bars=bars)
@@ -4761,9 +4756,9 @@ class DashboardWindow:
                         atr_pts  = int(atr_val / info.point)
                         ratio    = params.get("max_spread_atr_ratio", 0.20)
                         pair_pip = float(self.cfg["pairs"].get(symbol, {}).get(
-                                         "pip_size", info.point * 10))
+                                         "point_size", info.point))
                         pip_to_pt = max(1, round(pair_pip / info.point))
-                        min_pts  = max(1, int(params.get("min_spread_pips", 2.0)
+                        min_pts  = max(1, int(params.get("min_spread_points", 2.0)
                                               * pip_to_pt))
                         ds.max_spread_pts = max(min_pts, int(atr_pts * ratio))
             except Exception:

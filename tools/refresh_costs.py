@@ -67,13 +67,11 @@ def mt5_day_to_weekday(mt5_day: int) -> int:
     return (int(mt5_day) - 1) % 7
 
 
-def _pip_size(info) -> float:
-    d = info.digits
-    if d in (4, 5):
-        return info.point * 10
-    if d in (2, 3):
-        return info.point * 100
-    return info.point
+def _point_size(info) -> float:
+    """A szimbólum PONT-mérete. A `symbol_info.point` maga — nincs digits-alapú
+    szorzás, mert az a PIP-et adná (5 tizedesnél ×10, 2-3 tizedesnél ×100).
+    Tartalék, ha a config `point_size`-a hiányzik."""
+    return float(getattr(info, "point", 0.0) or 0.0)
 
 
 def measure_from_history(mt5, mc, days: int) -> dict:
@@ -130,7 +128,7 @@ def measure_from_history(mt5, mc, days: int) -> dict:
     return out
 
 
-def swap_from_symbol(mt5, info, pip_size: float) -> tuple:
+def swap_from_symbol(mt5, info, point_size: float) -> tuple:
     """(swap_long, swap_short) a SZÁMLA devizájában, 1.0 lotra/éjszaka — vagy
     (None, None), ha a `swap_mode` nem váltható át megbízhatóan."""
     mode = int(getattr(info, "swap_mode", 0) or 0)
@@ -158,7 +156,7 @@ def swap_from_symbol(mt5, info, pip_size: float) -> tuple:
         #     per_lot_night = ár × (kamat% / 100 / 360) × tick_value / tick_size
         #
         # FIGYELEM: ez az AKTUÁLIS árra vonatkozik, tehát PILLANATKÉP — ugyanúgy
-        # frissíteni kell időnként, mint a `pv1_usd`-t.
+        # frissíteni kell időnként, mint a `pv1_point`-t.
         with_price = _mid_price(mt5, info)
         if with_price and tv > 0 and ts > 0:
             f = with_price * (tv / ts) / (100.0 * BANK_YEAR_DAYS)
@@ -218,7 +216,7 @@ def main() -> int:
                 comm = float(pc.get("commission_per_lot", 0.0) or 0.0)
                 src_c = "valtozatlan"
 
-            pip = float(pc.get("pip_size") or _pip_size(info))
+            pip = float(pc.get("point_size") or _point_size(info))
             sw_l, sw_s = swap_from_symbol(mt5, info, pip)
             src_s = "symbol_info"
             if sw_l is None:
