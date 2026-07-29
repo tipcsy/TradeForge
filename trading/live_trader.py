@@ -42,6 +42,7 @@ from core import adopted
 from core import order_exec
 from core import spread_gate
 from core import symbol_policy as _sym_policy
+from core import opt_activity as _opt_activity
 from core.indicator_engine import atr as atr_indicator
 from core.risk_manager import (calc_lot, calc_effective_slots, SlotManager,
                                calc_swing_sl_tp_points)
@@ -150,8 +151,13 @@ dashboard: dict[str, PairDashboardState] = {}
 # Értékek: "LIVE" | "STOPPED" | "OPTIMIZING" | "QUEUED"
 instrument_state: dict[str, str] = {}
 
-# Optimizer státusz szöveg per pár (progress, "Várakozik...", "Kész ✓")
+# Optimizer státusz SZÖVEG per pár — KIJELZÉSI tükör. A döntéseket NEM ez hozza:
+# az optimalizálási tevékenység igazsága a `core.opt_activity`, per (pár, stratégia).
 optimizer_status: dict[str, str] = {}
+
+# (pár, stratégia) → naplóztuk-e már, hogy optimalizálás miatt szünetel. Csak azért
+# van, hogy a 10 mp-es kör ne írja tele a naplót ugyanazzal a sorral.
+_opt_paused: dict[tuple, bool] = {}
 
 # Per-ticket pozíció-állapot (GUI ↔ motor megosztott):
 #   {ticket: {"original_sl": float, "trailing_enabled": bool, "be_done": bool,
@@ -2557,8 +2563,25 @@ def run(cfg: dict, slot_mgr: SlotManager):
                 if instrument_state.get(symbol) in ("LIVE", "CLOSING"):
                     for st in strats:
                         key = (symbol, st.name)
-                        if key in pair_states:
-                            process_pair(pair_states[key], slot_mgr, balance, st)
+                        if key not in pair_states:
+                            continue
+                        # Az ÉPP OPTIMALIZÁLT stratégiát kihagyjuk: a futás végén
+                        # felülíródik a paraméterfájlja, tehát egy most nyíló belépő
+                        # a RÉGI paraméterekkel menne, a menedzsment viszont már az
+                        # újakkal. Ez PER STRATÉGIA szünet — a páron futó TÖBBI
+                        # stratégia zavartalanul kereskedik (külön magic, külön
+                        # paraméterfájl, külön pozíciók).
+                        if _opt_activity.busy(symbol, st.name):
+                            if not _opt_paused.get(key):
+                                _opt_paused[key] = True
+                                log.info("%s/%s — optimalizálás alatt: a stratégia "
+                                         "SZÜNETEL (a pár többi stratégiája fut)",
+                                         symbol, st.name)
+                            continue
+                        if _opt_paused.pop(key, None):
+                            log.info("%s/%s — optimalizálás kész: a stratégia "
+                                     "folytatja", symbol, st.name)
+                        process_pair(pair_states[key], slot_mgr, balance, st)
 
             # A chart-vizualizációt a VIZ-SZÁL rajzolja — itt csak a munkalistát
             # frissítjük (egy atomi referencia-csere). Így a mély adatablakok

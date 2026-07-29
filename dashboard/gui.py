@@ -44,6 +44,7 @@ from strategy.base import Column
 from strategy.settings import apply_strategy_config, main_config_view
 from core import risky_mode
 from core import adopted as _adopted
+from core import opt_activity as _opt_activity
 from version import APP_NAME, APP_VERSION
 
 
@@ -735,19 +736,44 @@ class OptimizerController:
     def _default_strategy(self) -> str:
         return getattr(self.strategy, "name", "wpr_sma")
 
+    def _strategy_live(self, symbol: str, strategy: str) -> bool:
+        """Kereskedik-e ÉPP ez a (symbol, strategy)? A szándék forrása a
+        `core.run_state` — ugyanaz, amit a `live_trader` is használ, tehát a felület
+        és a motor nem mondhat mást. Hibánál KONZERVATÍV: True (inkább nem
+        optimalizálunk, mint hogy egy kereskedő stratégia paraméterei alóla
+        íródjanak át)."""
+        try:
+            from core import run_state as _rs
+            return _rs.get_state(self.cfg, symbol, strategy,
+                                 self._default_strategy()) == _rs.LIVE
+        except Exception:
+            return True
+
     def _symbol_busy(self, symbol: str) -> bool:
-        """Fut vagy sorban áll-e MÁR bármely stratégia ezen a szimbólumon."""
+        """Fut vagy sorban áll-e MÁR bármely stratégia ezen a szimbólumon.
+
+        ERŐFORRÁS-korlát (egy szimbólumon egyszerre egy optimalizálás), NEM
+        kereskedési korlát — a többi stratégia közben kereskedhet."""
         return (any(s == symbol for s, _ in self._running)
                 or any(s == symbol for s, _ in self._queue))
 
     def request_optimize(self, symbol: str, strategy: str | None = None):
         """Egy (symbol, strategy) optimalizálás kérése. Ugyanarra a szimbólumra TÖBB
-        stratégia is kérhető — egyszerre EGY fut, a többi sorba kerül. LIVE
-        (kereskedő) szimbólumot nem optimalizálunk."""
+        stratégia is kérhető — egyszerre EGY fut, a többi sorba kerül.
+
+        A KERESKEDŐ stratégiát nem optimalizáljuk — de ezt PER STRATÉGIA nézzük.
+        Korábban a szimbólum állapota döntött, ezért egy kereskedő páron egyáltalán
+        nem lehetett optimalizálni: előbb Stopot kellett nyomni, ami a pár ÖSSZES
+        stratégiáját leállította. Pedig a `wpr_sma` hangolása alatt az `ml_ai`
+        zavartalanul kereskedhet (külön magic, külön paraméterfájl, külön pozíciók)."""
         strategy = strategy or self._default_strategy()
         with self._lock:
-            # KIVEZETÉS alatt is fut a pár (nyitott pozíciót kezel) → nem optimalizáljuk.
-            if self.instrument_state.get(symbol) in ("LIVE", "CLOSING"):
+            # KIVEZETÉS alatt is fut a stratégia (nyitott pozíciót kezel) → nem
+            # optimalizáljuk. A kivezetés a SZIMBÓLUM szintjén él, ezért azt még
+            # szimbólum-szinten kérdezzük; a LIVE viszont per stratégia dől el.
+            if self.instrument_state.get(symbol) == "CLOSING":
+                return
+            if self._strategy_live(symbol, strategy):
                 return
             job = (symbol, strategy)
             if job in self._running or job in self._queue:
@@ -764,19 +790,24 @@ class OptimizerController:
                 self._start(job)
             else:
                 self._queue.append(job)
-                # Ha a szimbólum MÁR optimalizál (más stratégia), maradjon OPTIMIZING;
-                # különben QUEUED (a pool tele van).
-                if not symbol_running:
-                    self.instrument_state[symbol] = "QUEUED"
-                    self.optimizer_status[symbol] = f"Várakozik... ({strategy})"
+                # A tevékenység PER STRATÉGIA jelölődik; a szimbólum-szintű kijelzést
+                # az `opt_activity.symbol_state()` vonja össze. Az `instrument_state`-et
+                # NEM írjuk: az a kereskedési szándék, és nem szabad elveszítenie.
+                _opt_activity.set_state(symbol, strategy, _opt_activity.QUEUED,
+                                        f"Várakozik... ({strategy})")
+                self.optimizer_status[symbol] = f"Várakozik... ({strategy})"
 
     def cancel_queued(self, symbol: str):
         """Sorban álló (QUEUED) optimalizálás visszavonása (a szimbólum összes
         sorban álló tétele)."""
         with self._lock:
+            _dropped = [st for (s, st) in self._queue if s == symbol]
             self._queue = [(s, st) for (s, st) in self._queue if s != symbol]
+            for _st in _dropped:
+                _opt_activity.set_state(symbol, _st, None)
+            # Az `instrument_state`-hez NEM nyúlunk: a sor ürítése nem kereskedési
+            # döntés. (Korábban STOPPED-re állította — ez törölte a Play szándékot.)
             if not self._symbol_busy(symbol):
-                self.instrument_state[symbol] = "STOPPED"
                 self.optimizer_status[symbol] = ""
 
     def request_stop(self, symbol: str):
@@ -793,6 +824,8 @@ class OptimizerController:
             except Exception:
                 pass
         self.cancel_queued(symbol)          # a sorban állók is törölve
+        for _s, _strat in running:
+            _opt_activity.set_status(_s, _strat, "Leállítás kérve...")
         if running:
             self.optimizer_status[symbol] = "Leállítás kérve..."
 
@@ -808,14 +841,18 @@ class OptimizerController:
         except Exception:
             return
         for symbol, strat in pending:
-            if self.instrument_state.get(symbol) in ("LIVE", "CLOSING"):
-                continue                     # kereskedő/kivezető pár — nem optimalizáljuk
+            # Per STRATÉGIA: egy kereskedő páron a MÁSIK stratégia befejezetlen
+            # study-ja nyugodtan folytatódhat.
+            if (self.instrument_state.get(symbol) == "CLOSING"
+                    or self._strategy_live(symbol, strat)):
+                continue
             self.request_optimize(symbol, strat)   # per-job dedup + sor a request-ben
 
     def _start(self, job):
         symbol, strategy = job
         self._running.add(job)
-        self.instrument_state[symbol] = "OPTIMIZING"
+        _opt_activity.set_state(symbol, strategy, _opt_activity.RUNNING,
+                                f"Indul... ({strategy})")
         self.optimizer_status[symbol] = f"Indul... ({strategy})"
         threading.Thread(target=self._run_worker, args=(job,), daemon=True).start()
 
@@ -938,11 +975,13 @@ class OptimizerController:
         finally:
             with self._lock:
                 self._running.discard(job)
-                # A szimbólum csak akkor lesz STOPPED, ha NINCS több futó/sorban álló
-                # tétele (más stratégia még optimalizálhat ugyanarra a szimbólumra).
+                # A tevékenység-jelölés törlése — CSAK ezé a stratégiáé. Az
+                # `instrument_state`-et NEM állítjuk STOPPED-re: az a kereskedési
+                # szándék, és az optimalizálásnak nincs joga eldobni. (Korábban ez
+                # tette, ezért esett a pár Stopba minden optimalizálás végén.)
+                _opt_activity.set_state(symbol, strategy, None)
                 if not self._symbol_busy(symbol):
                     self._last_progress.pop(symbol, None)
-                    self.instrument_state[symbol] = "STOPPED"
                 self._try_start_next()
 
     @staticmethod
@@ -2373,6 +2412,7 @@ class DashboardWindow:
         self.dashboard_ref    = dashboard_ref
         self.instrument_state = instrument_state
         self.optimizer_status = optimizer_status
+
         self._on_play         = on_play_pair
         self._on_stop         = on_stop_pair
         self._on_slots_change = on_slots_change
@@ -2719,7 +2759,7 @@ class DashboardWindow:
         for symbol in self.rows:
             if search and search not in symbol.upper():
                 continue
-            st = self.instrument_state.get(symbol, "STOPPED")
+            st = self._display_state(symbol)
             if hide_stopped and st == "STOPPED":
                 continue
             visible.append(symbol)
@@ -3493,7 +3533,7 @@ class DashboardWindow:
         popup.geometry("780x540")
         popup.grab_set()
 
-        state  = self.instrument_state.get(symbol, "—")
+        state  = self._display_state(symbol)
         status = self.optimizer_status.get(symbol, "—")
         tk.Label(popup, text=f"{symbol}   —   állapot: {state}", bg=BG, fg=FG_BLUE,
                  font=self._header_font).pack(anchor="w", padx=10, pady=(10, 2))
@@ -3583,7 +3623,7 @@ class DashboardWindow:
     def _handle_run(self, symbol: str):
         """A futtató gomb (Play↔Stop morph) kezelője. KIVEZETÉS alatt a gomb
         VISSZAVONJA a leállítást (a pár újra kereskedhet)."""
-        st = self.instrument_state.get(symbol)
+        st = self._display_state(symbol)
         if st == "STOPPED":
             self._handle_play(symbol)
         elif st == "LIVE":
@@ -3659,7 +3699,21 @@ class DashboardWindow:
         stratégiánál VÁLASZTÓ-MENÜ nyílik (melyiket — vagy mindet), hogy egyértelmű
         legyen, mi fog futni (az ml_ai-nál az Opt = tanítás!). QUEUED → a szimbólum
         sorban álló tételeinek törlése."""
-        st = self.instrument_state.get(symbol)
+        st = self._display_state(symbol)
+        # LIVE páron IS indítható optimalizálás — de csak a NEM kereskedő
+        # stratégiákra. Ha van ilyen, a menü nyílik (a kereskedő tételt tiltottként,
+        # indoklással mutatja); ha nincs, nem csinálunk semmit.
+        if st in ("LIVE", "CLOSING"):
+            names = self._opt_strategies_for(symbol)
+            if st == "LIVE" and any(not self._opt_ctrl._strategy_live(symbol, s)
+                                    for s in names):
+                row = self.rows.get(symbol)
+                btn = getattr(row, "btn_opt", None)
+                x = btn.winfo_rootx() if btn else self.root.winfo_pointerx()
+                y = (btn.winfo_rooty() + btn.winfo_height()) if btn \
+                    else self.root.winfo_pointery()
+                self._show_opt_menu(symbol, names, x, y)
+            return
         if st == "STOPPED":
             names = self._opt_strategies_for(symbol)
             if len(names) > 1:
@@ -3690,19 +3744,31 @@ class DashboardWindow:
         from strategy import get_strategy_by_name
         menu = tk.Menu(self.root, tearoff=0)
         menu.add_command(label=f"— {symbol} optimalizálása —", state="disabled")
+        # A KERESKEDŐ stratégiát nem optimalizáljuk (a futás végén felülíródna a
+        # paraméterfájlja) — de ez PER STRATÉGIA dől el, tehát a pár többi
+        # stratégiája menüből indítható akkor is, ha a pár épp kereskedik.
+        # A tiltott tételt LÁTHATÓAN, indoklással mutatjuk: ha csak kihagynánk, a
+        # hiányzó sor rejtélyes lenne.
+        _closing = self.instrument_state.get(symbol) == "CLOSING"
+        free = []
         for sn in names:
             trainable = callable(getattr(get_strategy_by_name(sn), "fit", None))
             label = f"▶ {sn} (tanítás)" if trainable else f"▶ {sn}"
+            if _closing or self._opt_ctrl._strategy_live(symbol, sn):
+                menu.add_command(
+                    label=f"   {sn} — kereskedik, előbb Stop", state="disabled")
+                continue
+            free.append(sn)
             menu.add_command(
                 label=label,
                 command=lambda s=sn: (self._opt_ctrl.request_optimize(symbol, s),
                                       self._refresh_row(symbol)))
-        if len(names) > 1:
+        if len(free) > 1:
             menu.add_separator()
             menu.add_command(
                 label="▶ Mind",
                 command=lambda: ([self._opt_ctrl.request_optimize(symbol, s)
-                                  for s in names], self._refresh_row(symbol)))
+                                  for s in free], self._refresh_row(symbol)))
         try:
             menu.tk_popup(int(x), int(y))
         finally:
@@ -3710,9 +3776,10 @@ class DashboardWindow:
 
     def _handle_opt_menu(self, symbol: str, event):
         """JOBB-klikk az OPT gombon: stratégiaválasztó menü (ugyanaz, mint a
-        bal-klikk több stratégiánál). LIVE/KIVEZETÉS szimbólumnál nem teszünk
-        semmit (mindkettőnél fut a pár)."""
-        if self.instrument_state.get(symbol) in ("LIVE", "CLOSING"):
+        bal-klikk több stratégiánál). KIVEZETÉS alatt nem nyitjuk meg (ott minden
+        stratégia pozíciót kezel); LIVE páron IGEN — a menü stratégiánként jelzi,
+        melyik indítható és melyik kereskedik épp."""
+        if self.instrument_state.get(symbol) == "CLOSING":
             return
         self._show_opt_menu(symbol, self._opt_strategies_for(symbol),
                             event.x_root, event.y_root)
@@ -3721,7 +3788,7 @@ class DashboardWindow:
         row = self.rows.get(symbol)
         ds  = self.dashboard_ref.get(symbol)
         if row and ds:
-            row.update(ds, self.instrument_state.get(symbol, "STOPPED"),
+            row.update(ds, self._display_state(symbol),
                        self.optimizer_status.get(symbol, ""),
                        connected=getattr(self, "_connected", True))
 
@@ -3742,7 +3809,7 @@ class DashboardWindow:
             if row is not None:
                 no_trade = (self.instrument_state.get(symbol) == "LIVE"
                             and self._is_no_trade_now(symbol))
-                row.update(ds, self.instrument_state.get(symbol, "STOPPED"),
+                row.update(ds, self._display_state(symbol),
                            self.optimizer_status.get(symbol, ""),
                            connected=getattr(self, "_connected", False),
                            no_trade=no_trade)
@@ -3889,10 +3956,29 @@ class DashboardWindow:
         tk.Button(btns, text="Mégse", bg=BTN_DIS_BG, fg=BTN_DIS_FG, relief="flat",
                   font=self._small_font, command=popup.destroy).pack(side="left", padx=6)
 
+    def _display_state(self, symbol: str) -> str:
+        """A soron MEGJELENÍTETT állapot: a kereskedési szándék, az optimalizálási
+        tevékenységgel felülrétegezve.
+
+        A kettő már KÜLÖN él (`instrument_state` = szándék, `core.opt_activity` =
+        tevékenység), a jelenlegi EGYSOROS felület viszont egy badge-et tud mutatni.
+        Szabály: ha a pár kereskedik, azt mutatjuk — az a fontosabb jelzés, és a
+        haladás úgyis ott van az Opt-státusz szövegben. Csak nem-kereskedő párnál
+        lép elő az OPTIMIZING/QUEUED. Így a régi munkamenet (Stop → OPT) képe
+        VÁLTOZATLAN, az új képesség (kereskedés közbeni optimalizálás) pedig nem
+        hazudja azt, hogy a pár áll.
+
+        A per-stratégia sorok bevezetésekor (dashboard-átstrukturálás) ez a
+        kompromisszum megszűnik: ott mindkettő a saját sorában látszik."""
+        st = self.instrument_state.get(symbol, "STOPPED")
+        if st in ("LIVE", "CLOSING"):
+            return st
+        return _opt_activity.symbol_state(symbol) or st
+
     def _handle_delete(self, symbol: str):
         """Instrumentum törlése a config-ból és a táblából (megerősítéssel).
-        Csak megállított (STOPPED) párra engedélyezett."""
-        if self.instrument_state.get(symbol) != "STOPPED":
+        Csak megállított (STOPPED) párra engedélyezett — optimalizálás alatt sem."""
+        if self._display_state(symbol) != "STOPPED":
             return
         from tkinter import messagebox
         if not messagebox.askyesno(
@@ -4583,7 +4669,7 @@ class DashboardWindow:
             pass
         # 'Utolsó opt' PERZISZTENS címke (a done-marker idejéből) — ha nem épp optimalizál.
         # Így restart / opt közben sem tűnik el (nem az in-memory 'Kész ✓'-ra hagyatkozik).
-        if self.instrument_state.get(symbol) not in ("OPTIMIZING", "QUEUED"):
+        if not _opt_activity.symbol_busy(symbol):
             _cur = self.optimizer_status.get(symbol, "")
             if (not _cur or "Kész" in _cur or "Utolsó opt" in _cur
                     or _cur.startswith("Opt:")):
@@ -4650,7 +4736,7 @@ class DashboardWindow:
             ds.opt_grade_reason = reason
             # Külsőleg (más app által) optimalizált párt is "vegyük észre":
             # ha nem épp most optimalizál, a perzisztens 'Utolsó opt: <dátum>' címke.
-            if self.instrument_state.get(symbol) not in ("OPTIMIZING", "QUEUED"):
+            if not _opt_activity.symbol_busy(symbol):
                 self.optimizer_status[symbol] = self._opt_done_label(symbol) or "Kész ✓"
         else:
             params = self.strategy.base_params(self.cfg)
@@ -4942,7 +5028,7 @@ class DashboardWindow:
         if hasattr(self, "rows"):
             for symbol, row in self.rows.items():
                 ds         = self.dashboard_ref.get(symbol)
-                inst_state = self.instrument_state.get(symbol, "STOPPED")
+                inst_state = self._display_state(symbol)
                 opt_status = self.optimizer_status.get(symbol, "")
                 if ds is not None and mt5_positions is not None:
                     pos = mt5_positions.get(symbol)
