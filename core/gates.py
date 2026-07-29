@@ -170,6 +170,39 @@ def badge(states) -> str:
     return f"{EFFECT_GLYPH[EFFECT_BLOCK]}{len(blk)}" if blk else "✓"
 
 
+def counts(states) -> dict:
+    """`{BLOCKING: n, PASS: n, OFF: n}` — az összevont kijelzéshez.
+
+    Az `UNKNOWN` az `OFF`-hoz számít: mindkettő azt jelenti, hogy ez a kapu MOST
+    nem mond semmit. Külön mutatni őket a sorban zaj lenne; a különbség a
+    kapu-panelen látszik, ahol el is fér a magyarázat."""
+    out = {BLOCKING: 0, PASS: 0, OFF: 0}
+    for s in (states or []):
+        st = s.get("state")
+        out[BLOCKING if st == BLOCKING else PASS if st == PASS else OFF] += 1
+    return out
+
+
+def compact(states) -> list:
+    """Összevont kijelzés SOK kapura: `[(szöveg, állapot), …]`.
+
+    Miért kell: a szegmensenkénti csík ~6 kapuig olvasható. Afölött (a) nem fér
+    ki a cellába, és (b) úgysem tudnád megszámolni, hogy a HETEDIK a piros —
+    tehát a pozíció-információ elveszti az értékét. Ilyenkor a SZÁM a hasznos:
+    „kettő blokkol, öt átenged, három ki van kapcsolva".
+
+    Az üres kategóriákat kihagyjuk, hogy ne legyen `⛔0` zaj."""
+    c = counts(states)
+    out = []
+    if c[BLOCKING]:
+        out.append((f"{EFFECT_GLYPH[EFFECT_BLOCK]}{c[BLOCKING]}", BLOCKING))
+    if c[PASS]:
+        out.append((f"▮{c[PASS]}", PASS))
+    if c[OFF]:
+        out.append((f"▯{c[OFF]}", OFF))
+    return out or [("—", OFF)]
+
+
 def is_blocked(states) -> bool:
     """Blokkolja-e BÁRMI most a belépőt? A sor halványítása ezt használja — így a
     „miért nem köt?" kérdésre nem kell se betűt, se számot olvasni."""

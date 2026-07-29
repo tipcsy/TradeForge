@@ -16,8 +16,8 @@ from core import applog
 applog.harden_console()
 
 from core import gates as G
-from dashboard.grouped_layout import (INSTRUMENT_COLUMNS, STRATEGY_COLUMNS,
-                                      ready_badge, should_expand)
+from dashboard.grouped_layout import (GATE_SEGMENTS_MAX, INSTRUMENT_COLUMNS,
+                                      STRATEGY_COLUMNS, ready_badge, should_expand)
 
 R = []
 
@@ -128,6 +128,32 @@ else:
     check("ujrarajzolas NEM duplazza a szegmenseket",
           len(sr._gate_segs) == len(G.REGISTRY), str(len(sr._gate_segs)))
     _root.destroy()
+
+# ══ 6. SKALAZODAS: sok kapu -> osszevont szamlalo ════════════════════════
+# A merés megfogta, hogy a szegmenses csik 6 folott NEM fer ki (80px cella vs
+# 10 kapu 165px), es NEMAN levagta a tobbletet: a 10 kapus sor NEGYNEK latszott.
+def many(n, blk=0, off=0):
+    out = []
+    for i in range(n):
+        stt = G.BLOCKING if i < blk else G.OFF if i < blk + off else G.PASS
+        out.append({"key": f"g{i}", "label": f"kapu{i}",
+                    "effect": G.EFFECT_BLOCK, "state": stt, "detail": ""})
+    return out
+
+
+c = G.counts(many(10, blk=2, off=3))
+check("szamlalas: 2 blokkol / 3 ki / 5 atenged",
+      (c[G.BLOCKING], c[G.OFF], c[G.PASS]) == (2, 3, 5), str(c))
+comp = G.compact(many(10, blk=2, off=3))
+check("osszevont alak: harom csoport", len(comp) == 3, str(comp))
+check("...a blokkolo AZ ELSO (az a lenyeges)", comp[0][1] == G.BLOCKING, str(comp[0]))
+check("ures kategoria kimarad (nincs '⛔0' zaj)",
+      all("0" not in t for t, _ in G.compact(many(5))), str(G.compact(many(5))))
+check("minden kikapcsolva -> egyetlen csoport", len(G.compact(many(4, off=4))) == 1)
+check("ures allapot -> gondolatjel", G.compact([]) == [("—", G.OFF)])
+
+# A hatarertek: 6-ig szegmens, 7-tol osszevont
+check("a hatar 6 kapu", GATE_SEGMENTS_MAX == 6)
 
 print()
 print(f"{sum(R)}/{len(R)} teszt PASS")

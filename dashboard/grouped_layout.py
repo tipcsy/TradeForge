@@ -60,6 +60,29 @@ STRATEGY_COLUMNS = [
 ]
 
 
+# Eddig a kapuszámig rajzolunk SZEGMENSENKÉNT; afölött összevont számlálót.
+#
+# A határ nem esztétikai: 6 fölött (a) nem fér ki a cellába — mérve: 80 px cella,
+# 6 kapu 113 px, 10 kapu 165 px —, és (b) úgysem tudnád megszámolni, hogy a
+# HETEDIK szegmens a piros, tehát a pozíció-információ elveszti az értékét.
+# Az első változat NÉMÁN levágta a többletet: a 10 kapus sor NÉGYNEK látszott.
+GATE_SEGMENTS_MAX = 6
+
+
+def gates_cell_px(mono_font, n_gates: int) -> int:
+    """A „Kapuk" cella szélessége PIXELBEN.
+
+    SZÁNDÉKOSAN mérünk, nem karakterből becsülünk: a blokk-glifák (`▮▨▯`) és a
+    `⛔` SZÉLESEBBEK, mint a `0` — az első, karakter-alapú becslésem ezért
+    csordult túl, és a cella NÉMÁN levágta a szegmenseket (a 10 kapus sor
+    négynek látszott). A `+10` a belső térköz."""
+    # A badge sajat padx-e (2+2) IS belefer — enelkul 2 pixellel csordult tul.
+    if n_gates <= GATE_SEGMENTS_MAX:
+        return n_gates * mono_font.measure("▨") + mono_font.measure("⛔9") + 14
+    # Összevont mód: a leghosszabb elképzelhető alak (kétjegyű számlálók).
+    return mono_font.measure("⛔99 ▮99 ▯99") + 10
+
+
 def instrument_indent(mono_font) -> int:
     """A gyerek-sorok behúzása pixelben — a nyitó/csukó jel szélessége.
     Egy helyen, hogy a fejléc és a sorok ne csússzanak szét."""

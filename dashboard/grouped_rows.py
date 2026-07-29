@@ -23,6 +23,7 @@ import tkinter as tk
 
 from core import gates as _g
 from dashboard import theme as _theme
+from dashboard import grouped_layout as _gl
 from dashboard.grouped_layout import (INSTRUMENT_COLUMNS, STRATEGY_COLUMNS,
                                       ready_badge)
 from dashboard.theme import (BG_INACTIVE, BG_OPT_ROW, BG_ROW_EVEN, BG_ROW_ODD,
@@ -168,7 +169,7 @@ class StrategyRow:
                 # kulonben osszeesik, es fuggolegesen LEVAGJA a glifakat (az
                 # elonezeten vekony vonalkak latszottak teljes blokkok helyett).
                 cell = tk.Frame(self.frame, bg=self._bg,
-                                width=mono_font.measure("0") * col.width + 8,
+                                width=_gl.gates_cell_px(mono_font, len(_g.REGISTRY)),
                                 height=mono_font.metrics("linespace") + 6)
                 cell.pack(side="left")
                 cell.pack_propagate(False)
@@ -190,7 +191,7 @@ class StrategyRow:
         if on_gates:
             for _w in (self._gate_cell, self._gate_badge):
                 _w.config(cursor="hand2")
-                _w.bind("<Button-1>", lambda e: on_gates(symbol, strategy))
+                _w.bind("<Button-1>", lambda e: on_gates(symbol, strategy, None))
             self._on_gates = on_gates
         if on_params:
             self.labels["strategy"].config(cursor="hand2")
@@ -254,26 +255,49 @@ class StrategyRow:
     _SEG_FG = {_g.PASS: FG_GREEN, _g.BLOCKING: FG_RED,
                _g.OFF: FG_GRAY_DIM, _g.UNKNOWN: FG_GRAY_DIM}
 
+    def _new_seg(self, bg, gate_key=None):
+        """Egy csík-szegmens (vagy összevont számláló) címkéje.
+
+        A kattintás a kapu-PANELT nyitja — de a KONKRÉT szegmensre kattintva
+        átadjuk, melyik kapuról van szó, hogy a panel azt kiemelve nyíljon. Így a
+        pontos kattintás jutalmat ad, de nem követelmény: 10 kapunál a szegmensek
+        pár pixel szélesek, és összevont módban nincs is szegmens — ezért a
+        MEGBÍZHATÓ út mindig a panel."""
+        lbl = tk.Label(self._gate_cell, text="", bg=bg, font=self._mono, padx=0)
+        lbl.pack(side="left")
+        if getattr(self, "_on_gates", None):
+            lbl.config(cursor="hand2")
+            lbl.bind("<Button-1>",
+                     lambda e, k=gate_key: self._on_gates(self.symbol,
+                                                          self.strategy, k))
+        return lbl
+
     def _render_gates(self, states, bg):
         """A kapu-csik: szegmensenkent egy Label, sajat szinnel. A szegmensek
         SORRENDJE a `core.gates.REGISTRY`-bol jon, tehat allando — a pozíciok
         maguktol rogzulnek, anelkul hogy barkinek MEG KELLENE tanulnia oket."""
         states = states or []
         glyph = {_g.PASS: "▮", _g.BLOCKING: "▨"}
+        # SOK kapunal osszevont szamlalo: a szegmenses csik ~6-ig olvashato,
+        # afolott nem fer ki (merve: 80px cella vs 10 kapu 165px) ES ugysem
+        # tudnad megszamolni, hogy a HETEDIK a piros. Az elso valtozat NEMAN
+        # levagta a tobbletet -> a 10 kapus sor NEGYNEK latszott.
+        if len(states) > _gl.GATE_SEGMENTS_MAX:
+            parts = _g.compact(states)
+            if len(self._gate_segs) != len(parts):
+                for w in self._gate_segs:
+                    w.destroy()
+                self._gate_segs = [self._new_seg(bg) for _ in parts]  # összevont: nincs egyedi kapu
+            for lbl, (txt, st) in zip(self._gate_segs, parts):
+                lbl.config(text=txt + " ", fg=self._SEG_FG.get(st, FG_GRAY_DIM), bg=bg)
+            self._gate_badge.config(text="", bg=bg)
+            return
         # A szegmensek szama valtozhat (uj kapu regisztralasa) -> ujraepitjuk,
         # ha nem stimmel; kulonben csak atszinezunk (nincs villogas).
         if len(self._gate_segs) != len(states):
             for w in self._gate_segs:
                 w.destroy()
-            self._gate_segs = []
-            for _ in states:
-                lbl = tk.Label(self._gate_cell, text="", bg=bg, font=self._mono, padx=0)
-                lbl.pack(side="left")
-                if getattr(self, "_on_gates", None):
-                    lbl.config(cursor="hand2")
-                    lbl.bind("<Button-1>",
-                             lambda e: self._on_gates(self.symbol, self.strategy))
-                self._gate_segs.append(lbl)
+            self._gate_segs = [self._new_seg(bg, st.get("key")) for st in states]
         for lbl, st in zip(self._gate_segs, states):
             lbl.config(text=glyph.get(st.get("state"), "▯"),
                        fg=self._SEG_FG.get(st.get("state"), FG_GRAY_DIM), bg=bg)
