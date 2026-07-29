@@ -17,19 +17,90 @@
 input int    TimerSeconds = 1;       // Fájl-újraolvasás gyakorisága (mp)
 input string FilePrefix   = "TFV_";  // Objektum-név és fájl prefix
 input string InpStrategy  = "";      // Melyik STRATÉGIÁT mutassa (üres = MIND)
+input int    AlertMemoryDays = 3;    // Ennyi nap után felejtjük a riasztás-jelölőket
 
 string g_file;                    // TFV_<Symbol>.csv
 string g_objpref;                 // szűrő-prefix: TFV_ (mind) VAGY TFV_<InpStrategy>@
 string g_ind_sig  = "";           // az utoljára felrakott IND-halmaz aláírása
 string g_ma_names[];              // MINDEN általunk felrakott MA rövidneve (leszedéshez)
 
-// Már LEFUTTATOTT riasztások id-jei. A viz-fájl a kívánt állapot teljes
-// pillanatképe, ezért az ALERT sor minden olvasáskor újra ott van — enélkül
-// másodpercenként újra szólna. Több stratégia is riaszthat egyszerre, ezért
-// LISTÁT tartunk (egyetlen „utolsó id" két stratégia közt oda-vissza billegne,
-// és mindkettő újra és újra megszólalna).
-string g_seen_alerts[];
-int    g_seen_max = 64;           // gyűrű-méret (a régi id-k kiesnek)
+// Már LEFUTTATOTT riasztások — GLOBÁLIS VÁLTOZÓBAN, nem a memóriában.
+//
+// A viz-fájl a kívánt állapot teljes PILLANATKÉPE, ezért az ALERT sor minden
+// olvasáskor újra ott van — enélkül másodpercenként újra szólna.
+//
+// Eddig egy memóriabeli tömb őrizte az id-ket. Idősík-váltáskor viszont az MT5
+// ELPUSZTÍTJA és ÚJRALÉTREHOZZA az indikátort (OnDeinit → OnInit), a tömb
+// kiürül, az OnInit végén pedig azonnal jön a RefreshFromFile() — és a fájlban
+// még ott az ALERT sor. Ezért szólt újra MINDEN idősík-váltáskor.
+//
+// A terminál GLOBÁLIS VÁLTOZÓI túlélik az idősík-váltást, a template-újratöltést
+// és a terminál újraindítását is. Ráadás: több chart OSZTOZIK rajtuk, tehát egy
+// jelre most pontosan EGYSZER szól akkor is, ha ugyanarra a szimbólumra több
+// chart van nyitva — ez eddig chartonként külön riasztást adott.
+#define ALERT_GV_PREFIX "TFV_A_"
+
+//+------------------------------------------------------------------+
+//| Riasztás-jelölő neve az `aid`-ből.                               |
+//|                                                                  |
+//| A globális változó neve max 63 karakter, az `aid` viszont hosszabb|
+//| is lehet (szimbólum + stratégia + irány + bar-idő), ezért HASH-t  |
+//| használunk (FNV-1a, 32 bit). Ütközés esetén EGY riasztás maradna  |
+//| el; ~100 élő jelölőnél ennek esélye ~1e-6, tehát elhanyagolható.  |
+//+------------------------------------------------------------------+
+string AlertMarkName(string aid)
+{
+   uint h = 2166136261;                       // FNV-1a offset basis
+   int n = StringLen(aid);
+   for(int i = 0; i < n; i++)
+   {
+      h ^= (uint)StringGetCharacter(aid, i);
+      h *= 16777619;                          // FNV prime
+   }
+   return(ALERT_GV_PREFIX + IntegerToString((long)h));
+}
+
+//+------------------------------------------------------------------+
+//| Szóltunk-e már erre a jelre? (A jelölő PUSZTA LÉTE a válasz.)    |
+//+------------------------------------------------------------------+
+bool AlertWasSeen(string aid)
+{
+   return(GlobalVariableCheck(AlertMarkName(aid)));
+}
+
+//+------------------------------------------------------------------+
+//| Jelölő elhelyezése. Az ÉRTÉK a riasztás ideje — ebből tudja a     |
+//| takarítás, mit lehet elfelejteni.                                |
+//+------------------------------------------------------------------+
+void AlertMarkSeen(string aid)
+{
+   GlobalVariableSet(AlertMarkName(aid), (double)TimeCurrent());
+}
+
+//+------------------------------------------------------------------+
+//| Régi jelölők takarítása — különben a globális változók korlátlanul|
+//| gyűlnének. Az OnInit hívja: idősík-váltásonként egyszer fut le, és|
+//| csak néhány tucat bejegyzést jár be, tehát olcsó.                |
+//|                                                                  |
+//| CSAK a SAJÁT prefixűekhez nyúlunk — más eszközök globális         |
+//| változóit nem bántjuk.                                           |
+//+------------------------------------------------------------------+
+void PurgeOldAlertMarks()
+{
+   if(AlertMemoryDays <= 0)
+      return;
+   datetime cutoff = TimeCurrent() - (datetime)((long)AlertMemoryDays * 86400);
+   // CSÖKKENŐ sorrendben: a törlés eltolja az indexeket, növekvő ciklussal
+   // minden törlés után kimaradna egy bejegyzés.
+   for(int i = GlobalVariablesTotal() - 1; i >= 0; i--)
+   {
+      string nm = GlobalVariableName(i);
+      if(StringFind(nm, ALERT_GV_PREFIX) != 0)
+         continue;
+      if((datetime)GlobalVariableGet(nm) < cutoff)
+         GlobalVariableDel(nm);
+   }
+}
 
 //+------------------------------------------------------------------+
 //| A SAJÁT al-ablak-indikátorok (TFWPR, TFBANDS) leszedése MINDEN    |
@@ -73,6 +144,7 @@ int OnInit()
    g_ind_sig = "";
    ArrayResize(g_ma_names, 0);
    RemoveOurWPRs();   // előző futás maradék WPR-jei (halmozódás ellen)
+   PurgeOldAlertMarks();   // régi riasztás-jelölők (a globális változók ne gyűljenek)
    EventSetTimer(TimerSeconds);
    RefreshFromFile();
    return(INIT_SUCCEEDED);
@@ -200,22 +272,12 @@ void HandleAlert(string ln)
       return;
 
    string aid = f[2];
-   int cnt = ArraySize(g_seen_alerts);
-   for(int i = 0; i < cnt; i++)
-      if(g_seen_alerts[i] == aid)
-         return;                       // erre a jelre már szóltunk
+   if(AlertWasSeen(aid))
+      return;                          // erre a jelre már szóltunk
 
-   if(cnt >= g_seen_max)               // gyűrű: a legrégebbi kiesik
-   {
-      for(int i = 1; i < cnt; i++)
-         g_seen_alerts[i - 1] = g_seen_alerts[i];
-      g_seen_alerts[cnt - 1] = aid;
-   }
-   else
-   {
-      ArrayResize(g_seen_alerts, cnt + 1);
-      g_seen_alerts[cnt] = aid;
-   }
+   // ELŐBB jelölünk, AZUTÁN riasztunk. Fordítva egy Alert() alatti újrabelépés
+   // (a riasztás-ablak eseményt pumpál) duplán szólalhatna meg.
+   AlertMarkSeen(aid);
    Alert(f[3]);
 }
 
