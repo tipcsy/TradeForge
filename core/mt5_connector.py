@@ -406,18 +406,60 @@ def open_positions_detailed() -> list:
         return []
 
 
+def server_today():
+    """A BRÓKER mai dátuma (`datetime.date`) — nem a gép helyi dátuma.
+
+    A „Lezárt" fül gyorsgombjai (Ma / 7 nap / 30 nap) ezt használják. A gép helyi
+    dátuma a szerver-éjfél környékén MÁS napot adna, és akkor a „Ma" nézet más
+    trade-eket mutatna, mint a folyamatosan frissülő napi összesítő."""
+    from datetime import datetime, timezone
+    off = _server_offset["v"] or 0.0
+    return datetime.fromtimestamp(
+        datetime.now(timezone.utc).timestamp() + off, tz=timezone.utc).date()
+
+
+def server_day_bounds_for(date_from, date_to):
+    """Egy DÁTUM-INTERVALLUM határai: `(tól, ig)`, mindkét dátum BELEÉRTVE.
+
+    **A konvenció ugyanaz, mint a `server_day_bounds()`-nál:** a visszaadott
+    datetime a BRÓKER FALIÓRÁJÁNAK ideje, UTC-nek CÍMKÉZVE — mert a
+    `history_deals_get` így várja. Ezért itt NINCS eltolás-korrekció: a `date`
+    már a bróker naptárának napját nevezi meg.
+
+    Az első változatom kivonta az eltolást (valódi UTC-pillanatot számolt), és
+    ezzel a lekérés GMT+3-nál **3 órával elcsúszott** volna a „ma" nézettől. A
+    teszt fogta meg — az `server_day_bounds()` doksija épp egy ilyen
+    időzóna-csúszásról szól, csak a másik irányban.
+
+    Ha a két dátum fordítva jön, MEGCSERÉLJÜK: egy elgépelt intervallum üres
+    listát adna, és úgy tűnne, nincs adat."""
+    from datetime import datetime, time as _time, timedelta, timezone
+    if date_to < date_from:
+        date_from, date_to = date_to, date_from
+    def _b(d):
+        return datetime.combine(d, _time(0, 0), tzinfo=timezone.utc)
+    return _b(date_from), _b(date_to + timedelta(days=1))
+
+
 def closed_positions_today() -> list:
-    """A MAI napon (a BRÓKER naptára szerint) LEZÁRT pozíciók — a „Lezárt napi
-    pozíciók" fülhöz. A felület felirata („MT5 szerver-idő") eddig nem teljesült:
-    a nap határa a gép HELYI dátumából jött, UTC-nek címkézve.
+    """A MAI napon (a BRÓKER naptára szerint) LEZÁRT pozíciók.
+
+    A `closed_positions_range()` mai napra szűkített esete — egy helyen él a
+    deal-feldolgozás, hogy a „ma" és a „tól-ig" nézet SOSE mondhasson mást
+    ugyanarra a kereskedésre."""
+    frm, to = server_day_bounds()
+    return closed_positions_range(frm, to)
+
+
+def closed_positions_range(frm, to) -> list:
+    """LEZÁRT pozíciók egy időszakban — a „Lezárt" fül dátumválasztójához.
 
     Az MT5 deal-előzményből pozíciónként összegzi: nyitó/záró ár, irány, lot,
     P&L (a záró deal-ök profit+jutalék+swap-ja — a daily_pnl konvenciójával
-    egyezik), magic. A ma zárt, de KORÁBBAN nyitott pozíciók nyitó dealjét külön
-    lekéri. Rendezve zárási idő szerint.
+    egyezik), magic. Az időszak ELŐTT nyitott, benne zárt pozíciók nyitó dealjét
+    külön lekéri. Rendezve zárási idő szerint.
     """
     try:
-        frm, to = server_day_bounds()          # a BRÓKER napja (nem a gép helyi dátuma)
         with MT5_LOCK:
             deals = mt5.history_deals_get(frm, to)
         if not deals:
@@ -435,9 +477,9 @@ def closed_positions_today() -> list:
         out = []
         for pid, p in agg.items():
             if p["close_time"] is None:
-                continue                     # ma nyitott, még nyitva → nem lezárt
+                continue                     # az időszakban nyitott, még nyitva → nem lezárt
             din = p["in"]
-            if din is None:                  # korábban nyitott, ma zárt → nyitó deal külön
+            if din is None:                  # korábban nyitott, itt zárt → nyitó deal külön
                 with MT5_LOCK:
                     hist = mt5.history_deals_get(position=pid)
                 for d in hist or []:

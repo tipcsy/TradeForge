@@ -2286,14 +2286,21 @@ class ClosedTab:
     A sorok kulcsa a pozíció-azonosító; a lista a nap során csak bővül."""
 
     def __init__(self, parent, mono_font, small_font, header_font,
-                 closed_provider, strategy_provider, digits_provider):
+                 closed_provider, strategy_provider, digits_provider,
+                 range_provider=None):
         self.parent = parent
         self._mono, self._small, self._header = mono_font, small_font, header_font
         self._closed_provider = closed_provider
         self._strategy_provider = strategy_provider
         self._digits_provider = digits_provider
+        # `range_provider(date_from, date_to) -> list` — MT5-lekérés egy időszakra.
+        # None → csak a „ma" nézet él (visszafelé kompatibilis).
+        self._range_provider = range_provider
         self._rows: dict = {}
         self._day = None          # az utolsó frissítés napja (napváltás-detektálás)
+        self._custom: list | None = None   # a betöltött időszak adata (None = ma)
+        self._custom_label = ""
+        self._pending_reset = False        # nézet-váltásnál a sorokat törölni kell
         self._build_ui()
 
     def _build_ui(self):
@@ -2301,11 +2308,41 @@ class ClosedTab:
         p.configure(bg=BG)
         top = tk.Frame(p, bg=BG, pady=4)
         top.pack(fill="x", padx=8)
-        tk.Label(top, text="Mai lezárt kereskedések  (MT5 szerver-idő)", bg=BG,
-                 fg=FG_WHITE, font=self._header).pack(side="left")
+        self._lbl_title = tk.Label(top, text="Lezárt kereskedések  (MT5 szerver-idő)",
+                                   bg=BG, fg=FG_WHITE, font=self._header)
+        self._lbl_title.pack(side="left")
         self._lbl_total = tk.Label(top, text="Összes P&L: —", bg=BG, fg=FG_WHITE,
                                    font=self._header)
         self._lbl_total.pack(side="right", padx=8)
+
+        # ── Időszak-választó ─────────────────────────────────────────────
+        # A „ma" a leggyakoribb eset, ezért ELŐVÁLASZTOTT gyorsgombok vannak, és a
+        # tól–ig csak akkor él, ha tényleg intervallumot kérsz. A dátumot SZÖVEGBŐL
+        # olvassuk (nincs külön naptár-widget a tkinterben, és egy `YYYY-MM-DD`
+        # mező itt nem lassítja a munkát).
+        sel = tk.Frame(p, bg=BG)
+        sel.pack(fill="x", padx=10, pady=(0, 2))
+        self._range_var = tk.StringVar(value="today")
+        for _val, _txt in (("today", "Ma"), ("7", "7 nap"), ("30", "30 nap"),
+                           ("custom", "Tól–ig:")):
+            tk.Radiobutton(sel, text=_txt, value=_val, variable=self._range_var,
+                           bg=BG, fg=FG_WHITE, selectcolor=BG_HEADER,
+                           activebackground=BG, activeforeground=FG_WHITE,
+                           font=self._small,
+                           command=self._on_range_change).pack(side="left", padx=(0, 6))
+        _t = datetime.now().date()
+        self._from_var = tk.StringVar(value=str(_t))
+        self._to_var   = tk.StringVar(value=str(_t))
+        for _v in (self._from_var, self._to_var):
+            tk.Entry(sel, textvariable=_v, width=11, bg=BG_HEADER, fg=FG_WHITE,
+                     font=self._small, insertbackground=FG_WHITE,
+                     relief="flat").pack(side="left", padx=2)
+        tk.Button(sel, text="Betölt", bg=BTN_OPT_BG, fg=BTN_OPT_FG, relief="flat",
+                  font=self._small, command=self._on_range_change).pack(side="left",
+                                                                       padx=6)
+        self._lbl_range_err = tk.Label(sel, text="", bg=BG, fg=FG_RED,
+                                       font=self._small)
+        self._lbl_range_err.pack(side="left", padx=6)
 
         self._lbl_breakdown = tk.Label(p, text="", bg=BG, fg=FG_GRAY, font=self._small,
                                        anchor="w", justify="left")
@@ -2339,8 +2376,22 @@ class ClosedTab:
                 w.destroy()
             self._rows.clear()
         self._day = today
+        # Időszakos nézetben a lista NEM „csak bővül": másik időszak MÁS trade-ek.
+        # A `_reset_rows()` a betöltésnél már törölt; itt csak a mai nézetre
+        # visszatérés esetét kell kezelni.
+        if self._pending_reset:
+            self._pending_reset = False
+            for w in self._rows_frame.winfo_children():
+                w.destroy()
+            self._rows.clear()
 
-        closed = self._closed_provider() or []
+        # Az adat forrása: „ma" → a folyamatos gyorsítótár; időszak → a betöltött
+        # pillanatkép. Az utóbbi SZÁNDÉKOSAN nem frissül magától: egy múltbeli
+        # időszak nem változik, és minden körben újra lekérni az MT5-öt pazarlás.
+        if self._custom is not None:
+            closed = list(self._custom)
+        else:
+            closed = self._closed_provider() or []
         for c in closed:
             pid = c["position"]
             if pid not in self._rows:
@@ -2367,7 +2418,59 @@ class ClosedTab:
             parts = [f"{s}: {v[0]:+.2f}$ ({v[1]})" for s, v in sorted(by_strat.items())]
             self._lbl_breakdown.config(text="   |   ".join(parts), fg=FG_GRAY)
         else:
-            self._lbl_breakdown.config(text="Ma még nincs lezárt kereskedés.", fg=FG_GRAY)
+            self._lbl_breakdown.config(
+                text=(f"{self._custom_label}: nincs lezárt kereskedés."
+                      if self._custom is not None
+                      else "Ma még nincs lezárt kereskedés."), fg=FG_GRAY)
+
+    def _on_range_change(self):
+        """Az időszak-választó kezelője: betölti a kért intervallumot az MT5-ből.
+
+        A „Ma" visszaáll a folyamatos gyorsítótárra (az frissül magától). A többi
+        eset EGYSZERI pillanatkép: egy lezárt múltbeli időszak nem változik, ezért
+        nem kérjük le minden körben."""
+        from datetime import timedelta
+        from core.mt5_connector import server_today
+        mode = self._range_var.get()
+        self._lbl_range_err.config(text="")
+        if mode == "today":
+            self._custom, self._custom_label = None, ""
+            self._pending_reset = True
+            self._lbl_title.config(text="Lezárt kereskedések — MA  (MT5 szerver-idő)")
+            self.refresh()
+            return
+        if self._range_provider is None:
+            self._lbl_range_err.config(text="nincs MT5-kapcsolat")
+            return
+        # A BRÓKER mai dátuma (nem a gépé): a szerver-éjfél környékén a kettő
+        # eltér, és akkor a „Ma" más trade-eket mutatna, mint a napi összesítő.
+        today = server_today()
+        if mode in ("7", "30"):
+            d_from, d_to = today - timedelta(days=int(mode) - 1), today
+            self._from_var.set(str(d_from))
+            self._to_var.set(str(d_to))
+        else:
+            from datetime import date as _date
+            try:
+                d_from = _date.fromisoformat(self._from_var.get().strip())
+                d_to   = _date.fromisoformat(self._to_var.get().strip())
+            except ValueError:
+                # A hibát KIÍRJUK, nem nyeljük el: enélkül a felület csak annyit
+                # mutatna, hogy „nincs lezárt kereskedés" — ami hazugság lenne.
+                self._lbl_range_err.config(text="dátum: ÉÉÉÉ-HH-NN")
+                return
+        try:
+            data = self._range_provider(d_from, d_to) or []
+        except Exception as e:
+            self._lbl_range_err.config(text=f"lekérés: {e}")
+            return
+        self._custom = data
+        self._custom_label = (str(d_from) if d_from == d_to
+                              else f"{d_from} … {d_to}")
+        self._pending_reset = True
+        self._lbl_title.config(
+            text=f"Lezárt kereskedések — {self._custom_label}  (MT5 szerver-idő)")
+        self.refresh()
 
     def _make_row(self, c):
         digits = self._digits_provider(c["symbol"])
@@ -2546,12 +2649,14 @@ class DashboardWindow:
             params_provider=self._pos_params)
 
         closed_frame = tk.Frame(self._notebook, bg=BG)
-        self._notebook.add(closed_frame, text="  Lezárt (ma)  ")
+        # A fül neve már nem „(ma)": időszak is választható.
+        self._notebook.add(closed_frame, text="  Lezárt  ")
         self._closed_tab = ClosedTab(
             closed_frame, mono_font, small_font, header_font,
             closed_provider=lambda: getattr(self, "_mt5_cache", {}).get("closed_today", []),
             strategy_provider=self._strategy_by_magic,
-            digits_provider=lambda sym: getattr(self.dashboard_ref.get(sym), "digits", 5))
+            digits_provider=lambda sym: getattr(self.dashboard_ref.get(sym), "digits", 5),
+            range_provider=self._closed_in_range)
 
         bt_frame = tk.Frame(self._notebook, bg=BG_BT)
         self._notebook.add(bt_frame, text="  Portfólió Backtest  ")
@@ -4086,6 +4191,18 @@ class DashboardWindow:
         self.instrument_state.pop(symbol, None)
         self.optimizer_status.pop(symbol, None)
         self._apply_filter_sort()
+
+    def _closed_in_range(self, date_from, date_to) -> list:
+        """LEZÁRT pozíciók egy dátum-intervallumra (a „Lezárt" fül tól–ig nézete).
+
+        A nap határát a BRÓKER naptára adja (`server_day_bounds_for`), nem a gép
+        helyi dátuma — különben a felirat („MT5 szerver-idő") megint nem
+        teljesülne, és a napváltás környékén más trade-ek jönnének, mint amit a
+        „ma" nézet mutat."""
+        from core.mt5_connector import (closed_positions_range,
+                                        server_day_bounds_for)
+        frm, to = server_day_bounds_for(date_from, date_to)
+        return closed_positions_range(frm, to)
 
     def _strategy_by_magic(self, magic, ticket=None) -> str:
         """magic (+ ticket) → stratégianév a Pozíciók / Lezárt fülre.
