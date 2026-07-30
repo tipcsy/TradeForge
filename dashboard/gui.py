@@ -45,7 +45,6 @@ from strategy.settings import apply_strategy_config, main_config_view
 from core import risky_mode
 from core import adopted as _adopted
 from core import opt_activity as _opt_activity
-from dashboard import layout_mode as _layout
 from version import APP_NAME, APP_VERSION
 
 
@@ -2413,12 +2412,6 @@ class DashboardWindow:
         self.dashboard_ref    = dashboard_ref
         self.instrument_state = instrument_state
         self.optimizer_status = optimizer_status
-        # Elrendezés (config: dashboard.layout). Alap: `classic` = a megszokott
-        # tábla → egy meglévő config.json változatlan felülettel indul. A
-        # `classic` ág kódja ÉRINTETLEN; a többi mód külön úton fut.
-        self._layout = _layout.resolve(cfg)
-        self._srows: dict = {}        # (szimbólum, stratégia) → sor (flat/grouped)
-        self._row_order: list = []    # a sorok kirajzolási sorrendje
 
         self._on_play         = on_play_pair
         self._on_stop         = on_stop_pair
@@ -2646,15 +2639,9 @@ class DashboardWindow:
 
         header_holder = tk.Frame(table_holder, bg=BG)
         header_holder.pack(fill="x")
-        if _layout.is_per_strategy_row(self._layout):
-            # A per-stratégia elrendezés SAJÁT oszlopokkal dolgozik (a
-            # `flat_rows.COLUMNS`), és a rendezést az állapot-súly adja — ezért
-            # nincs kattintható oszlop-rendezés, ami félrevezető lenne.
-            self._header_row = self._build_flat_header(header_holder, mono_font)
-        else:
-            self._header_row = HeaderRow(
-                header_holder, self._columns, header_font, small_font,
-                on_col_click=self._on_header_click)
+        self._header_row = HeaderRow(
+            header_holder, self._columns, header_font, small_font,
+            on_col_click=self._on_header_click)
 
         canvas = tk.Canvas(table_holder, bg=BG, highlightthickness=0)
         vsb = tk.Scrollbar(table_holder, orient="vertical", command=canvas.yview)
@@ -2688,16 +2675,6 @@ class DashboardWindow:
         canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
 
         self.rows: dict[str, PairRow] = {}
-        if _layout.is_per_strategy_row(self._layout):
-            # Per-stratégia sorok: a sorokat a frissítés építi/rendezi (a
-            # sorrend állapot-függő), ezért itt csak a tartót jegyezzük meg.
-            self._srow_font = (mono_font, small_font)
-            self._apply_filter_sort()
-            tk.Frame(parent, bg=FG_GRAY_DIM, height=1).pack(fill="x", padx=2, pady=2)
-            self.lbl_status = tk.Label(parent, text="Indulás...", bg=BG,
-                                       fg=FG_GRAY, font=small_font)
-            self.lbl_status.pack(side="bottom", pady=4)
-            return
         for idx, (symbol, pair_cfg) in enumerate(self.cfg["pairs"].items()):
             if not isinstance(pair_cfg, dict):
                 continue
@@ -2718,291 +2695,6 @@ class DashboardWindow:
         tk.Frame(parent, bg=FG_GRAY_DIM, height=1).pack(fill="x", padx=2, pady=2)
         self.lbl_status = tk.Label(parent, text="Indulás...", bg=BG, fg=FG_GRAY, font=small_font)
         self.lbl_status.pack(side="bottom", pady=4)
-
-    # ── Per-stratégia elrendezés (flat / grouped) ────────────────────────
-    # A `classic` ág kódját ez NEM érinti: külön fejléc, külön sor-építés,
-    # külön frissítés. Így egy hiba itt nem tudja elvinni a megszokott táblát.
-
-    def _build_flat_header(self, holder, mono_font):
-        """Fejléc a lapos elrendezéshez. Egyszerű keret-objektum (nincs
-        oszlop-rendezés): a sorrendet az állapot-súly adja, egy kattintható
-        fejléc azt sugallná, hogy felülírható."""
-        from dashboard.flat_rows import COLUMNS as _FC
-
-        class _H:
-            def __init__(self, frame):
-                self.frame = frame
-
-            def sync_ctrl_width(self, px):
-                pass
-
-            def set_sort(self, col_idx, direction):
-                pass
-
-        f = tk.Frame(holder, bg=BG_HEADER)
-        f.pack(fill="x", padx=2)
-        tk.Frame(f, bg=BG_HEADER, width=5).pack(side="left")
-        for c in _FC:
-            tk.Label(f, text=c.header, width=c.width, anchor=c.anchor,
-                     bg=BG_HEADER, fg=FG_WHITE, font=mono_font,
-                     padx=4, pady=3).pack(side="left")
-        tk.Label(f, text="Opt", bg=BG_HEADER, fg=FG_WHITE, font=mono_font,
-                 padx=8).pack(side="left")
-        return _H(f)
-
-    def _flat_items(self, mt5_positions=None) -> list:
-        """A sor-leírók összeállítása (rendezés előtt) — a `dashboard.row_data`
-        tiszta függvényeivel, hogy a GUI ne tartalmazzon üzleti logikát."""
-        from core import run_state as _rs, trade_mode as _tm
-        from core import tf_align as _tfa
-        from core.params_store import params_file
-        from dashboard import row_data as _rd
-        from strategy import enabled_strategy_names, get_strategy_by_name
-
-        search = (self._search_var.get().upper().strip()
-                  if hasattr(self, "_search_var") else "")
-        hide_stopped = (self._hide_stopped_var.get()
-                        if hasattr(self, "_hide_stopped_var") else False)
-        syms = [s for s, pc in (self.cfg.get("pairs") or {}).items()
-                if isinstance(pc, dict)]
-        if search:
-            syms = [s for s in syms if search in s.upper()]
-        if hide_stopped:
-            syms = [s for s in syms if self._display_state(s) != "STOPPED"]
-
-        _primary = getattr(self.strategy, "name", "wpr_sma")
-
-        def _read_params(sym, sname):
-            # SZŰK kivétel-kezelés szándékosan: az első változat `except
-            # Exception`-t fogott, és ezzel ELNYELTE a `NameError`-t (a
-            # `params_file` nem volt importálva) — a Minőség-oszlop némán „—"
-            # lett, holott a fájlok ott voltak. Csak a VALÓDI IO/JSON hibát
-            # nyeljük el (nincs fájl, sérült JSON).
-            try:
-                pf = params_file(sym, sname)
-                if pf.exists():
-                    with open(pf, encoding="utf-8") as fh:
-                        return json.load(fh)
-            except (OSError, ValueError):
-                pass
-            return None
-
-        def _params(sym, sname):
-            d = _read_params(sym, sname)
-            return (d.get("params") or {}) if d else {}
-
-        def _quality(sym, sname):
-            d = _read_params(sym, sname)
-            if not d:
-                return ("—", "muted")
-            try:
-                txt, col, _why = get_strategy_by_name(sname).grade(
-                    d.get("test_summary", {}), self.cfg)
-                return (txt, col)
-            except Exception:
-                return ("—", "muted")
-
-        def _trained(sym, sname):
-            return _read_params(sym, sname) is not None
-
-        def _mode(sym, sname):
-            return "Jelzés" if _tm.is_signal_only(self.cfg, sym, sname) else "KÖT"
-
-        def _live(sym, sname):
-            return (_rs.get_state(self.cfg, sym, sname, _primary) == _rs.LIVE
-                    and self._display_state(sym) in ("LIVE", "CLOSING"))
-
-        def _open(sym, sname):
-            # A RÉSZLETES (per-ticket) listát használjuk: a szimbólumra
-            # aggregált gyorsítótárban nincs stratégia (lásd row_data.split_open).
-            detail = (getattr(self, "_mt5_cache", {}) or {}).get("positions_detail")
-            if mt5_positions is not None and isinstance(mt5_positions, list):
-                detail = mt5_positions
-            return _rd.split_open(detail or [], sym, sname,
-                                  owner_of=self._ticket_owner)
-
-        def _daily(sym, sname):
-            # A napi (LEZÁRT) eredmény per stratégia. Ha a motor nem bontja, az
-            # instrumentum összegét CSAK az elsődlegesnél mutatjuk — különben
-            # ugyanaz a szám ismétlődne minden soron, és azt hinnéd, összeadódik.
-            ds = self.dashboard_ref.get(sym)
-            per = getattr(ds, "daily_pnl_by_strategy", None) if ds else None
-            if isinstance(per, dict):
-                return per.get(sname, 0.0)
-            return (getattr(ds, "daily_pnl", 0.0) or 0.0) if sname == _primary else 0.0
-
-        return _rd.row_items(
-            symbols=syms, cfg=self.cfg, dashboard_ref=self.dashboard_ref,
-            strategies_of=lambda s: (enabled_strategy_names(self.cfg, s)
-                                     or [_primary]),
-            params_of=_params, quality_of=_quality, mode_of=_mode,
-            live_of=_live, trained_of=_trained,
-            tf_gate_of=lambda s: _tfa.config_for(self.cfg, s)[3],
-            open_of=_open, daily_of=_daily,
-            opt_status_of=lambda s, n: _opt_activity.status_of(s, n))
-
-    @staticmethod
-    def _ticket_owner(ticket, magic=None):
-        """Melyik stratégiához tartozik egy nyitott pozíció (magic vagy
-        örökbefogadás). A MOTOR igazságforrását használjuk, hogy a felület ne
-        mondhasson mást, mint ami a pozíciót kezeli."""
-        try:
-            from trading import live_trader as _lt
-            return _lt.strategy_of_ticket(ticket, magic)
-        except Exception:
-            return None
-
-    def _rebuild_flat_rows(self, mt5_positions=None):
-        """A sorok újraépítése a FONTOSSÁG szerinti sorrendben.
-
-        Azért újraépítés és nem csak átcsomagolás: a sorrend állapot-függő (a
-        nyitott pozíciós pár felkerül), és a csoport-sávozás a csoport
-        INDEXÉTŐL függ — egy áthelyezett sor rossz háttérrel maradna. Ha a
-        sorrend NEM változott, csak a tartalmat frissítjük (nincs villogás)."""
-        from dashboard.flat_rows import FlatRow, order
-        if not hasattr(self, "_srow_font"):
-            return []
-        mono_font, small_font = self._srow_font
-        items = order(self._flat_items(mt5_positions))
-        keys = [(it["symbol"], it["strategy"]) for it in items]
-        if keys != self._row_order:
-            for r in self._srows.values():
-                r.frame.destroy()
-            self._srows = {}
-            gidx, last = -1, None
-            for it in items:
-                if it["symbol"] != last:
-                    gidx += 1
-                    last = it["symbol"]
-                r = FlatRow(self._table_frame, it["symbol"], it["strategy"],
-                            gidx, mono_font, small_font,
-                            on_gates=self._show_gate_panel,
-                            on_params=self._show_strategy_params,
-                            on_opt=self._flat_opt,
-                            on_name=self._show_instrument_settings,
-                            on_run=self._flat_run)
-                r.frame.pack(fill="x", padx=2, pady=0)
-                self._srows[(it["symbol"], it["strategy"])] = r
-            self._row_order = keys
-        last = None
-        for it in items:
-            r = self._srows.get((it["symbol"], it["strategy"]))
-            if r is None:
-                continue
-            r.update(ds=it["ds"], first_of_group=(it["symbol"] != last),
-                     state=it["state"], mode_label=it["mode"],
-                     states=it["states"], quality=it["quality"],
-                     open_pnl=it["open_pnl"], open_count=it["open_n"],
-                     daily=it["daily"], opt_status=it["opt_status"],
-                     trained=it["trained"],
-                     connected=getattr(self, "_connected", False))
-            last = it["symbol"]
-        return items
-
-    def _flat_run(self, symbol, strategy):
-        """Play/Stop EGY (pár × stratégia) sorra.
-
-        A szándék forrása a `core.run_state` — ugyanaz, amit a motor olvas —,
-        ezért a felület és a kereskedés nem csúszhat szét. A szimbólum-szintű
-        `instrument_state` az AGGREGÁTUM: LIVE, ha bármely stratégia él;
-        nyitott pozíció mellett STOP → KIVEZETÉS (a meglévőt tovább kezeljük)."""
-        from core import run_state as _rs
-        from strategy import enabled_strategy_names
-        _primary = getattr(self.strategy, "name", "wpr_sma")
-        now = _rs.get_state(self.cfg, symbol, strategy, _primary)
-        _rs.set_state(self.cfg, symbol, strategy,
-                      _rs.STOPPED if now == _rs.LIVE else _rs.LIVE)
-        names = enabled_strategy_names(self.cfg, symbol) or [_primary]
-        any_live = any(_rs.get_state(self.cfg, symbol, n, _primary) == _rs.LIVE
-                       for n in names)
-        if any_live:
-            self.instrument_state[symbol] = "LIVE"
-        else:
-            ds = self.dashboard_ref.get(symbol)
-            has_pos = bool(getattr(ds, "pos_count", 0) or 0)
-            # Nyitott pozícióval a Stop KIVEZETÉS: a motor tovább kezeli (BE,
-            # trailing), de új belépőt nem nyit. Enélkül a pozíció magára maradna.
-            self.instrument_state[symbol] = "CLOSING" if has_pos else "STOPPED"
-        try:
-            self._save_main_config()
-        except Exception:
-            pass
-        self._apply_filter_sort()
-
-    def _flat_opt(self, symbol, strategy):
-        """OPT egy KONKRÉT (pár × stratégia) sorra. Futó/sorban álló tételnél
-        leállítást kér — ugyanaz a morph, mint a klasszikus OPT gombon."""
-        if _opt_activity.busy(symbol, strategy):
-            self._opt_ctrl.request_stop(symbol)
-        else:
-            self._opt_ctrl.request_optimize(symbol, strategy)
-        self._apply_filter_sort()
-
-    def _refresh_flat(self, mt5_positions) -> int:
-        """Egy frissítési kör a per-stratégia elrendezésben. Visszaadja, hány
-        instrumentum LIVE (a státusz-sorhoz)."""
-        # A hívó a SZIMBÓLUMRA aggregált pillanatképet adja (`positions`), a
-        # per-stratégia bontás pedig a RÉSZLETES listából jön (`positions_detail`,
-        # lásd `_open`). Csak akkor indexelünk, ha tényleg szótárat kaptunk —
-        # így egy lista-átadás nem AttributeError-ral áll meg.
-        _by_sym = mt5_positions if isinstance(mt5_positions, dict) else None
-        for sym, pc in (self.cfg.get("pairs") or {}).items():
-            if not isinstance(pc, dict):
-                continue
-            ds = self.dashboard_ref.get(sym)
-            if ds is None or _by_sym is None:
-                continue
-            pos = _by_sym.get(sym)
-            ds.position_pnl = pos["pnl"] if pos else None
-            ds.pos_count = pos.get("count", 1) if pos else 0
-            ds.risk_free = pos["risk_free"] if pos else False
-        items = self._rebuild_flat_rows(mt5_positions) or []
-        return len({it["symbol"] for it in items
-                    if self._display_state(it["symbol"]) == "LIVE"})
-
-    def _show_gate_panel(self, symbol, strategy, gate_key=None):
-        """A KAPU-PANEL: minden kapu egy sor, TELJES NÉVEN, a mért értékkel.
-
-        A sorban szándékosan csak állapot látszik (betű nélkül) — a nevek és a
-        részletek (pl. „jelenlegi 1721 / határ 1111 pont") ide tartoznak, ahol
-        elférnek. Ha egy KONKRÉT szegmensre kattintottak, azt a kaput kiemeljük."""
-        from core import gates as _g
-        items = [it for it in self._flat_items()
-                 if it["symbol"] == symbol and it["strategy"] == strategy]
-        states = items[0]["states"] if items else _g.evaluate({})
-        popup = tk.Toplevel(self.root)
-        popup.title(f"{symbol} · {strategy} — kapuk")
-        popup.configure(bg=BG)
-        popup.grab_set()
-        tk.Label(popup, text=f"{symbol} · {strategy}", bg=BG, fg=FG_WHITE,
-                 font=self._header_font).pack(anchor="w", padx=12, pady=(12, 6))
-        _SFG = {_g.PASS: FG_GREEN, _g.BLOCKING: FG_RED,
-                _g.OFF: FG_GRAY_DIM, _g.UNKNOWN: FG_GRAY_DIM}
-        _STXT = {_g.PASS: "átenged", _g.BLOCKING: "BLOKKOL",
-                 _g.OFF: "kikapcsolva", _g.UNKNOWN: "nincs adat"}
-        grid = tk.Frame(popup, bg=BG)
-        grid.pack(anchor="w", padx=12, pady=(0, 6))
-        for r, st in enumerate(states):
-            hi = (gate_key is not None and st.get("key") == gate_key)
-            _bg = BG_HEADER if hi else BG
-            tk.Label(grid, text="●", bg=_bg, fg=_SFG.get(st["state"], FG_GRAY),
-                     font=self._small_font, padx=4).grid(row=r, column=0, sticky="w")
-            tk.Label(grid, text=st["label"], bg=_bg, fg=FG_WHITE,
-                     font=self._small_font, anchor="w", width=22,
-                     padx=4).grid(row=r, column=1, sticky="w")
-            tk.Label(grid, text=_STXT.get(st["state"], st["state"]), bg=_bg,
-                     fg=_SFG.get(st["state"], FG_GRAY), font=self._small_font,
-                     anchor="w", width=12).grid(row=r, column=2, sticky="w")
-            tk.Label(grid, text=st.get("detail", ""), bg=_bg, fg=FG_GRAY,
-                     font=self._small_font, anchor="w",
-                     wraplength=340, justify="left").grid(row=r, column=3, sticky="w")
-        tk.Label(popup, text="A beállításokat a stratégia paraméter-ablaka "
-                             "(a stratégia nevére kattintva) tartalmazza.",
-                 bg=BG, fg=FG_GRAY_DIM, font=self._small_font,
-                 wraplength=420, justify="left").pack(anchor="w", padx=12, pady=(4, 6))
-        tk.Button(popup, text="Bezárás", bg=BTN_DIS_BG, fg=BTN_DIS_FG,
-                  relief="flat", font=self._small_font,
-                  command=popup.destroy).pack(pady=(0, 10))
 
     def _on_header_click(self, col_idx: int):
         if self._sort_col == col_idx:
@@ -3060,9 +2752,6 @@ class DashboardWindow:
             lambda e: self._header_row.sync_ctrl_width(e.width))
 
     def _apply_filter_sort(self):
-        if _layout.is_per_strategy_row(self._layout):
-            self._rebuild_flat_rows()
-            return
         search = self._search_var.get().upper().strip() if hasattr(self, "_search_var") else ""
         hide_stopped = self._hide_stopped_var.get() if hasattr(self, "_hide_stopped_var") else False
 
@@ -3096,7 +2785,7 @@ class DashboardWindow:
         tk.Entry(popup, textvariable=search_var, width=28, bg=BG_HEADER, fg=FG_WHITE,
                  font=self._small_font, insertbackground=FG_WHITE,
                  relief="flat").pack(padx=12, pady=(0, 6))
-        in_config = self._known_symbols()
+        in_config = set(self.rows.keys())
         available: list = []      # háttérszálból töltődik: [(name, description), ...]
         shown_names: list = []    # a listbox aktuális soraival igazított névlista
 
@@ -3173,7 +2862,7 @@ class DashboardWindow:
         listbox.bind("<Double-Button-1>", lambda _: add_selected())
 
     def _add_instrument(self, symbol: str):
-        if symbol in self._known_symbols():
+        if symbol in self.rows:
             return
 
         # MT5 symbol_info lekérés HÁTTÉRSZÁLON (MT5_LOCK alatt), majd a config-írás
@@ -3217,7 +2906,7 @@ class DashboardWindow:
                                  description="", min_lot=0.01, lot_step=0.01,
                                  max_lot=0.0):
         """A fő szálon fut: config-írás + dashboard state + új tábla-sor."""
-        if symbol in self._known_symbols():
+        if symbol in self.rows:
             return
         self.cfg["pairs"][symbol] = {
             "enabled": False, "point_size": point_size, "pv1_point": pv1_point,
@@ -3235,11 +2924,6 @@ class DashboardWindow:
         self.instrument_state[symbol] = "STOPPED"
         self.optimizer_status[symbol] = ""
 
-        if _layout.is_per_strategy_row(self._layout):
-            # A per-stratégia sorokat az `_apply_filter_sort` építi (a sorrend
-            # állapot-függő), ezért itt csak újrarajzolunk.
-            self._apply_filter_sort()
-            return
         idx = len(self.rows)
         self.rows[symbol] = PairRow(
             self._table_frame, symbol, idx, self._columns,
@@ -4193,11 +3877,6 @@ class DashboardWindow:
                             event.x_root, event.y_root)
 
     def _refresh_row(self, symbol: str):
-        if _layout.is_per_strategy_row(self._layout):
-            # Itt a sor (pár × stratégia) kulcsú, és a SORREND is állapot-függő
-            # → a teljes tábla-frissítés a helyes válasz, nem egy sor pötyögése.
-            self._apply_filter_sort()
-            return
         row = self.rows.get(symbol)
         ds  = self.dashboard_ref.get(symbol)
         if row and ds:
@@ -4369,16 +4048,6 @@ class DashboardWindow:
         tk.Button(btns, text="Mégse", bg=BTN_DIS_BG, fg=BTN_DIS_FG, relief="flat",
                   font=self._small_font, command=popup.destroy).pack(side="left", padx=6)
 
-    def _known_symbols(self) -> set:
-        """A táblában szereplő instrumentumok — a CONFIGBÓL, nem a widgetekből.
-
-        A `classic` úton a `self.rows` kulcsai ezzel egyeznek, de a per-stratégia
-        elrendezésben a sorok (pár × stratégia) kulcsúak, tehát a `self.rows`
-        üres. Egy igazságforrás kell, különben egy meglévő pár „hozzáadhatónak"
-        látszana."""
-        return {s for s, pc in (self.cfg.get("pairs") or {}).items()
-                if isinstance(pc, dict)}
-
     def _display_state(self, symbol: str) -> str:
         """A soron MEGJELENÍTETT állapot: a kereskedési szándék, az optimalizálási
         tevékenységgel felülrétegezve.
@@ -4413,9 +4082,6 @@ class DashboardWindow:
         row = self.rows.pop(symbol, None)
         if row is not None:
             row.frame.destroy()
-        for _k in [k for k in self._srows if k[0] == symbol]:
-            self._srows.pop(_k).frame.destroy()
-        self._row_order = [k for k in self._row_order if k[0] != symbol]
         self.dashboard_ref.pop(symbol, None)
         self.instrument_state.pop(symbol, None)
         self.optimizer_status.pop(symbol, None)
@@ -5451,9 +5117,7 @@ class DashboardWindow:
             self._render_slots_label()
 
         live_count = 0
-        if _layout.is_per_strategy_row(self._layout):
-            live_count = self._refresh_flat(mt5_positions)
-        elif hasattr(self, "rows"):
+        if hasattr(self, "rows"):
             for symbol, row in self.rows.items():
                 ds         = self.dashboard_ref.get(symbol)
                 inst_state = self._display_state(symbol)

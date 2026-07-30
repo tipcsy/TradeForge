@@ -22,8 +22,6 @@
   },
   "dashboard": {
     "_comment": "Felület frissítési ütem. price_refresh_sec: BID/ASK/spread MINDEN párra (1-5 ajánlott). live_refresh_sec: indikátor (WPR) a FUTÓ pároknál. all_refresh_sec: indikátor minden párra. watchdog_threshold_sec: ennyi mp blokkolás fölött figyelmeztet a fagyás-watchdog (data/ui_watchdog.log).",
-    "_comment_layout": "Dashboard-elrendezes. classic = a megszokott tabla (egy sor = egy instrumentum). flat = egy sor = egy (instrumentum x strategia): semmi elrejtve, a sorrend fontossag szerinti (nyitott pozicio felul), a nyitott pozicio ELO eredmennyel. grouped = instrumentum-sor + osszecsukhato strategia-alsorok. Alap: classic.",
-    "layout": "classic",
     "price_refresh_sec": 3,
     "live_refresh_sec": 7,
     "all_refresh_sec": 30,
