@@ -303,6 +303,31 @@ class Strategy(ABC):
     # Aki ATR-alapú SL/TP-t ad a `sl_tp_points`-ben, az írja felül `"atr"`-re.
     default_sl_method = "swing20"
 
+    # ── Leírás (a paraméter-ablakból megnyitható) ─────────────────────────
+    def doc_path(self):
+        """A stratégia leírásának útvonala: `strategy/docs/<név>.md`.
+
+        Konvenció, nem kötelező: ha a fájl nem létezik, a felület KIÍRJA az
+        elvárt útvonalat. Így a hiányzó doksi nem „elromlott gomb", hanem
+        felszólítás — enélkül nem lenne kitalálható, hova kell írni.
+
+        Felülírható, ha egy stratégia máshol tartja a leírását."""
+        from pathlib import Path
+        return (Path(__file__).resolve().parent / "docs" / f"{self.name}.md")
+
+    def doc_text(self) -> str:
+        """A leírás tartalma, vagy egy beszédes helyettesítő szöveg."""
+        p = self.doc_path()
+        try:
+            if p.exists():
+                return p.read_text(encoding="utf-8")
+        except OSError as e:
+            return f"# {self.name}\n\nA leírás nem olvasható: `{e}`\n"
+        return (f"# {self.name}\n\n"
+                f"Ehhez a stratégiához **még nincs leírás**.\n\n"
+                f"Hozd létre ezt a fájlt, és a tartalma itt fog megjelenni "
+                f"formázva:\n\n```\n{p}\n```\n")
+
     def sl_tp_points(self, hi_row, params, point_size):
         """A pozíció SL/TP mérete PIPBEN a magasabb tf aktuális ZÁRT sorából
         (hi_row): `(sl_points, tp_points)` VAGY `None` (nincs érvényes méret).

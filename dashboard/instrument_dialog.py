@@ -638,10 +638,30 @@ class InstrumentParamsDialog:
         self._btn_bt.pack(side="left", padx=6)
         tk.Button(btns, text="Trials CSV", bg=BTN_BT_BG, fg=BTN_BT_FG, relief="flat",
                   font=self._sf, command=self._open_trials).pack(side="left", padx=6)
+        # A stratégia LEÍRÁSA (`strategy/docs/<név>.md`) formázva. Itt a helye: a
+        # paraméterek mellett kell tudni, MIT is állítunk.
+        tk.Button(btns, text="Leírás", bg=BTN_BT_BG, fg=BTN_BT_FG, relief="flat",
+                  font=self._sf, command=self._open_doc).pack(side="left", padx=6)
         tk.Button(btns, text="Mégse", bg=BTN_DIS_BG, fg=BTN_DIS_FG, relief="flat",
                   font=self._sf, command=popup.destroy).pack(side="left", padx=6)
 
         self._fit_to_screen(popup, body, footer)
+
+    def _open_doc(self):
+        """A stratégia leírása formázva (`strategy/docs/<név>.md`).
+
+        Ha a fájl nincs, a nézet KIÍRJA az elvárt útvonalat — így a hiányzó doksi
+        nem „elromlott gomb", hanem felszólítás. A leírás mindig a lemezről
+        olvasódik, tehát szerkesztés után ÚJRA MEGNYITVA azonnal friss (nincs
+        gyorsítótár, ami elavulhatna)."""
+        from dashboard import md_view
+        try:
+            md_view.show(self.popup,
+                         f"{self.strategy.name} — leírás",
+                         self.strategy.doc_text(),
+                         source=str(self.strategy.doc_path()))
+        except Exception as e:
+            self.lbl_err.config(text=f"A leírás nem nyitható meg: {e}")
 
     def _fit_to_screen(self, popup, body, footer):
         """Az ablak méretezése a KÉPERNYŐHÖZ: ha a tartalom elfér, minden látszik
