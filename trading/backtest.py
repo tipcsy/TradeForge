@@ -1129,6 +1129,7 @@ def run_backtest(cfg: dict, params: Optional[dict] = None, test_mode: bool = Fal
     strategy        = get_strategy(cfg)
     set_active_strategy(strategy.name)     # stratégia-hatókörű params-tárolás
 
+    _use_base_params = params is None
     if params is None:
         params = strategy.base_params(cfg)
 
@@ -1143,9 +1144,14 @@ def run_backtest(cfg: dict, params: Optional[dict] = None, test_mode: bool = Fal
         if df_m15 is None:
             continue
 
+        # BE/trailing/atr_period/spread-kapu MÁR NEM stratégia-paraméter — a
+        # közös, instrumentum-szintű execution config felülírje az alapértéket
+        # (csak akkor, ha a hívó NEM adott explicit, kész paramétert).
+        sym_params = ({**params, **load_execution_params(symbol, cfg)}
+                      if _use_base_params else params)
         result = run_pair(
             symbol, df_m15, df_m1,
-            params, pair_cfg, trading_cfg,
+            sym_params, pair_cfg, trading_cfg,
             initial_balance, test_start, strategy=strategy,
             risky=risky_mode.is_risky(symbol),
         )
@@ -1324,6 +1330,7 @@ def _save_backtest_results(trades: list, summaries: list[dict],
 from core.params_store import (
     PARAMS_DIR, params_file, set_active_strategy, migrate_flat_layout,
 )
+from core.execution_params import load_execution_params
 
 
 def _advance_m15_state(pd_info: dict, m1_time: pd.Timestamp, strategy) -> None:
@@ -1424,7 +1431,10 @@ def run_portfolio_backtest(
         if f.exists():
             with open(f, encoding="utf-8") as fh:
                 data = json.load(fh)
-            pair_params[sym] = data.get("params")
+            # BE/trailing/atr_period/spread-kapu MÁR NEM stratégia-paraméter — a
+            # közös, instrumentum-szintű execution config felülírja az esetleges
+            # elavult másolatot a régi optimalizált json-ban.
+            pair_params[sym] = {**data.get("params", {}), **load_execution_params(sym, cfg)}
             gtxt, _, _ = strategy.grade(data.get("test_summary", {}), cfg)
             weak = 1 <= strategy.grade_rank(gtxt) <= 3   # Közepes/Gyenge/Rossz
             pair_risky[sym] = risky_mode.is_risky(sym) or (auto_risky and weak)

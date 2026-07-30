@@ -65,6 +65,18 @@
     "_comment_auto_risky": "Portfólió-backtest: a Közepes/Gyenge/Rossz minősítésű pár automatikusan RISKY módban fut (felezett kockázat, azonnali BE, azonnali+felezett trailing) — mint élőben. false = csak a kézi kapcsoló számít.",
     "auto_risky_weak": true
   },
+  "execution": {
+    "_comment": "Közös, STRATÉGIA-FÜGGETLEN végrehajtási/kockázati alapértékek — MINDEN stratégia ugyanazt az instrumentum-szintű értéket használja (nem stratégiánként hangolt). Per-szimbólum felülírás: data/execution_params/<SYMBOL>.json (a Stratégia Paraméterek ablak 'Végrehajtás' kategóriája menti oda).",
+    "atr_period": 14,
+    "_comment_be": "breakeven_pct: a TP hány %-ánál toljuk az SL-t az entry szintre (0 = kikapcs)",
+    "breakeven_pct": 0.5,
+    "_comment_trail": "trail_activation_atr: ennyi ATR-nyi profit UTÁN indul a trailing. trail_distance_atr: ennyi ATR-rel követ.",
+    "trail_activation_atr": 0.5,
+    "trail_distance_atr": 0.4,
+    "_comment_spread": "Spread-kapu (core/spread_gate.py): max_spread_atr_ratio — a megengedett spread az ATR hányada. min_spread_mult — az alsó küszöb az instrumentum normál spreadjének ennyiszerese.",
+    "max_spread_atr_ratio": 0.20,
+    "min_spread_mult": 1.5
+  },
   "optimizer": {
     "_comment_method": "Optimalizálási módszer: optuna | random | grid",
     "method": "optuna",

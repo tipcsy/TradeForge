@@ -37,6 +37,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from core.indicator_engine import compute_indicators
+from core.execution_params import load_execution_params
 from trading.backtest import load_data, run_pair
 
 logging.basicConfig(
@@ -848,6 +849,13 @@ def optimize_symbol(symbol, df_m15, df_m1, cfg, initial_balance, progress=None,
     trading_cfg = cfg["trading"]
     pair_cfg    = cfg["pairs"][symbol]
     base_params = strategy.base_params(cfg)
+    # A BE/trailing/atr_period/spread-kapu MÁR NEM stratégia-paraméter (közös,
+    # instrumentum-szintű execution config) — de a stratégia hookjai (pl.
+    # wpr_sma.bt_warmup: `params["atr_period"]`) még mindig elvárják, hogy a
+    # kulcs jelen legyen minden trial params-jában. A jelenlegi, ténylegesen ható
+    # értékkel töltjük fel (nem keresi az optimalizáló — konstansként viszi
+    # minden trial-on át).
+    base_params = {**base_params, **load_execution_params(symbol, cfg)}
 
     # A tanítható ág (lentebb) a TELJES előzményt kapja — a modell-tanítás a saját
     # lookback-jét alkalmazza (optimizer.training.lookback_years), nem a
@@ -945,6 +953,13 @@ def optimize_symbol(symbol, df_m15, df_m1, cfg, initial_balance, progress=None,
 
     if result is None:
         return {"error": _no_result_reason(symbol, df_m15, opt_cfg, strategy)}
+
+    # A `fit` ág (pl. ml_ai) a saját params-ját a `base_params`-tól FÜGGETLENÜL
+    # építi — ráfésüljük a közös execution configot is, hogy az OOS teszt (lentebb)
+    # és a mentett eredmény a TÉNYLEGESEN ható BE/trailing/atr_period/spread-kapu
+    # értékkel egyezzen (ne a beépített alapértékkel).
+    if "params" in result:
+        result["params"] = {**result["params"], **load_execution_params(symbol, cfg)}
 
     # Out-of-sample (TEST) validálás — szintén itt, egységesen. A nyertes rr-rel
     # (ha volt rr-optimalizálás), hogy a mentett test_summary konzisztens legyen.

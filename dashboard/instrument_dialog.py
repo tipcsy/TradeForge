@@ -39,6 +39,27 @@ from core.quality import metric_colors
 from core.params_store import (
     params_file, trials_file, resolve_trade_hours, save_trade_hours,
 )
+from core import execution_params as _execp
+
+# A közös, stratégia-független "Végrehajtás" kategória (BE/trailing/atr_period/
+# spread-kapu) — minden stratégia-configból kikerült, itt jelenik meg egységesen.
+# `_EXEC_KEYS` a `core.execution_params.DEFAULTS` kulcsai.
+_EXEC_CATEGORY = "Végrehajtás"
+_EXEC_KEYS = frozenset(_execp.DEFAULTS)
+_EXEC_PARAM_META = {
+    "atr_period": {"category": _EXEC_CATEGORY,
+                   "comment": "ATR periódus (spread-kapu + BE/trailing volatilitás-mércéje)"},
+    "breakeven_pct": {"category": _EXEC_CATEGORY,
+                       "comment": "BE: a TP hány %-ánál húzzuk az SL-t a belépőre (0 = ki)"},
+    "trail_activation_atr": {"category": _EXEC_CATEGORY,
+                              "comment": "Trailing ennyi ATR profit UTÁN indul"},
+    "trail_distance_atr": {"category": _EXEC_CATEGORY,
+                            "comment": "Trailing követési távolság (ATR-szorzó)"},
+    "max_spread_atr_ratio": {"category": _EXEC_CATEGORY,
+                              "comment": "Spread-kapu: max spread az ATR arányában"},
+    "min_spread_mult": {"category": _EXEC_CATEGORY,
+                         "comment": "Spread-kapu alsó küszöbe (a normál spread ennyiszerese)"},
+}
 
 # A trials CSV metrika-oszlopai (ezek NEM paraméterek, hanem az eredmény jellemzői)
 _METRIC_COLS = frozenset({
@@ -224,6 +245,12 @@ class InstrumentParamsDialog:
             self._src = src
         else:
             self._src = default_params(cfg, strategy)
+        # Közös, stratégia-független végrehajtási paraméterek (BE/trailing/
+        # atr_period/spread-kapu) — MINDIG a ténylegesen ható (execution-config)
+        # értéket mutatjuk, felülírva egy esetleges elavult másolatot a régi
+        # optimalizált JSON-ban.
+        self._orig_exec_params = _execp.load_execution_params(symbol, cfg)
+        self._src = {**self._src, **self._orig_exec_params}
         self._keys  = sorted(k for k in self._src if not k.startswith("_"))
         # Típus-minta a mentéskori konverzióhoz (int/float/bool/str)
         self._types = {k: self._src[k] for k in self._keys}
@@ -357,7 +384,10 @@ class InstrumentParamsDialog:
         # és a (szerkeszthető) megjegyzést. Ismeretlen kulcs → 'Egyéb' a végén.
         _pm     = self.cfg.get("param_meta") or {}
         _cat_ord = list(_pm.get("categories") or [])
-        _pmeta  = _pm.get("params") or {}
+        _pmeta  = {**(_pm.get("params") or {}), **_EXEC_PARAM_META}
+        if _EXEC_CATEGORY not in _cat_ord:
+            _insert_at = _cat_ord.index("Egyéb") if "Egyéb" in _cat_ord else len(_cat_ord)
+            _cat_ord.insert(_insert_at, _EXEC_CATEGORY)
 
         def _cat_of(k):
             return (_pmeta.get(k, {}) or {}).get("category") or "Egyéb"
@@ -982,10 +1012,16 @@ class InstrumentParamsDialog:
     def _save_comments(self):
         """A szerkesztett paraméter-megjegyzések mentése a stratégia-configba
         (param_meta.params.<kulcs>.comment). Stratégia-szintű (minden szimbólumra közös).
-        Csak akkor ír, ha változott (a helper ellenőrzi)."""
+        Csak akkor ír, ha változott (a helper ellenőrzi). A közös "Végrehajtás"
+        kategória kulcsai (BE/trailing/atr_period/spread-kapu) NEM a stratégia-
+        configé — a megjegyzésük itt fixen `_EXEC_PARAM_META`-ból jön, nem menthető
+        szerkesztve (kockázat/végrehajtási dokumentáció, nem stratégia-specifikus)."""
         if not getattr(self, "_comment_entries", None):
             return
-        comments = {k: e.get().strip() for k, e in self._comment_entries.items()}
+        comments = {k: e.get().strip() for k, e in self._comment_entries.items()
+                   if k not in _EXEC_KEYS}
+        if not comments:
+            return
         try:
             from strategy.settings import save_param_comments
             save_param_comments(self.strategy.name, comments)
@@ -1027,7 +1063,11 @@ class InstrumentParamsDialog:
         if not saved:
             return False
         for k in self.entries:
-            sv, pv = saved.get(k), params.get(k)
+            # A közös végrehajtási kulcsok NEM a stratégia-JSON-ban vannak (lásd
+            # `_persist`) — az EREDETI (dialog-nyitáskori) execution-config érték
+            # ellenében vetjük össze, nem a `saved` stratégia-params ellen.
+            sv = self._orig_exec_params.get(k) if k in _EXEC_KEYS else saved.get(k)
+            pv = params.get(k)
             if sv is None or pv is None:
                 return False
             try:
@@ -1068,7 +1108,19 @@ class InstrumentParamsDialog:
             self._rank_rows[new_rank] = rec
             self._ranks = sorted(self._rank_rows)
             extra = {"manual_rank": new_rank}
-        if not self._write_json(params, extra=extra):
+        # A közös, stratégia-független végrehajtási kulcsok (BE/trailing/atr_period/
+        # spread-kapu) a data/execution_params/<SYMBOL>.json-ba mennek — MINDEN
+        # stratégia ugyanazt olvassa vissza. A stratégia-JSON csak a saját (jelzés+
+        # SL/TP) paramétereit kapja, hogy ne duplikálódjanak.
+        _exec_vals = {k: params[k] for k in _EXEC_KEYS if k in params}
+        if _exec_vals:
+            try:
+                _execp.save_execution_params(self.symbol, _exec_vals)
+            except Exception as ex:
+                self.lbl_err.config(text=f"Végrehajtás-config mentési hiba: {ex}", fg=FG_RED)
+                return
+        strat_params = {k: v for k, v in params.items() if k not in _EXEC_KEYS}
+        if not self._write_json(strat_params, extra=extra):
             return
         self.popup.destroy()
 

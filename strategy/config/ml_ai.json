@@ -17,27 +17,18 @@
     "ml_warmup_bars": 900
   },
   "sltp": {
-    "_comment": "dynamic_sltp: true = SL = ATR14 × sl_atr_mult, TP = SL × tp_rr_ratio. false = fix sl_pips/tp_pips (páronként a tanítás írja). A címkézés (tanítás) UGYANEZT a sémát használja.",
+    "_comment": "dynamic_sltp: true = SL = ATR14 × sl_atr_mult, TP = SL × tp_rr_ratio. false = fix sl_pips/tp_pips (páronként a tanítás írja). A címkézés (tanítás) UGYANEZT a sémát használja. Az atr_period a közös execution configban van (core/execution_params.py).",
     "dynamic_sltp": true,
     "sl_atr_mult": 1.5,
     "tp_rr_ratio": 2.0,
     "sl_points": 0,
-    "tp_points": 0,
-    "atr_period": 14
-  },
-  "position_mgmt": {
-    "_comment": "Kockázatmentesítés és trailing — a keretrendszer végrehajtási presetjeihez (mint a wpr_sma-nál).",
-    "breakeven_pct": 0.5,
-    "trail_activation_atr": 0.5,
-    "trail_distance_atr": 0.4,
-    "no_trade_resets_signal": false
+    "tp_points": 0
   },
   "param_meta": {
-    "_comment": "A Paraméterek ablak csoportosítása + megjegyzései.",
+    "_comment": "A Paraméterek ablak csoportosítása + megjegyzései. A BE/trailing/atr_period/spread-kapu a közös, stratégia-független \"Végrehajtás\" kategóriában jelenik meg (nem itt).",
     "categories": [
       "ML modell",
       "SL / TP",
-      "Kockázatkezelés",
       "Egyéb"
     ],
     "params": {
@@ -64,26 +55,6 @@
       "tp_points": {
         "category": "SL / TP",
         "comment": "Fix TP pipben (dynamic_sltp=false esetén)"
-      },
-      "atr_period": {
-        "category": "SL / TP",
-        "comment": "ATR periódus a keretrendszer spread-kapujához"
-      },
-      "breakeven_pct": {
-        "category": "Kockázatkezelés",
-        "comment": "BE: a TP hány %-ánál húzzuk az SL-t a belépőre (0 = ki)"
-      },
-      "trail_activation_atr": {
-        "category": "Kockázatkezelés",
-        "comment": "Trailing ennyi pip profit UTÁN indul"
-      },
-      "trail_distance_atr": {
-        "category": "Kockázatkezelés",
-        "comment": "Trailing követési távolság (pip)"
-      },
-      "no_trade_resets_signal": {
-        "category": "Kockázatkezelés",
-        "comment": "A no-trade (szürke) óra resetelje-e a jelzést (ML-nél nincs mély állapot — hatástalan)"
       }
     }
   },

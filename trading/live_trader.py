@@ -62,6 +62,7 @@ from core.params_store import (
     PARAMS_DIR, params_file, set_active_strategy, migrate_flat_layout,
     resolve_trade_hours,
 )
+from core import execution_params
 
 # Az MT5 Python API nem thread-safe. A motor, a GUI szálai ÉS (a #8 óta) a
 # viz-szál is hívja — minden közvetlen `mt5.*` hívás EZEN keresztül megy.
@@ -2291,6 +2292,10 @@ def run(cfg: dict, slot_mgr: SlotManager):
         _params = load_pair_params(symbol, strat.name)
         if _params is None:
             return None
+        # BE/trailing/atr_period/spread-kapu MÁR NEM stratégia-paraméter — a
+        # közös, instrumentum-szintű execution config felülírja az esetleges
+        # elavult másolatot a mentett optimalizált json-ban.
+        _params = {**_params, **execution_params.load_execution_params(symbol, cfg)}
         # Pár-azonosító injektálás a stratégia-hookoknak (mint a backtest
         # run_pair-ben): symbol/point_size autoritatív a pair configból, a session
         # default-olható. A wpr_sma ezeket nem olvassa → viselkedése változatlan.
