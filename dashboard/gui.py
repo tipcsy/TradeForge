@@ -44,6 +44,7 @@ from strategy.base import Column
 from strategy.settings import apply_strategy_config, main_config_view
 from core import risky_mode
 from core import adopted as _adopted
+from core import position_meta as _pmeta
 from core import opt_activity as _opt_activity
 from version import APP_NAME, APP_VERSION
 
@@ -4295,6 +4296,19 @@ class DashboardWindow:
                 f"tartja nyilván.{warn}"):
             return
         _adopted.adopt(ticket, strategy_name, symbol)
+        # A BELÉPÉSKORI kockázat (1 R) rögzítése a kézi pozícióra is — a motor
+        # innentől húzza a stopot, tehát a mostani SL-táv hamarosan elveszne.
+        # SL NÉLKÜLI pozíciónál a kockázat nem értelmezhető → nem írunk bejegyzést,
+        # és az R „—" marad (a fenti figyelmeztetés épp erről szól).
+        if pos is not None:
+            _pc = (self.cfg.get("pairs") or {}).get(symbol) or {}
+            _pmeta.record(
+                ticket, symbol, strategy_name,
+                _pmeta.risk_from_prices(
+                    pos.get("volume", 0.0), pos.get("price_open", 0.0),
+                    pos.get("sl", 0.0), _pc.get("point_size", 0.0),
+                    _pc.get("pv1_point", 0.0)),
+                lot=pos.get("volume", 0.0), entry_price=pos.get("price_open", 0.0))
         # Ha a pár áll, a live loop KIVEZETÉS-be teszi (kezeli a pozíciót, de új
         # belépőt nem nyit) — a szándékot nem írjuk felül.
         self._pos_tab.refresh()

@@ -153,9 +153,12 @@ def pairs() -> set:
 def prune(open_tickets=None, keep_days: int = 3):
     """Takarítás induláskor: a régen lezárt bejegyzések törlése. Ha `open_tickets`
     meg van adva, a MÁR NEM NYITOTT (de lezártként sem jelölt — pl. a program
-    állása közben zárt) ticketek is lezártnak számítanak."""
+    állása közben zárt) ticketek is lezártnak számítanak.
+
+    `keep_days <= 0` → **soha nem törlünk** (a bejegyzések aprók, és csak kézi
+    hozzárendeléskor / ráépítéskor keletkeznek). A `core/position_meta.py` ugyanezt
+    a szabályt követi — a kettő retencióját közös config vezérli."""
     _ensure_loaded()
-    cutoff = datetime.now(timezone.utc) - timedelta(days=keep_days)
     with _lock:
         changed = False
         for k in list(_state):
@@ -164,13 +167,16 @@ def prune(open_tickets=None, keep_days: int = 3):
                     and not e.get("closed_at"):
                 e["closed_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
                 changed = True
-            ca = e.get("closed_at")
-            if ca:
-                try:
-                    if datetime.fromisoformat(ca) < cutoff:
-                        del _state[k]
-                        changed = True
-                except Exception:
-                    pass
+        if keep_days and keep_days > 0:
+            cutoff = datetime.now(timezone.utc) - timedelta(days=keep_days)
+            for k in list(_state):
+                ca = _state[k].get("closed_at")
+                if ca:
+                    try:
+                        if datetime.fromisoformat(ca) < cutoff:
+                            del _state[k]
+                            changed = True
+                    except Exception:
+                        pass
         if changed:
             _save_locked()

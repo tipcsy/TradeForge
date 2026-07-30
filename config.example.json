@@ -63,7 +63,9 @@
     "_comment_risky": "Risky mód (data/risky_mode.json) újraolvasási gyakorisága mp-ben — külső program is írhatja a fájlt. A gombnyomás azonnal ment.",
     "risky_reload_sec": 3600,
     "_comment_auto_risky": "Portfólió-backtest: a Közepes/Gyenge/Rossz minősítésű pár automatikusan RISKY módban fut (felezett kockázat, azonnali BE, azonnali+felezett trailing) — mint élőben. false = csak a kézi kapcsoló számít.",
-    "auto_risky_weak": true
+    "auto_risky_weak": true,
+    "_comment_position_records": "Meddig őrizzük a LEZÁRT pozíciók ticket-szintű bejegyzéseit (data/adopted_positions.json = melyik stratégiához tartozott, data/position_meta.json = mekkora volt a belépéskori kockázat, azaz 1 R). NAPBAN; 0 = soha ne takarítson. A bejegyzések aprók (~170 byte) és csak nyitáskor/kézi hozzárendeléskor keletkeznek, tehát a 0 is biztonságos. Rövid érték mellett a régebbi lezárt kötések elvesztik a stratégia- és R-adatukat.",
+    "position_record_keep_days": 3
   },
   "execution": {
     "_comment": "Közös, STRATÉGIA-FÜGGETLEN végrehajtási/kockázati alapértékek — MINDEN stratégia ugyanazt az instrumentum-szintű értéket használja (nem stratégiánként hangolt). Per-szimbólum felülírás: data/execution_params/<SYMBOL>.json (a Stratégia Paraméterek ablak 'Végrehajtás' kategóriája menti oda).",

@@ -63,6 +63,7 @@ from core.params_store import (
     resolve_trade_hours,
 )
 from core import execution_params
+from core import position_meta
 
 # Az MT5 Python API nem thread-safe. A motor, a GUI szálai ÉS (a #8 óta) a
 # viz-szál is hívja — minden közvetlen `mt5.*` hívás EZEN keresztül megy.
@@ -1795,6 +1796,9 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
         # Örökbefogadott pozíció: a bejegyzés lezártként megjelölve (a
         # „Lezárt ma" fül még a stratégiához köti; a prune takarítja).
         adopted.mark_closed(ticket)
+        # A belépéskori kockázat UGYANÍGY megmarad: a lezárt kötés R-je (napi
+        # P&L R-ben) csak ebből számolható — a pozíció már nem létezik.
+        position_meta.mark_closed(ticket)
         log.info("📋 [%s] %s #%d zárt | P&L: %.2f$",
                  strategy.name, symbol, ticket, pnl)
         log_trade({
@@ -2051,6 +2055,15 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
                                        comment=strategy.name, strategy_name=strategy.name)
                 if ticket:
                     slot_mgr.add(ticket)
+                    # A BELÉPÉSKORI kockázat (1 R) rögzítése — a BE/trailing hamarosan
+                    # felülírja az SL-t, onnantól ez a szám sehonnan nem nyerhető
+                    # vissza. A TÉNYLEGES lotból számolunk (a min_lot/max_lot korlát
+                    # eltérítheti a szándékolt kockázattól).
+                    position_meta.record(
+                        ticket, symbol, strategy.name,
+                        position_meta.risk_from_points(
+                            lot, sl_points, _sizing_cfg.get("pv1_point", 0.0)),
+                        lot=lot, sl_points=sl_points, entry_price=open_price)
                     log_trade({
                         "time":      datetime.now(timezone.utc).isoformat(),
                         "event":     "open",
@@ -2158,6 +2171,17 @@ def manual_build(symbol: str, strategy_name: "str | None" = None) -> bool:
     rt["ready"] = False
     if _base_strat:
         adopted.adopt(ticket, _base_strat, symbol)
+    # A láb BELÉPÉSKORI kockázata (1 R): a csomag-stopig mért táv. A közös stop
+    # rögtön ezután az átlagárra húzódik, tehát utólag ez sem lenne kinyerhető.
+    _pc = (_run_cfg.get("pairs") or {}).get(symbol) or {}
+    _new_pos = _refresh_position(ticket)
+    _entry = float(getattr(_new_pos, "price_open", 0.0) or 0.0)
+    position_meta.record(
+        ticket, symbol, strategy_name,
+        position_meta.risk_from_prices(add_lot, _entry, _seed_sl,
+                                       _pc.get("point_size", 0.0),
+                                       _pc.get("pv1_point", 0.0)),
+        lot=add_lot, entry_price=_entry)
     if _run_slot_mgr is not None:
         _run_slot_mgr.add(ticket)   # foglalja a slotot, amíg nem bizonyítottan nulla-kockázatú
 
@@ -2352,7 +2376,12 @@ def run(cfg: dict, slot_mgr: SlotManager):
     try:
         with MT5_LOCK:
             _all_now = mt5.positions_get() or []
-        adopted.prune({p.ticket for p in _all_now})
+        # KÖZÖS retenció: a ticket-szintű nyilvántartások (stratégia-hozzárendelés
+        # és belépéskori kockázat) ugyanaddig élnek — 0 = soha ne takarítson.
+        _keep = int(trading_cfg.get("position_record_keep_days", 3) or 0)
+        _open_tk = {p.ticket for p in _all_now}
+        adopted.prune(_open_tk, keep_days=_keep)
+        position_meta.prune(_open_tk, keep_days=_keep)
     except Exception:
         pass
 
