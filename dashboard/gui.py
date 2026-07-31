@@ -2845,7 +2845,7 @@ class DashboardWindow:
         from dashboard.live_table import LiveTable
         from dashboard import theme as _t
         self._live2 = LiveTable(
-            parent, _t.fonts(), rows=self._live2_rows(),
+            parent, _t.fonts(), rows=self._live2_visible_rows(),
             on_close=self._handle_delete)
         self._live2.frame.pack(fill="both", expand=True)
 
@@ -2855,6 +2855,19 @@ class DashboardWindow:
         config `available_strategies`-éből dolgozunk, nem a pár sajátjából."""
         from strategy import available_strategy_names
         return list(available_strategy_names(self.cfg))
+
+    def _live2_visible_rows(self) -> list:
+        """A MEGJELENÍTENDŐ sorok: keresés + „STOPPED elrejtése" alkalmazva.
+
+        A 2.0 az ADATOT szűri (nem a widgeteket csomagolja újra, mint a classic),
+        így a viselkedés tkinter nélkül is mérhető. A rendezést a tábla maga
+        végzi, mert a fejléc-kattintás ott keletkezik."""
+        from dashboard import row_source as _rsrc
+        return _rsrc.filter_rows(
+            self._live2_rows(),
+            search=(self._search_var.get() if hasattr(self, "_search_var") else ""),
+            hide_stopped=(self._hide_stopped_var.get()
+                          if hasattr(self, "_hide_stopped_var") else False))
 
     def _live2_rows(self) -> list:
         """A 2.0 sorok adata. Minden külső forrás ITT kötődik be — a leképezés
@@ -2967,6 +2980,12 @@ class DashboardWindow:
             lambda e: self._header_row.sync_ctrl_width(e.width))
 
     def _apply_filter_sort(self):
+        # A 2.0 tabla az ADATOT szuri (a classic a widgeteket csomagolja ujra) —
+        # a kereso mezo es a "STOPPED elrejtese" ugyanezt a belepesi pontot hivja,
+        # tehat itt agazunk el. A rendezes a 2.0-nal a fejlec-kattintasbol jon.
+        if getattr(self, "_live2", None) is not None:
+            self._live2.refresh(self._live2_visible_rows())
+            return
         search = self._search_var.get().upper().strip() if hasattr(self, "_search_var") else ""
         hide_stopped = self._hide_stopped_var.get() if hasattr(self, "_hide_stopped_var") else False
 
@@ -5392,7 +5411,7 @@ class DashboardWindow:
         # tehát a 3 másodperces ütem nem villog.
         if getattr(self, "_live2", None) is not None:
             try:
-                self._live2.refresh(self._live2_rows())
+                self._live2.refresh(self._live2_visible_rows())
             except Exception:
                 import logging as _logging
                 _logging.getLogger(__name__).warning(

@@ -110,7 +110,7 @@ class LiveTable:
     a fejléc kapcsolói állítják, és a tábla újraépíti magát."""
 
     def __init__(self, parent, fonts: dict, rows=None, collapsed: dict = None,
-                 on_close=None, on_collapse_change=None):
+                 on_close=None, on_collapse_change=None, on_sort_change=None):
         self._parent = parent
         self._f = fonts
         self._rows = list(rows or [])
@@ -118,6 +118,8 @@ class LiveTable:
         self._collapsed.update(collapsed or {})
         self._on_close = on_close
         self._on_collapse_change = on_collapse_change
+        self._on_sort_change = on_sort_change
+        self._sort_key, self._sort_dir = None, 1
 
         self.frame = tk.Frame(parent, bg=BG)
         self._build()
@@ -155,11 +157,15 @@ class LiveTable:
         # ── Fejléc: a három rész a három oszlopba ──
         names = self._strategy_names()
         build_header((self._left, self._mid, self._right), self._f, names,
-                     self._collapsed, on_toggle=self._toggle)
+                     self._collapsed, on_toggle=self._toggle,
+                     on_sort=self._sort, sort_key=self._sort_key,
+                     sort_dir=self._sort_dir)
 
         # ── Sorok ──
+        # A rendezes ITT alkalmazodik, nem a hivonal: igy a `refresh(rows)` utan
+        # is ervenyben marad anelkul, hogy a hivonak emlekeznie kellene ra.
         self._row_widgets = []
-        for i, d in enumerate(self._rows):
+        for i, d in enumerate(self._visible()):
             r = LiveRow((self._left, self._mid, self._right), d, self._f,
                         self._collapsed, stripe=i,
                         on_close=(lambda s=d.get("symbol"): self._close(s)))
@@ -170,6 +176,11 @@ class LiveTable:
         self._mid.bind("<Configure>", self._sync_scrollregion)
         self._canvas.bind("<Configure>", self._sync_scrollregion)
         self.frame.after_idle(self._sync_scrollregion)
+
+    def _visible(self) -> list:
+        """A kirajzolando sorok a jelenlegi rendezessel."""
+        from dashboard import row_source as _rsrc
+        return _rsrc.sort_rows(self._rows, self._sort_key, self._sort_dir < 0)
 
     def _strategy_names(self) -> list:
         """A stratégiák a SORREND szerint, az első sorból. Minden sornak ugyanaz
@@ -218,6 +229,26 @@ class LiveTable:
         if self._on_collapse_change:
             self._on_collapse_change(dict(self._collapsed))
 
+    def _sort(self, key: str):
+        """Oszlopfejlec-kattintas: novekvo -> csokkeno -> RENDEZETLEN.
+
+        A harmadik allapot (vissza a config szerinti sorrendhez) szandekos: a
+        `classic` is igy mukodik, es kulonben nem lehetne visszaallni az eredeti,
+        megszokott sorrendre."""
+        if self._sort_key != key:
+            self._sort_key, self._sort_dir = key, 1
+        elif self._sort_dir == 1:
+            self._sort_dir = -1
+        else:
+            self._sort_key, self._sort_dir = None, 1
+        self._build()
+        if self._on_sort_change:
+            self._on_sort_change(self._sort_key, self._sort_dir)
+
+    @property
+    def sort(self) -> tuple:
+        return (self._sort_key, self._sort_dir)
+
     def _close(self, symbol):
         if self._on_close:
             self._on_close(symbol)
@@ -234,14 +265,13 @@ class LiveTable:
         halmaza/sorrendje, vagy egy soron más stratégiák (vagy más stádium-szám)
         vannak. Ilyenkor más cellák kellenek, tehát a helyben frissítés hazudna."""
         rows = list(rows or [])
-        old = [d.get("symbol") for d in self._rows]
-        new = [d.get("symbol") for d in rows]
-        if old != new or len(self._row_widgets) != len(rows):
-            self._rows = rows
+        old = [d.get("symbol") for d in self._visible()]
+        self._rows = rows
+        new = [d.get("symbol") for d in self._visible()]
+        if old != new or len(self._row_widgets) != len(new):
             self._build()
             return
-        self._rows = rows
-        for w, d in zip(self._row_widgets, rows):
+        for w, d in zip(self._row_widgets, self._visible()):
             if not w.update(d):          # szerkezet-változás -> teljes újraépítés
                 self._build()
                 return

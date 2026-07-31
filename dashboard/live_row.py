@@ -113,7 +113,11 @@ def widths(fonts: dict, strategy_names=(), collapsed: dict = None) -> dict:
     small = fonts["small"]
     out = {}
     for k, (fkey, txt) in _SAMPLE.items():
-        w = max(fonts[fkey].measure(txt), small.measure(_HEADER_TEXT.get(k, "")))
+        # A fejlec-felirat a RENDEZES-JELZOT is viselheti (" ▲") — enelkul az
+        # aktiv oszlop feliratanak vege levagodna.
+        head = _HEADER_TEXT.get(k, "")
+        w = max(fonts[fkey].measure(txt),
+                small.measure(head + " ▲") if head else 0)
         out[k] = w + 2 * PAD
     if is_collapsed(collapsed) and strategy_names:
         # A felirat a KAPCSOLÓ-NYILAT is tartalmazza (`▸ wpr_sma`) — enélkül a
@@ -509,8 +513,24 @@ def _quality_color(q):
 # Fejléc — UGYANAZOKKAL a szélességekkel és betűvel
 # ---------------------------------------------------------------------------
 
+def _sorted_head(parent, key, text, width, f, h, on_sort, sort_key, sort_dir):
+    """Egy KATTINTHATO oszlopfejlec + rendezes-jelzo.
+
+    A jelzo (`▲`/`▼`) csak az AKTIV oszlopon jelenik meg. A szelesseget a
+    `widths()` mar a jelzovel egyutt merte, tehat nem csordul tul."""
+    mark = ""
+    if on_sort is not None and sort_key == key:
+        mark = " ▼" if sort_dir < 0 else " ▲"
+    if on_sort is None:
+        _cell(parent, text, width, FG_GRAY_DIM, f, bg=BG_HEADER, height=h)
+        return
+    _click_label(parent, text + mark, width,
+                 FG_WHITE if sort_key == key else FG_GRAY_DIM, f,
+                 on_click=lambda k=key: on_sort(k), bg=BG_HEADER, height=h)
+
+
 def build_header(parent, fonts: dict, strategies: list, collapsed: dict = None,
-                 on_toggle=None):
+                 on_toggle=None, on_sort=None, sort_key=None, sort_dir=1):
     """A sorokkal EGYEZŐ fejléc.
 
     A fejlécnek ugyanazt a betűt és ugyanazokat a szélességeket kell használnia,
@@ -573,32 +593,45 @@ def build_header(parent, fonts: dict, strategies: list, collapsed: dict = None,
     # ── 2. sor: oszlopnevek ──
     for key, txt in (("symbol", "Symbol"), ("bid", "BID"), ("ask", "ASK"),
                      ("change", "Vált.%")):
-        _cell(bl, txt, w[key], FG_GRAY_DIM, f, bg=BG_HEADER, height=h)
+        _sorted_head(bl, key, txt, w[key], f, h, on_sort, sort_key, sort_dir)
     if not collapsed.get("gates"):
-        for key, txt in (("spread", "Spread"), ("align", "Együtt"),
-                         ("market", "Piac")):
-            _cell(bm, txt, w[key], FG_GRAY_DIM, f, bg=BG_HEADER, height=h)
+        # A SORREND kötött: Spread · Együtt · Piac — pontosan úgy, ahogy a sorok
+        # cellái. (Egy korábbi változat itt átrendezte őket, és a feliratok rossz
+        # oszlopok fölé kerültek; a `test_live_table` oszlop-igazítási állítása
+        # fogta meg.) Az „Együtt" a pöttyök oszlopa: nincs értelmes rendezési
+        # értéke, ezért az egyetlen nem kattintható fejléc a blokkban.
+        _sorted_head(bm, "spread", "Spread", w["spread"], f, h, on_sort,
+                     sort_key, sort_dir)
+        _cell(bm, "Együtt", w["align"], FG_GRAY_DIM, f, bg=BG_HEADER, height=h)
+        _sorted_head(bm, "market", "Piac", w["market"], f, h, on_sort,
+                     sort_key, sort_dir)
     # Összecsukott kapuknál a K.Össz. fejléce lesz a kapcsoló (különben nem
     # lehetne visszanyitni — a „Kapuk" felirat ilyenkor nem létezik).
     if collapsed.get("gates") and on_toggle is not None:
         _click_label(bm, "▸ K.Ö.", w["badge"], FG_GRAY_DIM, f,
                      on_click=lambda: on_toggle("gates"), bg=BG_HEADER, height=h)
     else:
-        _cell(bm, "K.Össz.", w["badge"], FG_GRAY_DIM, f, anchor="center",
-              bg=BG_HEADER, height=h)
+        _sorted_head(bm, "badge", "K.Össz.", w["badge"], f, h, on_sort,
+                     sort_key, sort_dir)
     for name in strategies:
-        _cell(bm, "jelzés", w["stages"], FG_GRAY_DIM, f, anchor="center",
-              bg=BG_HEADER, height=h)
+        # A strategia-oszlopok kulcsa "<nev>|<mezo>": ugyanaz az oszlop
+        # strategiankent kulon letezik, tehat a rendezes is arra a blokkra hat,
+        # amelyikben kattintottal.
+        _sorted_head(bm, f"{name}|stages", "jelzés", w["stages"], f, h, on_sort,
+                     sort_key, sort_dir)
         if is_collapsed(collapsed, name):
             continue
         for key, txt in (("position", "Pozíció"), ("daily", "Napi P&L"),
-                         ("quality", "Min."), ("ctrl", "Vezérlés"),
-                         ("opt", "Opt")):
-            _cell(bm, txt, w[key], FG_GRAY_DIM, f, bg=BG_HEADER, height=h)
-    _cell(br, "Pozíció", w["total_pos"], FG_GRAY_DIM, f, anchor="e",
-          bg=BG_HEADER, height=h)
-    _cell(br, "Napi P&L", w["total_daily"], FG_GRAY_DIM, f, anchor="e",
-          bg=BG_HEADER, height=h)
+                         ("quality", "Min.")):
+            _sorted_head(bm, f"{name}|{key}", txt, w[key], f, h, on_sort,
+                         sort_key, sort_dir)
+        _cell(bm, "Vezérlés", w["ctrl"], FG_GRAY_DIM, f, bg=BG_HEADER, height=h)
+        _sorted_head(bm, f"{name}|opt", "Opt", w["opt"], f, h, on_sort,
+                     sort_key, sort_dir)
+    _sorted_head(br, "total_pos", "Pozíció", w["total_pos"], f, h, on_sort,
+                 sort_key, sort_dir)
+    _sorted_head(br, "total_daily", "Napi P&L", w["total_daily"], f, h, on_sort,
+                 sort_key, sort_dir)
     _cell(br, "", w["close"], FG_GRAY_DIM, f, bg=BG_HEADER, height=h)
     return head
 

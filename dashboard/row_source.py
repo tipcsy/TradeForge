@@ -37,13 +37,16 @@ def _spread_cell(ctx: dict) -> dict:
     """`250/1312` — az aktuális és a megengedett spread PONTBAN.
 
     Konkrét szám, nem betűkód: az 1. kör tanulsága szerint az `S`/`E`/`E2` típusú
-    jelölést senki nem tudja fejben tartani, a két szám viszont önmagát magyarázza."""
+    jelölést senki nem tudja fejben tartani, a két szám viszont önmagát magyarázza.
+
+    A `value` a RENDEZÉSHEZ kell: a kijelzett szövegből visszafejteni a számot
+    törékeny volna (a `—` és a `250/—` alak is előfordul)."""
     cur, cap = ctx.get("spread_points"), ctx.get("max_spread_points")
     if cur is None:
-        return {"text": "—", "blocking": False}
+        return {"text": "—", "blocking": False, "value": None}
     if not cap:
-        return {"text": f"{cur:.0f}/—", "blocking": False}
-    return {"text": f"{cur:.0f}/{cap:.0f}", "blocking": cur > cap}
+        return {"text": f"{cur:.0f}/—", "blocking": False, "value": cur}
+    return {"text": f"{cur:.0f}/{cap:.0f}", "blocking": cur > cap, "value": cur}
 
 
 def _stages(ds, name: str, order=None) -> list:
@@ -133,7 +136,9 @@ def row_data(symbol: str, ds, strategy_names, cfg: dict = None,
     # A K.Össz.-hez a MÉRÉST nézzük: minden kaput blokkolónak véve megkapjuk,
     # hány kapu áll blokkoló állapotban (lásd a modul fejlécét).
     measure_effects = {k: _g.EFFECT_BLOCK for k in _g.KEYS}
-    badge = _g.badge(_g.evaluate(ctx, measure_effects))
+    _measured = _g.evaluate(ctx, measure_effects)
+    badge = _g.badge(_measured)
+    blocking_count = len(_g.blocking(_measured))   # a rendezéshez (a `⛔n` száma)
 
     strategies = []
     for name in strategy_names or []:
@@ -164,6 +169,7 @@ def row_data(symbol: str, ds, strategy_names, cfg: dict = None,
             "align": {"signs": ctx.get("tf_align_signs") or []},
             "market": {"text": getattr(ds, "market_state_label", "") or "—"},
             "badge": badge,
+            "blocking_count": blocking_count,
         },
         "strategies": strategies,
         "total": {
@@ -171,6 +177,107 @@ def row_data(symbol: str, ds, strategy_names, cfg: dict = None,
             "daily": _sum_money_r([s["daily"] for s in strategies]),
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# Szűrés és rendezés — TISZTA függvények a kész sor-adaton
+# ---------------------------------------------------------------------------
+# A `classic` tábla a widgetek újracsomagolásával szűr/rendez; a 2.0 az ADATOT
+# rendezi, és a tábla azt rajzolja ki. Így a viselkedés tkinter nélkül mérhető,
+# és a rendezés nem tud „elcsúszni" a megjelenítéstől.
+
+# A minőség rangsora — szövegként rendezve „Gyenge" < „Jó" lenne, ami hazugság.
+_QUALITY_RANK = {"Jó": 0, "Közepes": 1, "Gyenge": 2, "Rossz": 3}
+
+
+def _num(v):
+    """Rendezhető alak: `(rang, érték)`. A hiányzó adat MINDIG a végére kerül,
+    növekvő és csökkenő sorrendben is — különben a „nincs adat" sorok a lista
+    elejére ugranának, és úgy tűnne, ők a legjobbak."""
+    if v is None:
+        return (1, 0.0)
+    try:
+        return (0, float(v))
+    except (TypeError, ValueError):
+        return (1, 0.0)
+
+
+def sort_value(row: dict, key: str):
+    """Egy sor rendezési értéke a megadott oszlop-kulcsra.
+
+    A kulcs vagy egyszerű (`symbol`, `bid`, `spread`, `total_daily`), vagy
+    stratégiához kötött: `"<stratégia>|position"`, `"…|daily"`, `"…|quality"`,
+    `"…|opt"`. Utóbbi azért kell, mert ugyanaz az oszlop stratégiánként külön
+    létezik — a „Pozíció" fejlécre kattintva AZ a stratégia szerint rendezünk,
+    amelyik blokkjában kattintottál."""
+    g = row.get("gates") or {}
+    if key == "symbol":
+        return (0, str(row.get("symbol") or ""))
+    if key in ("bid", "ask", "change"):
+        return _num(row.get({"change": "change_pct"}.get(key, key)))
+    if key == "spread":
+        return _num((g.get("spread") or {}).get("value"))
+    if key == "badge":
+        return _num(g.get("blocking_count"))
+    if key == "market":
+        return (0, str((g.get("market") or {}).get("text") or ""))
+    if key in ("total_pos", "total_daily"):
+        t = (row.get("total") or {}).get(
+            "position" if key == "total_pos" else "daily") or {}
+        return _num(t.get("money"))
+    if "|" in key:
+        name, field = key.split("|", 1)
+        st = next((s for s in (row.get("strategies") or [])
+                   if s.get("name") == name), None)
+        if st is None:
+            return (1, 0.0)
+        if field in ("position", "daily"):
+            return _num((st.get(field) or {}).get("money"))
+        if field == "quality":
+            return (0, _QUALITY_RANK.get(st.get("quality"), 9))
+        if field == "stages":
+            # A jelzés-oszlop: a BLOKKOLT sorok előre (ott van teendő), utána a
+            # csökkentett, végül a szabadon futók.
+            return (0, {"blocked": 0, "reduced": 1}.get(st.get("frame") or "", 2))
+        return (0, str(st.get(field) or ""))
+    return (1, 0.0)
+
+
+def sort_rows(rows, key: str = None, reverse: bool = False) -> list:
+    """A sorok rendezve. `key=None` → az EREDETI (config szerinti) sorrend.
+
+    A rendezés STABIL, és másodlagos kulcsként mindig a szimbólum: azonos
+    értékeknél így nem cserélgetik egymást a sorok frissítésenként (az ugráló
+    tábla olvashatatlan)."""
+    rows = list(rows or [])
+    if not key:
+        return rows
+    # A hiányzó adatot KÜLÖN kezeljük, nem a rendezési kulcs rangjával: a
+    # `reverse=True` a rangot is megfordítaná, és a „nincs adat" sorok a lista
+    # ELEJÉRE ugranának — mintha ők lennének a legjobbak.
+    have = [r for r in rows if sort_value(r, key)[0] == 0]
+    missing = [r for r in rows if sort_value(r, key)[0] != 0]
+    have.sort(key=lambda r: (sort_value(r, key)[1],
+                             str(r.get("symbol") or "")), reverse=reverse)
+    missing.sort(key=lambda r: str(r.get("symbol") or ""))
+    return have + missing
+
+
+def filter_rows(rows, search: str = "", hide_stopped: bool = False) -> list:
+    """Keresés a szimbólum nevében + a STOPPED sorok elrejtése.
+
+    „Stopped" = a soron EGYETLEN stratégia sem fut. Több stratégiánál ez a
+    helyes olvasat: ha bármelyik él, az instrumentum dolgozik."""
+    out = []
+    s = (search or "").strip().upper()
+    for r in rows or []:
+        if s and s not in str(r.get("symbol") or "").upper():
+            continue
+        if hide_stopped and not any(x.get("live")
+                                    for x in (r.get("strategies") or [])):
+            continue
+        out.append(r)
+    return out
 
 
 def build_rows(symbols, ds_map, strategies_of, **kw) -> list:

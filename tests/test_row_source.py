@@ -181,6 +181,83 @@ check("build_rows a letezo szimbolumokra ad sort", [x["symbol"] for x in rows]
 check("minden sorban AZONOS a strategia-lista (kulonben elcsusznanak az oszlopok)",
       all([s["name"] for s in x["strategies"]] == NAMES for x in rows))
 
+# ══ 10. Szures ════════════════════════════════════════════════════════════
+def mkrow(sym, **kw):
+    r = {"symbol": sym, "bid": kw.get("bid"), "ask": kw.get("ask"),
+         "change_pct": kw.get("change"),
+         "gates": {"spread": {"value": kw.get("spread")},
+                   "market": {"text": kw.get("market", "")},
+                   "blocking_count": kw.get("blocking", 0)},
+         "strategies": [{"name": "wpr_sma", "live": kw.get("live", False),
+                         "frame": kw.get("frame", ""),
+                         "position": {"money": kw.get("pos")},
+                         "daily": {"money": kw.get("daily")},
+                         "quality": kw.get("q"), "opt": kw.get("opt", "")}],
+         "total": {"position": {"money": kw.get("tpos")},
+                   "daily": {"money": kw.get("tdaily")}}}
+    return r
+
+
+ROWS = [mkrow("GOLD", bid=4000, change=1.5, spread=300, blocking=2, live=True,
+              pos=10.0, daily=-5.0, q="Gyenge", tdaily=-5.0, frame="blocked"),
+        mkrow("EURUSD", bid=1.1, change=-0.5, spread=100, blocking=0, live=False,
+              pos=None, daily=12.0, q="Jó", tdaily=12.0, frame=""),
+        mkrow("Ger40", bid=25000, change=0.2, spread=200, blocking=1, live=True,
+              pos=3.0, daily=0.0, q="Közepes", tdaily=0.0, frame="reduced")]
+
+check("kereses szurkit", [r["symbol"] for r in rs.filter_rows(ROWS, "EUR")] == ["EURUSD"])
+check("a kereses kis/nagybetu-fuggetlen",
+      len(rs.filter_rows(ROWS, "gold")) == 1)
+check("ures kereses -> minden sor", len(rs.filter_rows(ROWS, "")) == 3)
+check("nincs talalat -> ures", rs.filter_rows(ROWS, "NINCSILYEN") == [])
+check("STOPPED elrejtese: csak ahol FUT valamelyik strategia",
+      [r["symbol"] for r in rs.filter_rows(ROWS, hide_stopped=True)]
+      == ["GOLD", "Ger40"])
+check("a ketto EGYUTT is mukodik",
+      [r["symbol"] for r in rs.filter_rows(ROWS, "GER", True)] == ["Ger40"])
+
+# ══ 11. Rendezes ══════════════════════════════════════════════════════════
+def order(key, rev=False):
+    return [r["symbol"] for r in rs.sort_rows(ROWS, key, rev)]
+
+
+check("kulcs nelkul az EREDETI sorrend", order(None) == ["GOLD", "EURUSD", "Ger40"])
+check("symbol szerint", order("symbol") == ["EURUSD", "GOLD", "Ger40"])
+check("...forditva", order("symbol", True) == ["Ger40", "GOLD", "EURUSD"])
+check("bid szerint (szam, nem szoveg)", order("bid") == ["EURUSD", "GOLD", "Ger40"])
+check("valtozas% szerint", order("change") == ["EURUSD", "Ger40", "GOLD"])
+check("spread szerint", order("spread") == ["EURUSD", "Ger40", "GOLD"])
+check("K.Ossz. (hany kapu blokkol) szerint",
+      order("badge") == ["EURUSD", "Ger40", "GOLD"])
+check("strategia-pozicio szerint", order("wpr_sma|position") == ["Ger40", "GOLD", "EURUSD"])
+check("strategia napi P&L szerint", order("wpr_sma|daily") == ["GOLD", "Ger40", "EURUSD"])
+check("osszesito napi P&L szerint", order("total_daily") == ["GOLD", "Ger40", "EURUSD"])
+
+# A minoseg SZOVEGKENT rendezve "Gyenge" < "Jo" lenne — ami hazugsag.
+check("minoseg RANGSOR szerint (Jo elol), nem abecerendben",
+      order("wpr_sma|quality") == ["EURUSD", "Ger40", "GOLD"])
+
+# A jelzes-oszlop: ahol TEENDO van (blokkolt), az elore
+check("jelzes szerint a blokkoltak elol",
+      order("wpr_sma|stages") == ["GOLD", "Ger40", "EURUSD"])
+
+# A hianyzo adat MINDIG hatul — novekvo es csokkeno sorrendben is. Kulonben a
+# "nincs adat" sorok a lista elejere ugrananak, mintha ok lennenek a legjobbak.
+check("hianyzo ertek novekvoben is hatul", order("wpr_sma|position")[-1] == "EURUSD")
+check("...es csokkenoben is hatul",
+      rs.sort_rows(ROWS, "wpr_sma|position", True)[-1]["symbol"] == "EURUSD")
+
+check("ismeretlen kulcs nem szall el", len(rs.sort_rows(ROWS, "nincs_ilyen")) == 3)
+check("ismeretlen strategia nem szall el", len(rs.sort_rows(ROWS, "x|position")) == 3)
+check("ures listan sem", rs.sort_rows([], "symbol") == [])
+
+# STABIL: azonos ertekeknel a szimbolum dont, tehat a sorok nem cserelgetik
+# egymast frissitesenkent (az ugralo tabla olvashatatlan).
+same = [mkrow("BBB", daily=1.0), mkrow("AAA", daily=1.0), mkrow("CCC", daily=1.0)]
+check("azonos ertekeknel STABIL (szimbolum szerint)",
+      [r["symbol"] for r in rs.sort_rows(same, "wpr_sma|daily")]
+      == ["AAA", "BBB", "CCC"])
+
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")
 sys.exit(0 if all(results) else 1)
