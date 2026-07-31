@@ -64,6 +64,7 @@ from core.params_store import (
 )
 from core import execution_params
 from core import position_meta
+from core import pnl_split
 
 # Az MT5 Python API nem thread-safe. A motor, a GUI szálai ÉS (a #8 óta) a
 # viz-szál is hívja — minden közvetlen `mt5.*` hívás EZEN keresztül megy.
@@ -106,6 +107,12 @@ class PairDashboardState:
     risk_free:        bool = False
     risky:            bool = False              # Risky mód aktív-e (instabil piac)
     daily_pnl:        float = 0.0
+    # A mai lezárt P&L STRATÉGIÁNKÉNTI bontása ezen az instrumentumon:
+    # {stratégia_név | None: {pnl, count, wins, losses, r, r_count}}. A None kulcs
+    # a hozzá nem rendelt (idegen/kézi) pozíciókat gyűjti. A `daily_pnl` ennek az
+    # összege — a 2.0 sor a blokkokat ebből, az „Összesítő" oszlopot a `daily_pnl`-ből
+    # tölti, így a kettő nem mondhat mást. MT5 history-alapú → újraindítás-biztos.
+    daily_by_strategy: dict = field(default_factory=dict)
     enabled:          bool = True
     trained:          bool = False  # van-e optimalizált paraméter
     opt_grade:        Optional[tuple] = None  # (minősítő_szöveg, szín-név)
@@ -436,6 +443,35 @@ def strategy_of_ticket(ticket: int, magic=None) -> "str | None":
         return _magic_to_strategy.get(int(magic))
     except (TypeError, ValueError):
         return None
+
+
+# A mai lezárt kötések (szimbólum × stratégia) bontása — TTL-cache.
+# Miért cache: a bontás MT5 deal-lekérést igényel, a live ciklus viszont
+# páronként fut. Enélkül ugyanazt az előzményt kérnénk le szimbólumonként,
+# körönként. A `daily_pnl_cached` ugyanezt a mintát követi.
+_daily_split_cache: dict = {"t": 0.0, "v": None}
+
+
+def daily_split_cached(ttl: float = 15.0) -> dict:
+    """A mai lezárt kötések `{(symbol, strategy): bucket}` bontása.
+
+    A stratégiát a `strategy_of_ticket` oldja fel (örökbefogadás ELŐBB, aztán a
+    magic), az R-hez pedig a belépéskori kockázat kell (`core.position_meta`).
+    MT5-hiba esetén az utolsó ismert bontást adja vissza (üres dict, ha még nincs)."""
+    now = time.time()
+    if _daily_split_cache["v"] is not None and now - _daily_split_cache["t"] < ttl:
+        return _daily_split_cache["v"]
+    try:
+        closed = mt5_connector.closed_positions_today()
+    except Exception:
+        return _daily_split_cache["v"] or {}
+    v = pnl_split.split_by_strategy(
+        closed,
+        resolve=lambda magic, pid: strategy_of_ticket(pid, magic),
+        risk_of=position_meta.risk_of)
+    _daily_split_cache["t"] = now
+    _daily_split_cache["v"] = v
+    return v
 
 
 def strategy_positions(symbol: str, strategy_name: str, positions=None) -> list:
@@ -1265,6 +1301,15 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
     _real_daily = mt5_connector.daily_pnl_cached()
     _day_pnl = _real_daily if _real_daily is not None else state.daily_pnl
     daily_limit_hit = (_day_pnl <= -daily_limit)
+
+    # A mai P&L STRATÉGIÁNKÉNTI bontása ehhez az instrumentumhoz. MT5 history-alapú
+    # (mint a napi limit), tehát újraindítás-biztos — a session-lokális
+    # `state.daily_pnl` ezt nem tudná. A bontás körönként EGYSZER számolódik
+    # (TTL-cache), itt csak kiolvassuk a szimbólum szeletét.
+    try:
+        ds.daily_by_strategy = pnl_split.for_symbol(daily_split_cached(), symbol)
+    except Exception:
+        pass
 
     # --- Piaci adat a stratégia időkereteire ---
     # Az ELSŐ bemelegítéskor MÉLY ablakot töltünk (signal_warmup_bars — a jelzés-
