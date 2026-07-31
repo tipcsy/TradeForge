@@ -167,6 +167,7 @@ def inspect(build, size=(1400, 220), settle_ms=60) -> list:
                     "x": w.winfo_x(), "y": w.winfo_y(),
                     "w": w.winfo_width(), "h": w.winfo_height(),
                     "req_w": w.winfo_reqwidth(), "req_h": w.winfo_reqheight(),
+                    "mapped": bool(w.winfo_ismapped()),
                     "depth": depth,
                 })
             except Exception:
@@ -182,18 +183,32 @@ def inspect(build, size=(1400, 220), settle_ms=60) -> list:
 def truncated(nodes, tol: int = 0) -> list:
     """Azok a widgetek, amelyek NEM férnek ki (a kért méret > a kapott).
 
-    Csak a MEGJELENÍTETT (w>1, h>1) elemeket nézi: a még nem elrendezett widget
-    mérete 1, abból nem következik levágás.
+    A szűrés a `mapped` jelzőn megy, NEM a méreten. Ez fontos: egy korábbi
+    változat a w/h ≤ 1 elemeket „még nincs elrendezve" címen kihagyta — csakhogy
+    a `pack_propagate(False)` MAGASSÁG NÉLKÜL pontosan 1 px-re lapítja a keretet,
+    tehát a legjellemzőbb összeesés-hiba ESETT KI a detektálásból. (Ez menet közben
+    valóban elő is fordult a 2.0 sor első változatánál: a képernyőkép mutatta, a
+    `truncated()` hallgatott.)
 
     `tol`: hány pixel eltérés még elfogadható (a betű-kerekítés miatt 1-2 pixel
     normális lehet)."""
     out = []
     for n in nodes or []:
-        if n["w"] <= 1 or n["h"] <= 1:
+        if not n.get("mapped", True):
             continue
         if n["req_w"] - n["w"] > tol or n["req_h"] - n["h"] > tol:
             out.append(n)
     return out
+
+
+def collapsed(nodes, min_px: int = 2) -> list:
+    """Az ÖSSZEESETT keretek: meg vannak jelenítve, de a méretük ~0, holott
+    tartalmat kérnek. A `pack_propagate(False)` magasság nélküli hívásának
+    klasszikus tünete — külön néven, mert ez a leggyakoribb tkinter-hiba itt."""
+    return [n for n in (nodes or [])
+            if n.get("mapped", True)
+            and (n["h"] < min_px or n["w"] < min_px)
+            and (n["req_h"] > min_px or n["req_w"] > min_px)]
 
 
 def height_groups(nodes, cls=None) -> dict:
