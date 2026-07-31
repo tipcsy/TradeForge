@@ -20,6 +20,21 @@
     "sma_period": 50,
     "gate": []
   },
+  "gates": {
+    "_comment": "Belépő-kapuk HATÁSA stratégiánként. Értékek: 'block' (akadályozza a beszállást) | 'reduce' (kockázatcsökkentés — belép, de kisebben) | 'none' (ki). A 'default' minden stratégiára érvényes, a stratégia-nevű kulcs felülírja. Páronként is felülírható: pairs.<SYM>.gates. Feloldás: pár+stratégia → pár default → globális stratégia → globális default → beépített. MEGJEGYZÉS: a 'csak jelzés' NEM kapu-hatás — az a stratégiáé (pairs.<SYM>.strategy_mode).",
+    "spread": {
+      "default": "block"
+    },
+    "tf_align": {
+      "_comment": "Ha ez a szekció hiányzik, a régi tf_align.gate LISTA dönt (a benne felsorolt stratégiákat blokkolja) — visszafelé kompatibilis.",
+      "default": "none",
+      "wpr_sma": "block"
+    },
+    "market": {
+      "_comment": "A piac-előszűrő ma nem blokkol, csak a kockázatcsökkentő preset megválasztásához ad bemenetet. 'reduce'-ra állítva viszont kisebb pozíciót nyithat.",
+      "default": "none"
+    }
+  },
   "dashboard": {
     "_comment": "Felület frissítési ütem. price_refresh_sec: BID/ASK/spread MINDEN párra (1-5 ajánlott). live_refresh_sec: indikátor (WPR) a FUTÓ pároknál. all_refresh_sec: indikátor minden párra. watchdog_threshold_sec: ennyi mp blokkolás fölött figyelmeztet a fagyás-watchdog (data/ui_watchdog.log).",
     "price_refresh_sec": 3,
