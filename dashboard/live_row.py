@@ -54,7 +54,7 @@ PAD = 4
 #   • a fix pixel a felületről állítható betűmérettel csúszna el.
 # A mintaszövegek a ténylegesen előforduló leghosszabb alakot képviselik.
 _SAMPLE = {
-    "symbol": ("mono_b", "XXXXXXXX"), "bid": ("mono", "99999.99"),
+    "symbol": ("mono_bold", "XXXXXXXX"), "bid": ("mono", "99999.99"),
     "ask": ("mono", "99999.99"), "change": ("mono", "+99.99%"),
     "spread": ("mono", "9999/9999"), "align": ("mono", "●●●●"),
     "market": ("small", "Sz.Bika"), "badge": ("mono", "⛔9"),
@@ -62,8 +62,8 @@ _SAMPLE = {
     "ctrl": ("small", "■ OPT"), "opt": ("small", "99/99"),
     "position": ("mono", "+9999.99$ +99.99R"),
     "daily": ("mono", "+9999.99$ +99.99R"),
-    "total_pos": ("mono_b", "+9999.99$ +99.99R"),
-    "total_daily": ("mono_b", "+9999.99$ +99.99R"),
+    "total_pos": ("mono_bold", "+9999.99$ +99.99R"),
+    "total_daily": ("mono_bold", "+9999.99$ +99.99R"),
     "close": ("small", "✕"),
 }
 
@@ -132,6 +132,13 @@ _DOT = "●"
 _FRAME = {"blocked": FG_RED, "reduced": FG_ORANGE}
 
 
+# A sor által HASZNÁLT betű-szerepek (`dashboard.theme.FONT_ROLES` kulcsai).
+# Csak ezeket nézzük a magasság/szélesség számításnál — a `theme.fonts()` a
+# TELJES szerep-készletet adja (`title`, `tiny`, …), és a `title` nagyobb betűje
+# fölöslegesen magasra tolná a sorokat.
+ROLES = ("mono", "mono_bold", "small")
+
+
 def row_height(fonts: dict) -> int:
     """A sor MAGASSÁGA a betűből származtatva.
 
@@ -141,7 +148,7 @@ def row_height(fonts: dict) -> int:
 
     Származtatva, nem konstans: a betűméret a felületről állítható
     (`dashboard.theme`), és egy bedrótozott 22 px nagyobb betűnél levágna."""
-    return max(f.metrics("linespace") for f in fonts.values()) + 2 * PAD
+    return max(fonts[r].metrics("linespace") for r in ROLES) + 2 * PAD
 
 
 def _cell(parent, text, width, fg=FG_WHITE, font=None, anchor="w", bg=None,
@@ -233,7 +240,7 @@ class LiveRow:
         dg = d.get("digits", 2)
         ch = d.get("change_pct")
         _cell(self.left, d.get("symbol", "—"), self._w["symbol"], FG_WHITE,
-              self._f["mono_b"], bg=bg, height=self._h)
+              self._f["mono_bold"], bg=bg, height=self._h)
         _cell(self.left, _fmt_price(d.get("bid"), dg), self._w["bid"], FG_WHITE,
               self._f["mono"], anchor="e", bg=bg, height=self._h)
         _cell(self.left, _fmt_price(d.get("ask"), dg), self._w["ask"], FG_WHITE,
@@ -352,9 +359,9 @@ class LiveRow:
         t = self.data.get("total") or {}
         pos, day = t.get("position") or {}, t.get("daily") or {}
         _cell(self.right, _money_r(pos.get("money"), pos.get("r")), self._w["total_pos"],
-              FG_WHITE, self._f["mono_b"], anchor="e", bg=bg, height=self._h)
+              FG_WHITE, self._f["mono_bold"], anchor="e", bg=bg, height=self._h)
         _cell(self.right, _money_r(day.get("money"), day.get("r")), self._w["total_daily"],
-              _pnl_color(day.get("money")), self._f["mono_b"], anchor="e", bg=bg, height=self._h)
+              _pnl_color(day.get("money")), self._f["mono_bold"], anchor="e", bg=bg, height=self._h)
         # Az X az instrumentum TÖRLÉSE — a sor legvégén, megerősítéssel (a hívó
         # dolga). Szándékosan nincs a stratégia vezérlői közt: az más művelet.
         _click_label(self.right, "✕", self._w["close"], FG_GRAY_DIM, self._f["small"],
@@ -514,12 +521,17 @@ def demo_row() -> dict:
 
 def build_demo(parent, collapsed: dict = None, rows: int = 3):
     """Fejléc + néhány sor kitalált adattal — a `tools/ui_preview.py`-hoz."""
-    from tkinter import font as tkfont
-    fonts = {
-        "mono": tkfont.Font(family="Consolas", size=10),
-        "mono_b": tkfont.Font(family="Consolas", size=10, weight="bold"),
-        "small": tkfont.Font(family="Segoe UI", size=9),
-    }
+    # A TÉMA megosztott betű-objektumai — nem sajátok. Így a bemutató pontosan
+    # azt mutatja, amit a felhasználó látni fog a saját beállításaival, és a
+    # betűméret-változás (theme.apply_fonts) élőben átüt rajta is.
+    #
+    # A gyorsítótár ürítése CSAK a bemutatóhoz kell: a `theme.fonts()` szingleton
+    # az ELSŐ Tk-gyökérhez köti a Font-objektumokat, a képernyőkép-eszköz viszont
+    # eldobható ablakokban rendereli. Az alkalmazásban egy gyökér van, ott ez
+    # sosem áll elő.
+    from dashboard import theme as _t
+    _t._FONTS.clear()
+    fonts = _t.fonts()
     holder = tk.Frame(parent, bg=BG)
     holder.pack(fill="both", expand=True)
     names = [s["name"] for s in demo_row()["strategies"]]

@@ -229,6 +229,20 @@ class LiveTable:
         self._rows = list(rows or [])
         self._build()
 
+    def rebuild(self):
+        """Újraépítés VÁLTOZATLAN adattal — BETŰVÁLTÁS után kell.
+
+        A `theme.fonts()` megosztott objektumokat ad, tehát az `apply_fonts()`
+        a feliratokon AZONNAL átüt. A cellák FIX szélessége és magassága viszont
+        a régi betűvel lett kimérve (`live_row.widths` / `row_height`), és attól
+        nem változik magától — a nagyobb betű levágódna, a kisebb mellett meg
+        üresen állna a hely. A beállító ablak ezért hívja ezt betűváltás után.
+
+        A SZÍN-váltás nem igényel ilyet: a modulok érték szerint kötik a
+        paletta-neveket, és a program egésze ugyanígy csak újraindításkor vált
+        témát (lásd `dashboard/theme.py`)."""
+        self._build()
+
     @property
     def collapsed(self) -> dict:
         return {"gates": self._collapsed.get("gates"),
@@ -240,13 +254,17 @@ class LiveTable:
 # ---------------------------------------------------------------------------
 
 def build_demo(parent, collapsed: dict = None, rows: int = 4):
-    from tkinter import font as tkfont
+    # A TÉMA megosztott betű-objektumai — nem sajátok. Így a bemutató pontosan
+    # azt mutatja, amit a felhasználó látni fog a saját beállításaival.
+    #
+    # A gyorsítótár ürítése CSAK a bemutatóhoz kell: a `theme.fonts()` szingleton
+    # az ELSŐ Tk-gyökérhez köti a Font-objektumokat, a képernyőkép-eszköz viszont
+    # eldobható ablakokban rendereli. Az alkalmazásban egy gyökér van, ott ez
+    # sosem áll elő.
+    from dashboard import theme as _t
+    _t._FONTS.clear()
     from dashboard.live_row import demo_row
-    fonts = {
-        "mono": tkfont.Font(family="Consolas", size=10),
-        "mono_b": tkfont.Font(family="Consolas", size=10, weight="bold"),
-        "small": tkfont.Font(family="Segoe UI", size=9),
-    }
+    fonts = _t.fonts()
     syms = ("Ger 40", "UsaTec", "EURUSD", "GOLD")
     data = []
     for i in range(rows):

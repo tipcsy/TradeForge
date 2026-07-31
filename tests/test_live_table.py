@@ -144,6 +144,52 @@ if TK_OK:
         check(f"{label}: semmi nem vagodik le", real == [],
               "; ".join(f'{x["text"]!r} {x["req_w"]}>{x["w"]}' for x in real[:3]))
 
+    # ══ 5b. TEMA es BETU — a programban valaszthato ═══════════════════════
+    # A tabla a TEMA szineit es a TEMA megosztott betu-objektumait hasznalja,
+    # nem sajatokat. A betu azonnal atut (megosztott Font), a szin viszont csak
+    # ujraindulaskor — ez a program egeszenek konvencioja (dashboard/theme.py).
+    from dashboard import theme as _t
+
+    def uses_theme(t):
+        """A tabla hattere a TEMA hattere legyen, ne bedrotozott hex."""
+        return t.frame.cget("bg")
+
+    check("a tabla a TEMA hatterszinet hasznalja", with_table(uses_theme) == _t.BG)
+
+    def demo_fonts_are_shared(t):
+        """A bemutato a theme.fonts() MEGOSZTOTT objektumait kapja — kulonben a
+        betumeret-valtas nem utne at rajta."""
+        shared = _t.fonts()
+        return all(t._f.get(r) is shared.get(r) for r in lr.ROLES)
+
+    check("a betuk a TEMA megosztott objektumai (nem sajat peldanyok)",
+          with_table(demo_fonts_are_shared))
+
+    # A sor csak a SAJAT szerepeit nezi: a theme.fonts() a teljes keszletet adja
+    # (`title` nagyobb, `tiny` kisebb), es a `title` folosleges magasra tolna.
+    _rt = tk.Tk()
+    try:
+        _t._FONTS.clear()          # a szingleton az ELOZO (mar eldobott) gyokerhez kotodott
+        f = _t.fonts()
+        h_used = lr.row_height(f)
+        h_all = max(x.metrics("linespace") for x in f.values()) + 2 * lr.PAD
+        check("a sor-magassag CSAK a hasznalt szerepekbol jon (nem a 'title'-bol)",
+              h_used <= h_all, f"{h_used} <= {h_all}")
+        check("a hasznalt szerepek mind leteznek a temaban",
+              all(r in f for r in lr.ROLES), str(lr.ROLES))
+    finally:
+        _rt.destroy()
+
+    def rebuild_works(t):
+        """Betuvaltas utan a tabla ujraepitheto (a fix cella-meretek kulonben a
+        REGI betuvel maradnanak kimerve)."""
+        t.rebuild()
+        t.frame.update_idletasks()
+        return len(t._row_widgets)
+
+    check("rebuild() ujraepiti a sorokat (betuvaltas utan kell)",
+          with_table(rebuild_works) == 4)
+
     # ══ 6. A jobb oszlop MINDIG latszik (nem szoritja ki a kozep) ══════════
     def right_visible(t):
         t.frame.update_idletasks()

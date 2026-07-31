@@ -87,10 +87,10 @@ if TK_OK:
     try:
         small = tkfont.Font(family="Segoe UI", size=9)
         f1 = {"mono": tkfont.Font(family="Consolas", size=10),
-              "mono_b": tkfont.Font(family="Consolas", size=10, weight="bold"),
+              "mono_bold": tkfont.Font(family="Consolas", size=10, weight="bold"),
               "small": small}
         f2 = {"mono": tkfont.Font(family="Consolas", size=14),
-              "mono_b": tkfont.Font(family="Consolas", size=14, weight="bold"),
+              "mono_bold": tkfont.Font(family="Consolas", size=14, weight="bold"),
               "small": tkfont.Font(family="Segoe UI", size=13)}
         w1, w2 = lr.widths(f1), lr.widths(f2)
         check("nagyobb betuhoz szelesebb oszlop tartozik",
