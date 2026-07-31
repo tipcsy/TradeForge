@@ -80,6 +80,23 @@ _HEADER_TEXT = {
 }
 
 
+def is_collapsed(collapsed: dict, name: str = None) -> bool:
+    """Össze van-e csukva ez a stratégia-blokk?
+
+    A `collapsed["strategies"]` lehet:
+      • `True`  — MINDEN stratégia összecsukva;
+      • halmaz/lista — csak a felsoroltak (a fejlécen egyenként kapcsolhatók);
+      • hamis érték — egyik sem.
+
+    `name=None` → „össze van-e csukva bármelyik" (a szélesség-számításhoz)."""
+    v = (collapsed or {}).get("strategies")
+    if not v:
+        return False
+    if v is True:
+        return True
+    return True if name is None else name in v
+
+
 def widths(fonts: dict, strategy_names=(), collapsed: dict = None) -> dict:
     """Az oszlop-szélességek MÉRVE, az aktuális betűkkel.
 
@@ -96,8 +113,10 @@ def widths(fonts: dict, strategy_names=(), collapsed: dict = None) -> dict:
     for k, (fkey, txt) in _SAMPLE.items():
         w = max(fonts[fkey].measure(txt), small.measure(_HEADER_TEXT.get(k, "")))
         out[k] = w + 2 * PAD
-    if (collapsed or {}).get("strategies") and strategy_names:
-        longest = max((small.measure(n) for n in strategy_names), default=0)
+    if is_collapsed(collapsed) and strategy_names:
+        # A felirat a KAPCSOLÓ-NYILAT is tartalmazza (`▸ wpr_sma`) — enélkül a
+        # mérés 4 px-szel kevesebbet ad, és a név utolsó betűje levágódik.
+        longest = max((small.measure(f"▸ {n}") for n in strategy_names), default=0)
         out["stages"] = max(out["stages"], longest + 2 * PAD)
     return out
 
@@ -175,6 +194,12 @@ class LiveRow:
 
     def __init__(self, parent, data: dict, fonts: dict, collapsed: dict = None,
                  stripe: int = 0, on_close=None):
+        """`parent` lehet EGY widget (a három rész egymás mellé kerül benne), vagy
+        HÁROM widget `(bal, közép, jobb)`.
+
+        A három szülő azért kell, mert a tábla fix–görgethető–fix elrendezésű: a
+        bal és jobb oszlop rögzített, a közép külön vásznon görög. Ilyenkor a sor
+        részei KÜLÖN oszlopokba épülnek, nem egymás mellé."""
         self.data = data
         self._f = fonts
         self._collapsed = collapsed or {}
@@ -183,12 +208,19 @@ class LiveRow:
                          self._collapsed)   # MÉRT szélességek (lásd widths)
         bg = BG_ROW_EVEN if stripe % 2 == 0 else BG_ROW_ODD
 
-        self.frame = tk.Frame(parent, bg=bg, height=self._h)
-        self.left = tk.Frame(self.frame, bg=bg, height=self._h)
-        self.mid = tk.Frame(self.frame, bg=bg, height=self._h)
-        self.right = tk.Frame(self.frame, bg=bg, height=self._h)
-        for f in (self.left, self.mid, self.right):
-            f.pack(side="left", fill="y")
+        if isinstance(parent, (tuple, list)):
+            self.frame = None
+            self.left, self.mid, self.right = (
+                tk.Frame(p, bg=bg, height=self._h) for p in parent)
+            for f in (self.left, self.mid, self.right):
+                f.pack(fill="x")
+        else:
+            self.frame = tk.Frame(parent, bg=bg, height=self._h)
+            self.left = tk.Frame(self.frame, bg=bg, height=self._h)
+            self.mid = tk.Frame(self.frame, bg=bg, height=self._h)
+            self.right = tk.Frame(self.frame, bg=bg, height=self._h)
+            for f in (self.left, self.mid, self.right):
+                f.pack(side="left", fill="y")
 
         self._build_instrument(bg)
         self._build_gates(bg)
@@ -260,7 +292,7 @@ class LiveRow:
         viszont a keretével a kapu-érintettséget is hordozza, tehát a legtömörebb
         nézet sem veszít információt."""
         self._stages_cell(bg, st)
-        if self._collapsed.get("strategies"):
+        if is_collapsed(self._collapsed, st.get("name")):
             return
         pos = st.get("position") or {}
         day = st.get("daily") or {}
@@ -348,73 +380,97 @@ def _quality_color(q):
 # Fejléc — UGYANAZOKKAL a szélességekkel és betűvel
 # ---------------------------------------------------------------------------
 
-def build_header(parent, fonts: dict, strategies: list, collapsed: dict = None):
+def build_header(parent, fonts: dict, strategies: list, collapsed: dict = None,
+                 on_toggle=None):
     """A sorokkal EGYEZŐ fejléc.
 
     A fejlécnek ugyanazt a betűt és ugyanazokat a szélességeket kell használnia,
     mint a celláknak — különben az oszlopok nem illeszkednek (ez az 1. körben
-    ténylegesen előfordult)."""
+    ténylegesen előfordult).
+
+    `parent` itt is lehet EGY widget vagy HÁROM `(bal, közép, jobb)` — utóbbi a
+    fix–görgethető–fix táblához.
+
+    `on_toggle(kulcs)`: az összecsukó kapcsoló. A kulcs `"gates"` vagy a stratégia
+    NEVE. A csoport-feliratok kattinthatók, és `▾`/`▸` mutatja az állapotot — így
+    a kapcsoló ott van, ahol a hatása látszik, nem külön eszköztárban."""
     collapsed = collapsed or {}
     f = fonts["small"]
     h = row_height(fonts)            # a sorokkal AZONOS magasság
     w = widths(fonts, strategies, collapsed)   # a sorokkal AZONOS szélességek
 
-    def group(parent_, keys, text, fg=FG_GRAY_DIM):
+    def group(parent_, keys, text, fg=FG_GRAY_DIM, key=None, is_coll=False):
         """Csoport-felirat, ami a hozzá tartozó oszlopok FÖLÖTT áll végig.
         A szélessége a tagoszlopok összege + a köztük lévő hézagok — így a
         két fejlécsor és a cellák egy vonalban maradnak."""
         span = sum(w[k] for k in keys) + GAP * (len(keys) - 1)
-        _cell(parent_, text, span, fg, f, anchor="center", bg=BG_HEADER, height=h)
+        if key is None or on_toggle is None:
+            _cell(parent_, text, span, fg, f, anchor="center", bg=BG_HEADER,
+                  height=h)
+            return
+        _click_label(parent_, f"{'▸' if is_coll else '▾'} {text}", span, fg, f,
+                     on_click=lambda k=key: on_toggle(k), bg=BG_HEADER, height=h)
 
-    head = tk.Frame(parent, bg=BG_HEADER)
+    if isinstance(parent, (tuple, list)):
+        head = None
+        tl, tm, tr = (tk.Frame(p, bg=BG_HEADER, height=h) for p in parent)
+        bl, bm, br = (tk.Frame(p, bg=BG_HEADER, height=h) for p in parent)
+        for x in (tl, tm, tr, bl, bm, br):
+            x.pack(fill="x")
+    else:
+        head = tk.Frame(parent, bg=BG_HEADER)
+        top = tk.Frame(head, bg=BG_HEADER, height=h)
+        top.pack(fill="x")
+        tl, tm, tr = (tk.Frame(top, bg=BG_HEADER, height=h) for _ in range(3))
+        bot = tk.Frame(head, bg=BG_HEADER, height=h)
+        bot.pack(fill="x")
+        bl, bm, br = (tk.Frame(bot, bg=BG_HEADER, height=h) for _ in range(3))
+        for x in (tl, tm, tr, bl, bm, br):
+            x.pack(side="left", fill="y")
+
     # ── 1. sor: csoportok (a terv „Instrumentum / Kapuk / Stratégiák" sávja) ──
-    top = tk.Frame(head, bg=BG_HEADER, height=h)
-    top.pack(fill="x")
-    tl, tm, tr = (tk.Frame(top, bg=BG_HEADER, height=h) for _ in range(3))
-    for x in (tl, tm, tr):
-        x.pack(side="left", fill="y")
     group(tl, ("symbol", "bid", "ask", "change"), "Instrumentum")
-    gate_keys = ("spread", "align", "market")
     if not collapsed.get("gates"):
-        group(tm, gate_keys, "Kapuk")
+        group(tm, ("spread", "align", "market"), "Kapuk", key="gates")
     _cell(tm, "", w["badge"], FG_GRAY_DIM, f, bg=BG_HEADER, height=h)
-    strat_keys = (("stages",) if collapsed.get("strategies")
-                  else ("stages", "position", "daily", "quality", "ctrl", "opt"))
     for name in strategies:
-        group(tm, strat_keys, name, FG_BLUE)
+        coll = is_collapsed(collapsed, name)
+        keys = ("stages",) if coll else ("stages", "position", "daily",
+                                         "quality", "ctrl", "opt")
+        group(tm, keys, name, FG_BLUE, key=name, is_coll=coll)
     group(tr, ("total_pos", "total_daily"), "Összesítő")
     _cell(tr, "", w["close"], FG_GRAY_DIM, f, bg=BG_HEADER, height=h)
 
     # ── 2. sor: oszlopnevek ──
-    bot = tk.Frame(head, bg=BG_HEADER, height=h)
-    bot.pack(fill="x")
-    left, mid, right = (tk.Frame(bot, bg=BG_HEADER, height=h) for _ in range(3))
-    for x in (left, mid, right):
-        x.pack(side="left", fill="y")
-
     for key, txt in (("symbol", "Symbol"), ("bid", "BID"), ("ask", "ASK"),
                      ("change", "Vált.%")):
-        _cell(left, txt, w[key], FG_GRAY_DIM, f, bg=BG_HEADER, height=h)
+        _cell(bl, txt, w[key], FG_GRAY_DIM, f, bg=BG_HEADER, height=h)
     if not collapsed.get("gates"):
         for key, txt in (("spread", "Spread"), ("align", "Együtt"),
                          ("market", "Piac")):
-            _cell(mid, txt, w[key], FG_GRAY_DIM, f, bg=BG_HEADER, height=h)
-    _cell(mid, "K.Össz.", w["badge"], FG_GRAY_DIM, f, anchor="center",
-          bg=BG_HEADER, height=h)
-    for _name in strategies:
-        _cell(mid, "jelzés", w["stages"], FG_GRAY_DIM, f, anchor="center",
+            _cell(bm, txt, w[key], FG_GRAY_DIM, f, bg=BG_HEADER, height=h)
+    # Összecsukott kapuknál a K.Össz. fejléce lesz a kapcsoló (különben nem
+    # lehetne visszanyitni — a „Kapuk" felirat ilyenkor nem létezik).
+    if collapsed.get("gates") and on_toggle is not None:
+        _click_label(bm, "▸ K.Ö.", w["badge"], FG_GRAY_DIM, f,
+                     on_click=lambda: on_toggle("gates"), bg=BG_HEADER, height=h)
+    else:
+        _cell(bm, "K.Össz.", w["badge"], FG_GRAY_DIM, f, anchor="center",
               bg=BG_HEADER, height=h)
-        if collapsed.get("strategies"):
+    for name in strategies:
+        _cell(bm, "jelzés", w["stages"], FG_GRAY_DIM, f, anchor="center",
+              bg=BG_HEADER, height=h)
+        if is_collapsed(collapsed, name):
             continue
         for key, txt in (("position", "Pozíció"), ("daily", "Napi P&L"),
                          ("quality", "Min."), ("ctrl", "Vezérlés"),
                          ("opt", "Opt")):
-            _cell(mid, txt, w[key], FG_GRAY_DIM, f, bg=BG_HEADER, height=h)
-    _cell(right, "Pozíció", w["total_pos"], FG_GRAY_DIM, f, anchor="e",
+            _cell(bm, txt, w[key], FG_GRAY_DIM, f, bg=BG_HEADER, height=h)
+    _cell(br, "Pozíció", w["total_pos"], FG_GRAY_DIM, f, anchor="e",
           bg=BG_HEADER, height=h)
-    _cell(right, "Napi P&L", w["total_daily"], FG_GRAY_DIM, f, anchor="e",
+    _cell(br, "Napi P&L", w["total_daily"], FG_GRAY_DIM, f, anchor="e",
           bg=BG_HEADER, height=h)
-    _cell(right, "", w["close"], FG_GRAY_DIM, f, bg=BG_HEADER, height=h)
+    _cell(br, "", w["close"], FG_GRAY_DIM, f, bg=BG_HEADER, height=h)
     return head
 
 
