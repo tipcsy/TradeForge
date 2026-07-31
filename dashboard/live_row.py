@@ -54,9 +54,11 @@ PAD = 4
 #   • a fix pixel a felületről állítható betűmérettel csúszna el.
 # A mintaszövegek a ténylegesen előforduló leghosszabb alakot képviselik.
 _SAMPLE = {
+    # A spread-hatar OTJEGYU is lehet: nagy point_size-u parnal az ATR-tag
+    # ezresekben jon ki (a valodi dashboardon "370/100000" jelent meg).
     "symbol": ("mono_bold", "XXXXXXXX"), "bid": ("mono", "99999.99"),
     "ask": ("mono", "99999.99"), "change": ("mono", "+99.99%"),
-    "spread": ("mono", "9999/9999"), "align": ("mono", "●●●●"),
+    "spread": ("mono", "99999/99999"), "align": ("mono", "●●●●"),
     "market": ("small", "Sz.Bika"), "badge": ("mono", "⛔9"),
     "stages": ("mono", "●●●●"), "quality": ("small", "Közepes"),
     "ctrl": ("small", "■ OPT"), "opt": ("small", "99/99"),
@@ -229,25 +231,39 @@ class LiveRow:
             for f in (self.left, self.mid, self.right):
                 f.pack(side="left", fill="y")
 
+        self._lbl = {}      # cella-kulcs -> Label (a HELYBEN frissiteshez)
+        self._dots = {}     # kulcs -> [Label, …] (pottyok)
+        self._box = {}      # strategia -> a jelzes-cella KERETE
+        self._bg = bg
         self._build_instrument(bg)
         self._build_gates(bg)
         self._build_strategies(bg)
         self._build_total(bg, on_close)
+
+    def _rc(self, key, parent, text, width, fg, font, **kw):
+        """`_cell` + a Label FELJEGYZESE, hogy a `update()` helyben frissithesse.
+
+        Miert kell: a tabla 3 masodpercenkent frissul. Teljes ujraepitessel a
+        widgetek eldobasa/letrehozasa lathatoan villogna; helyben csak a
+        megvaltozott szoveget/szint irjuk at."""
+        _f, lbl = _cell(parent, text, width, fg, font, **kw)
+        self._lbl[key] = lbl
+        return lbl
 
     # ── bal: fix ────────────────────────────────────────────────────────
     def _build_instrument(self, bg):
         d = self.data
         dg = d.get("digits", 2)
         ch = d.get("change_pct")
-        _cell(self.left, d.get("symbol", "—"), self._w["symbol"], FG_WHITE,
-              self._f["mono_bold"], bg=bg, height=self._h)
-        _cell(self.left, _fmt_price(d.get("bid"), dg), self._w["bid"], FG_WHITE,
-              self._f["mono"], anchor="e", bg=bg, height=self._h)
-        _cell(self.left, _fmt_price(d.get("ask"), dg), self._w["ask"], FG_WHITE,
-              self._f["mono"], anchor="e", bg=bg, height=self._h)
-        _cell(self.left, "—" if ch is None else f"{ch:+.2f}%", self._w["change"],
-              FG_GRAY if ch is None else (FG_GREEN if ch >= 0 else FG_RED),
-              self._f["mono"], anchor="e", bg=bg, height=self._h)
+        self._rc("symbol", self.left, d.get("symbol", "—"), self._w["symbol"], FG_WHITE,
+                 self._f["mono_bold"], bg=bg, height=self._h)
+        self._rc("bid", self.left, _fmt_price(d.get("bid"), dg), self._w["bid"], FG_WHITE,
+                 self._f["mono"], anchor="e", bg=bg, height=self._h)
+        self._rc("ask", self.left, _fmt_price(d.get("ask"), dg), self._w["ask"], FG_WHITE,
+                 self._f["mono"], anchor="e", bg=bg, height=self._h)
+        self._rc("change", self.left, "—" if ch is None else f"{ch:+.2f}%", self._w["change"],
+                 FG_GRAY if ch is None else (FG_GREEN if ch >= 0 else FG_RED),
+                 self._f["mono"], anchor="e", bg=bg, height=self._h)
 
     # ── közép: összecsukható ────────────────────────────────────────────
     def _build_gates(self, bg):
@@ -259,15 +275,16 @@ class LiveRow:
         g = self.data.get("gates") or {}
         if not self._collapsed.get("gates"):
             sp = g.get("spread") or {}
-            _cell(self.mid, sp.get("text", "—"), self._w["spread"],
-                  FG_RED if sp.get("blocking") else FG_GREEN, self._f["mono"], bg=bg, height=self._h)
+            self._rc("spread", self.mid, sp.get("text", "—"), self._w["spread"],
+                     FG_RED if sp.get("blocking") else FG_GREEN, self._f["mono"],
+                     bg=bg, height=self._h)
             self._align_cell(bg, g.get("align") or {})
-            _cell(self.mid, (g.get("market") or {}).get("text", "—"), self._w["market"],
-                  FG_GRAY, self._f["small"], bg=bg, height=self._h)
+            self._rc("market", self.mid, (g.get("market") or {}).get("text", "—"),
+                     self._w["market"], FG_GRAY, self._f["small"], bg=bg, height=self._h)
         badge = g.get("badge", "✓")
-        _cell(self.mid, badge, self._w["badge"],
-              FG_RED if badge != "✓" else FG_GREEN, self._f["mono"],
-              anchor="center", bg=bg, height=self._h)
+        self._rc("badge", self.mid, badge, self._w["badge"],
+                 FG_RED if badge != "✓" else FG_GREEN, self._f["mono"],
+                 anchor="center", bg=bg, height=self._h)
 
     def _align_cell(self, bg, al: dict):
         """Az idősík-irányok pöttyei — KERET NÉLKÜL.
@@ -285,10 +302,13 @@ class LiveRow:
             tk.Label(inner, text="—", fg=FG_GRAY_DIM, bg=bg, font=self._f["mono"],
                      bd=0, padx=0, pady=0, highlightthickness=0).pack()
             return
+        self._dots["align"] = []
         for s in signs:
-            tk.Label(inner, text=_DOT, bg=bg, font=self._f["mono"],
-                     fg=FG_GREEN if s > 0 else FG_RED if s < 0 else FG_GRAY_DIM,
-                     bd=0, padx=0, pady=0, highlightthickness=0).pack(side="left")
+            l = tk.Label(inner, text=_DOT, bg=bg, font=self._f["mono"],
+                         fg=FG_GREEN if s > 0 else FG_RED if s < 0 else FG_GRAY_DIM,
+                         bd=0, padx=0, pady=0, highlightthickness=0)
+            l.pack(side="left")
+            self._dots["align"].append(l)
 
     def _build_strategies(self, bg):
         for st in self.data.get("strategies") or []:
@@ -303,13 +323,16 @@ class LiveRow:
             return
         pos = st.get("position") or {}
         day = st.get("daily") or {}
-        _cell(self.mid, _money_r(pos.get("money"), pos.get("r")), self._w["position"],
-              FG_WHITE, self._f["mono"], anchor="e", bg=bg, height=self._h)
-        _cell(self.mid, _money_r(day.get("money"), day.get("r")), self._w["daily"],
-              _pnl_color(day.get("money")), self._f["mono"], anchor="e", bg=bg, height=self._h)
+        n = st.get("name", "")
+        self._rc(f"{n}|position", self.mid, _money_r(pos.get("money"), pos.get("r")),
+                 self._w["position"], FG_WHITE, self._f["mono"], anchor="e",
+                 bg=bg, height=self._h)
+        self._rc(f"{n}|daily", self.mid, _money_r(day.get("money"), day.get("r")),
+                 self._w["daily"], _pnl_color(day.get("money")), self._f["mono"],
+                 anchor="e", bg=bg, height=self._h)
         q = st.get("quality") or "—"
-        _cell(self.mid, q, self._w["quality"], _quality_color(q), self._f["small"],
-              anchor="center", bg=bg, height=self._h)
+        self._rc(f"{n}|quality", self.mid, q, self._w["quality"], _quality_color(q),
+                 self._f["small"], anchor="center", bg=bg, height=self._h)
         # Vezérlés: kattintható Labelek (NEM Button — lásd a modul-doksit)
         ctrl = tk.Frame(self.mid, width=self._w["ctrl"], bg=bg, height=self._h)
         ctrl.pack(side="left", padx=(0, GAP))
@@ -317,16 +340,17 @@ class LiveRow:
         inner = tk.Frame(ctrl, bg=bg, height=self._h)
         inner.pack(expand=True)
         live = st.get("live")
-        for txt, fg, cb in (("■" if live else "▶", FG_RED if live else FG_GREEN,
-                             st.get("on_toggle")),
-                            ("OPT", FG_BLUE, st.get("on_opt"))):
+        for key, txt, fg, cb in (("run", "■" if live else "▶",
+                                  FG_RED if live else FG_GREEN, st.get("on_toggle")),
+                                 ("opt", "OPT", FG_BLUE, st.get("on_opt"))):
             l = tk.Label(inner, text=txt, fg=fg, bg=bg, font=self._f["small"],
                          cursor="hand2", bd=0, padx=3, pady=0, highlightthickness=0)
             l.pack(side="left")
+            self._lbl[f"{n}|ctrl_{key}"] = l
             if cb:
                 l.bind("<Button-1>", lambda _e, c=cb: c())
-        _cell(self.mid, st.get("opt") or "—", self._w["opt"], FG_GRAY,
-              self._f["small"], anchor="center", bg=bg, height=self._h)
+        self._rc(f"{n}|opt", self.mid, st.get("opt") or "—", self._w["opt"], FG_GRAY,
+                 self._f["small"], anchor="center", bg=bg, height=self._h)
 
     def _stages_cell(self, bg, st: dict):
         """A jelzés-cella: stádium-pöttyök + KERET.
@@ -349,23 +373,114 @@ class LiveRow:
         box.pack(expand=True)
         dots = tk.Frame(box, bg=bg, height=self._h)
         dots.pack(padx=2)
+        nm = st.get("name", "")
+        self._box[nm] = box
+        self._dots[nm] = []
         for s in (st.get("stages") or []):
-            tk.Label(dots, text=_DOT, bg=bg, font=self._f["mono"],
-                     fg=_stage_color(s), bd=0, padx=0, pady=0,
-                     highlightthickness=0).pack(side="left")
+            l = tk.Label(dots, text=_DOT, bg=bg, font=self._f["mono"],
+                         fg=_stage_color(s), bd=0, padx=0, pady=0,
+                         highlightthickness=0)
+            l.pack(side="left")
+            self._dots[nm].append(l)
 
     # ── jobb: fix ───────────────────────────────────────────────────────
     def _build_total(self, bg, on_close):
         t = self.data.get("total") or {}
         pos, day = t.get("position") or {}, t.get("daily") or {}
-        _cell(self.right, _money_r(pos.get("money"), pos.get("r")), self._w["total_pos"],
-              FG_WHITE, self._f["mono_bold"], anchor="e", bg=bg, height=self._h)
-        _cell(self.right, _money_r(day.get("money"), day.get("r")), self._w["total_daily"],
-              _pnl_color(day.get("money")), self._f["mono_bold"], anchor="e", bg=bg, height=self._h)
+        self._rc("total_pos", self.right, _money_r(pos.get("money"), pos.get("r")),
+                 self._w["total_pos"], FG_WHITE, self._f["mono_bold"], anchor="e",
+                 bg=bg, height=self._h)
+        self._rc("total_daily", self.right, _money_r(day.get("money"), day.get("r")),
+                 self._w["total_daily"], _pnl_color(day.get("money")),
+                 self._f["mono_bold"], anchor="e", bg=bg, height=self._h)
         # Az X az instrumentum TÖRLÉSE — a sor legvégén, megerősítéssel (a hívó
         # dolga). Szándékosan nincs a stratégia vezérlői közt: az más művelet.
         _click_label(self.right, "✕", self._w["close"], FG_GRAY_DIM, self._f["small"],
                      on_click=on_close, bg=bg, height=self._h)
+
+
+    # ── HELYBEN frissítés ────────────────────────────────────────────────
+    def structure_key(self) -> tuple:
+        """A sor SZERKEZETÉT azonosító kulcs: a stratégiák neve+sorrendje és a
+        stádiumok száma. Ha ez változik, a sort ÚJRA KELL ÉPÍTENI (más cellák
+        kellenek); ha nem, elég a helyben frissítés."""
+        return tuple((s.get("name", ""), len(s.get("stages") or []))
+                     for s in (self.data.get("strategies") or []))
+
+    def _set(self, key, text, fg):
+        """Egy cella átírása — CSAK ha tényleg változott.
+
+        A fölösleges `config()` hívás nem csak lassú: a tkinter újrarajzolja a
+        widgetet, ami 3 másodpercenként, tucatnyi soron látható villogás."""
+        lbl = self._lbl.get(key)
+        if lbl is None:
+            return
+        if lbl.cget("text") != text:
+            lbl.config(text=text)
+        if fg is not None and lbl.cget("fg") != fg:
+            lbl.config(fg=fg)
+
+    def update(self, data: dict) -> bool:
+        """Az adat frissítése HELYBEN. Visszaad: sikerült-e.
+
+        `False`, ha a SZERKEZET változott (más stratégiák/stádiumok) — ilyenkor a
+        hívó (a tábla) újraépít. Így a gyakori eset olcsó, a ritka eset helyes."""
+        new_key = tuple((s.get("name", ""), len(s.get("stages") or []))
+                        for s in (data.get("strategies") or []))
+        if new_key != self.structure_key():
+            return False
+        self.data = data
+        dg = data.get("digits", 2)
+        ch = data.get("change_pct")
+        self._set("symbol", data.get("symbol", "—"), None)
+        self._set("bid", _fmt_price(data.get("bid"), dg), None)
+        self._set("ask", _fmt_price(data.get("ask"), dg), None)
+        self._set("change", "—" if ch is None else f"{ch:+.2f}%",
+                  FG_GRAY if ch is None else (FG_GREEN if ch >= 0 else FG_RED))
+
+        g = data.get("gates") or {}
+        sp = g.get("spread") or {}
+        self._set("spread", sp.get("text", "—"),
+                  FG_RED if sp.get("blocking") else FG_GREEN)
+        self._set("market", (g.get("market") or {}).get("text", "—"), None)
+        badge = g.get("badge", "✓")
+        self._set("badge", badge, FG_RED if badge != "✓" else FG_GREEN)
+
+        for i, s in enumerate((g.get("align") or {}).get("signs") or []):
+            dots = self._dots.get("align") or []
+            if i < len(dots):
+                c = FG_GREEN if s > 0 else FG_RED if s < 0 else FG_GRAY_DIM
+                if dots[i].cget("fg") != c:
+                    dots[i].config(fg=c)
+
+        for st in data.get("strategies") or []:
+            n = st.get("name", "")
+            pos, day = st.get("position") or {}, st.get("daily") or {}
+            self._set(f"{n}|position", _money_r(pos.get("money"), pos.get("r")), None)
+            self._set(f"{n}|daily", _money_r(day.get("money"), day.get("r")),
+                      _pnl_color(day.get("money")))
+            q = st.get("quality") or "—"
+            self._set(f"{n}|quality", q, _quality_color(q))
+            self._set(f"{n}|opt", st.get("opt") or "—", None)
+            live = st.get("live")
+            self._set(f"{n}|ctrl_run", "■" if live else "▶",
+                      FG_RED if live else FG_GREEN)
+            for i, sc in enumerate(st.get("stages") or []):
+                dots = self._dots.get(n) or []
+                if i < len(dots) and dots[i].cget("fg") != _stage_color(sc):
+                    dots[i].config(fg=_stage_color(sc))
+            box = self._box.get(n)
+            if box is not None:
+                c = _FRAME.get(st.get("frame") or "") or self._bg
+                if box.cget("highlightbackground") != c:
+                    box.config(highlightbackground=c, highlightcolor=c)
+
+        t = data.get("total") or {}
+        tp, td = t.get("position") or {}, t.get("daily") or {}
+        self._set("total_pos", _money_r(tp.get("money"), tp.get("r")), None)
+        self._set("total_daily", _money_r(td.get("money"), td.get("r")),
+                  _pnl_color(td.get("money")))
+        return True
 
 
 def _stage_color(name):

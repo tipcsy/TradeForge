@@ -2756,10 +2756,15 @@ class DashboardWindow:
         table_holder.pack(fill="both", expand=True, padx=2)
 
         header_holder = tk.Frame(table_holder, bg=BG)
-        header_holder.pack(fill="x")
         self._header_row = HeaderRow(
             header_holder, self._columns, header_font, small_font,
             on_col_click=self._on_header_click)
+        # A 2.0 tábla SAJÁT (kétsoros, csoportosított) fejlécet hoz — a classic
+        # fejléc ilyenkor nem jelenik meg. Megépítjük, de nem csomagoljuk ki: a
+        # rendezés/szűrés kódja hivatkozik rá (`_header_row.set_sort`), és egy
+        # None-ellenőrzés minden hívási helyre elszórva több kárt okozna.
+        if self._layout_mode() != "live2":
+            header_holder.pack(fill="x")
 
         canvas = tk.Canvas(table_holder, bg=BG, highlightthickness=0)
         vsb = tk.Scrollbar(table_holder, orient="vertical", command=canvas.yview)
@@ -2793,6 +2798,21 @@ class DashboardWindow:
         canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
 
         self.rows: dict[str, PairRow] = {}
+
+        # ── Dashboard 2.0 (opcionális) ──────────────────────────────────
+        # `dashboard.layout = "live2"` → a 2.0 tábla (fix–görgethető–fix,
+        # összecsukható blokkok, per-stratégia oszlopok). Alapértelmezés a
+        # `classic`: az 1. körben HÁROM elrendezés bukott meg, ezért a 2.0 nem
+        # veszi át a helyét, amíg nem bizonyított — a `self.rows` üresen marad,
+        # így a classic frissítő-ág (`hasattr`/üres ciklus) magától kimarad.
+        if self._layout_mode() == "live2":
+            self._build_live2(self._table_frame)
+            tk.Frame(parent, bg=FG_GRAY_DIM, height=1).pack(fill="x", padx=2, pady=2)
+            self.lbl_status = tk.Label(parent, text="Indulás...", bg=BG,
+                                       fg=FG_GRAY, font=small_font)
+            self.lbl_status.pack(side="bottom", pady=4)
+            return
+
         for idx, (symbol, pair_cfg) in enumerate(self.cfg["pairs"].items()):
             if not isinstance(pair_cfg, dict):
                 continue
@@ -2813,6 +2833,83 @@ class DashboardWindow:
         tk.Frame(parent, bg=FG_GRAY_DIM, height=1).pack(fill="x", padx=2, pady=2)
         self.lbl_status = tk.Label(parent, text="Indulás...", bg=BG, fg=FG_GRAY, font=small_font)
         self.lbl_status.pack(side="bottom", pady=4)
+
+    # ── Dashboard 2.0 tábla ──────────────────────────────────────────────
+    def _layout_mode(self) -> str:
+        """`classic` (alap) vagy `live2`. A configból: `dashboard.layout`."""
+        return str((self.cfg.get("dashboard") or {}).get("layout", "classic"))
+
+    def _build_live2(self, parent):
+        """A 2.0 tábla felépítése. A sor-adatot a `dashboard.row_source` állítja
+        elő a motor pillanatképeiből — itt csak a forrásokat kötjük be."""
+        from dashboard.live_table import LiveTable
+        from dashboard import theme as _t
+        self._live2 = LiveTable(
+            parent, _t.fonts(), rows=self._live2_rows(),
+            on_close=self._handle_delete)
+        self._live2.frame.pack(fill="both", expand=True)
+
+    def _live2_strategies(self, symbol: str) -> list:
+        """A soron megjelenő stratégiák. MINDEN sorban ugyanaz a lista kell
+        legyen, különben a tábla oszlopai nem állnának egy vonalban — ezért a
+        config `available_strategies`-éből dolgozunk, nem a pár sajátjából."""
+        from strategy import available_strategy_names
+        return list(available_strategy_names(self.cfg))
+
+    def _live2_rows(self) -> list:
+        """A 2.0 sorok adata. Minden külső forrás ITT kötődik be — a leképezés
+        maga tiszta és tesztelt (`dashboard/row_source.py`)."""
+        from dashboard import row_source as _rsrc
+        from core import position_meta as _pm
+        from core import run_state as _rst
+        try:
+            from trading.live_trader import strategy_of_ticket as _owner
+        except Exception:
+            _owner = None
+        positions = (getattr(self, "_mt5_cache", {}) or {}).get("positions_detail") or []
+        syms = [s for s, p in self.cfg["pairs"].items() if isinstance(p, dict)]
+
+        def live_of(sym, name):
+            return name in (_rst.live_strategies(self.cfg, sym,
+                                                self._live2_strategies(sym)) or [])
+
+        rows = []
+        for sym in syms:
+            ds = self.dashboard_ref.get(sym)
+            if ds is None:
+                continue
+            pc = self.cfg["pairs"].get(sym) or {}
+            rows.append(_rsrc.row_data(
+                sym, ds, self._live2_strategies(sym), self.cfg,
+                getattr(ds, "params", None) or {}, pc,
+                positions=positions, owner_of=_owner, risk_of=_pm.risk_of,
+                quality_of=self._live2_quality,
+                opt_of=lambda s, n: self.optimizer_status.get(s, "") or "—",
+                live_of=live_of,
+                on_toggle=lambda s, n: self._handle_run(s),
+                on_opt=lambda s, n: self._handle_opt(s)))
+        return rows
+
+    def _live2_quality(self, symbol: str, name: str):
+        """A minősítés PER STRATÉGIA — a stratégia SAJÁT mentett eredményéből.
+
+        A `ds.opt_grade` szimbólum-szintű, tehát több stratégiánál mindig az
+        elsődlegesét mutatná; pont ez a kétértelműség, amit a 2.0 orvosol. Szűk
+        kivétel-kezelés: a `NameError`/elírás ne látszódjon adathiánynak (ez az
+        1. körben a Minőség-oszlopot némán „—"-re állította)."""
+        from core.params_store import params_file
+        from strategy import get_strategy_by_name
+        p = params_file(symbol, name)
+        if not p.exists():
+            return None
+        try:
+            with open(p, encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            return None
+        txt, col, _reason = get_strategy_by_name(name).grade(
+            data.get("test_summary", {}), self.cfg)
+        return (txt, col)
 
     def _on_header_click(self, col_idx: int):
         if self._sort_col == col_idx:
@@ -5289,6 +5386,19 @@ class DashboardWindow:
                                no_trade=no_trade)
                 if inst_state == "LIVE":
                     live_count += 1
+
+        # ── Dashboard 2.0 tábla frissítése ──────────────────────────────
+        # HELYBEN frissül (a LiveTable csak szerkezet-változáskor épít újra),
+        # tehát a 3 másodperces ütem nem villog.
+        if getattr(self, "_live2", None) is not None:
+            try:
+                self._live2.refresh(self._live2_rows())
+            except Exception:
+                import logging as _logging
+                _logging.getLogger(__name__).warning(
+                    "A 2.0 tábla frissítése elbukott.", exc_info=True)
+            live_count = sum(1 for s in self.cfg["pairs"]
+                             if self._display_state(s) == "LIVE")
 
         if hasattr(self, "lbl_status"):
             # "Utolsó frissítés" = lokális UI-esemény → HELYI idő (nem UTC/bróker).

@@ -224,10 +224,27 @@ class LiveTable:
 
     # ── Adat ─────────────────────────────────────────────────────────────
     def refresh(self, rows):
-        """Új adat. Egyelőre teljes újraépítés — a cellánkénti frissítés akkor
-        válik fontossá, amikor a tábla élő adatra kerül (másodpercenként)."""
-        self._rows = list(rows or [])
-        self._build()
+        """Új adat — HELYBEN, ha lehet.
+
+        A tábla másodpercenként frissül; teljes újraépítéssel a widgetek
+        eldobása/létrehozása láthatóan villogna. Ezért a gyakori esetben csak a
+        megváltozott cellák szövegét/színét írjuk át.
+
+        ÚJRAÉPÍTÉS csak akkor, ha a SZERKEZET más: változott a szimbólumok
+        halmaza/sorrendje, vagy egy soron más stratégiák (vagy más stádium-szám)
+        vannak. Ilyenkor más cellák kellenek, tehát a helyben frissítés hazudna."""
+        rows = list(rows or [])
+        old = [d.get("symbol") for d in self._rows]
+        new = [d.get("symbol") for d in rows]
+        if old != new or len(self._row_widgets) != len(rows):
+            self._rows = rows
+            self._build()
+            return
+        self._rows = rows
+        for w, d in zip(self._row_widgets, rows):
+            if not w.update(d):          # szerkezet-változás -> teljes újraépítés
+                self._build()
+                return
 
     def rebuild(self):
         """Újraépítés VÁLTOZATLAN adattal — BETŰVÁLTÁS után kell.
