@@ -159,6 +159,47 @@ pm.load()
 check("betolteskor a 0 kockazatu bejegyzes kiesik", pm.risk_of(501) is None)
 check("...az ervenyes megmarad", pm.risk_of(502) == 11.0)
 
+# ══ 7b. risk_of_closed — a "Lezart" ful R-jenek kockazat-forrasa ═══════════
+# Ket forras: (1) a ROGZITETT ertek, (2) tartalek a NYITO ORDER SL-jebol. A
+# tartalek a v1.81.0 ELOTT nyitott kotesekhez kell — enelkul az R-oszlop minden
+# multbeli kotesnel kiurulne.
+fresh_store()
+_pc = {"point_size": 0.01, "pv1_point": 0.88}
+
+# GOLD: 0.5 lot, nyito 4000, nyito-order SL 3998 -> 200 pont -> 88.0
+_row = {"position": 700, "symbol": "GOLD", "volume": 0.5,
+        "price_open": 4000.0, "sl": 3998.0, "pnl": 44.0}
+check("tartalek: a nyito order SL-jebol szamol",
+      abs(pm.risk_of_closed(_row, _pc) - 88.0) < 1e-9)
+
+# A ROGZITETT ertek NYER a tartalek felett (az a pontos: nyitaskori pv1-gyel)
+pm.record(700, "GOLD", "wpr_sma", 90.0)
+check("a rogzitett ertek elonyt elvez a tartalekkal szemben",
+      pm.risk_of_closed(_row, _pc) == 90.0)
+
+# Stop nelkul nincs R — se rogzites, se hasznalhato SL
+check("SL nelkuli kotes -> None (a ful '-'-t mutasson)",
+      pm.risk_of_closed({"position": 701, "symbol": "GOLD", "volume": 0.5,
+                         "price_open": 4000.0, "sl": 0.0}, _pc) is None)
+check("hianyzo par-config -> None",
+      pm.risk_of_closed({"position": 702, "symbol": "X", "volume": 0.5,
+                         "price_open": 4000.0, "sl": 3998.0}, {}) is None)
+check("nem-dict bemenet -> None", pm.risk_of_closed(None, _pc) is None)
+
+# ── A PAJZS-ESET: emiatt allt at a ful a penz-alapu R-re ──
+# Belepo 4000, SL 3990 (10 ar-egyseg). 1 lot, 1 ar-egyseg = 1$ -> kockazat 10$.
+# 75% zarva 1R-nel (4010), a runner 3R-nel (4030).
+#   realizalt penz: 0,75 x 10 + 0,25 x 30 = 15$  -> 1,5 R
+#   az AR-alapu keplet a VEGSO 4030-cal szamolna -> 3,0 R  (KETSZERES tevedes)
+fresh_store()
+pm.record(800, "GOLD", "wpr_sma", 10.0)
+_penz_r = pm.r_multiple(800, 15.0)
+_ar_r = (4030.0 - 4000.0) / abs(4000.0 - 3990.0)
+check("Pajzs: a penz-alapu R helyesen 1,5", abs(_penz_r - 1.5) < 1e-9,
+      f"{_penz_r:.2f}R")
+check("Pajzs: az AR-alapu 3,0 lett volna", abs(_ar_r - 3.0) < 1e-9, f"{_ar_r:.2f}R")
+check("Pajzs: a ket definicio KETSZERES eltterest ad", abs(_ar_r / _penz_r - 2.0) < 1e-9)
+
 # ══ 8. A PAROS modul (core/adopted.py) ugyanazt a retencios szabalyt koveti ═══
 # A ket nyilvantartas retenciojat EGY config ertek vezerli, tehat a keep_days=0
 # jelentesenek is azonosnak kell lennie — kulonben az egyik tarolo elveszitene a

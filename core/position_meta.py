@@ -205,6 +205,34 @@ def meta_of(ticket) -> "dict | None":
         return dict(e) if e else None
 
 
+def risk_of_closed(closed_row: dict, pair_cfg: dict) -> "float | None":
+    """Egy LEZÁRT kötés belépéskori kockázata (1 R) — két forrásból, sorrendben:
+
+      1. a **rögzített** érték (`risk_of`) — ez a pontos: a nyitáskori `pv1_point`-tal
+         számolt tényleges tét;
+      2. tartalék: a **nyitó order SL-jéből** visszaszámolva. A `closed_positions_range`
+         az `sl` mezőbe a NYITÓ order stopját teszi (az SL-módosítás külön order,
+         tehát ez az EREDETI kockázati táv). Ez a régi, még nem rögzített kötésekhez
+         kell — enélkül az R-oszlop minden múltbeli kötésnél kiürülne.
+
+    None, ha nincs érvényes stop (stop nélküli pozíciónak nincs értelmezhető
+    kockázata) — a hívó ilyenkor „—"-t mutasson, ne 0-t.
+
+    A tartalék-ág a MAI `pv1_point`-tal számol, ami a nem számla-devizás
+    instrumentumoknál sodródhat a nyitáskorihoz képest — ezért csak tartalék."""
+    if not isinstance(closed_row, dict):
+        return None
+    rec = risk_of(closed_row.get("position"))
+    if rec:
+        return rec
+    pc = pair_cfg or {}
+    v = risk_from_prices(closed_row.get("volume", 0.0),
+                         closed_row.get("price_open", 0.0),
+                         closed_row.get("sl", 0.0),
+                         pc.get("point_size", 0.0), pc.get("pv1_point", 0.0))
+    return v or None
+
+
 def r_multiple(ticket, pnl_ccy) -> "float | None":
     """Egy pozíció eredménye R-ben: `pnl / belépéskori kockázat`.
     None, ha nincs rögzített kockázat — a hívó ilyenkor „—"-t mutasson."""

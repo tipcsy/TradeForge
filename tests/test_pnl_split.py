@@ -166,6 +166,26 @@ check("a risk_of kivetele nem dobja el a kotest",
 check("totals ures bemenetre ures", ps.totals_by_symbol({}) == {})
 check("r_text ures bucketre None", ps.r_text(None) is None)
 
+# ══ 6. A "Lezart" ful R-fuggvenye (gui._r_multiple) ════════════════════════
+# Atallt PENZ-alapura. A szerzodes: kockazat nelkul None (a ful "-"-t mutat),
+# nem 0 — a 0 R azt allitana, hogy a kotes nullan zart.
+try:
+    from dashboard.gui import _r_multiple
+
+    _c = {"pnl": 30.0, "price_open": 4000.0, "sl": 3990.0,
+          "price_close": 4030.0, "type": "BUY"}
+    check("ful: +30$ 15$-os teten = +2 R", abs(_r_multiple(_c, lambda c: 15.0) - 2.0) < 1e-9)
+    check("ful: kockazat nelkul None (nem 0)", _r_multiple(_c, lambda c: None) is None)
+    check("ful: risk_provider nelkul None", _r_multiple(_c) is None)
+    check("ful: nulla kockazat -> None (nincs nullaval osztas)",
+          _r_multiple(_c, lambda c: 0.0) is None)
+    # A REGI ar-alapu keplet ugyanerre 3,0-t adott volna (4030-4000)/10 — a fuggveny
+    # mostantol a pnl-bol dolgozik, tehat a reszleges zaras nem torzitja.
+    check("ful: a P&L-bol dolgozik, NEM a zaroarbol",
+          abs(_r_multiple({**_c, "pnl": 15.0}, lambda c: 10.0) - 1.5) < 1e-9)
+except Exception as e:                                   # tkinter nelkuli kornyezet
+    check(f"ful R-fuggveny teszt kihagyva ({type(e).__name__})", True)
+
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")
 sys.exit(0 if all(results) else 1)

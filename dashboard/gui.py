@@ -2268,18 +2268,26 @@ CLOSED_COLUMNS = [
 ]
 
 
-def _r_multiple(c: dict):
-    """A trade R-szorzója (ár-alapú): kedvező ármozgás / kezdeti SL-táv. Lot- és
-    egység-független, a klasszikus „R multiple". None, ha nincs érvényes SL."""
-    sl = c.get("sl")
-    po = c.get("price_open")
-    if not sl or not po:
+def _r_multiple(c: dict, risk_provider=None):
+    """A trade R-szorzója — **PÉNZ-alapú**: `realizált P&L / belépéskori kockázat`.
+
+    A korábbi képlet ÁR-alapú volt (`elmozdulás / SL-táv`). Az kényelmesen
+    lot-független, DE **részleges zárásnál félrevezet**, mert csak az UTOLSÓ
+    záróárat nézi: egy Pajzs-kötésnél (75% zárva 1R-nél, a runner 3R-nél) 3,00R-t
+    mondott, holott a valós pénz-eredmény 1,50R. A jutalékot és a swapot sem
+    tartalmazta, a `pnl` viszont igen.
+
+    `risk_provider(c) -> float | None` adja a belépéskori kockázatot (rögzített
+    érték, tartalékként a nyitó order SL-jéből). None → nincs R („—")."""
+    if risk_provider is None:
         return None
-    risk = abs(po - sl)
-    if risk <= 0:
+    risk = risk_provider(c)
+    if not risk:
         return None
-    move = (c["price_close"] - po) if c["type"] == "BUY" else (po - c["price_close"])
-    return move / risk
+    try:
+        return float(c.get("pnl") or 0.0) / float(risk)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
 
 
 class ClosedTab:
@@ -2288,12 +2296,15 @@ class ClosedTab:
 
     def __init__(self, parent, mono_font, small_font, header_font,
                  closed_provider, strategy_provider, digits_provider,
-                 range_provider=None):
+                 range_provider=None, risk_provider=None):
         self.parent = parent
         self._mono, self._small, self._header = mono_font, small_font, header_font
         self._closed_provider = closed_provider
         self._strategy_provider = strategy_provider
         self._digits_provider = digits_provider
+        # `risk_provider(closed_row) -> float | None` — a belépéskori kockázat (1 R).
+        # Enélkül az R-oszlop „—" (nem 0): a hiányzó adat nem nulla eredmény.
+        self._risk_provider = risk_provider
         # `range_provider(date_from, date_to) -> list` — MT5-lekérés egy időszakra.
         # None → csak a „ma" nézet él (visszafelé kompatibilis).
         self._range_provider = range_provider
@@ -2401,7 +2412,7 @@ class ClosedTab:
         total   = sum(c["pnl"] for c in closed)
         wins    = sum(1 for c in closed if c["pnl"] > 0)
         losses  = sum(1 for c in closed if c["pnl"] < 0)
-        r_vals  = [_r_multiple(c) for c in closed]
+        r_vals  = [_r_multiple(c, self._risk_provider) for c in closed]
         total_r = sum(r for r in r_vals if r is not None)
         r_txt   = f"   |   {total_r:+.2f}R" if any(r is not None for r in r_vals) else ""
         self._lbl_total.config(
@@ -2479,7 +2490,7 @@ class ClosedTab:
                   if self._strategy_provider else "—")
         t      = c["type"]
         pnl    = c["pnl"]
-        r      = _r_multiple(c)
+        r      = _r_multiple(c, self._risk_provider)
         tstr   = datetime.fromtimestamp(c["close_time"], tz=timezone.utc).strftime("%H:%M")
         vals = {
             "symbol":   (c["symbol"],                       FG_WHITE),
@@ -2657,7 +2668,8 @@ class DashboardWindow:
             closed_provider=lambda: getattr(self, "_mt5_cache", {}).get("closed_today", []),
             strategy_provider=self._strategy_by_magic,
             digits_provider=lambda sym: getattr(self.dashboard_ref.get(sym), "digits", 5),
-            range_provider=self._closed_in_range)
+            range_provider=self._closed_in_range,
+            risk_provider=self._closed_risk)
 
         bt_frame = tk.Frame(self._notebook, bg=BG_BT)
         self._notebook.add(bt_frame, text="  Portfólió Backtest  ")
@@ -4204,6 +4216,15 @@ class DashboardWindow:
                                         server_day_bounds_for)
         frm, to = server_day_bounds_for(date_from, date_to)
         return closed_positions_range(frm, to)
+
+    def _closed_risk(self, c: dict):
+        """Egy lezárt kötés belépéskori kockázata (1 R) — a `Lezárt` fül R-oszlopához.
+
+        A rögzített értéket (`core.position_meta`) használja, tartalékként a nyitó
+        order SL-jéből számol. A tartalék a v1.81.0 ELŐTT nyitott kötésekhez kell:
+        azoknál még nincs rögzítés, de a nyitó order stopja az MT5-ben megvan."""
+        pc = (self.cfg.get("pairs") or {}).get(c.get("symbol")) or {}
+        return _pmeta.risk_of_closed(c, pc)
 
     def _strategy_by_magic(self, magic, ticket=None) -> str:
         """magic (+ ticket) → stratégianév a Pozíciók / Lezárt fülre.
