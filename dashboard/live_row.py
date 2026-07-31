@@ -102,6 +102,13 @@ def widths(fonts: dict, strategy_names=(), collapsed: dict = None) -> dict:
     return out
 
 # A stádium-pöttyök színe (a stratégia belső állapota), és a keret (az engedély).
+#
+# A keret CSAK SZÍNNEL különbözteti meg a két esetet — ez tudatos döntés
+# (2026-07-31), nem hiányosság: az eredeti terv szaggatott keretet szánt a
+# kockázatcsökkentésnek, de a tkinter `highlightthickness` nem tud szaggatott
+# lenni, ahhoz cellánként `Canvas` kellene. Sok sornál az fölösleges teher.
+# → NE „javítsd meg" Canvas-szal. Ha később mégis kell egy szín-független jel,
+#   a legolcsóbb út a keret VASTAGSÁGA (2 px vs 1 px), nem új widget.
 _DOT = "●"
 _FRAME = {"blocked": FG_RED, "reduced": FG_ORANGE}
 
