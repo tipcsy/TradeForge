@@ -3528,7 +3528,8 @@ class DashboardWindow:
         strat = get_strategy_by_name(strategy_name) if strategy_name else self.strategy
         InstrumentParamsDialog(
             self.root, symbol, self.cfg, strat,
-            self._header_font, self._small_font, self._save_main_config)
+            self._header_font, self._small_font, self._save_main_config,
+            root_cfg=self.cfg)
 
     def _show_instrument_params(self, symbol: str):
         """Visszafelé komp.: az elsődleges stratégia paraméterei (a Pozíciók fül

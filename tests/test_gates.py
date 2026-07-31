@@ -203,6 +203,55 @@ check("...ugyanez az ml_ai-ra NEM blokkolas (nincs ra bekapcsolva)",
 
 check("ctx point_size nelkul nem szall el", g.ctx_from_state(DS(), {}, {}) is not None)
 
+# ══ 6. A hatas FORRASA — a beallito felulet ehhez igazodik ════════════════
+# A felulet kiirja, hogy egy ertek OROKOLT vagy ezen a paron beallitott;
+# enelkul nem derulne ki, mit allitottal el tenylegesen.
+SRC_CFG = {
+    "gates": {"spread": {"default": "block"},
+              "tf_align": {"default": "none", "wpr_sma": "block"}},
+    "pairs": {"GOLD": {"gates": {"market": {"wpr_sma": "reduce"},
+                                 "spread": {"default": "none"}}},
+              "UK100": {}},
+}
+
+check("par+strategia felulriras -> forras 'pair'",
+      g.effect_with_source(SRC_CFG, "GOLD", "wpr_sma", g.MARKET)
+      == ("reduce", g.SRC_PAIR))
+check("par-szintu default -> forras 'pair_default'",
+      g.effect_with_source(SRC_CFG, "GOLD", "ml_ai", g.SPREAD)
+      == ("none", g.SRC_PAIR_DEFAULT))
+check("globalis strategia-ertek -> forras 'global'",
+      g.effect_with_source(SRC_CFG, "UK100", "wpr_sma", g.TF_ALIGN)
+      == ("block", g.SRC_GLOBAL))
+check("globalis default -> forras 'global_default'",
+      g.effect_with_source(SRC_CFG, "UK100", "ml_ai", g.TF_ALIGN)
+      == ("none", g.SRC_GLOBAL_DEFAULT))
+check("semmi sincs configolva -> forras 'builtin'",
+      g.effect_with_source({}, "X", "y", g.SPREAD) == ("block", g.SRC_BUILTIN))
+check("a regi tf_align.gate lista -> forras 'legacy'",
+      g.effect_with_source({"tf_align": {"gate": ["wpr_sma"]}, "pairs": {"G": {}}},
+                           "G", "wpr_sma", g.TF_ALIGN) == ("block", g.SRC_LEGACY))
+check("minden forrasnak van magyar felirata",
+      all(s in g.SOURCE_LABEL for s in (g.SRC_PAIR, g.SRC_PAIR_DEFAULT,
+                                        g.SRC_GLOBAL, g.SRC_GLOBAL_DEFAULT,
+                                        g.SRC_LEGACY, g.SRC_BUILTIN)))
+
+# inherited_effect: mi lenne az ertek, ha visszavonnad a par-szintu felulirast?
+# A felulet ezt kinalja fel "Orokolt (…)" neven — igy nem kell kitalalni.
+check("inherited_effect a par-szintu felulirast FIGYELMEN KIVUL hagyja",
+      g.inherited_effect(SRC_CFG, "GOLD", "wpr_sma", g.MARKET)
+      == ("none", g.SRC_BUILTIN))
+check("...a spreadnel a globalisra esik vissza (nem a par defaultjara)",
+      g.inherited_effect(SRC_CFG, "GOLD", "ml_ai", g.SPREAD)
+      == ("block", g.SRC_GLOBAL_DEFAULT))
+check("inherited_effect NEM modositja a configot",
+      SRC_CFG["pairs"]["GOLD"]["gates"]["market"]["wpr_sma"] == "reduce")
+
+check("effect_for valtozatlanul a hatast adja (a forras nelkul)",
+      g.effect_for(SRC_CFG, "GOLD", "wpr_sma", g.MARKET) == "reduce")
+check("minden hatasnak van magyar felirata",
+      all(e in g.EFFECT_LABEL for e in g.EFFECTS))
+
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")
 sys.exit(0 if all(results) else 1)

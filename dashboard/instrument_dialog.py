@@ -198,9 +198,14 @@ class InstrumentParamsDialog:
     """Optimalizált paraméterek szerkesztője egy instrumentumhoz."""
 
     def __init__(self, parent, symbol, cfg, strategy,
-                 header_font, small_font, save_main_config):
+                 header_font, small_font, save_main_config, root_cfg=None):
         self.parent  = parent
         self.symbol  = symbol
+        # A `self.cfg` a stratégia NÉZETE — `config_for_strategy` deepcopy-t ad,
+        # tehát ABBA írni nem hat a programra. A kapu-hatás viszont a VALÓDI
+        # config.json-ba megy (`pairs.<SYM>.gates`), ezért kell az ÉLŐ cfg is.
+        # (Enélkül a legördülő némán semmit nem mentett volna.)
+        self.root_cfg = root_cfg if root_cfg is not None else cfg
         # A cfg átképezése ENNEK a stratégiának a nézetére: a futásidejű cfg az
         # ELSŐDLEGES stratégia szekcióival (indicators/sltp/param_meta/quality/
         # optimizer-tér) van merge-elve — egy MÁSIK stratégia ablaka különben a
@@ -434,6 +439,9 @@ class InstrumentParamsDialog:
                 ce.grid(row=_r, column=2, sticky="we", padx=(0, 2), pady=1)
                 self._comment_entries[k] = ce
                 _r += 1
+
+        # ── Kapuk: mit tegyenek EZZEL a stratégiával ezen a páron ───────────
+        self._build_gates(body)
 
         # A hibaüzenet a RÖGZÍTETT alsó sávba kerül (a görgethető törzsben
         # elgörgetve nem látszana — pedig épp a Mentés hibáját mondja).
@@ -930,6 +938,124 @@ class InstrumentParamsDialog:
         # „Órák mentése" gomb). Az „Auto-javasol" is elmaradt: az óránkénti P&L jól
         # látható a rácsban, így a mínuszos órák kézzel kikattinthatók.
         self._hour_on = hour_on
+
+    # ── Kapu-hatások (per pár × stratégia) ──────────────────────────────────
+    def _build_gates(self, parent):
+        """A belépő-kapuk HATÁSA ERRE a stratégiára, ezen az instrumentumon.
+
+        Ide tartozik, mert ez az ablak már eleve per (instrumentum × stratégia)
+        nyílik — pontosan a kapu-config szemcsézettsége, tehát nem kell új
+        felület-fogalom.
+
+        Minden sor kiírja, hogy az érték ÖRÖKÖLT vagy ezen a páron beállított.
+        Enélkül nem derülne ki, mit állítottál el ténylegesen, és mi jön
+        feljebbről (`core/gates.py` feloldási lánc)."""
+        from core import gates as _g
+        self._g = _g
+        box = tk.Frame(parent, bg=BG)
+        box.pack(fill="x", padx=10, pady=(10, 2))
+        hdr = tk.Frame(box, bg=BG)
+        hdr.pack(fill="x")
+        tk.Label(hdr, text="Kapuk", bg=BG, fg=FG_BLUE, font=self._sf,
+                 anchor="w").pack(side="left")
+        tk.Frame(hdr, bg=BG_HEADER, height=1).pack(side="left", fill="x",
+                                                   expand=True, padx=(8, 0))
+        tk.Label(box, text=f"Mit tegyen a kapu, ha blokkoló állapotban van — "
+                           f"a(z) {self.strategy.name} stratégiára, ezen a páron:",
+                 bg=BG, fg=FG_GRAY, font=self._sf, anchor="w").pack(anchor="w",
+                                                                    pady=(2, 4))
+        self._gate_vars = {}
+        self._gate_src_lbl = {}
+        grid = tk.Frame(box, bg=BG)
+        grid.pack(fill="x")
+        for i, g in enumerate(_g.REGISTRY):
+            key = g["key"]
+            tk.Label(grid, text=g["label"], bg=BG, fg=FG_WHITE, font=self._sf,
+                     anchor="w", width=22).grid(row=i, column=0, sticky="w", pady=1)
+            eff, _src = _g.effect_with_source(self.root_cfg, self.symbol,
+                                              self.strategy.name, key)
+            var = tk.StringVar(value=self._gate_choice_text(key, eff))
+            om = tk.OptionMenu(grid, var, *self._gate_choices(key),
+                               command=lambda _v, k=key: self._on_gate_change(k))
+            _style_om(om, self._sf)
+            # A szelesseg a LEGHOSSZABB felirathoz igazodik ("Örökölt (…)"),
+            # mert az OptionMenu levagja a tullogot — merve, nem becsulve.
+            om.config(width=max(len(t) for t in self._gate_choices(key)),
+                      anchor="w")
+            om.grid(row=i, column=1, sticky="w", padx=6)
+            lbl = tk.Label(grid, text="", bg=BG, fg=FG_GRAY_DIM, font=self._sf,
+                           anchor="w")
+            lbl.grid(row=i, column=2, sticky="w", padx=(6, 0))
+            self._gate_vars[key] = var
+            self._gate_src_lbl[key] = lbl
+            self._refresh_gate_source(key)
+        tk.Label(box, text="A „csak jelzés” NEM kapu-hatás: az a stratégia "
+                           "kötés-módja (a soron állítható).",
+                 bg=BG, fg=FG_GRAY_DIM, font=self._sf, anchor="w").pack(
+                 anchor="w", pady=(4, 0))
+
+    def _gate_choices(self, key: str) -> list:
+        """A választható értékek: a három hatás + az „Örökölt (…)" visszaállítás.
+
+        Az örökölt opció KIÍRJA, mi lenne az érték felülírás nélkül — így nem
+        kell kitalálni, mit kapsz vissza, ha visszavonod a beállítást."""
+        inh, _src = self._g.inherited_effect(self.root_cfg, self.symbol,
+                                             self.strategy.name, key)
+        return [f"Örökölt ({self._g.EFFECT_LABEL[inh]})"] + \
+               [self._g.EFFECT_LABEL[e] for e in self._g.EFFECTS]
+
+    def _gate_choice_text(self, key: str, eff: str) -> str:
+        """A legördülő AKTUÁLIS felirata: felülírt értéknél a konkrét hatás, ha
+        nincs pár-szintű felülírás, akkor az „Örökölt (…)" tétel."""
+        pg = ((self.root_cfg.get("pairs") or {}).get(self.symbol) or {}).get("gates") or {}
+        g = pg.get(key) or {}
+        if g.get(self.strategy.name) in self._g.EFFECTS:
+            return self._g.EFFECT_LABEL[eff]
+        return self._gate_choices(key)[0]
+
+    def _refresh_gate_source(self, key: str):
+        eff, src = self._g.effect_with_source(self.root_cfg, self.symbol,
+                                              self.strategy.name, key)
+        lbl = self._gate_src_lbl.get(key)
+        if lbl is not None:
+            lbl.config(text=f"→ {self._g.EFFECT_LABEL[eff]}  "
+                            f"({self._g.SOURCE_LABEL.get(src, src)})",
+                       fg=FG_WHITE if src == self._g.SRC_PAIR else FG_GRAY_DIM)
+
+    def _on_gate_change(self, key: str):
+        """A választás AZONNAL a config.json-ba megy (`pairs.<SYM>.gates`).
+
+        Nem a Mentés gombhoz kötjük: az a paraméter-készletet menti és backtestet
+        futtat — a kapu-hatásnak semmi köze ahhoz, és félrevezető volna, ha egy
+        legördülő némán a Mentésre várna."""
+        txt = self._gate_vars[key].get()
+        pairs = self.root_cfg.setdefault("pairs", {})
+        pc = pairs.setdefault(self.symbol, {})
+        gates = pc.setdefault("gates", {})
+        g = gates.setdefault(key, {})
+        if txt.startswith("Örökölt"):
+            g.pop(self.strategy.name, None)     # felülírás visszavonása
+            if not g:
+                gates.pop(key, None)
+            if not gates:
+                pc.pop("gates", None)
+        else:
+            eff = next((e for e in self._g.EFFECTS
+                        if self._g.EFFECT_LABEL[e] == txt), None)
+            if eff is None:
+                return
+            g[self.strategy.name] = eff
+        try:
+            self._save_main_config()
+        except Exception as ex:
+            self.lbl_err.config(text=f"Kapu-mentési hiba: {ex}", fg=FG_RED)
+            return
+        self._refresh_gate_source(key)
+        # A választható „Örökölt (…)" felirat is változhat, ha közben a felsőbb
+        # szint mást mond — újraépítjük a menüt, hogy ne mutasson elavult értéket.
+        self._gate_vars[key].set(self._gate_choice_text(
+            key, self._g.effect_for(self.root_cfg, self.symbol,
+                                    self.strategy.name, key)))
 
     # ── Mentés ──────────────────────────────────────────────────────────────
     def _collect_params(self):

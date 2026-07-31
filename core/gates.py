@@ -125,19 +125,69 @@ def _legacy_tf_align_effect(cfg: dict, symbol: str, strategy: str):
     return None
 
 
-def effect_for(cfg: dict, symbol: str, strategy: str, key: str) -> str:
-    """Egy kapu HATÁSA erre a (pár, stratégia) párosra."""
+# A hatás FORRÁSA — a beállító felület ebből mondja meg, hogy egy érték örökölt
+# vagy felülírt. Enélkül nem derülne ki, mit állítottál el ténylegesen.
+SRC_PAIR = "pair"                  # pairs.<SYM>.gates.<kapu>.<stratégia>
+SRC_PAIR_DEFAULT = "pair_default"  # pairs.<SYM>.gates.<kapu>.default
+SRC_GLOBAL = "global"              # gates.<kapu>.<stratégia>
+SRC_GLOBAL_DEFAULT = "global_default"
+SRC_LEGACY = "legacy"              # a régi tf_align.gate lista
+SRC_BUILTIN = "builtin"            # REGISTRY default_effect
+
+SOURCE_LABEL = {
+    SRC_PAIR: "ezen a páron beállítva",
+    SRC_PAIR_DEFAULT: "örökölt — a pár alapértéke",
+    SRC_GLOBAL: "örökölt — globális, erre a stratégiára",
+    SRC_GLOBAL_DEFAULT: "örökölt — globális alapérték",
+    SRC_LEGACY: "örökölt — a régi tf_align.gate listából",
+    SRC_BUILTIN: "örökölt — beépített alapérték",
+}
+
+
+def effect_with_source(cfg: dict, symbol: str, strategy: str,
+                       key: str) -> tuple:
+    """`(hatás, forrás)` — a feloldási lánc melyik szintje döntött.
+
+    A beállító felület ezt mutatja („ezen a páron beállítva" vs. „örökölt"),
+    különben nem derülne ki, mit állítottál el ténylegesen, és mi jön feljebbről."""
     cfg = cfg or {}
     pair_gates = ((cfg.get("pairs") or {}).get(symbol) or {}).get("gates")
-    for section in (pair_gates, cfg.get("gates")):
-        e = _effect_from(section, key, strategy)
-        if e:
-            return e
+    g = (pair_gates or {}).get(key)
+    if isinstance(g, dict):
+        if g.get(strategy) in EFFECTS:
+            return g[strategy], SRC_PAIR
+        if g.get("default") in EFFECTS:
+            return g["default"], SRC_PAIR_DEFAULT
+    g = (cfg.get("gates") or {}).get(key)
+    if isinstance(g, dict):
+        if g.get(strategy) in EFFECTS:
+            return g[strategy], SRC_GLOBAL
+        if g.get("default") in EFFECTS:
+            return g["default"], SRC_GLOBAL_DEFAULT
     if key == TF_ALIGN:
         e = _legacy_tf_align_effect(cfg, symbol, strategy)
         if e:
-            return e
-    return default_effect_of(key)
+            return e, SRC_LEGACY
+    return default_effect_of(key), SRC_BUILTIN
+
+
+def inherited_effect(cfg: dict, symbol: str, strategy: str, key: str) -> tuple:
+    """`(hatás, forrás)` ÚGY, MINTHA a pár-szintű felülírás nem létezne.
+
+    A felület ezt ajánlja fel „Örökölt (…)" néven: így látszik, mi lenne az
+    érték, ha visszavonod a felülírást — nem kell kitalálni."""
+    cfg = dict(cfg or {})
+    pairs = dict(cfg.get("pairs") or {})
+    pc = dict(pairs.get(symbol) or {})
+    pc.pop("gates", None)
+    pairs[symbol] = pc
+    cfg["pairs"] = pairs
+    return effect_with_source(cfg, symbol, strategy, key)
+
+
+def effect_for(cfg: dict, symbol: str, strategy: str, key: str) -> str:
+    """Egy kapu HATÁSA erre a (pár, stratégia) párosra."""
+    return effect_with_source(cfg, symbol, strategy, key)[0]
 
 
 def effects_for(cfg: dict, symbol: str, strategy: str) -> dict:
