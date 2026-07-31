@@ -39,6 +39,71 @@ from dashboard.live_row import (
 # bal/közép/jobb sorai elcsúsznának egymáshoz képest.
 ROW_PAD = 1
 
+# A saját gördítősáv magassága.
+BAR_H = 8
+
+
+class _ThinScrollbar(tk.Canvas):
+    """Vékony, TÉMÁHOZ ILLŐ vízszintes gördítősáv.
+
+    Miért nem `tk.Scrollbar`: Windowson a natív megjelenítést használja, és a
+    `bg`/`troughcolor` beállítást FIGYELMEN KÍVÜL HAGYJA — a sötét táblán vakító
+    fehér csík marad. (Ellenőrizve: feltűnő zöldre állítva is fehér maradt.)
+
+    Miért nem `ttk.Scrollbar`: az színezhető lenne, de csak a `clam` témával, a
+    `theme_use` viszont GLOBÁLIS — átírná az alkalmazás összes ttk-widgetjét
+    (fülek, legördülők). Egy gördítősáv nem ér ennyit.
+
+    Marad a saját rajz: teljes kontroll, nulla mellékhatás. Húzható, és a
+    `Shift`+görgő is működik (a vízszintes görgetés szokásos billentyűje)."""
+
+    def __init__(self, parent, canvas):
+        super().__init__(parent, height=BAR_H, bg=BG, highlightthickness=0, bd=0)
+        self._c = canvas
+        self._lo, self._hi = 0.0, 1.0
+        self._thumb = self.create_rectangle(0, 0, 0, BAR_H, fill=BG_HEADER,
+                                            outline="")
+        self._drag_x = None
+        self.bind("<Configure>", lambda _e: self._redraw())
+        self.bind("<Button-1>", self._press)
+        self.bind("<B1-Motion>", self._drag)
+        self.bind("<ButtonRelease-1>", lambda _e: self._end())
+        for w in (canvas, self):
+            w.bind("<Shift-MouseWheel>", self._wheel, add="+")
+
+    def set(self, lo, hi):
+        self._lo, self._hi = float(lo), float(hi)
+        self._redraw()
+
+    def _redraw(self):
+        w = max(1, self.winfo_width())
+        x0, x1 = self._lo * w, self._hi * w
+        if x1 - x0 < 24:                 # túl rövid fogantyú nem megfogható
+            x1 = x0 + 24
+        self.coords(self._thumb, x0, 1, min(x1, w), BAR_H - 1)
+
+    def _press(self, e):
+        w = max(1, self.winfo_width())
+        x0, x1 = self._lo * w, self._hi * w
+        if x0 <= e.x <= x1:
+            self._drag_x = e.x           # a fogantyún kezdtük → húzás
+        else:
+            self._c.xview_moveto(max(0.0, e.x / w - (self._hi - self._lo) / 2))
+
+    def _drag(self, e):
+        if self._drag_x is None:
+            return
+        w = max(1, self.winfo_width())
+        self._c.xview_moveto(max(0.0, self._lo + (e.x - self._drag_x) / w))
+        self._drag_x = e.x
+
+    def _end(self):
+        self._drag_x = None
+
+    def _wheel(self, e):
+        self._c.xview_scroll(-1 if e.delta > 0 else 1, "units")
+        return "break"
+
 
 class LiveTable:
     """A teljes tábla. `refresh(rows)` cseréli az adatot; a `collapsed` állapotot
@@ -81,13 +146,7 @@ class LiveTable:
         wrap.pack(side="left", fill="both", expand=True)
         self._canvas = tk.Canvas(wrap, bg=BG, highlightthickness=0, bd=0)
         self._canvas.pack(side="top", fill="both", expand=True)
-        # A gördítősáv a TÉMA színeivel: a tkinter alapértelmezése világos, ami a
-        # sötét táblán vakító fehér csík lenne (a képernyőkép mutatta meg).
-        self._hbar = tk.Scrollbar(wrap, orient="horizontal",
-                                  command=self._canvas.xview,
-                                  bg=BG_HEADER, activebackground=FG_GRAY_DIM,
-                                  troughcolor=BG, bd=0, highlightthickness=0,
-                                  relief="flat", width=10)
+        self._hbar = _ThinScrollbar(wrap, self._canvas)
         self._canvas.configure(xscrollcommand=self._on_xscroll)
         self._mid = tk.Frame(self._canvas, bg=BG)
         self._mid_id = self._canvas.create_window((0, 0), window=self._mid,

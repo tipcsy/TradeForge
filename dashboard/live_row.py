@@ -361,8 +361,15 @@ class LiveRow:
                      on_click=on_close, bg=bg, height=self._h)
 
 
-def _stage_color(s):
-    return {"buy": FG_GREEN, "sell": FG_RED, "on": FG_GREEN}.get(s, FG_GRAY_DIM)
+def _stage_color(name):
+    """A stádium-pötty színe SZEMANTIKUS SZÍN-NÉVBŐL (`green` / `red` / `muted`…).
+
+    Ez pontosan az, amit a stratégia előállít (`Cell.color`, lásd `strategy/base.py`)
+    és amit a motor a `ds.strategy_cells`-be ír — így a 2.0 sor és a `classic`
+    tábla körei UGYANABBÓL dolgoznak, nem tudnak szétcsúszni. Ismeretlen név →
+    halvány (a `theme.color` alapértelmezése helyett tudatosan tompa)."""
+    from dashboard import theme as _t
+    return _t.SEMANTIC.get(name, FG_GRAY_DIM)
 
 
 def _pnl_color(v):
@@ -491,11 +498,11 @@ def demo_row() -> dict:
             "badge": "⛔1",
         },
         "strategies": [
-            {"name": "wpr_sma", "stages": ["buy", "buy", "off"], "frame": "blocked",
+            {"name": "wpr_sma", "stages": ["green", "green", "muted"], "frame": "blocked",
              "position": {"money": 1.00, "r": 1.0},
              "daily": {"money": 0.03, "r": 0.01},
              "quality": "Jó", "live": True, "opt": "06/29"},
-            {"name": "ml_ai", "stages": ["sell", "off", "off"], "frame": "",
+            {"name": "ml_ai", "stages": ["red", "muted", "muted"], "frame": "",
              "position": {"money": 1.00, "r": 1.0},
              "daily": {"money": 0.03, "r": 0.01},
              "quality": "Jó", "live": False, "opt": "85%"},
