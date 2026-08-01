@@ -140,6 +140,43 @@ if TK_OK:
         if wc is not None:
             wc.root.destroy()
 
+    # ══ 3. Az Opt cella PER STRATEGIA es ROVID ════════════════════════════
+    # Elesben itt "ia — ·" jelent meg: az elso valtozat a SZIMBOLUM-szintu,
+    # OSSZETETT optimizer_status-t adta (pl. "Opt: wpr_sma 07/28 · ml_ai 07/28"),
+    # amit a szuk cella kozepre igazitva vagott — a szoveg KOZEPE latszott, es
+    # mindket strategia-blokk ugyanazt mutatta.
+    w3 = None
+    try:
+        from core import opt_activity as _oa
+        w3 = build_window("live2")
+
+        # Nincs marker -> "—" (nem hosszu szoveg, nem szimbolum-szintu allapot)
+        check("ismeretlen par Opt-cellaja rovid '—'",
+              w3._live2_opt("NINCS_ILYEN_PAR", "wpr_sma") == "—")
+
+        # A szimbolum-szintu (hosszu) statusz NEM szivarog be
+        w3.optimizer_status["NINCS_ILYEN_PAR"] = "Opt: wpr_sma 07/28 · ml_ai 07/28"
+        check("a hosszu szimbolum-szintu statusz NEM jelenik meg a cellaban",
+              w3._live2_opt("NINCS_ILYEN_PAR", "wpr_sma") == "—")
+
+        # Ha az ADOTT strategia epp fut, a SAJAT allapota latszik
+        _oa.set_state("NINCS_ILYEN_PAR", "wpr_sma", "OPTIMIZING")
+        try:
+            check("futo optimalizalasnal rovid jelzes",
+                  w3._live2_opt("NINCS_ILYEN_PAR", "wpr_sma") == "fut…",
+                  w3._live2_opt("NINCS_ILYEN_PAR", "wpr_sma"))
+            check("...a MASIK strategia ettol nem valtozik",
+                  w3._live2_opt("NINCS_ILYEN_PAR", "ml_ai") == "—")
+        finally:
+            _oa.clear_symbol("NINCS_ILYEN_PAR")
+
+        check("minden Opt-ertek elfer egy rovid cellaban (<= 8 karakter)",
+              all(len(w3._live2_opt(s, n)) <= 8
+                  for s in CFG["pairs"] for n in ("wpr_sma", "ml_ai")))
+    finally:
+        if w3 is not None:
+            w3.root.destroy()
+
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")
 sys.exit(0 if all(results) else 1)

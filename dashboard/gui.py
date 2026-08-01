@@ -2897,11 +2897,32 @@ class DashboardWindow:
                 getattr(ds, "params", None) or {}, pc,
                 positions=positions, owner_of=_owner, risk_of=_pm.risk_of,
                 quality_of=self._live2_quality,
-                opt_of=lambda s, n: self.optimizer_status.get(s, "") or "—",
+                opt_of=self._live2_opt,
                 live_of=live_of,
                 on_toggle=lambda s, n: self._handle_run(s),
                 on_opt=lambda s, n: self._handle_opt(s)))
         return rows
+
+    def _live2_opt(self, symbol: str, name: str) -> str:
+        """Az Opt cella PER STRATÉGIA — rövid, cellába férő alak.
+
+        Az első változat a `self.optimizer_status`-t adta, ami SZIMBÓLUM-szintű és
+        ÖSSZETETT (pl. `"Opt: wpr_sma 07/28 · ml_ai 07/28"`). A szűk cella ezt
+        középre igazítva vágta, tehát a szöveg KÖZEPE látszott — élesben `ia — ·`
+        jelent meg, és mindkét stratégia-blokk ugyanazt mutatta. Pontosan az a
+        kétértelműség, amit a 2.0 orvosolni akar.
+
+        Most: ha ez a stratégia ÉPP fut, a saját állapota (`core.opt_activity`
+        per pár × stratégia); különben a SAJÁT utolsó optimalizálásának dátuma."""
+        try:
+            from core import opt_activity as _oa
+            if _oa.busy(symbol, name):
+                st = _oa.state_of(symbol, name)
+                return "fut…" if st == "OPTIMIZING" else "sorban"
+        except Exception:
+            pass
+        d = opt_done_date(symbol, name)
+        return d.strftime("%m/%d") if d else "—"
 
     def _live2_quality(self, symbol: str, name: str):
         """A minősítés PER STRATÉGIA — a stratégia SAJÁT mentett eredményéből.
