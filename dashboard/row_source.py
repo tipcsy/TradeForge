@@ -41,10 +41,14 @@ def _spread_cell(ctx: dict) -> dict:
 
     A `value` a RENDEZÉSHEZ kell: a kijelzett szövegből visszafejteni a számot
     törékeny volna (a `—` és a `250/—` alak is előfordul)."""
+    import math
     cur, cap = ctx.get("spread_points"), ctx.get("max_spread_points")
     if cur is None:
         return {"text": "—", "blocking": False, "value": None}
-    if not cap:
+    # A `spread_gate` VÉGTELENT ad, ha nincs érvényes ATR (fail-open: ilyenkor
+    # nem szűrünk). Ez indulaskor, a bemelegítés előtt normális állapot — de a
+    # cellába „inf"-et írni értelmetlen volna, ezért `—`: nincs korlát MOST.
+    if not cap or not math.isfinite(cap):
         return {"text": f"{cur:.0f}/—", "blocking": False, "value": cur}
     return {"text": f"{cur:.0f}/{cap:.0f}", "blocking": cur > cap, "value": cur}
 

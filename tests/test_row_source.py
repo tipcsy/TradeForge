@@ -258,6 +258,32 @@ check("azonos ertekeknel STABIL (szimbolum szerint)",
       [r["symbol"] for r in rs.sort_rows(same, "wpr_sma|daily")]
       == ["AAA", "BBB", "CCC"])
 
+# ══ 12. Vegtelen spread-hatar (nincs meg ATR) ═════════════════════════════
+# A spread_gate fail-open: ervenyes ATR nelkul VEGTELEN a hatar. Ez indulaskor,
+# a bemelegites elott normalis — de "inf"-et kiirni a cellaba ertelmetlen.
+# (A valodi indulasnal "8/inf" jelent meg; a demo-inditas mutatta meg.)
+class _DSNoATR(DS):
+    atr_price = None
+
+
+_r_noatr = rs.row_data("Ger40", _DSNoATR(), NAMES, {}, PARAMS, PAIR)
+check("nincs ATR -> a hatar '—', nem 'inf'",
+      _r_noatr["gates"]["spread"]["text"] == "250/—",
+      _r_noatr["gates"]["spread"]["text"])
+check("...es ilyenkor NEM blokkol (fail-open)",
+      _r_noatr["gates"]["spread"]["blocking"] is False)
+check("...de a spread erteke megmarad rendezeshez",
+      _r_noatr["gates"]["spread"]["value"] == 250)
+# A K.Ossz.-hoz a tf_align-t is rendbe kell tenni, kulonben AZ blokkol (nincs
+# egyuttallas) — a spread hatasat kulon kell szigetelni.
+class _DSNoATROk(_DSNoATR):
+    tf_align_dir = "BUY"
+
+
+check("nincs ATR -> a spread NEM szamit blokkolonak (fail-open)",
+      rs.row_data("Ger40", _DSNoATROk(), NAMES, {}, PARAMS,
+                  PAIR)["gates"]["badge"] == "✓")
+
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")
 sys.exit(0 if all(results) else 1)
