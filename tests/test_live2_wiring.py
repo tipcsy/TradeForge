@@ -177,6 +177,48 @@ if TK_OK:
         if w3 is not None:
             w3.root.destroy()
 
+    # ══ 4. Az OPT gomb KOZVETLENUL hat, menu nelkul ═══════════════════════
+    # A classic OPT gombja szimbolum-szintu, ezert tobb strategianal valaszto-
+    # menut nyit. A 2.0-ban a gomb a strategia SAJAT blokkjaban ul, tehat a
+    # valasztas mar megtortent — a menu ott folosleges kerdes lenne.
+    w4 = None
+    try:
+        w4 = build_window("live2")
+        calls = []
+        w4._opt_ctrl.request_optimize = lambda s, n=None: calls.append(("start", s, n))
+        w4._opt_ctrl.request_stop = lambda s, n=None: calls.append(("stop", s, n))
+        w4._opt_ctrl.cancel_queued = lambda s, n=None: calls.append(("cancel", s, n))
+        w4._opt_ctrl._strategy_live = lambda s, n: False
+
+        w4._live2_opt_click("Ger40", "ml_ai")
+        check("az OPT KOZVETLENUL azt a strategiat inditja (nincs menu)",
+              calls == [("start", "Ger40", "ml_ai")], str(calls))
+
+        # Futo optimalizalasnal LEALLIT — es CSAK azt a strategiat
+        from core import opt_activity as _oa
+        _oa.set_state("Ger40", "ml_ai", "OPTIMIZING")
+        try:
+            calls.clear()
+            w4._live2_opt_click("Ger40", "ml_ai")
+            check("futo optimalizalasnal leallit, a SAJAT strategiajara",
+                  calls == [("stop", "Ger40", "ml_ai")], str(calls))
+            calls.clear()
+            w4._live2_opt_click("Ger40", "wpr_sma")
+            check("...a MASIK strategia ettol fuggetlenul indithato",
+                  calls == [("start", "Ger40", "wpr_sma")], str(calls))
+        finally:
+            _oa.clear_symbol("Ger40")
+
+        # KERESKEDO strategiat nem optimalizalunk (a futas vegen felulirodna a
+        # parameterfajlja, es egy nyilo belepo a REGI parameterekkel menne)
+        calls.clear()
+        w4._opt_ctrl._strategy_live = lambda s, n: True
+        w4._live2_opt_click("Ger40", "wpr_sma")
+        check("kereskedo strategiat NEM indit el", calls == [], str(calls))
+    finally:
+        if w4 is not None:
+            w4.root.destroy()
+
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")
 sys.exit(0 if all(results) else 1)

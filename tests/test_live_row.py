@@ -33,21 +33,33 @@ if TK_OK:
     GATES = {"gates": True}
     ALL = {"gates": True, "strategies": True}
 
-    def nodes_for(collapsed, w=2200):
-        return up.inspect(lambda p: lr.build_demo(p, collapsed), size=(w, 220))
+    # A SOR-demo egy szuloben rakja egymas melle a harom reszt (a tablaban ezek
+    # KULON oszlopok). Ezert az ablaknak el kell birnia a TELJES sort, kulonben a
+    # `pack` a jobb oszlopot osszeszoritja — az nem a sor hibaja, hanem a demo
+    # elrendezese. (Az elso valtozat 2200-at hasznalt, es a szuk ablak miatt
+    # levagott jobb oszlopot a `truncated` szuroje elrejtette.)
+    WIDE = 3000
+
+    def nodes_for(collapsed, w=WIDE):
+        return up.inspect(lambda p: lr.build_demo(p, collapsed), size=(w, 300))
 
     def real_truncation(nodes, w):
         """A kulso keretek azert 'lognak ki', mert a tartalom szelesebb az
         ablaknal — ez a TERVEZETT allapot (a kozep gorgetheto lesz). Csak azt
-        nezzuk, ami az ablakon BELUL vagodott le."""
+        nezzuk, ami az ablakon BELUL vagodott le.
+
+        ⚠ A `req_w > w` szuro KORABBAN tul sokat rejtett: a szuk ablakban
+        osszeszoritott JOBB oszlop levagott feliratai is kiestek. A LABEL-eket
+        ezert MINDIG nezzuk — egy levagott felirat sosem "tervezett"."""
         return [t for t in up.truncated(nodes)
-                if not (t["cls"] == "Frame" and t["req_w"] > w)]
+                if t["cls"] == "Label"
+                or not (t["cls"] == "Frame" and t["req_w"] > w)]
 
     # ══ 1. Semmi nem esik ossze, semmi nem vagodik le ══════════════════════
     # A pack_propagate(False) MAGASSAG NELKUL 1 px-re lapitja a keretet — ez a
     # sor elso valtozataban tenylegesen meg is tortent, a kepernyokep mutatta meg.
-    for label, coll, w in (("kinyitva", OPEN, 2200), ("kapuk csukva", GATES, 2000),
-                           ("minden csukva", ALL, 1000)):
+    for label, coll, w in (("kinyitva", OPEN, WIDE), ("kapuk csukva", GATES, WIDE),
+                           ("minden csukva", ALL, 1400)):
         n = nodes_for(coll, w)
         check(f"{label}: semmi nem esik ossze", up.collapsed(n) == [],
               f"{len(up.collapsed(n))} osszeesett")
@@ -72,10 +84,10 @@ if TK_OK:
           not [x for x in n if x["cls"] == "Button"])
 
     # ══ 3. Az osszecsukas TENYLEG szukit ═══════════════════════════════════
-    def total_w(collapsed, w=2200):
+    def total_w(collapsed, w=WIDE):
         return max(x["req_w"] for x in nodes_for(collapsed, w) if x["depth"] <= 1)
 
-    w_open, w_gates, w_all = total_w(OPEN), total_w(GATES), total_w(ALL, 2000)
+    w_open, w_gates, w_all = total_w(OPEN), total_w(GATES), total_w(ALL, 1400)
     check("a kapuk osszecsukasa szukit", w_gates < w_open, f"{w_gates} < {w_open}")
     check("a strategiak osszecsukasa tovabb szukit", w_all < w_gates,
           f"{w_all} < {w_gates}")

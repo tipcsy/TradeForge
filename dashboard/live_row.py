@@ -46,6 +46,13 @@ from dashboard.theme import (
 GAP = 6
 PAD = 4
 
+# A Vezérlés-cella belső térközei. Élesben a Play/Stop és az OPT „összemosódott",
+# ezért mindkettő saját belső margót és egy elválasztó hézagot kapott.
+# ⚠ A `widths()` EBBŐL számol: ha itt változtatsz, a cella szélessége követi —
+# különben a tartalom kilógna (az első próbánál pontosan ez történt).
+CTRL_PADX = 6      # egy vezérlő belső margója (mindkét oldalon)
+CTRL_GAP = 8       # a Play/Stop és az OPT közti elválasztás
+
 # Oszlop-szélességek: a LEGROSSZABB ESETŰ szöveg MÉRT szélességéből.
 #
 # Szándékosan nem karakterszámból és nem bedrótozott pixelből:
@@ -80,6 +87,16 @@ _HEADER_TEXT = {
     "daily": "Napi P&L", "quality": "Min.", "ctrl": "Vezérlés", "opt": "Opt",
     "total_pos": "Pozíció", "total_daily": "Napi P&L", "close": "",
 }
+
+
+def show_market(collapsed: dict) -> bool:
+    """Latszik-e a `Piac` oszlop?
+
+    Ha EGYETLEN paron sincs piac-eloszuro kivalasztva, az oszlop minden soron
+    `—` lenne: helyet foglal, de nem mond semmit. A hivo `collapsed["market"]`-be
+    teszi a dontest (a tabla szamolja ki az adatbol) — a sor es a fejlec
+    UGYANAZT az erteket kapja, kulonben elcsusznanak az oszlopok."""
+    return not (collapsed or {}).get("hide_market")
 
 
 def is_collapsed(collapsed: dict, name: str = None) -> bool:
@@ -119,6 +136,11 @@ def widths(fonts: dict, strategy_names=(), collapsed: dict = None) -> dict:
         w = max(fonts[fkey].measure(txt),
                 small.measure(head + " ▲") if head else 0)
         out[k] = w + 2 * PAD
+    # A Vezérlés a mintaszövegnél SZÉLESEBB: két külön vezérlő, saját margóval és
+    # elválasztó hézaggal. Karakterből becsülve kilógna.
+    out["ctrl"] = max(out["ctrl"],
+                      fonts["small"].measure("■") + 2 * CTRL_PADX + CTRL_GAP
+                      + fonts["small"].measure("OPT") + 2 * CTRL_PADX + 2 * PAD)
     if is_collapsed(collapsed) and strategy_names:
         # A felirat a KAPCSOLÓ-NYILAT is tartalmazza (`▸ wpr_sma`) — enélkül a
         # mérés 4 px-szel kevesebbet ad, és a név utolsó betűje levágódik.
@@ -283,8 +305,10 @@ class LiveRow:
                      FG_RED if sp.get("blocking") else FG_GREEN, self._f["mono"],
                      bg=bg, height=self._h)
             self._align_cell(bg, g.get("align") or {})
-            self._rc("market", self.mid, (g.get("market") or {}).get("text", "—"),
-                     self._w["market"], FG_GRAY, self._f["small"], bg=bg, height=self._h)
+            if show_market(self._collapsed):
+                self._rc("market", self.mid, (g.get("market") or {}).get("text", "—"),
+                         self._w["market"], FG_GRAY, self._f["small"], bg=bg,
+                         height=self._h)
         badge = g.get("badge", "✓")
         self._rc("badge", self.mid, badge, self._w["badge"],
                  FG_RED if badge != "✓" else FG_GREEN, self._f["mono"],
@@ -347,9 +371,13 @@ class LiveRow:
         for key, txt, fg, cb in (("run", "■" if live else "▶",
                                   FG_RED if live else FG_GREEN, st.get("on_toggle")),
                                  ("opt", "OPT", FG_BLUE, st.get("on_opt"))):
+            # A ket vezerlo KULON dobozban, elvalaszto hezaggal: elesben
+            # "osszemosodtak" (padx=3 nem eleg, a Play/Stop es az OPT egy
+            # foltnak latszott). A Play/Stop szeles kattinto-feluletet kap.
             l = tk.Label(inner, text=txt, fg=fg, bg=bg, font=self._f["small"],
-                         cursor="hand2", bd=0, padx=3, pady=0, highlightthickness=0)
-            l.pack(side="left")
+                         cursor="hand2", bd=0, padx=CTRL_PADX, pady=0,
+                         highlightthickness=0)
+            l.pack(side="left", padx=(0, CTRL_GAP) if key == "run" else 0)
             self._lbl[f"{n}|ctrl_{key}"] = l
             if cb:
                 l.bind("<Button-1>", lambda _e, c=cb: c())
@@ -580,7 +608,8 @@ def build_header(parent, fonts: dict, strategies: list, collapsed: dict = None,
     # ── 1. sor: csoportok (a terv „Instrumentum / Kapuk / Stratégiák" sávja) ──
     group(tl, ("symbol", "bid", "ask", "change"), "Instrumentum")
     if not collapsed.get("gates"):
-        group(tm, ("spread", "align", "market"), "Kapuk", key="gates")
+        _gk = ("spread", "align", "market") if show_market(collapsed)             else ("spread", "align")
+        group(tm, _gk, "Kapuk", key="gates")
     _cell(tm, "", w["badge"], FG_GRAY_DIM, f, bg=BG_HEADER, height=h)
     for name in strategies:
         coll = is_collapsed(collapsed, name)
@@ -603,8 +632,9 @@ def build_header(parent, fonts: dict, strategies: list, collapsed: dict = None,
         _sorted_head(bm, "spread", "Spread", w["spread"], f, h, on_sort,
                      sort_key, sort_dir)
         _cell(bm, "Együtt", w["align"], FG_GRAY_DIM, f, bg=BG_HEADER, height=h)
-        _sorted_head(bm, "market", "Piac", w["market"], f, h, on_sort,
-                     sort_key, sort_dir)
+        if show_market(collapsed):
+            _sorted_head(bm, "market", "Piac", w["market"], f, h, on_sort,
+                         sort_key, sort_dir)
     # Összecsukott kapuknál a K.Össz. fejléce lesz a kapcsoló (különben nem
     # lehetne visszanyitni — a „Kapuk" felirat ilyenkor nem létezik).
     if collapsed.get("gates") and on_toggle is not None:

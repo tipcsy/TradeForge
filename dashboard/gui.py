@@ -798,12 +798,17 @@ class OptimizerController:
                                         f"Várakozik... ({strategy})")
                 self.optimizer_status[symbol] = f"Várakozik... ({strategy})"
 
-    def cancel_queued(self, symbol: str):
-        """Sorban álló (QUEUED) optimalizálás visszavonása (a szimbólum összes
-        sorban álló tétele)."""
+    def cancel_queued(self, symbol: str, strategy: str = None):
+        """Sorban álló (QUEUED) optimalizálás visszavonása.
+
+        `strategy=None` → a szimbólum ÖSSZES sorban álló tétele (a classic OPT
+        gombja szimbólum-szintű). Névvel CSAK azt az egyet — a 2.0 OPT gombja a
+        stratégia saját blokkjában ül, tehát ott a többihez nem szabad nyúlni."""
         with self._lock:
-            _dropped = [st for (s, st) in self._queue if s == symbol]
-            self._queue = [(s, st) for (s, st) in self._queue if s != symbol]
+            def _match(s, st):
+                return s == symbol and (strategy is None or st == strategy)
+            _dropped = [st for (s, st) in self._queue if _match(s, st)]
+            self._queue = [(s, st) for (s, st) in self._queue if not _match(s, st)]
             for _st in _dropped:
                 _opt_activity.set_state(symbol, _st, None)
             # Az `instrument_state`-hez NEM nyúlunk: a sor ürítése nem kereskedési
@@ -811,20 +816,25 @@ class OptimizerController:
             if not self._symbol_busy(symbol):
                 self.optimizer_status[symbol] = ""
 
-    def request_stop(self, symbol: str):
-        """FUTÓ optimalizálás/tanítás leállítás-kérése + a szimbólum sorban álló
-        tételeinek törlése. A stop-marker fájlt a szubprocessz trial-/lépés-
-        határon észleli (optuna: study.stop) → az eredmény ELDOBVA, a korábban
-        mentett paraméterek érintetlenek, nincs auto-folytatás."""
+    def request_stop(self, symbol: str, strategy: str = None):
+        """FUTÓ optimalizálás/tanítás leállítás-kérése + a sorban állók törlése.
+
+        `strategy=None` → a szimbólum összes futó tétele (classic). Névvel CSAK
+        azt az egyet (2.0: a gomb a stratégia blokkjában ül).
+
+        A stop-marker fájlt a szubprocessz trial-/lépés-határon észleli (optuna:
+        study.stop) → az eredmény ELDOBVA, a korábban mentett paraméterek
+        érintetlenek, nincs auto-folytatás."""
         from core.params_store import stop_marker
         with self._lock:
-            running = [j for j in self._running if j[0] == symbol]
+            running = [j for j in self._running
+                       if j[0] == symbol and (strategy is None or j[1] == strategy)]
         for s, strat in running:
             try:
                 stop_marker(s, strat).touch()
             except Exception:
                 pass
-        self.cancel_queued(symbol)          # a sorban állók is törölve
+        self.cancel_queued(symbol, strategy)   # a sorban állók is törölve
         for _s, _strat in running:
             _opt_activity.set_status(_s, _strat, "Leállítás kérve...")
         if running:
@@ -2900,8 +2910,39 @@ class DashboardWindow:
                 opt_of=self._live2_opt,
                 live_of=live_of,
                 on_toggle=lambda s, n: self._handle_run(s),
-                on_opt=lambda s, n: self._handle_opt(s)))
+                on_opt=self._live2_opt_click))
         return rows
+
+    def _live2_opt_click(self, symbol: str, name: str):
+        """A 2.0 OPT gombja — KÖZVETLENÜL erre a stratégiára hat, menü nélkül.
+
+        A `classic` OPT gombja szimbólum-szintű, ezért több stratégiánál választó-
+        menüt nyit. A 2.0-ban a gomb a stratégia SAJÁT blokkjában ül, tehát a
+        választás már megtörtént — a menü ott fölösleges kérdés lenne.
+
+        A morph ugyanaz, mint a classicban: fut → leállítás, sorban → törlés,
+        egyébként indítás. Csak a hatókör szűkebb (egy stratégia, nem az egész
+        szimbólum)."""
+        from core import opt_activity as _oa
+        st = _oa.state_of(symbol, name)
+        if st == "OPTIMIZING":
+            self._opt_ctrl.request_stop(symbol, name)
+            return
+        if st == "QUEUED":
+            self._opt_ctrl.cancel_queued(symbol, name)
+            return
+        # LIVE-ban KERESKEDŐ stratégiát nem optimalizálunk: a futás végén
+        # felülíródna a paraméterfájlja, és egy nyíló belépő a RÉGI paraméterekkel
+        # menne. (Ugyanaz a szabály, mint a classic menüjében — ott tiltott
+        # tételként, indoklással látszik.)
+        try:
+            if self._opt_ctrl._strategy_live(symbol, name):
+                self.lbl_status.config(
+                    text=f"{symbol}/{name}: kereskedik — előbb állítsd meg (▶/■).")
+                return
+        except Exception:
+            pass
+        self._opt_ctrl.request_optimize(symbol, name)
 
     def _live2_opt(self, symbol: str, name: str) -> str:
         """Az Opt cella PER STRATÉGIA — rövid, cellába férő alak.

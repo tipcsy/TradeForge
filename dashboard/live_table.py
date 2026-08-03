@@ -120,12 +120,17 @@ class LiveTable:
         self._on_collapse_change = on_collapse_change
         self._on_sort_change = on_sort_change
         self._sort_key, self._sort_dir = None, 1
+        self._sync_pending = False       # egyszerre EGY utemezett szinkron
+        self._last_sync = None           # az utoljara beallitott (w, h)
 
         self.frame = tk.Frame(parent, bg=BG)
         self._build()
 
     # ── Felépítés ────────────────────────────────────────────────────────
     def _build(self):
+        # Ujraepiteskor a korabbi meret ervenytelen (mas oszlopok), kulonben a
+        # "csak ha valtozott" szures kihagyna az elso szinkront.
+        self._last_sync = None
         for w in self.frame.winfo_children():
             w.destroy()
         h = row_height(self._f)
@@ -154,6 +159,8 @@ class LiveTable:
         self._mid_id = self._canvas.create_window((0, 0), window=self._mid,
                                                   anchor="nw")
 
+        self._collapsed["hide_market"] = self._want_hide_market()
+
         # ── Fejléc: a három rész a három oszlopba ──
         names = self._strategy_names()
         build_header((self._left, self._mid, self._right), self._f, names,
@@ -173,9 +180,20 @@ class LiveTable:
                 part.pack_configure(pady=(0, ROW_PAD))
             self._row_widgets.append(r)
 
-        self._mid.bind("<Configure>", self._sync_scrollregion)
-        self._canvas.bind("<Configure>", self._sync_scrollregion)
-        self.frame.after_idle(self._sync_scrollregion)
+        self._mid.bind("<Configure>", self._queue_sync)
+        self._canvas.bind("<Configure>", self._queue_sync)
+        self._queue_sync()
+
+    def _want_hide_market(self) -> bool:
+        """Elrejtsuk-e a `Piac` oszlopot? Igen, ha EGYETLEN soron sincs
+        piac-allapot — ott az oszlop minden sorban `—` lenne: helyet foglal, de
+        nem mond semmit.
+
+        A dontes EGY helyen szuletik, es a fejlec meg a sorok ugyanazt kapjak,
+        kulonben elcsusznanak az oszlopok."""
+        return not any(
+            ((d.get("gates") or {}).get("market") or {}).get("text")
+            not in (None, "", "—") for d in self._rows)
 
     def _visible(self) -> list:
         """A kirajzolando sorok a jelenlegi rendezessel."""
@@ -201,13 +219,42 @@ class LiveTable:
         elif not needed and self._hbar.winfo_ismapped():
             self._hbar.pack_forget()
 
+    def _queue_sync(self, _e=None):
+        """A görgetési tartomány frissítésének ÜTEMEZÉSE — nem azonnali futtatás.
+
+        ⚠ EZ VOLT A „FLOW"-AKADÁS OKA. Az első változat közvetlenül a
+        `<Configure>` eseményre futtatta a szinkront, ami két bajt okozott:
+
+          1. `update_idletasks()` a kezelőn BELÜL — ez a TELJES ablak elrendezését
+             újraszámolja. Ablak-húzáskor/átméretezéskor a `<Configure>` sűrűn
+             tüzel, tehát ez másodpercenként sokszor lefutott: a felület
+             „megakadt, aztán észbe kapott".
+          2. VISSZACSATOLÁS: a kezelő `configure()`-t hívott a vásznon és a
+             beágyazott kereten, ami ÚJABB `<Configure>`-t váltott ki — a hurok
+             önmagát táplálta.
+
+        Megoldás: az eseményt csak MEGJELÖLJÜK, a tényleges munka egyszer fut le
+        a következő üresjáratban (a sok esemény egyetlen szinkronná olvad össze).
+        A `update_idletasks()` elmarad — az elrendezés úgyis kész, mire az
+        üresjárati hívás sorra kerül."""
+        if self._sync_pending:
+            return
+        self._sync_pending = True
+        self.frame.after_idle(self._sync_scrollregion)
+
     def _sync_scrollregion(self, _e=None):
         """A vászon görgetési tartománya = a benne lévő keret TÉNYLEGES mérete.
         A magasságot rá is kényszerítjük a vászonra, különben a vászon a saját
         kért méretét tartaná, és a sorok alja levágódna."""
-        self._canvas.update_idletasks()
+        self._sync_pending = False
         w = self._mid.winfo_reqwidth()
         h = self._mid.winfo_reqheight()
+        # CSAK akkor irunk, ha tenylegesen valtozott. A `configure()` ujabb
+        # <Configure> esemenyt kelt: valtozatlan ertekkel ez vegtelen korbe-
+        # ertesitest jelentene (a hurok masodik fele — lasd `_queue_sync`).
+        if (w, h) == self._last_sync:
+            return
+        self._last_sync = (w, h)
         self._canvas.configure(scrollregion=(0, 0, w, h), height=h)
         self._canvas.itemconfigure(self._mid_id, width=w, height=h)
 
@@ -268,7 +315,10 @@ class LiveTable:
         old = [d.get("symbol") for d in self._visible()]
         self._rows = rows
         new = [d.get("symbol") for d in self._visible()]
-        if old != new or len(self._row_widgets) != len(new):
+        # A `Piac` oszlop meg/eltunese SZERKEZETI valtozas (mas cellak kellenek),
+        # tehat ujraepitest kivan — a helyben frissites itt hazudna.
+        if (self._want_hide_market() != self._collapsed.get("hide_market")
+                or old != new or len(self._row_widgets) != len(new)):
             self._build()
             return
         for w, d in zip(self._row_widgets, self._visible()):

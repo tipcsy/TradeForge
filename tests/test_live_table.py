@@ -198,6 +198,71 @@ if TK_OK:
     check("kinyitva is latszik az Osszesito oszlop", with_table(right_visible))
     check("...osszecsukva is", with_table(right_visible, ALL_COLL))
 
+    # ══ 7. A `Piac` oszlop elrejtese, ha egyik paron sincs beallitva ═══════
+    def market_headers(t):
+        return len([1 for w in _all_widgets(t.frame)
+                    if w.winfo_class() == "Label" and w.cget("text") == "Piac"])
+
+    def _all_widgets(w):
+        yield w
+        for c in w.winfo_children():
+            yield from _all_widgets(c)
+
+    def with_market(t):
+        return market_headers(t)
+
+    def without_market(t):
+        for d in t._rows:
+            d["gates"]["market"]["text"] = "—"
+        t.refresh(t._rows)
+        t.frame.update_idletasks()
+        return market_headers(t)
+
+    check("van piac-allapot -> latszik a Piac oszlop", with_table(with_market) == 1)
+    check("egyik paron sincs -> ELTUNIK", with_table(without_market) == 0)
+
+    # A megjelenes/eltunes SZERKEZETI valtozas: ujra kell epiteni, kulonben a
+    # helyben frissites a regi oszlopokkal maradna (es elcsusznanak a cellak).
+    def rebuild_on_market_change(t):
+        # SZAMLALOVAL, nem id()-vel: a felszabadult objektumok cime UJRA-
+        # HASZNOSULHAT, es a teszt hamis egyezest merne (elso valtozatban
+        # pontosan ez tortent — a kod jol mukodott, a MERES volt rossz).
+        calls = []
+        orig = t._build
+        t._build = lambda: (calls.append(1), orig())[1]
+        for d in t._rows:
+            d["gates"]["market"]["text"] = "—"
+        t.refresh(t._rows)
+        return len(calls) == 1
+
+    check("a Piac-oszlop eltunese UJRAEPITEST valt ki",
+          with_table(rebuild_on_market_change))
+
+    # ══ 8. A gorgetesi szinkron OSSZEVONVA (a "flow"-akadas javitasa) ═════
+    # Az elso valtozat a <Configure> esemenyre AZONNAL futtatta a szinkront,
+    # `update_idletasks()`-szel a kezelon belul — ablak-huzaskor ez lathato
+    # akadast okozott, es a `configure()` ujabb <Configure>-t keltett (hurok).
+    def sync_coalesces(t):
+        t._sync_pending = False
+        t._queue_sync(); t._queue_sync(); t._queue_sync()
+        return t._sync_pending          # EGY utemezett munka, nem harom
+
+    check("sok <Configure> EGY szinkronna olvad ossze", with_table(sync_coalesces))
+
+    def no_op_guard(t):
+        t.frame.update_idletasks()
+        t._sync_scrollregion()
+        first = t._last_sync
+        t._sync_scrollregion()          # valtozatlan meret -> nem ir ujra
+        return first is not None and first == t._last_sync
+
+    check("valtozatlan meretnel nincs ujra-konfiguralas (nincs visszacsatolas)",
+          with_table(no_op_guard))
+
+    # A <Configure> az UTEMEZOT hivja, nem kozvetlenul a szinkront
+    check("a <Configure> az utemezohoz kotodik",
+          with_table(lambda t: "_queue_sync" in t._canvas.bind("<Configure>")))
+
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")
 sys.exit(0 if all(results) else 1)
