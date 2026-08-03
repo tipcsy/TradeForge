@@ -1,5 +1,7 @@
 # TradeForge
 
+[![Licenc: GPL v3](https://img.shields.io/badge/Licenc-GPLv3-blue.svg)](LICENSE)
+
 MetaTrader 5-höz kapcsolódó, Python-alapú kereskedési keretrendszer: élő motor,
 tkinter dashboard, backtest, Optuna-alapú paraméter-optimalizálás és MT5-chart
 vizualizáció — több instrumentumra és több stratégiára egyszerre.
@@ -25,6 +27,7 @@ vizualizáció — több instrumentumra és több stratégiára egyszerre.
 - [Tesztek](#tesztek)
 - [Hibakeresés](#hibakeresés)
 - [További dokumentáció](#további-dokumentáció)
+- [Licenc](#licenc)
 
 ---
 
@@ -361,3 +364,35 @@ szűrhető névtöredékkel (`python tests/run_all.py package`).
 - [`tools/MT5_BACKTEST_README.md`](tools/MT5_BACKTEST_README.md) — backtest visszajátszása MT5-ben
 - [`build/README.md`](build/README.md) — EXE-build (PyInstaller)
 - [`.claude/skills/new-strategy/SKILL.md`](.claude/skills/new-strategy/SKILL.md) — új stratégia bevezetésének checklistje
+
+---
+
+## Licenc
+
+**GNU General Public License v3.0** — a teljes szöveg: [`LICENSE`](LICENSE).
+
+```
+TradeForge — MetaTrader 5 kereskedési keretrendszer
+Copyright (C) 2026 tipcsy
+
+Ez a program szabad szoftver: terjesztheted és/vagy módosíthatod a Free
+Software Foundation által kiadott GNU General Public License 3. (vagy
+bármely későbbi) változatának feltételei szerint.
+
+A programot abban a reményben adjuk közre, hogy hasznos lesz, de MINDENFÉLE
+GARANCIA NÉLKÜL; még az ELADHATÓSÁGRA vagy egy ADOTT CÉLRA VALÓ ALKALMASSÁGRA
+vonatkozó garancia nélkül is. Részletekért lásd a GNU General Public
+License-t.
+
+A programmal együtt meg kellett kapnod a GNU General Public License egy
+példányát; ha nem, lásd <https://www.gnu.org/licenses/>.
+```
+
+Röviden, mit jelent ez a gyakorlatban:
+
+- **Szabadon** használhatod, tanulmányozhatod, módosíthatod és továbbadhatod.
+- Ha **továbbadod** — akár módosítva, akár nem —, a **forráskódot is** át kell
+  adnod, **ugyanezen** GPL-3.0 licenc alatt.
+- Zárt forrású termékbe **nem** építhető be.
+- **Nincs garancia.** Ezt a fenti kockázati figyelmeztetéssel együtt olvasd: a
+  program valós pénzzel kereskedhet, és a felelősség a felhasználóé.

@@ -8,6 +8,9 @@ Parancsok:
   python main.py live         — élő kereskedés + dashboard
   python main.py dashboard    — csak dashboard (demo mód, MT5 nélkül)
   python main.py backtest     — backtest futtatás az alapértelmezett paraméterekkel
+
+TradeForge — Copyright (C) 2026 tipcsy. Ez a program MINDENFÉLE GARANCIA NÉLKÜL
+készült, és szabadon terjesztheted a GNU GPL v3 feltételei szerint (lásd LICENSE).
 """
 
 import json
