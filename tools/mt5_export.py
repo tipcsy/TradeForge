@@ -28,7 +28,7 @@ import pandas as pd
 
 MT5_HEADER = ["event", "datetime", "symbol", "direction", "price", "sl", "tp",
               "lot", "comment", "be_trigger", "trail_trigger", "trail_dist_p"]
-BAR_MINUTES = 1     # Trading-with-Erik M1-belépő → az OPEN a belépő + 1 M1 (bar-záró)
+BAR_MINUTES = 1     # TradeForge M1-belépő → az OPEN a belépő + 1 M1 (bar-záró)
 
 
 def _fmt(dt) -> str:

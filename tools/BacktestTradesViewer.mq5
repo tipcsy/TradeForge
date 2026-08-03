@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| BacktestTradesViewer.mq5  v1.00 (TradeForge / Trading-with-Erik) |
+//| BacktestTradesViewer.mq5  v1.00 (TradeForge)                     |
 //| A BacktestReplayer CSV-jét (mt5_export.py, esemény-napló) egy     |
 //| NORMÁL charton rajzolja ki — nem kell Strategy Testert futtatni.  |
 //|                                                                  |

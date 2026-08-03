@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| BacktestPnLViewer.mq5  v1.10 (TradeForge / Trading-with-Erik)    |
+//| BacktestPnLViewer.mq5  v1.10 (TradeForge)                        |
 //| A BacktestReplayer CSV-jét (mt5_export.py, esemény-napló) egy     |
 //| NORMÁL charton rajzolja ki — nem kell Strategy Testert futtatni — |
 //| ÉS kiszámolja minden kötés eredményét PÉNZBEN és R-ben.           |

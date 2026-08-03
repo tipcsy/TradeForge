@@ -50,17 +50,17 @@ vizualizáció — több instrumentumra és több stratégiára egyszerre.
 ### 1. Kód letöltése
 
 ```bash
-git clone https://github.com/tipcsy/TradingWithErik.git
+git clone https://github.com/tipcsy/TradeForge.git
 ```
 
-Ez létrehoz egy `TradingWithErik` mappát az aktuális könyvtárban. Ha más nevet
+Ez létrehoz egy `TradeForge` mappát az aktuális könyvtárban. Ha más nevet
 szeretnél, add meg a végén (`git clone <url> <mappanév>`). Git nélkül a GitHubról
 ZIP-ként is letölthető és kicsomagolható bárhová.
 
 Ezután lépj a projekt mappájába — **minden további parancsot innen futtass**:
 
 ```bash
-cd TradingWithErik
+cd TradeForge
 ```
 
 ### 2. Virtuális környezet (ajánlott)

@@ -42,7 +42,7 @@ ugyanezt a CSV-t olvasó **indikátorok** valamelyikét egy `<SYMBOL>` **M1** ch
   fájlneve. Csak rajzol, nem kereskedik.
 
 ## Fontos / korlátok
-- **Trading-with-Erik M1-belépőket ad** → az EA **M1**-en fut. Minden esemény
+- **A TradeForge M1-belépőket ad** → az EA **M1**-en fut. Minden esemény
   időbélyege a detektáló bar + 1 M1 (bar-záró) → az EA a következő bar nyitásán hajtja
   végre.
 - **v4 (eseménynapló-alapú):** BÁRMELY preset (Felező/Pajzs/Fibo/Harmados/Risky), a

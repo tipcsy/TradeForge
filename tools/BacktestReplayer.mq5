@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| BacktestReplayer.mq5  v4.00 (TradeForge / Trading-with-Erik)     |
+//| BacktestReplayer.mq5  v4.00 (TradeForge)                         |
 //| Reads mt5_backtest_SYMBOL.csv from tools/mt5_export.py and       |
 //| REPLAYS the Python backtest event log 1:1 (no re-simulation).    |
 //|                                                                  |
