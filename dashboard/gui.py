@@ -45,6 +45,7 @@ from strategy.settings import apply_strategy_config, main_config_view
 from core import risky_mode
 from core import adopted as _adopted
 from core import position_meta as _pmeta
+from core import pnl_split as _pnl_split
 from core import opt_activity as _opt_activity
 from version import APP_NAME, APP_VERSION
 
@@ -2856,8 +2857,20 @@ class DashboardWindow:
         from dashboard import theme as _t
         self._live2 = LiveTable(
             parent, _t.fonts(), rows=self._live2_visible_rows(),
+            collapsed={"pnl_mode": self._pnl_display()},
             on_close=self._handle_delete)
         self._live2.frame.pack(fill="both", expand=True)
+
+    def _pnl_display(self) -> str:
+        """A `Pozíció` / `Napi P&L` cellák tartalma: `money` | `r` | `both`.
+
+        ALAPÉRTELMEZÉS: `money` (csak dollár). A „mindkettő" azért nem az, mert
+        R csak akkor van, ha a belépéskori kockázat rögzült — enélkül a cella
+        fele üresen áll, és a tábla ettől „szétesik". Configból:
+        `dashboard.pnl_display`."""
+        from dashboard.live_row import PNL_MODES
+        v = str((self.cfg.get("dashboard") or {}).get("pnl_display", "money"))
+        return v if v in PNL_MODES else "money"
 
     def _live2_strategies(self, symbol: str) -> list:
         """A soron megjelenő stratégiák. MINDEN sorban ugyanaz a lista kell
@@ -2884,17 +2897,12 @@ class DashboardWindow:
         maga tiszta és tesztelt (`dashboard/row_source.py`)."""
         from dashboard import row_source as _rsrc
         from core import position_meta as _pm
-        from core import run_state as _rst
         try:
             from trading.live_trader import strategy_of_ticket as _owner
         except Exception:
             _owner = None
         positions = (getattr(self, "_mt5_cache", {}) or {}).get("positions_detail") or []
         syms = [s for s, p in self.cfg["pairs"].items() if isinstance(p, dict)]
-
-        def live_of(sym, name):
-            return name in (_rst.live_strategies(self.cfg, sym,
-                                                self._live2_strategies(sym)) or [])
 
         rows = []
         for sym in syms:
@@ -2908,10 +2916,64 @@ class DashboardWindow:
                 positions=positions, owner_of=_owner, risk_of=_pm.risk_of,
                 quality_of=self._live2_quality,
                 opt_of=self._live2_opt,
-                live_of=live_of,
-                on_toggle=lambda s, n: self._handle_run(s),
-                on_opt=self._live2_opt_click))
+                live_of=self._strategy_live,
+                stage_order_of=self._live2_stage_order,
+                opt_enabled_of=self._live2_opt_enabled,
+                on_toggle=self._handle_run_strategy,
+                on_opt=self._live2_opt_click,
+                on_stages=self._show_strategy_params,
+                on_symbol=self._show_instrument_settings,
+                on_align=self._show_tfalign_settings,
+                on_spread=self._show_spread_params))
         return rows
+
+    def _strategy_live(self, symbol: str, name: str) -> bool:
+        """Kereskedik-e ÉPP ez a (pár, stratégia)? A `core.run_state` a forrás —
+        ugyanaz, amit a `live_trader` is olvas, tehát a felület és a motor nem
+        mondhat mást. EGY igazságforrás: a sor Play/Stop jelzése, az OPT
+        engedélyezettsége és a „STOPPED elrejtése" szűrő is ezt hívja."""
+        from core import run_state as _rst
+        return name in (_rst.live_strategies(self.cfg, symbol,
+                                             self._live2_strategies(symbol)) or [])
+
+    def _live2_opt_enabled(self, symbol: str, name: str) -> bool:
+        """Optimalizálható-e MOST ez a (pár, stratégia)? Nem, ha kereskedik (a
+        futás végén felülíródna a paraméterfájlja), és nem KIVEZETÉS alatt sem
+        (ott minden stratégia pozíciót kezel). Pontosan az a két feltétel, amit
+        az `OptimizerController.request_optimize` is ellenőriz — így a halvány
+        gomb nem ígér mást, mint amit a kattintás tenne."""
+        if self.instrument_state.get(symbol) == "CLOSING":
+            return False
+        return not self._strategy_live(symbol, name)
+
+    def _show_spread_params(self, symbol: str):
+        """A `Spread` cellára kattintva a spread-küszöb paraméterei nyílnak.
+
+        Ezek a KÖZÖS, stratégia-független végrehajtási paraméterek
+        (`max_spread_atr_ratio`, `min_spread_mult` — `core/execution_params.py`),
+        tehát egy instrumentumon minden stratégiára ugyanazok. Az ablakuk a
+        paraméter-ablak „Végrehajtás" kategóriája; az első stratégia nézetében
+        nyitjuk meg (bármelyik ugyanazt az értéket mutatná)."""
+        names = self._live2_strategies(symbol)
+        self._show_strategy_params(symbol, names[0] if names else "")
+
+    def _live2_stage_order(self, name: str) -> tuple:
+        """A stratégia jelölő-stádiumainak KANONIKUS sorrendje (`columns()`).
+
+        Enélkül a `row_source._stages` a `ds.strategy_cells[név]` dict MINDEN
+        kulcsát pöttynek veszi — az `ml_ai` viszont a két stádium mellé a
+        `ml_proba` SZÁM-cellát is beleírja, tehát egy harmadik, örökké halvány
+        pötty jelent meg. A `classic` tábla sosem hibázott ebben, mert ott az
+        oszlop-deklaráció `stages` mezője adja a köröket — most a 2.0 is onnan
+        veszi. Ismeretlen stratégia → `None` (marad a régi, dict szerinti sorrend)."""
+        try:
+            from strategy import get_strategy_by_name
+            for col in get_strategy_by_name(name).columns():
+                if col.kind == "marker" and col.stages:
+                    return tuple(k for k, _lbl in col.stages)
+        except Exception:
+            pass
+        return None
 
     def _live2_opt_click(self, symbol: str, name: str):
         """A 2.0 OPT gombja — KÖZVETLENÜL erre a stratégiára hat, menü nélkül.
@@ -4020,6 +4082,84 @@ class DashboardWindow:
         elif st == "CLOSING":
             self._handle_resume(symbol)
 
+    # ── Per-stratégia Play/Stop (a 2.0 tábla vezérlője) ──────────────────
+    def _handle_run_strategy(self, symbol: str, name: str):
+        """A 2.0 Play/Stop gombja — CSAK ezt a (pár, stratégia) párost kapcsolja.
+
+        A `classic` gombja szimbólum-szintű, mert ott egy sor = egy instrumentum
+        ÖSSZES stratégiája. A 2.0-ban a gomb a stratégia SAJÁT blokkjában ül,
+        tehát a szimbólum-szintű kapcsolás itt hazugság volna: a `wpr_sma` Play
+        gombja az `ml_ai`-t is elindította.
+
+        A szimbólum-szintű `instrument_state` ettől nem tűnik el — a motor
+        ciklusa azon dönt, hogy egy párt egyáltalán feldolgoz-e. A két szint
+        viszonya: a szimbólum LIVE, ha BÁRMELY stratégiája él."""
+        if self._strategy_live(symbol, name):
+            self._stop_strategy(symbol, name)
+        else:
+            self._start_strategy(symbol, name)
+
+    def _start_strategy(self, symbol: str, name: str):
+        """Egy stratégia indítása ezen a páron."""
+        from core import run_state as _rs
+        from core.params_store import params_file
+        # Paraméterek nélkül nincs mit futtatni — a motor amúgy is kihagyná
+        # (`_make_state` → None), csak épp NÉMÁN. Itt megmondjuk, miért.
+        if not params_file(symbol, name).exists():
+            self._set_status(f"{symbol}/{name}: nincs paraméterkészlet — "
+                             f"előbb futtasd az OPT-ot.")
+            return
+        if _opt_activity.busy(symbol, name):
+            self._set_status(f"{symbol}/{name}: optimalizálás fut — "
+                             f"előbb állítsd le (OPT).")
+            return
+        _rs.set_state(self.cfg, symbol, name, _rs.LIVE)
+        self._save_main_config()
+        # A pár szintjén is engedni kell, különben a motor hozzá sem nyúl.
+        # KIVEZETÉS alatt ez egyben a leállítás visszavonása.
+        if self.instrument_state.get(symbol) != "LIVE":
+            self.instrument_state[symbol] = "LIVE"
+            if self._on_play:
+                self._on_play(symbol)
+        self._set_status(f"{symbol}/{name}: elindítva.")
+        self._apply_filter_sort()
+
+    def _stop_strategy(self, symbol: str, name: str):
+        """Egy stratégia leállítása ezen a páron.
+
+        Amíg MARAD élő stratégia, a pár LIVE marad, és a motor a leállítottat
+        magától elengedi (nyitott pozícióval kivezetésbe teszi — lásd
+        `live_trader.run`). Ha ez volt az UTOLSÓ, a szimbólumot is le kell zárni,
+        és ott ugyanaz a szabály él, mint a `classic` Stopnál: nyitott
+        pozícióval KIVEZETÉS (a motor tovább kezeli), különben STOPPED."""
+        from core import run_state as _rs
+        _rs.set_state(self.cfg, symbol, name, _rs.STOPPED)
+        self._save_main_config()
+        if any(self._strategy_live(symbol, n)
+               for n in self._live2_strategies(symbol)):
+            self._set_status(f"{symbol}/{name}: leállítva "
+                             f"(a pár többi stratégiája fut).")
+            self._apply_filter_sort()
+            return
+        ds = self.dashboard_ref.get(symbol)
+        if ds is not None and ds.position_pnl is not None:
+            self.instrument_state[symbol] = "CLOSING"
+            self._set_status(f"{symbol}: kivezetés — a nyitott pozíciót "
+                             f"tovább kezeljük, új belépő nem nyílik.")
+        else:
+            self.instrument_state[symbol] = "STOPPED"
+            self._set_status(f"{symbol}: leállítva.")
+            if self._on_stop:
+                self._on_stop(symbol)
+        self._apply_filter_sort()
+
+    def _set_status(self, text: str):
+        """Állapotsor-üzenet — az alsó sáv még nem biztos, hogy létezik (a tábla
+        felépítése közben is hívódhat)."""
+        lbl = getattr(self, "lbl_status", None)
+        if lbl is not None:
+            lbl.config(text=text)
+
     def _handle_resume(self, symbol: str):
         """A kivezetés visszavonása: a pár újra nyithat belépőt. A motor állapota
         megmaradt (a pozíciót végig kezelte), ezért csak a szándékot állítjuk vissza."""
@@ -4404,6 +4544,43 @@ class DashboardWindow:
         azoknál még nincs rögzítés, de a nyitó order stopja az MT5-ben megvan."""
         pc = (self.cfg.get("pairs") or {}).get(c.get("symbol")) or {}
         return _pmeta.risk_of_closed(c, pc)
+
+    def _daily_split(self, closed_today):
+        """A mai lezárt kötések `{(szimbólum, stratégia): bucket}` bontása — a 2.0
+        tábla `Napi P&L` cellájához.
+
+        Miért ITT és nem a motorban: a `live_trader.daily_split_cached()` a
+        `process_pair`-ből hívódik, az pedig CSAK LIVE/CLOSING páron fut. Egy
+        megállított páron (vagy a bot újraindítása után, mielőtt a kör odaér) a
+        bontás sosem született meg, és a cella `—` maradt — miközben a `classic`
+        `Napi P&L` oszlopa ugyanebből a `closed_today` cache-ből hozta a számot.
+        Ugyanaz a feloldás (`_strategy_by_magic`: örökbefogadás ELŐBB, aztán a
+        magic) és ugyanaz az R-forrás, tehát a két nézet nem mondhat mást.
+
+        A számítás a lista VÁLTOZÁSAKOR fut (a `_refresh` másodpercenként hív);
+        hiba esetén `None` → a hívó nem írja felül a meglévő bontást."""
+        try:
+            sig = (len(closed_today),
+                   sum(float(c.get("pnl") or 0.0) for c in closed_today))
+        except (TypeError, ValueError):
+            return None
+        cached = getattr(self, "_daily_split_cache", None)
+        if cached is not None and cached[0] == sig:
+            return cached[1]
+        def _resolve(magic, pid):
+            # A `_strategy_by_magic` a TÁBLÁZATNAK „—"-t ad a hozzá nem rendelt
+            # kötésre; a bontásban viszont `None` a megállapodás (lásd
+            # `core/pnl_split.py`), hogy az adat ne keveredjen a formázással.
+            nm = self._strategy_by_magic(magic, pid)
+            return None if nm == "—" else nm
+
+        try:
+            split = _pnl_split.split_by_strategy(
+                closed_today, resolve=_resolve, risk_of=_pmeta.risk_of)
+        except Exception:
+            return None
+        self._daily_split_cache = (sig, split)
+        return split
 
     def _strategy_by_magic(self, magic, ticket=None) -> str:
         """magic (+ ticket) → stratégianév a Pozíciók / Lezárt fülre.
@@ -5395,14 +5572,23 @@ class DashboardWindow:
         # "Lezárt (ma)" füllel és a felső összesítővel is egyezik. Csak kapcsolódva
         # írjuk felül (offline a closed_today [] fallback → nem hiteles).
         if connected:
+            closed_today = cache.get("closed_today") or []
             daily_by_symbol: dict = {}
-            for c in (cache.get("closed_today") or []):
+            for c in closed_today:
                 s = c.get("symbol")
                 if s is not None:
                     daily_by_symbol[s] = daily_by_symbol.get(s, 0.0) + c.get("pnl", 0.0)
+            # A 2.0 tábla STRATÉGIÁNKÉNTI napi bontása UGYANEBBŐL a forrásból.
+            # Korábban csak a `live_trader.process_pair` töltötte, az viszont
+            # kizárólag LIVE/CLOSING párra fut — egy megállított páron (vagy
+            # a bot újraindítása után) a cella némán „—" maradt, holott a
+            # kereskedés megvolt és a `classic` oszlop hozta is.
+            split = self._daily_split(closed_today)
             for _sym, _ds in self.dashboard_ref.items():
                 if _ds is not None:
                     _ds.daily_pnl = daily_by_symbol.get(_sym, 0.0)
+                    if split is not None:
+                        _ds.daily_by_strategy = _pnl_split.for_symbol(split, _sym)
 
         if mt5_info:
             self._update_connection_ui(mt5_info)

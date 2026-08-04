@@ -83,6 +83,28 @@ if TK_OK:
     check("a csoport-sav ugyanolyan szeles, mint az oszlop-savok",
           len(set(bw)) == 1, f"szelessegek: {sorted(set(bw))}")
 
+    # OSSZECSUKVA is: a strategia-blokkbol a jelzes MELLETT a Vezerles is marad
+    # (osszecsukva is lehessen inditani/leallitani), tehat a FEJLECNEK is ket
+    # oszlopa van ott. Ha a ketto szetcsuszik, minden tovabbi oszlop elcsuszik.
+    offs_c = with_table(col_offsets, ALL_COLL)
+    data_c = offs_c[1:]
+    check("osszecsukva is EGY VONALBAN a fejlec es a sorok",
+          all(o == data_c[0] for o in data_c),
+          f"{len(set(map(tuple, data_c)))} kulonbozo tagolas")
+    bw_c = with_table(band_widths, ALL_COLL)
+    check("...es a csoport-sav is fedi a tagoszlopokat",
+          len(set(bw_c)) == 1, f"szelessegek: {sorted(set(bw_c))}")
+
+    def ctrl_labels(t):
+        """Osszecsukva is ott van-e a Play/Stop es az OPT MINDEN strategianal?"""
+        return [sorted(k for k in r._lbl if "|ctrl_" in k) for r in t._row_widgets]
+
+    ctrls = with_table(ctrl_labels, ALL_COLL)
+    check("osszecsukva is van Play/Stop es OPT minden strategianal",
+          all(c == ["ml_ai|ctrl_opt", "ml_ai|ctrl_run",
+                    "wpr_sma|ctrl_opt", "wpr_sma|ctrl_run"] for c in ctrls),
+          str(ctrls[:1]))
+
     # ══ 2. Fuggoleges igazitas: a harom oszlop sorai egy magassagban ═══════
     def row_tops(t):
         """Soronkent a bal/kozep/jobb resz y-pozicioja. Ha elternek, a sorok

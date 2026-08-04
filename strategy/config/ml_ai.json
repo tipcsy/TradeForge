@@ -13,7 +13,9 @@
     "winrate_good": 0.45
   },
   "indicators": {
-    "_comment": "A feature-motor fix (strategy/ml_features.py — a modell bemenete nem paraméterezhető át tanítás nélkül). Itt csak a futásidejű ablak-méret él.",
+    "_comment": "A feature-motor fix (strategy/ml_features.py — a modell bemenete nem paraméterezhető át tanítás nélkül). Itt a JEL-IDŐSÍK és a futásidejű ablak-méret él.",
+    "_comment_tf": "signal_tf_min: MELYIK IDŐSÍKON születik a jel, percben. Megengedett: 5 | 15 | 30 | 60 (a H1-kontextus feature-nek durvábbnak/egyenlőnek kell lennie a jel-idősíknál, ezért H4 nincs). A végrehajtás mindig M1-en fut (belépő-időzítés), ez nem változik. STRATÉGIA-SZINTŰ (nem per instrumentum): egy modell-architektúra = egy idősík; a betanított modellek fejlécében is szerepel, és ELTÉRÉSNÉL a modell KIHAGYÓDIK (tanítsd újra), mert a predikció más gyertyákra tanult volna.",
+    "signal_tf_min": 15,
     "ml_warmup_bars": 900
   },
   "sltp": {
@@ -32,9 +34,13 @@
       "Egyéb"
     ],
     "params": {
+      "signal_tf_min": {
+        "category": "ML modell",
+        "comment": "A JEL idősíkja percben (5/15/30/60). Változtatás után ÚJRA KELL TANÍTANI — a régi modell más gyertyákra tanult. STRATÉGIA-szintű: a strategy/config/ml_ai.json-ban állítsd."
+      },
       "ml_warmup_bars": {
         "category": "ML modell",
-        "comment": "Élő feature-ablak mélysége (M15 gyertya) — min. ~700 kell az indikátor-bemelegítéshez"
+        "comment": "Élő feature-ablak mélysége (jel-idősík gyertyában) — min. ~700 kell az indikátor-bemelegítéshez"
       },
       "dynamic_sltp": {
         "category": "SL / TP",

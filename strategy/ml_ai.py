@@ -4,10 +4,15 @@ Strategy seam mögé csomagolva.
 
 Működés: páronként és irányonként (long/short) egy tanított osztályozó
 (LightGBM/RandomForest) + StandardScaler + kalibrált valószínűség-küszöb.
-Minden M15 gyertyazáráskor a ~50 feature-ből (strategy.ml_features) predikció
+Minden JEL-gyertya zárásakor a ~50 feature-ből (strategy.ml_features) predikció
 készül; ha P(irány) >= küszöb ÉS a session-óra engedi, a KÖVETKEZŐ M1 záráskor
 belépő jel születik. Az SL/TP ATR-alapú (vagy fix pip) — a pozíciómenedzsment
 (BE/trailing/kockázatcsökkentés) a keretrendszer meglévő presetjeié.
+
+JEL-IDŐSÍK: állítható (`signal_tf_min` — 5/15/30/60 perc, alap M15), lásd lent.
+A VÉGREHAJTÁS mindig M1-en fut: az a belépő időzítése, nem a jelé. A beállítás
+STRATÉGIA-szintű, és a betanított modell fejlécébe is bekerül — eltérésnél a
+modell kimarad (a predikció más gyertyákra vonatkozna).
 
 Modelltár: data/models/ml_ai/<SYMBOL>.pkl — a tanítás (Fázis 2) írja, itt csak
 betöltjük (mtime-cache; újratanítás után automatikusan frissül). Modell nélkül
@@ -60,10 +65,109 @@ def model_path(symbol: str) -> Path:
     return MODELS_DIR / f"{symbol}.pkl"
 
 
-# (symbol) → (mtime, bundle) — újratanítás után (mtime változás) automatikus reload
-_bundle_cache: dict[str, tuple[float, Optional[dict]]] = {}
-# Azok a szimbolumok, ahol a modell LETEZIK, de ELAVULT egységgel tanult
-# (pip→pont migráció). A hívó ezeknél „tanítsd újra" üzenetet ad.
+# ---------------------------------------------------------------------------
+# Jel-idősík — STRATÉGIA-szintű beállítás (strategy/config/ml_ai.json)
+# ---------------------------------------------------------------------------
+#
+# MIÉRT NEM per instrumentum: a `Strategy.timeframes()` az egész keretrendszer
+# adat-szerződése (adatbetöltés, visszaszámlálók, portfólió-backtest, viz), és
+# egyik hívó sem tud paramétert adni neki. Egy instrumentumonként eltérő idősík
+# ezeket széttörné — cserébe semmit nem nyerne: egy modell-architektúra egy
+# idősíkhoz tartozik, és a modelleket úgyis együtt tanítjuk újra.
+#
+# H4 SZÁNDÉKOSAN NINCS: a feature-készlet H1-kontextust tartalmaz
+# (`ml_features.h1_context_from_m15`), ami H4 alapon FELBONTÁS-NÖVELÉS lenne —
+# a resample nem tud a semmiből órás gyertyát csinálni.
+ALLOWED_TF_MIN = (5, 15, 30, 60)
+DEFAULT_TF_MIN = 15
+_TF_LABEL = {5: "M5", 15: "M15", 30: "M30", 60: "H1", 240: "H4"}
+
+_tf_cache: dict = {}          # (mtime) → percek; a config-fájl változását követi
+
+
+def signal_tf_min() -> int:
+    """A jel idősíkja percben, a stratégia SAJÁT configjából.
+
+    Közvetlenül a fájlból olvassuk (nem a futásidejű cfg-ből), mert a
+    `timeframes()` hívóinak nincs cfg-jük. Az mtime-cache miatt ez nem
+    fájlrendszer-terhelés: körönként egy `stat()`."""
+    from strategy.settings import strategy_config_path
+    p = strategy_config_path("ml_ai")
+    try:
+        mtime = p.stat().st_mtime
+    except OSError:
+        return DEFAULT_TF_MIN
+    if _tf_cache.get("mtime") == mtime:
+        return _tf_cache["v"]
+    val = DEFAULT_TF_MIN
+    try:
+        import json as _json
+        with open(p, encoding="utf-8") as f:
+            raw = (_json.load(f).get("indicators") or {}).get("signal_tf_min")
+        if raw is not None:
+            v = int(raw)
+            if v in ALLOWED_TF_MIN:
+                val = v
+            else:
+                log.warning("ml_ai — signal_tf_min=%s nem megengedett (%s) → %d perc",
+                            raw, ALLOWED_TF_MIN, DEFAULT_TF_MIN)
+    except Exception as ex:
+        log.warning("ml_ai — signal_tf_min olvasási hiba: %s", ex)
+    _tf_cache.update({"mtime": mtime, "v": val})
+    return val
+
+
+def _infer_tf_min(df) -> "int | None":
+    """Egy OHLC frame idősíkja percben, az index leggyakoribb lépéséből.
+    None, ha nem állapítható meg (túl kevés sor)."""
+    if df is None or len(df) < 3:
+        return None
+    try:
+        deltas = df.index.to_series().diff().dropna()
+        if deltas.empty:
+            return None
+        return int(deltas.mode().iloc[0].total_seconds() // 60) or None
+    except Exception:
+        return None
+
+
+def resample_ohlc(df, minutes: int):
+    """OHLC(V) frame átmintázása `minutes` perces gyertyákra.
+
+    Csak FELFELÉ (durvább idősík) értelmes; a hívó dolga ezt biztosítani. A
+    `label`/`closed` alapértelmezés (bal-zárt, bal-címkés) EGYEZIK az MT5-ével és
+    a `core.tf_align` resample-jével: a gyertya a NYITÓ idejével azonosított."""
+    agg = {"open": "first", "high": "max", "low": "min", "close": "last"}
+    if "volume" in df.columns:
+        agg["volume"] = "sum"
+    if "avg_spread" in df.columns:
+        agg["avg_spread"] = "mean"
+    out = df.resample(f"{int(minutes)}min").agg(agg).dropna(subset=["close"])
+    return out
+
+
+def frame_for_signal(df_hi, df_lo, minutes: int):
+    """A JEL-idősík frame-je a motortól kapott két adatsorból.
+
+    A hívók (backtest, optimalizáló, viz) az M15+M1 parquet-t adják be. Ha a
+    kívánt idősík ettől eltér, ITT mintázzuk át — a FINOMABB felbontásúból
+    (M1-ből), hogy a gyertyahatárok pontosak legyenek. Élőben ez sosem fut: ott
+    az MT5 közvetlenül a kért idősíkot adja (`live_trader.mt5_timeframe`)."""
+    if _infer_tf_min(df_hi) == minutes:
+        return df_hi
+    if _infer_tf_min(df_lo) == minutes:
+        return df_lo
+    src = df_lo if (_infer_tf_min(df_lo) or 1) <= minutes else df_hi
+    return resample_ohlc(src, minutes)
+
+
+# (symbol) → (kulcs, bundle) — újratanítás (mtime) VAGY idősík-váltás után
+# automatikus reload. Az idősík azért része a kulcsnak, mert a config-váltás nem
+# nyúl a .pkl fájlhoz, tehát az mtime önmagában nem venné észre.
+_bundle_cache: dict[str, tuple[tuple, Optional[dict]]] = {}
+# Azok a szimbolumok, ahol a modell LETEZIK, de NEM HASZNÁLHATÓ: elavult
+# egységgel (pip→pont migráció) VAGY más idősíkon tanult. A hívó ezeknél
+# „tanítsd újra" üzenetet ad.
 _stale_unit_syms: set = set()
 
 
@@ -71,13 +175,15 @@ def load_bundle(symbol: str) -> Optional[dict]:
     """A pár tanított modell-csomagja: {"long": {"model","scaler","threshold"},
     "short": {...}, "features": [...], "meta": {...}} — vagy None, ha nincs."""
     p = model_path(symbol)
+    tf_now = signal_tf_min()
     try:
         mtime = p.stat().st_mtime
     except OSError:
         _bundle_cache.pop(symbol, None)
         return None
+    key = (mtime, tf_now)
     cached = _bundle_cache.get(symbol)
-    if cached and cached[0] == mtime:
+    if cached and cached[0] == key:
         return cached[1]
     try:
         with open(p, "rb") as f:
@@ -85,6 +191,21 @@ def load_bundle(symbol: str) -> Optional[dict]:
     except Exception as ex:
         log.warning("%s — ML modell betöltési hiba (%s): %s", symbol, p.name, ex)
         bundle = None
+    # Az IDŐSÍKNAK egyeznie kell azzal, amin a modell tanult. Ugyanaz a fajta
+    # csendes hiba, mint a pip→pont migráció: a bemenet szerkezetileg érvényes
+    # marad, csak MÁS gyertyákat ír le — a predikció értelmetlen lenne, és a
+    # rendszer ezt magától nem venné észre. A RÉGI (idősík-jelölő nélküli)
+    # modelleket M15-ösnek tekintjük: eddig csak olyan volt.
+    if bundle is not None:
+        _tf_model = int((bundle.get("meta") or {}).get("signal_tf_min", DEFAULT_TF_MIN))
+        if _tf_model != tf_now:
+            log.warning("%s — az ML modell M%d idősíkon tanult, a beállítás viszont "
+                        "M%d (strategy/config/ml_ai.json: signal_tf_min) → a "
+                        "predikció más gyertyákra vonatkozna. A modell KIHAGYVA; "
+                        "tanítsd újra (Opt gomb).", symbol, _tf_model, tf_now)
+            _bundle_cache[symbol] = (key, None)
+            _stale_unit_syms.add(symbol)
+            return None
     # A jellemzők egysége EGYEZZEN a modellével. A pip→pont migráció (v1.67.0) óta
     # a `compute_smc` PONTBAN normalizál; egy régi, PIP-skálán tanított modell
     # bemenete 10-100×-osra ugrana — a predikció értelmetlen lenne, de a rendszer
@@ -102,7 +223,7 @@ def load_bundle(symbol: str) -> Optional[dict]:
     _stale_unit_syms.discard(symbol)
     if stale_unit:
         _stale_unit_syms.add(symbol)
-    _bundle_cache[symbol] = (mtime, bundle)
+    _bundle_cache[symbol] = (key, bundle)
     return bundle
 
 
@@ -256,10 +377,12 @@ class MlAiStrategy(Strategy):
     # --- Megjelenítés -----------------------------------------------------
 
     def timeframes(self) -> list[Timeframe]:
-        # A jel M15-ön születik, a végrehajtás (belépő ár, SL/TP szimuláció) M1-en
-        # — mint a wpr_sma-nál, így az adatréteg változatlan. A H1 kontextust a
-        # feature-motor az M15-ből resample-eli.
-        return [Timeframe("M15", 15), Timeframe("M1", 1)]
+        # A jel a BEÁLLÍTOTT idősíkon születik (`signal_tf_min`, alap M15), a
+        # végrehajtás (belépő ár, SL/TP szimuláció) MINDIG M1-en — az utóbbi a
+        # belépő-időzítés, nem a jelé, ezért nem állítható. A H1 kontextust a
+        # feature-motor a jel-idősíkból resample-eli.
+        m = signal_tf_min()
+        return [Timeframe(_TF_LABEL.get(m, f"M{m}"), m), Timeframe("M1", 1)]
 
     def columns(self) -> list[Column]:
         # Csak a körös jelölő (Modell · Session · Belépő jel). A P(long)/P(short)
@@ -268,10 +391,13 @@ class MlAiStrategy(Strategy):
         return [MarkerColumn("ml_marks", self.name, stages=_STAGES)]
 
     def warmup_bars(self, params: dict, timeframe_label: str) -> int:
-        if timeframe_label == "M15":
-            return int(params.get("ml_warmup_bars", 900))
+        # A JEL idősíkja (bármi is legyen) kapja a mély ablakot; az M1 csak a
+        # végrehajtáshoz kell. Bedrótozott „M15" itt hibás lenne: az idősík
+        # átállításakor a jel-frame némán a sekély 50 bart kapná.
         if timeframe_label == "M1":
             return 10
+        if timeframe_label == self.timeframes()[0].label:
+            return int(params.get("ml_warmup_bars", 900))
         return 50
 
     # A predikció állapotmentes (nincs mély állapotgép) → a jelzés-warmup
@@ -282,7 +408,10 @@ class MlAiStrategy(Strategy):
         M15 gyertya predikciója."""
         cells = dict(_MARKS_EMPTY)
         cells["ml_proba"] = Cell("—", "muted")
-        df15 = md.bars.get("M15")
+        # A JEL idősíkjának frame-je — NEM bedrótozott „M15": az idősík
+        # átállításakor a `md.bars` kulcsa is más (`M30`, `H1`), és a
+        # bedrótozott kulcs némán `None`-t adna (= örökké üres jelzés).
+        df15 = md.bars.get(self.timeframes()[0].label)
         pip = md.params.get("point_size")
         if df15 is None or len(df15) < 3 or not pip:
             return cells
@@ -312,7 +441,7 @@ class MlAiStrategy(Strategy):
     def on_bar_close(self, state: MlAiState, md: MarketData) -> tuple[MlAiState, str]:
         """Új ZÁRT M15 gyertyánál predikció → jel. A hívás M1-ütemű; ugyanarra a
         zárt M15 gyertyára csak EGYSZER értékelünk (és tüzelünk)."""
-        df15 = md.bars.get("M15")
+        df15 = md.bars.get(self.timeframes()[0].label)   # a JEL idősíkja
         pip = md.params.get("point_size")
         if df15 is None or len(df15) < 3 or not pip:
             return state, "NONE"
@@ -403,6 +532,11 @@ class MlAiStrategy(Strategy):
         if not pip:
             raise ValueError("ml_ai.bt_indicators: hiányzó point_size a params-ból "
                              "(a hívónak a pair configból kell injektálnia)")
+        # A hívók (backtest, optimalizáló, viz) az M15+M1 parquet-t adják; ha a
+        # jel-idősík más, ITT áll elő (a motor ezután a visszaadott frame-mel
+        # dolgozik, a bar-hosszt pedig a `timeframes()`-ből veszi — a kettő így
+        # nem tud szétcsúszni).
+        df_hi = frame_for_signal(df_hi, df_lo, signal_tf_min())
         feats = mlf.build_feature_frame(df_hi, float(pip))
         bundle = load_bundle(symbol)
         if bundle is None:
@@ -419,9 +553,9 @@ class MlAiStrategy(Strategy):
         return feats, df_lo
 
     def bt_warmup(self, params: dict, timeframe_label: str) -> int:
-        if timeframe_label == "M15":
-            return mlf.WARMUP_BARS
-        return 2
+        if timeframe_label == "M1":
+            return 2
+        return mlf.WARMUP_BARS if timeframe_label == self.timeframes()[0].label else 2
 
     def bt_new_state(self, symbol: str) -> MlAiBtState:
         return MlAiBtState(symbol)

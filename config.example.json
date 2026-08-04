@@ -43,6 +43,8 @@
     "watchdog_threshold_sec": 2.0,
     "_comment_layout": "Dashboard-elrendezés: 'classic' (ALAP, a megszokott tábla) | 'live2' (Dashboard 2.0: egy sor = egy instrumentum, a stratégiák VÍZSZINTESEN, összecsukható kapu- és stratégia-blokkokkal, fix–görgethető–fix szélességgel). A 2.0 kísérleti: bármikor visszaváltható 'classic'-ra.",
     "layout": "classic",
+    "_comment_pnl": "CSAK a 'live2' elrendezésben: mit mutasson a Pozíció és a Napi P&L cella. 'money' (ALAP) = csak dollár | 'r' = csak R (1 R = a belépéskor kockáztatott összeg) | 'both' = mindkettő. Az oszlopszélesség követi. Az R csak ott van, ahol a belépéskori kockázat rögzült (v1.81.0 óta); ezért nem a 'both' az alapértelmezés — enélkül a cella fele üresen állna.",
+    "pnl_display": "money",
     "_comment_countdown": "Mely időkeretek visszaszámlálója látszik a felső sávban (percben). Üres/hiányzó = a stratégia összes időkerete.",
     "countdown_timeframes": [
       15,
@@ -110,7 +112,9 @@
     "wf_test_months": 2,
     "_comment_split": "train_start_date: ettől dolgozik az optimizer | test_start_date: végső out-of-sample teszt",
     "train_start_date": "2025-01-01",
-    "test_start_date": "2025-10-01"
+    "test_start_date": "2025-10-01",
+    "_comment_gates": "ÉL-PARITÁS (v1.95.0): az optimalizáló ugyanazokat a VÉGREHAJTÁSI kapukat modellezze-e, amiket az él — spread-kapu + TF-együttállás. true (ALAP) = a hangolás abban a világban történik, amiben a kereskedés is fut. false = a régi, kapu nélküli viselkedés (csak régi futások reprodukálásához). FIGYELEM: a váltás után ÚJRA KELL OPTIMALIZÁLNI — a korábbi készletek kapuk nélkül lettek hangolva, és a mentett JSON 'exec_gates' mezője mutatja, melyik világhoz tartoznak.",
+    "exec_gates": true
   },
   "data": {
     "history_start_date": "2024-10-01",

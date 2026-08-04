@@ -534,6 +534,13 @@ def _build_exit_evaluator(m15: pd.DataFrame, rr_spec: dict):
     return _at
 
 
+# A `run_pair(tf_eval=…)` alapértéke. Külön sentinel kell, mert a `None` ÉRVÉNYES
+# érték: „nincs TF-kapu ezen a páron/stratégián". Az alapérték jelentése: „építsd
+# meg magad a cfg-ből". Az optimalizáló EGYSZER építi ablakonként, és ide adja be
+# — a kapu ugyanis NEM függ a trial paramétereitől, viszont resample-t igényel.
+_TF_EVAL_AUTO = object()
+
+
 def _build_tf_align_evaluator(cfg, symbol, strategy_name, df_m1):
     """A TF-együttállás VÉGREHAJTÁSI kapu historikus kiértékelője a backtesthez —
     UGYANAZ a logika, mint az él (`core.tf_align`) és a viz jel-replay-e
@@ -608,6 +615,7 @@ def run_pair(
     stop_flag=None,
     cfg: "dict | None" = None,
     exec_gates: bool = False,
+    tf_eval=_TF_EVAL_AUTO,
 ) -> BacktestResult:
     # A jelzést/indikátorokat a STRATÉGIA adja (seam); a végrehajtás (SL/TP/
     # breakeven/trailing, slot, lot) a motoré. strategy=None → config szerinti.
@@ -720,10 +728,19 @@ def run_pair(
     # együttállás (core.tf_align, ha a `cfg`-ben erre a stratégiára be van kapcsolva).
     # Alap KI → a meglévő hívók (optimizer stb.) BITAZONOSAK maradnak. A TF-kaput a
     # TELJES (vágatlan) df_m1-ből építjük, hogy a magasabb idősíkok SMA-ja warmupolt.
+    #
+    # A TF-kapu kiértékelője NEM függ a trial paramétereitől (csak a cfg-től, a
+    # szimbólumtól és az M1 adattól), viszont resample-t + SMA-t igényel. Ezért a
+    # hívó BEADHATJA előre megépítve (`tf_eval=`) — az optimalizáló ablakonként
+    # EGYSZER építi, nem trialonként. Az alapérték a saját építés (a `None`
+    # ÉRVÉNYES érték: „nincs kapu ezen a páron/stratégián").
     from core import spread_gate as _spread_gate
     _exec_gates = bool(exec_gates)
-    _tf_eval    = (_build_tf_align_evaluator(cfg, symbol, strategy.name, df_m1)
-                   if (_exec_gates and cfg is not None) else None)
+    if tf_eval is not _TF_EVAL_AUTO:
+        _tf_eval = tf_eval if _exec_gates else None
+    else:
+        _tf_eval = (_build_tf_align_evaluator(cfg, symbol, strategy.name, df_m1)
+                    if (_exec_gates and cfg is not None) else None)
 
     # ── BID/ASK modell előkészítés (MT5-hű) ─────────────────────────────────
     # Az MT5 chart/tester gyertyái BID árak; ask-gyertya NINCS. A mi adatunk is

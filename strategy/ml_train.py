@@ -237,8 +237,20 @@ def train_symbol(symbol: str, df_m15: pd.DataFrame, cfg: dict, pair_cfg: dict,
     params = strategy.base_params(cfg)
     pip = float(pair_cfg["point_size"])
 
+    # ── Jel-idősík ─────────────────────────────────────────────────────────
+    # A hívó (optimizer) a TELJES M15 előzményt adja; ha a beállított jel-idősík
+    # más, ITT mintázzuk át. A modell így PONTOSAN azokon a gyertyákon tanul,
+    # amiket a backtest és az él is látni fog — az idősík a modell-csomagba is
+    # bekerül, és eltérésnél a `load_bundle` KIHAGYJA a modellt.
+    tf_min = ml_ai.signal_tf_min()
+    df_sig = (df_m15 if ml_ai._infer_tf_min(df_m15) == tf_min
+              else ml_ai.resample_ohlc(df_m15, tf_min))
+    if len(df_sig) < mlf.WARMUP_BARS + 500:
+        return {"error": f"túl kevés M{tf_min} gyertya a tanításhoz "
+                         f"(n={len(df_sig)}); tölts le hosszabb előzményt"}
+
     # ── Feature-ök + címkék ────────────────────────────────────────────────
-    feats = mlf.build_feature_frame(df_m15, pip)
+    feats = mlf.build_feature_frame(df_sig, pip)
     _step("features")
     feats = label_outcomes(feats, params, pip, lookahead)
     _step("címkézés")
@@ -299,6 +311,11 @@ def train_symbol(symbol: str, df_m15: pd.DataFrame, cfg: dict, pair_cfg: dict,
         # modellek bemenete 10-100×-osra ugrott volna — NÉMÁN, értelmetlen
         # predikciókkal. Ezért bélyegezzük, és a betöltés ellenőrzi.
         "feature_unit": "point",
+        # A JEL-IDŐSÍK, amin a modell tanult. Ugyanaz a fajta csendes csapda,
+        # mint a `feature_unit`: más idősíkon a bemenet szerkezetileg érvényes
+        # marad, csak MÁS gyertyákat ír le. A `load_bundle` ellenőrzi, és
+        # eltérésnél kihagyja a modellt (nem kereskedünk vele).
+        "signal_tf_min": tf_min,
         "trained_at":   datetime.now(timezone.utc).isoformat(),
         "test_start":   str(ts_test.date()),
         "train_rows":   len(train_all),

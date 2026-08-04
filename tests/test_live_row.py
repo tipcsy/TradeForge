@@ -115,14 +115,31 @@ if TK_OK:
               w1["badge"] >= small.measure("K.Össz."))
         check("a vezerles oszlop elbirja a 'Vezerles' fejlecet",
               w1["ctrl"] >= small.measure("Vezérlés"))
-        # Osszecsukva a strategia NEVE all a jelzes-oszlop folott
+        # Osszecsukva a strategia NEVE a megmarado oszlopok (jelzes + Vezerles)
+        # FOLOTT all — a felirat tehat a KETTO egyuttes szelessegebe kell ferjen.
         w_coll = lr.widths(f1, ["wpr_sma", "nagyon_hosszu_strategia_nev"],
                            {"strategies": True})
-        check("osszecsukva a jelzes-oszlop elbirja a leghosszabb strategia-nevet",
-              w_coll["stages"] >= small.measure("nagyon_hosszu_strategia_nev"))
+        _span = w_coll["stages"] + lr.GAP + w_coll["ctrl"]
+        check("osszecsukva a megmarado blokk elbirja a leghosszabb strategia-nevet",
+              _span >= small.measure("▸ nagyon_hosszu_strategia_nev") + 2 * lr.PAD,
+              f'{_span} >= {small.measure("▸ nagyon_hosszu_strategia_nev")}')
         check("...kinyitva ez nem szelesiti (ott a blokk folott all a felirat)",
               lr.widths(f1, ["nagyon_hosszu_strategia_nev"])["stages"]
               == w1["stages"])
+
+        # ── A P&L megjelenitesi mod SZUKITI az oszlopot ──────────────────
+        # A felhasznalo panasza: "tul sok az ures resz". Csak-dollar modban az
+        # R-nek fenntartott hely nem foglalhat.
+        w_money = lr.widths(f1, (), {"pnl_mode": "money"})
+        w_both = lr.widths(f1, (), {"pnl_mode": "both"})
+        check("csak-dollar modban keskenyebb a Pozicio oszlop",
+              w_money["position"] < w_both["position"],
+              f'{w_money["position"]} < {w_both["position"]}')
+        check("...es az Osszesito is", w_money["total_daily"] < w_both["total_daily"])
+        check("a 'both' az alapertelmezes (nincs csendes viselkedes-valtas)",
+              lr.widths(f1)["position"] == w_both["position"])
+        check("ismeretlen mod -> 'both' (nem omlik ossze)",
+              lr.pnl_mode({"pnl_mode": "nincs_ilyen"}) == "both")
     finally:
         _r.destroy()
 
@@ -131,6 +148,11 @@ if TK_OK:
           lr._money_r(1.5, None) == "+1.50$")
     check("R-rel mindketto", lr._money_r(1.5, 1.0) == "+1.50$ +1.00R")
     check("hianyzo penz -> '-'", lr._money_r(None, None) == "—")
+    check("csak-dollar mod: az R-t elhagyja",
+          lr._money_r(1.5, 1.0, "money") == "+1.50$")
+    check("csak-R mod: a penzt elhagyja", lr._money_r(1.5, 1.0, "r") == "+1.00R")
+    check("csak-R mod, ismeretlen kockazat -> '-' (nem 0R)",
+          lr._money_r(1.5, None, "r") == "—")
 
     demo = lr.demo_row()
     check("a bemutato-adat a terv Ger 40 sora", demo["symbol"] == "Ger 40")

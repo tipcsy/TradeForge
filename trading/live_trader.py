@@ -2582,30 +2582,46 @@ def run(cfg: dict, slot_mgr: SlotManager):
                                                   strats_by_symbol.get(symbol, [])]:
                     strats_by_symbol[symbol] = strats
                 _enabled = {st.name for st in strats}
-                # A menet közben KIKAPCSOLT stratégiák: nyitott pozíció nélkül
-                # azonnal leállnak; nyitott pozícióval kivezetésbe mennek (a
-                # meglévőt tovább kezeljük, újat nem nyitunk).
+                # A KERESKEDÉS-SZÁNDÉK (Play/Stop) is PER STRATÉGIA, és szintén
+                # KÖRÖNKÉNT olvassuk újra — ugyanabból az okból, mint a listát
+                # fölötte. Eddig csak INDULÁSKOR számított (`run()` eleje): a
+                # futásidejű LIVE ág minden engedélyezett stratégiához létrehozta
+                # az állapotot, tehát egy felületen leállított stratégiát a
+                # KÖVETKEZŐ KÖR visszaindított volna. A per-stratégia Stop így
+                # csak újraindításig hatott volna — némán.
+                _intent = set(run_state.live_strategies(
+                    cfg, symbol, [st.name for st in strats]))
+                _active = _enabled & _intent
+                # A menet közben LEÁLLÍTOTT stratégiák (kikapcsolt VAGY Stop-olt):
+                # nyitott pozíció nélkül azonnal leállnak; nyitott pozícióval
+                # kivezetésbe mennek (a meglévőt tovább kezeljük, újat nem nyitunk).
                 for (_s, _n) in [k for k in pair_states if k[0] == symbol]:
-                    if _n in _enabled:
+                    if _n in _active:
                         continue
+                    _why = ("KIKAPCSOLTAD" if _n not in _enabled else "LEÁLLÍTOTTAD")
                     _ps = pair_states[(_s, _n)]
                     _has_pos = any(p.symbol == symbol for p in
                                    strategy_positions(symbol, _n))
                     if _has_pos:
                         if not _ps.disabled_closing:
                             _ps.disabled_closing = True
-                            log.info("%s/%s — a stratégiát KIKAPCSOLTAD: a nyitott "
+                            log.info("%s/%s — a stratégiát %s: a nyitott "
                                      "pozíciót tovább kezeljük, új belépő nem nyílik.",
-                                     symbol, _n)
+                                     symbol, _n, _why)
                     else:
                         del pair_states[(_s, _n)]
-                        log.info("%s/%s — a stratégiát KIKAPCSOLTAD → leállítva.",
-                                 symbol, _n)
+                        log.info("%s/%s — a stratégiát %s → leállítva.",
+                                 symbol, _n, _why)
 
                 # Play → LIVE: a hiányzó (symbol, strat) állapotok létrehozása friss
-                # params-szal (minden engedélyezett, tanított stratégiához).
+                # params-szal (minden engedélyezett, LIVE szándékú, tanított
+                # stratégiához). A `is_display` az ELSŐ engedélyezett stratégiához
+                # tartozik (a szimbólum-szintű kijelzés forrása) — akkor is, ha az
+                # épp meg van állítva, különben a kijelzés gazdája vándorolna.
                 if state_now == "LIVE":
                     for _i, st in enumerate(strats):
+                        if st.name not in _active:
+                            continue
                         key = (symbol, st.name)
                         if key not in pair_states:
                             ps = _make_state(symbol, pair_cfg, st, is_display=(_i == 0))
@@ -2614,7 +2630,12 @@ def run(cfg: dict, slot_mgr: SlotManager):
                                 log.info("%s/%s — Play: LIVE indítva", symbol, st.name)
                     if not any((symbol, st.name) in pair_states for st in strats):
                         instrument_state[symbol] = "STOPPED"
-                        log.warning("%s — Play: egyik stratégiához sincs params, STOPPED", symbol)
+                        if _active:
+                            log.warning("%s — Play: egyik stratégiához sincs params, "
+                                        "STOPPED", symbol)
+                        else:
+                            log.info("%s — minden stratégiája leállítva → STOPPED",
+                                     symbol)
 
                 # KIVEZETÉS (Stop nyitott pozícióval): a pár TOVÁBBRA IS feldolgozódik,
                 # hogy a nyitott pozíció kezelése (breakeven, trailing, kiszállási jel,

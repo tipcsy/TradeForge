@@ -126,7 +126,9 @@ def row_data(symbol: str, ds, strategy_names, cfg: dict = None,
              params: dict = None, pair_cfg: dict = None, *,
              positions=None, owner_of=None, risk_of=None, quality_of=None,
              opt_of=None, live_of=None, stage_order_of=None,
-             on_toggle=None, on_opt=None) -> dict:
+             opt_enabled_of=None,
+             on_toggle=None, on_opt=None, on_stages=None,
+             on_symbol=None, on_align=None, on_spread=None) -> dict:
     """Egy instrumentum sorának adata a `live_row.LiveRow` számára.
 
     `ds`          — `live_trader.PairDashboardState` (duck-typed).
@@ -134,7 +136,12 @@ def row_data(symbol: str, ds, strategy_names, cfg: dict = None,
     `quality_of(symbol, strategy) -> (szöveg, szín) | None`
     `opt_of(symbol, strategy) -> str`      — dátum vagy folyamat-%
     `live_of(symbol, strategy) -> bool`    — fut-e a stratégia
-    """
+    `opt_enabled_of(symbol, strategy) -> bool` — optimalizálható-e MOST
+                  (alap: „nem kereskedik" — a futás felülírná a paraméterfájlt)
+
+    A megnyitó visszahívások (`on_*`) a `classic` nézet kattintásait hozzák át:
+    a jelzés-cella a stratégia paramétereit, az instrumentum NEVE az instrumentum
+    beállításait, az `Együtt` a TF-együttállást, a `Spread` a spread-küszöböt."""
     ctx = _g.ctx_from_state(ds, params or {}, pair_cfg or {})
 
     # A K.Össz.-hez a MÉRÉST nézzük: minden kaput blokkolónak véve megkapjuk,
@@ -148,6 +155,7 @@ def row_data(symbol: str, ds, strategy_names, cfg: dict = None,
     for name in strategy_names or []:
         states = _g.evaluate(ctx, _g.effects_for(cfg or {}, symbol, name))
         q = quality_of(symbol, name) if quality_of else None
+        live = bool(live_of(symbol, name)) if live_of else False
         strategies.append({
             "name": name,
             "stages": _stages(ds, name,
@@ -156,10 +164,15 @@ def row_data(symbol: str, ds, strategy_names, cfg: dict = None,
             "position": _open_position(positions, symbol, name, owner_of, risk_of),
             "daily": _daily(ds, name),
             "quality": (q[0] if q else None),
-            "live": bool(live_of(symbol, name)) if live_of else False,
+            "live": live,
             "opt": (opt_of(symbol, name) if opt_of else None),
+            # A KERESKEDŐ stratégiát nem optimalizáljuk: a futás végén felülíródna
+            # a paraméterfájlja, és egy nyíló belépő a RÉGI paraméterekkel menne.
+            "opt_enabled": (bool(opt_enabled_of(symbol, name))
+                            if opt_enabled_of else not live),
             "on_toggle": (lambda n=name: on_toggle(symbol, n)) if on_toggle else None,
             "on_opt": (lambda n=name: on_opt(symbol, n)) if on_opt else None,
+            "on_stages": (lambda n=name: on_stages(symbol, n)) if on_stages else None,
         })
 
     return {
@@ -168,9 +181,12 @@ def row_data(symbol: str, ds, strategy_names, cfg: dict = None,
         "ask": getattr(ds, "ask", None),
         "change_pct": getattr(ds, "change_pct", None),
         "digits": getattr(ds, "digits", 5),
+        "on_symbol": (lambda: on_symbol(symbol)) if on_symbol else None,
         "gates": {
             "spread": _spread_cell(ctx),
-            "align": {"signs": ctx.get("tf_align_signs") or []},
+            "on_spread": (lambda: on_spread(symbol)) if on_spread else None,
+            "align": {"signs": ctx.get("tf_align_signs") or [],
+                      "on_click": (lambda: on_align(symbol)) if on_align else None},
             "market": {"text": getattr(ds, "market_state_label", "") or "—"},
             "badge": badge,
             "blocking_count": blocking_count,

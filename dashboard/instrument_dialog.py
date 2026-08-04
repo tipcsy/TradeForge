@@ -61,6 +61,14 @@ _EXEC_PARAM_META = {
                          "comment": "Spread-kapu alsó küszöbe (a normál spread ennyiszerese)"},
 }
 
+# ELAVULT paraméter-kulcsok a régi, mentett `optimized_params/<strat>/<SYM>.json`
+# fájlokban. Ezeket a motor SOHA nem paraméterként olvassa — a `max_open_slots`
+# a `trading` configból jön (`core.risk_manager.calc_lot`), és a Backtest-ablak
+# „Slotok" mezője is azt írja felül. A JSON-ban maradt másolat viszont megjelent
+# a Paraméterek ablakban szerkeszthetőként, és mentéskor újra kiíródott: egy
+# beállítás, ami látszólag hat, valójában nem. Betöltéskor kidobjuk.
+_OBSOLETE_PARAM_KEYS = frozenset({"max_open_slots"})
+
 # A trials CSV metrika-oszlopai (ezek NEM paraméterek, hanem az eredmény jellemzői)
 _METRIC_COLS = frozenset({
     "rank", "score", "trades", "win_rate", "total_pnl", "max_drawdown",
@@ -109,6 +117,13 @@ def default_params(cfg: dict, strategy) -> dict:
     hangolható kulcsával (érték: a trading-config, különben a tartomány alja),
     hogy a kézi űrlap ugyanazt a teljes paraméterlistát kínálja, amit egy
     optimalizált JSON tartalmazna.
+
+    ⚠ A `cfg` MINDIG a `strategy` SAJÁT nézete legyen
+    (`strategy.settings.config_for_strategy`), ne a nyers futásidejű cfg! Az
+    utóbbi az ELSŐDLEGES stratégia `indicators`/`position_mgmt`/optimizer-terével
+    van merge-elve, tehát egy másik stratégia űrlapjára beszivárognának a primary
+    kulcsai (az `ml_ai` ablakában így jelent meg a `sma_period`, a `wpr_*`, az
+    `atr_min_pct`/`atr_max_pct` és a `no_trade_resets_signal`).
     """
     base = dict(strategy.base_params(cfg))
     opt = cfg.get("optimizer", {}) or {}
@@ -245,11 +260,16 @@ class InstrumentParamsDialog:
                 _old = src.pop("wpr_m15_trigger")
                 src.setdefault("wpr_m15_sell_trigger", _old)
                 src.setdefault("wpr_m15_buy_trigger",  _old)
-            for _k, _v in default_params(cfg, strategy).items():
+            for _k, _v in default_params(self.cfg, strategy).items():
                 src.setdefault(_k, _v)
+            # Elavult kulcsok kidobása: a régi JSON-okban maradt olyan érték,
+            # amit a motor SOHA nem paraméterként olvas — a felületen viszont
+            # szerkeszthetőnek látszott, és mentéskor újra kiíródott.
+            for _k in _OBSOLETE_PARAM_KEYS:
+                src.pop(_k, None)
             self._src = src
         else:
-            self._src = default_params(cfg, strategy)
+            self._src = default_params(self.cfg, strategy)
         # Közös, stratégia-független végrehajtási paraméterek (BE/trailing/
         # atr_period/spread-kapu) — MINDIG a ténylegesen ható (execution-config)
         # értéket mutatjuk, felülírva egy esetleges elavult másolatot a régi
@@ -366,6 +386,21 @@ class InstrumentParamsDialog:
             self._render_metrics(
                 None, "nincs mentett eredmény — állíts be paramétert, a Mentés "
                       "lefuttatja a backtestet és eltárolja")
+
+        # ── Figyelmeztetés: a készlet KAPUK NÉLKÜL lett hangolva ────────────
+        # A v1.95.0 előtti optimalizáló a spread- és a TF-együttállás kapu NÉLKÜL
+        # futott, az él viszont mindkettőt alkalmazza — a mentett paraméterek
+        # tehát egy olyan világhoz tartoznak, ami élesben nem létezik. Ez eddig
+        # LÁTHATATLAN volt: a régi és az új eredmény ránézésre egyforma. Ezért
+        # kiírjuk, ha a JSON-ban nincs (vagy hamis) az `exec_gates` jelölő.
+        if self.data is not None and not self.data.get("exec_gates", False):
+            tk.Label(body, bg=BG, fg=FG_YELLOW, font=self._sf, anchor="w",
+                     justify="left", wraplength=560,
+                     text=("⚠ Ez a készlet a VÉGREHAJTÁSI KAPUK NÉLKÜL lett "
+                           "hangolva (spread + TF-együttállás), az él viszont "
+                           "kapuz → a backtest más eredményt ad, mint az "
+                           "optimalizáló mutatott. Futtasd újra az OPT-ot.")
+                     ).pack(anchor="w", padx=10, pady=(0, 4))
 
         # ── Óra-rács (trade_hours) — a config.json-ba ment ──────────────────
         self._build_hours(body, ts)

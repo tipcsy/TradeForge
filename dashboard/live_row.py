@@ -76,6 +76,28 @@ _SAMPLE = {
     "close": ("small", "✕"),
 }
 
+# ── P&L megjelenítési mód ────────────────────────────────────────────────
+# A `Pozíció` és a `Napi P&L` cella mutathat pénzt, R-t vagy mindkettőt. Ha
+# nincs rögzített belépéskori kockázat (kézi pozíció SL nélkül, v1.81.0 előtti
+# kötés), a „mindkettő" módban a sor fele üresen áll — ezért választható.
+#
+# A mód a `collapsed` dictben utazik, nem külön paraméterként. Ez tudatos: a
+# modul legfontosabb invariánsa, hogy a FEJLÉC és a SOROK ugyanazokat az
+# értékeket kapják (különben elcsúsznak az oszlopok) — a `hide_market` már
+# ugyanezért került ide. Egy dict = egy dolgot kell átadni, nem hármat.
+PNL_MODES = ("money", "r", "both")
+_PNL_SAMPLE = {"both": "+9999.99$ +99.99R", "money": "+9999.99$", "r": "+99.99R"}
+_PNL_KEYS = ("position", "daily", "total_pos", "total_daily")
+
+
+def pnl_mode(collapsed: dict) -> str:
+    """A P&L-cellák megjelenítési módja: `money` | `r` | `both`.
+
+    Alap: `both` — a modul nem dönt a termék helyett. A tényleges ALAPÉRTELMEZÉS
+    (csak dollár) a configban él, lásd `dashboard.pnl_display`."""
+    m = (collapsed or {}).get("pnl_mode")
+    return m if m in PNL_MODES else "both"
+
 
 # A FEJLÉC szövegei — az oszlop szélességét ezek is meghatározzák. (Első
 # változatban kimaradtak, és a mérés emiatt levágta a „K.Össz." és a „Vezérlés"
@@ -128,8 +150,14 @@ def widths(fonts: dict, strategy_names=(), collapsed: dict = None) -> dict:
     fölött áll. A hívóknak UGYANAZT a két értéket kell átadniuk, különben a
     fejléc és a sorok elcsúsznának."""
     small = fonts["small"]
+    mode = pnl_mode(collapsed)
     out = {}
     for k, (fkey, txt) in _SAMPLE.items():
+        # A P&L-cellák mintaszövege a megjelenítési módtól függ: „csak dollár"
+        # módban az R-nek fenntartott hely FELESLEGES lenne (a felhasználó
+        # panasza pont ez volt — „túl sok az üres rész").
+        if k in _PNL_KEYS:
+            txt = _PNL_SAMPLE[mode]
         # A fejlec-felirat a RENDEZES-JELZOT is viselheti (" ▲") — enelkul az
         # aktiv oszlop feliratanak vege levagodna.
         head = _HEADER_TEXT.get(k, "")
@@ -144,8 +172,13 @@ def widths(fonts: dict, strategy_names=(), collapsed: dict = None) -> dict:
     if is_collapsed(collapsed) and strategy_names:
         # A felirat a KAPCSOLÓ-NYILAT is tartalmazza (`▸ wpr_sma`) — enélkül a
         # mérés 4 px-szel kevesebbet ad, és a név utolsó betűje levágódik.
+        # Összecsukva a jelzés MELLETT a Vezérlés is ott marad (a blokkot akkor
+        # is lehessen indítani/leállítani), tehát a felirat a KETTŐ fölött áll:
+        # csak a hiányzó részt kell a jelzés-oszlophoz adni.
         longest = max((small.measure(f"▸ {n}") for n in strategy_names), default=0)
-        out["stages"] = max(out["stages"], longest + 2 * PAD)
+        span = out["stages"] + GAP + out["ctrl"]
+        if longest + 2 * PAD > span:
+            out["stages"] += longest + 2 * PAD - span
     return out
 
 # A stádium-pöttyök színe (a stratégia belső állapota), és a keret (az engedély).
@@ -209,18 +242,36 @@ def _click_label(parent, text, width, fg, font, on_click=None, bg=None,
     return f, lbl
 
 
+def _bind_click(widget, on_click):
+    """Egy MÁR MEGLÉVŐ cella kattinthatóvá tétele (a `_click_label` mindig
+    középre igazít — a `Symbol` és a `Napi P&L` viszont nem középre való).
+
+    A kurzor is átvált: a `classic` nézetben ez jelzi, hogy a cella megnyit
+    valamit, és a felhasználó ezt onnan már ismeri."""
+    if on_click is None or widget is None:
+        return
+    widget.configure(cursor="hand2")
+    widget.bind("<Button-1>", lambda _e: on_click())
+
+
 def _fmt_price(v, digits):
     return "—" if v is None else f"{v:.{digits}f}"
 
 
-def _money_r(money, r):
-    """`+0.03$ +0.01R` — a P&L és az R egy cellában. Az R ELHAGYHATÓ: ha nincs
-    rögzített belépéskori kockázat, csak a pénz látszik (nem 0 R — az mást
-    állítana, lásd `core/position_meta.py`)."""
+def _money_r(money, r, mode="both"):
+    """`+0.03$ +0.01R` — a P&L és az R egy cellában, a `mode` szerint szűrve.
+
+    Az R ELHAGYHATÓ: ha nincs rögzített belépéskori kockázat, csak a pénz
+    látszik (nem 0 R — az mást állítana, lásd `core/position_meta.py`). Ezért
+    `r` módban a hiányzó kockázat `—`: az „ismeretlen" nem nulla."""
+    if mode == "r":
+        return "—" if r is None else f"{r:+.2f}R"
     if money is None:
         return "—"
     s = f"{money:+.2f}$"
-    return s if r is None else f"{s} {r:+.2f}R"
+    if mode == "money" or r is None:
+        return s
+    return f"{s} {r:+.2f}R"
 
 
 class LiveRow:
@@ -261,6 +312,7 @@ class LiveRow:
         self._dots = {}     # kulcs -> [Label, …] (pottyok)
         self._box = {}      # strategia -> a jelzes-cella KERETE
         self._bg = bg
+        self._pnl = pnl_mode(self._collapsed)
         self._build_instrument(bg)
         self._build_gates(bg)
         self._build_strategies(bg)
@@ -281,8 +333,13 @@ class LiveRow:
         d = self.data
         dg = d.get("digits", 2)
         ch = d.get("change_pct")
-        self._rc("symbol", self.left, d.get("symbol", "—"), self._w["symbol"], FG_WHITE,
-                 self._f["mono_bold"], bg=bg, height=self._h)
+        # Az instrumentum NEVE megnyitja az instrumentum-beállításokat — pontosan
+        # úgy, ahogy a `classic` nézetben. A 2.0-ból ez kimaradt, és a beállítások
+        # elérhetetlenné váltak (a `classic`-ban ez volt az EGYETLEN útjuk).
+        _sym_lbl = self._rc("symbol", self.left, d.get("symbol", "—"),
+                            self._w["symbol"], FG_WHITE, self._f["mono_bold"],
+                            bg=bg, height=self._h)
+        _bind_click(_sym_lbl, d.get("on_symbol"))
         self._rc("bid", self.left, _fmt_price(d.get("bid"), dg), self._w["bid"], FG_WHITE,
                  self._f["mono"], anchor="e", bg=bg, height=self._h)
         self._rc("ask", self.left, _fmt_price(d.get("ask"), dg), self._w["ask"], FG_WHITE,
@@ -301,9 +358,15 @@ class LiveRow:
         g = self.data.get("gates") or {}
         if not self._collapsed.get("gates"):
             sp = g.get("spread") or {}
-            self._rc("spread", self.mid, sp.get("text", "—"), self._w["spread"],
-                     FG_RED if sp.get("blocking") else FG_GREEN, self._f["mono"],
-                     bg=bg, height=self._h)
+            # KÖZÉPRE igazítva: a cella két számot tart (`250/1312`), és balra
+            # húzva a fejléc alatt „lógott". Kattintva a spread-küszöb
+            # (végrehajtási) paraméterei nyílnak.
+            _sp_lbl = self._rc("spread", self.mid, sp.get("text", "—"),
+                               self._w["spread"],
+                               FG_RED if sp.get("blocking") else FG_GREEN,
+                               self._f["mono"], anchor="center", bg=bg,
+                               height=self._h)
+            _bind_click(_sp_lbl, g.get("on_spread"))
             self._align_cell(bg, g.get("align") or {})
             if show_market(self._collapsed):
                 self._rc("market", self.mid, (g.get("market") or {}).get("text", "—"),
@@ -319,16 +382,26 @@ class LiveRow:
 
         A keret a stratégia jelzés-cellájának van fenntartva: ott az „engedélyt"
         jelenti. Itt csak a piaci tény látszik (együtt állnak-e az idősíkok), és
-        ez instrumentum-tulajdonság."""
+        ez instrumentum-tulajdonság.
+
+        Kattintva a TF-együttállás beállításai nyílnak (mint a `classic`-ban). A
+        kötés a KERETRE és minden pöttyre megy: a pöttyök takarják a keretet,
+        tehát csak a kereten kötve a kattintás nagy része elveszne."""
+        on_click = al.get("on_click")
         f = tk.Frame(self.mid, width=self._w["align"], bg=bg, height=self._h)
         f.pack(side="left", padx=(0, GAP))
         f.pack_propagate(False)
         inner = tk.Frame(f, bg=bg, height=self._h)
         inner.pack(expand=True)
+        _bind_click(f, on_click)
+        _bind_click(inner, on_click)
         signs = al.get("signs") or []
         if not signs:
-            tk.Label(inner, text="—", fg=FG_GRAY_DIM, bg=bg, font=self._f["mono"],
-                     bd=0, padx=0, pady=0, highlightthickness=0).pack()
+            _empty = tk.Label(inner, text="—", fg=FG_GRAY_DIM, bg=bg,
+                              font=self._f["mono"], bd=0, padx=0, pady=0,
+                              highlightthickness=0)
+            _empty.pack()
+            _bind_click(_empty, on_click)
             return
         self._dots["align"] = []
         for s in signs:
@@ -336,6 +409,7 @@ class LiveRow:
                          fg=FG_GREEN if s > 0 else FG_RED if s < 0 else FG_GRAY_DIM,
                          bd=0, padx=0, pady=0, highlightthickness=0)
             l.pack(side="left")
+            _bind_click(l, on_click)
             self._dots["align"].append(l)
 
     def _build_strategies(self, bg):
@@ -343,46 +417,65 @@ class LiveRow:
             self._build_one_strategy(bg, st)
 
     def _build_one_strategy(self, bg, st: dict):
-        """Egy stratégia blokkja. Összecsukva CSAK a jelzés-cella marad — az
-        viszont a keretével a kapu-érintettséget is hordozza, tehát a legtömörebb
-        nézet sem veszít információt."""
-        self._stages_cell(bg, st)
-        if is_collapsed(self._collapsed, st.get("name")):
-            return
+        """Egy stratégia blokkja.
+
+        Összecsukva a jelzés-cella MELLETT a Vezérlés is megmarad. Az eredeti
+        terv csak a jelzést hagyta meg — élesben viszont kiderült, hogy így egy
+        összecsukott blokkot nem lehet elindítani/leállítani, tehát az
+        összecsukás nem „tömörít", hanem HASZNÁLHATATLANNÁ tesz. A jelzés a
+        keretével továbbra is hordozza a kapu-érintettséget, tehát a tömör nézet
+        most sem veszít információt — csak a kezelhetőséget nyeri vissza."""
+        collapsed = is_collapsed(self._collapsed, st.get("name"))
         pos = st.get("position") or {}
         day = st.get("daily") or {}
         n = st.get("name", "")
-        self._rc(f"{n}|position", self.mid, _money_r(pos.get("money"), pos.get("r")),
-                 self._w["position"], FG_WHITE, self._f["mono"], anchor="e",
-                 bg=bg, height=self._h)
-        self._rc(f"{n}|daily", self.mid, _money_r(day.get("money"), day.get("r")),
-                 self._w["daily"], _pnl_color(day.get("money")), self._f["mono"],
-                 anchor="e", bg=bg, height=self._h)
-        q = st.get("quality") or "—"
-        self._rc(f"{n}|quality", self.mid, q, self._w["quality"], _quality_color(q),
-                 self._f["small"], anchor="center", bg=bg, height=self._h)
-        # Vezérlés: kattintható Labelek (NEM Button — lásd a modul-doksit)
+        self._stages_cell(bg, st)
+        if not collapsed:
+            self._rc(f"{n}|position", self.mid,
+                     _money_r(pos.get("money"), pos.get("r"), self._pnl),
+                     self._w["position"], FG_WHITE, self._f["mono"], anchor="e",
+                     bg=bg, height=self._h)
+            self._rc(f"{n}|daily", self.mid,
+                     _money_r(day.get("money"), day.get("r"), self._pnl),
+                     self._w["daily"], _pnl_color(day.get("money")), self._f["mono"],
+                     anchor="e", bg=bg, height=self._h)
+            q = st.get("quality") or "—"
+            self._rc(f"{n}|quality", self.mid, q, self._w["quality"], _quality_color(q),
+                     self._f["small"], anchor="center", bg=bg, height=self._h)
+        self._ctrl_cell(bg, st, n)
+        if not collapsed:
+            self._rc(f"{n}|opt", self.mid, st.get("opt") or "—", self._w["opt"],
+                     FG_GRAY, self._f["small"], anchor="center", bg=bg,
+                     height=self._h)
+
+    def _ctrl_cell(self, bg, st: dict, n: str):
+        """Vezérlés: Play/Stop + OPT — kattintható Labelek (NEM Button, lásd a
+        modul-doksit).
+
+        Az OPT HALVÁNY, ha a stratégia épp kereskedik: a futás végén felülíródna
+        a paraméterfájlja, tehát ilyenkor tiltott művelet. A kötés viszont
+        MEGMARAD — a hívó így ki tudja írni az OKOT az állapotsorba. Egy néma,
+        nem reagáló gomb rosszabb, mint egy halvány, ami megmondja, miért nem."""
         ctrl = tk.Frame(self.mid, width=self._w["ctrl"], bg=bg, height=self._h)
         ctrl.pack(side="left", padx=(0, GAP))
         ctrl.pack_propagate(False)
         inner = tk.Frame(ctrl, bg=bg, height=self._h)
         inner.pack(expand=True)
         live = st.get("live")
+        opt_on = st.get("opt_enabled", True)
         for key, txt, fg, cb in (("run", "■" if live else "▶",
                                   FG_RED if live else FG_GREEN, st.get("on_toggle")),
-                                 ("opt", "OPT", FG_BLUE, st.get("on_opt"))):
+                                 ("opt", "OPT", _opt_color(opt_on), st.get("on_opt"))):
             # A ket vezerlo KULON dobozban, elvalaszto hezaggal: elesben
             # "osszemosodtak" (padx=3 nem eleg, a Play/Stop es az OPT egy
             # foltnak latszott). A Play/Stop szeles kattinto-feluletet kap.
             l = tk.Label(inner, text=txt, fg=fg, bg=bg, font=self._f["small"],
-                         cursor="hand2", bd=0, padx=CTRL_PADX, pady=0,
-                         highlightthickness=0)
+                         cursor="hand2" if (key != "opt" or opt_on) else "",
+                         bd=0, padx=CTRL_PADX, pady=0, highlightthickness=0)
             l.pack(side="left", padx=(0, CTRL_GAP) if key == "run" else 0)
             self._lbl[f"{n}|ctrl_{key}"] = l
             if cb:
                 l.bind("<Button-1>", lambda _e, c=cb: c())
-        self._rc(f"{n}|opt", self.mid, st.get("opt") or "—", self._w["opt"], FG_GRAY,
-                 self._f["small"], anchor="center", bg=bg, height=self._h)
 
     def _stages_cell(self, bg, st: dict):
         """A jelzés-cella: stádium-pöttyök + KERET.
@@ -395,6 +488,7 @@ class LiveRow:
         szóljon, ha tényleg történik valami."""
         frame_st = st.get("frame") or ""
         color = _FRAME.get(frame_st)
+        on_click = st.get("on_stages")
         holder = tk.Frame(self.mid, width=self._w["stages"], bg=bg, height=self._h)
         holder.pack(side="left", padx=(0, GAP))
         holder.pack_propagate(False)
@@ -408,21 +502,30 @@ class LiveRow:
         nm = st.get("name", "")
         self._box[nm] = box
         self._dots[nm] = []
+        # Kattintva ENNEK a stratégiának a paraméter-ablaka nyílik (mint a
+        # `classic` körökre kattintva). A kötés minden szintre kell: a pöttyök
+        # eltakarják a keretet, a keret a holdert — csak a legkülsőn kötve a
+        # kattintások nagy része nem érne célba.
+        for w in (holder, box, dots):
+            _bind_click(w, on_click)
         for s in (st.get("stages") or []):
             l = tk.Label(dots, text=_DOT, bg=bg, font=self._f["mono"],
                          fg=_stage_color(s), bd=0, padx=0, pady=0,
                          highlightthickness=0)
             l.pack(side="left")
+            _bind_click(l, on_click)
             self._dots[nm].append(l)
 
     # ── jobb: fix ───────────────────────────────────────────────────────
     def _build_total(self, bg, on_close):
         t = self.data.get("total") or {}
         pos, day = t.get("position") or {}, t.get("daily") or {}
-        self._rc("total_pos", self.right, _money_r(pos.get("money"), pos.get("r")),
+        self._rc("total_pos", self.right,
+                 _money_r(pos.get("money"), pos.get("r"), self._pnl),
                  self._w["total_pos"], FG_WHITE, self._f["mono_bold"], anchor="e",
                  bg=bg, height=self._h)
-        self._rc("total_daily", self.right, _money_r(day.get("money"), day.get("r")),
+        self._rc("total_daily", self.right,
+                 _money_r(day.get("money"), day.get("r"), self._pnl),
                  self._w["total_daily"], _pnl_color(day.get("money")),
                  self._f["mono_bold"], anchor="e", bg=bg, height=self._h)
         # Az X az instrumentum TÖRLÉSE — a sor legvégén, megerősítéssel (a hívó
@@ -488,8 +591,10 @@ class LiveRow:
         for st in data.get("strategies") or []:
             n = st.get("name", "")
             pos, day = st.get("position") or {}, st.get("daily") or {}
-            self._set(f"{n}|position", _money_r(pos.get("money"), pos.get("r")), None)
-            self._set(f"{n}|daily", _money_r(day.get("money"), day.get("r")),
+            self._set(f"{n}|position",
+                      _money_r(pos.get("money"), pos.get("r"), self._pnl), None)
+            self._set(f"{n}|daily",
+                      _money_r(day.get("money"), day.get("r"), self._pnl),
                       _pnl_color(day.get("money")))
             q = st.get("quality") or "—"
             self._set(f"{n}|quality", q, _quality_color(q))
@@ -497,6 +602,15 @@ class LiveRow:
             live = st.get("live")
             self._set(f"{n}|ctrl_run", "■" if live else "▶",
                       FG_RED if live else FG_GREEN)
+            # Az OPT elhalványul, ha a stratégia kereskedni kezd — a Play/Stop
+            # UGYANEBBEN a frissítésben vált, tehát a kettő sosem mond mást.
+            _opt_lbl = self._lbl.get(f"{n}|ctrl_opt")
+            if _opt_lbl is not None:
+                _on = st.get("opt_enabled", True)
+                self._set(f"{n}|ctrl_opt", "OPT", _opt_color(_on))
+                _cur = "hand2" if _on else ""
+                if _opt_lbl.cget("cursor") != _cur:
+                    _opt_lbl.config(cursor=_cur)
             for i, sc in enumerate(st.get("stages") or []):
                 dots = self._dots.get(n) or []
                 if i < len(dots) and dots[i].cget("fg") != _stage_color(sc):
@@ -509,8 +623,8 @@ class LiveRow:
 
         t = data.get("total") or {}
         tp, td = t.get("position") or {}, t.get("daily") or {}
-        self._set("total_pos", _money_r(tp.get("money"), tp.get("r")), None)
-        self._set("total_daily", _money_r(td.get("money"), td.get("r")),
+        self._set("total_pos", _money_r(tp.get("money"), tp.get("r"), self._pnl), None)
+        self._set("total_daily", _money_r(td.get("money"), td.get("r"), self._pnl),
                   _pnl_color(td.get("money")))
         return True
 
@@ -524,6 +638,12 @@ def _stage_color(name):
     halvány (a `theme.color` alapértelmezése helyett tudatosan tompa)."""
     from dashboard import theme as _t
     return _t.SEMANTIC.get(name, FG_GRAY_DIM)
+
+
+def _opt_color(enabled: bool):
+    """Az OPT vezérlő színe. Halvány = a stratégia kereskedik, tehát most nem
+    optimalizálható (a futás végén felülíródna a paraméterfájlja)."""
+    return FG_BLUE if enabled else FG_GRAY_DIM
 
 
 def _pnl_color(v):
@@ -613,8 +733,10 @@ def build_header(parent, fonts: dict, strategies: list, collapsed: dict = None,
     _cell(tm, "", w["badge"], FG_GRAY_DIM, f, bg=BG_HEADER, height=h)
     for name in strategies:
         coll = is_collapsed(collapsed, name)
-        keys = ("stages",) if coll else ("stages", "position", "daily",
-                                         "quality", "ctrl", "opt")
+        # Összecsukva a jelzés MELLETT a Vezérlés is marad (indítani/leállítani
+        # összecsukva is lehessen), tehát a csoport-felirat KÉT oszlop fölött áll.
+        keys = ("stages", "ctrl") if coll else ("stages", "position", "daily",
+                                                "quality", "ctrl", "opt")
         group(tm, keys, name, FG_BLUE, key=name, is_coll=coll)
     group(tr, ("total_pos", "total_daily"), "Összesítő")
     _cell(tr, "", w["close"], FG_GRAY_DIM, f, bg=BG_HEADER, height=h)
@@ -650,6 +772,9 @@ def build_header(parent, fonts: dict, strategies: list, collapsed: dict = None,
         _sorted_head(bm, f"{name}|stages", "jelzés", w["stages"], f, h, on_sort,
                      sort_key, sort_dir)
         if is_collapsed(collapsed, name):
+            # Osszecsukva is van Vezerles-oszlop a sorokban — a fejlecnek KOVETNIE
+            # kell, kulonben minden tovabbi oszlop elcsuszik.
+            _cell(bm, "Vezérlés", w["ctrl"], FG_GRAY_DIM, f, bg=BG_HEADER, height=h)
             continue
         for key, txt in (("position", "Pozíció"), ("daily", "Napi P&L"),
                          ("quality", "Min.")):
@@ -683,14 +808,16 @@ def demo_row() -> dict:
             "badge": "⛔1",
         },
         "strategies": [
+            # A KERESKEDŐ stratégiánál az OPT halvány (a futás felülírná a
+            # paraméterfájlt) — a bemutatóban is így látszik.
             {"name": "wpr_sma", "stages": ["green", "green", "muted"], "frame": "blocked",
              "position": {"money": 1.00, "r": 1.0},
              "daily": {"money": 0.03, "r": 0.01},
-             "quality": "Jó", "live": True, "opt": "06/29"},
-            {"name": "ml_ai", "stages": ["red", "muted", "muted"], "frame": "",
+             "quality": "Jó", "live": True, "opt": "06/29", "opt_enabled": False},
+            {"name": "ml_ai", "stages": ["red", "muted"], "frame": "",
              "position": {"money": 1.00, "r": 1.0},
              "daily": {"money": 0.03, "r": 0.01},
-             "quality": "Jó", "live": False, "opt": "85%"},
+             "quality": "Jó", "live": False, "opt": "85%", "opt_enabled": True},
         ],
         "total": {"position": {"money": 2.00, "r": 2.0},
                   "daily": {"money": 0.06, "r": 0.02}},

@@ -358,12 +358,19 @@ def optimize_pair_optuna(
     train_months: int = 6,
     test_months: int = 2,
     progress_callback=None,
+    cfg: "dict | None" = None,
+    exec_gates: bool = False,
 ) -> Optional[dict]:
     """
     Optuna Bayesian optimalizálás walk-forward validációval.
     A legjobb paramétereket az összes walk-forward ablak átlagos score-ja alapján választja.
+
+    `exec_gates`: a trialok az ÉL végrehajtási kapuival (spread + TF-együttállás)
+    fussanak-e — lásd `run_optimizer_for_symbol`. A TF-kapu kiértékelőjét
+    ablakonként EGYSZER építjük meg (nem trialonként): nem függ a paraméterektől,
+    viszont resample-t igényel.
     """
-    from trading.backtest import run_pair
+    from trading.backtest import run_pair, _build_tf_align_evaluator
 
     # Opt-in: az rr (kockázatcsökkentés) is optimalizált dimenzió? Alapból NEM →
     # a keresési tér és a viselkedés bitazonos a korábbival.
@@ -392,6 +399,19 @@ def optimize_pair_optuna(
                  str(w["train_start"])[:10],
                  str(w["test_start"])[:10],
                  str(w["test_end"])[:10])
+
+    # ── Ablakonkénti előkészítés (a trial-cikluson KÍVÜL) ────────────────────
+    # Az adat-szeletelés és a TF-kapu kiértékelője paraméter-FÜGGETLEN, tehát
+    # ablakonként egyszer elég. Trialonként újraszámolva 500 trial × 4 ablak =
+    # 2000 resample lenne — az optimalizálás nagyságrendekkel lassulna, és a
+    # kapu-paritás ára indokolatlanul magas volna.
+    prepared = []
+    for w in windows:
+        m15_w = df_m15[df_m15.index >= w["train_start"]]
+        m1_w  = df_m1[df_m1.index  >= w["train_start"]]
+        tf_eval = (_build_tf_align_evaluator(cfg, symbol, strategy.name, m1_w)
+                   if (exec_gates and cfg is not None) else None)
+        prepared.append((w, m15_w, m1_w, tf_eval))
 
     call_count = [0]
     best_score_so_far = [-float("inf")]
@@ -453,12 +473,9 @@ def optimize_pair_optuna(
         window_scores = []
         combined_test = []          # az összes ablak TEST-trade-jei (CSV metrikákhoz)
         last_err = ""               # utolsó kivétel szövege (diagnosztika a CSV-be)
-        for w in windows:
+        for w, m15_w, m1_w, tf_eval in prepared:
             try:
                 # Teljes ablak adat (train + test) — az indikátorok warmuphoz kellenek
-                m15_w = df_m15[df_m15.index >= w["train_start"]]
-                m1_w  = df_m1[df_m1.index  >= w["train_start"]]
-
                 result = run_pair(
                     symbol, m15_w, m1_w,
                     params, pair_cfg, trading_cfg,
@@ -466,6 +483,7 @@ def optimize_pair_optuna(
                     test_start=None,  # teljes ablakot futtatjuk
                     strategy=strategy,
                     rr=rr_run,
+                    cfg=cfg, exec_gates=exec_gates, tf_eval=tf_eval,
                 )
 
                 # Csak a TEST periódus trade-jeit értékeljük
@@ -661,11 +679,20 @@ def optimize_pair(
     train_end: str,
     strategy,
     progress_callback=None,   # fn(done: int, total: int, best_pnl: float)
+    cfg: "dict | None" = None,
+    exec_gates: bool = False,
 ) -> Optional[dict]:
     """
     Végigpróbálja az összes params kombinációt TRAIN adaton.
     Visszaadja a legjobb params dict-et és a hozzá tartozó train summary-t.
+
+    `exec_gates`: az él végrehajtási kapuival (spread + TF-együttállás) fusson-e —
+    lásd `run_optimizer_for_symbol`. A TF-kapu kiértékelője itt is EGYSZER épül
+    (nem kombinációnként): nem függ a paraméterektől.
     """
+    from trading.backtest import _build_tf_align_evaluator
+    _tf_eval = (_build_tf_align_evaluator(cfg, symbol, strategy.name, df_m1)
+                if (exec_gates and cfg is not None) else None)
     best_score = -float("inf")
     best_params = None
     best_summary = None
@@ -684,6 +711,7 @@ def optimize_pair(
                 initial_balance,
                 test_start=None,   # TRAIN: teljes adat a train_end-ig
                 strategy=strategy,
+                cfg=cfg, exec_gates=exec_gates, tf_eval=_tf_eval,
             )
             # TRAIN adatra szűrünk
             train_result_trades = [
@@ -857,6 +885,20 @@ def optimize_symbol(symbol, df_m15, df_m1, cfg, initial_balance, progress=None,
     # minden trial-on át).
     base_params = {**base_params, **load_execution_params(symbol, cfg)}
 
+    # ── ÉL-PARITÁS: az optimalizáló ugyanazokat a végrehajtási kapukat járja ──
+    # Ez a v1.95.0 előtt NEM így volt, és ez volt a legsúlyosabb csendes hiba a
+    # rendszerben: a `run_pair` csak `exec_gates=True` mellett építi a spread- és
+    # a TF-együttállás kaput, az optimalizáló viszont MINDHÁROM hívását kapuk
+    # NÉLKÜL indította. Az él mindkettőt alkalmazza → MINDEN mentett
+    # paraméterkészlet egy olyan világban lett hangolva, ami élesben nem létezik.
+    # (Ez okozta azt is, hogy egy trials-sor betöltése után a Backtest-ablak — ami
+    # alapból kapuz — MÁS eredményt adott, mint amit az optimalizáló mutatott.)
+    #
+    # Kapcsolható, hogy a RÉGI futások reprodukálhatók maradjanak; alap: BE.
+    exec_gates = bool(opt_cfg.get("exec_gates", True))
+    log.info("  Végrehajtási kapuk (spread + TF-együttállás): %s",
+             "BE (él-paritás)" if exec_gates else "KI (nyers jelek)")
+
     # A tanítható ág (lentebb) a TELJES előzményt kapja — a modell-tanítás a saját
     # lookback-jét alkalmazza (optimizer.training.lookback_years), nem a
     # train_start_date-et (több adat = jobb modell).
@@ -914,20 +956,23 @@ def optimize_symbol(symbol, df_m15, df_m1, cfg, initial_balance, progress=None,
             n_splits=opt_cfg.get("wf_n_splits", 4),
             train_months=opt_cfg.get("wf_train_months", 6),
             test_months=opt_cfg.get("wf_test_months", 2),
-            progress_callback=progress)
+            progress_callback=progress,
+            cfg=cfg, exec_gates=exec_gates)
     elif method == "grid":
         params_list = generate_grid_params(opt_cfg, base_params, strategy.constraints_ok)
         log.info("  Grid search: %d kombináció", len(params_list))
         result = optimize_pair(symbol, df_m15, df_m1, params_list, pair_cfg,
                                trading_cfg, initial_balance, test_start, strategy,
-                               progress_callback=progress)
+                               progress_callback=progress,
+                               cfg=cfg, exec_gates=exec_gates)
     else:
         params_list = generate_random_params(opt_cfg, base_params, max_trials,
                                              strategy.constraints_ok)
         log.info("  Random search: %d kombináció", len(params_list))
         result = optimize_pair(symbol, df_m15, df_m1, params_list, pair_cfg,
                                trading_cfg, initial_balance, test_start, strategy,
-                               progress_callback=progress)
+                               progress_callback=progress,
+                               cfg=cfg, exec_gates=exec_gates)
 
     # ── Leállítás-kérés (GUI STOP): a futás eredményét ELDOBJUK ─────────────
     # A user-cancel nem hiba és nem „megszakadt futás": a meglévő mentett
@@ -968,7 +1013,8 @@ def optimize_symbol(symbol, df_m15, df_m1, cfg, initial_balance, progress=None,
         test_result  = run_pair(symbol, df_m15, df_m1, result["params"],
                                 pair_cfg, trading_cfg, initial_balance,
                                 test_start=test_start, strategy=strategy,
-                                rr=_rr_for_run(_best_rr))
+                                rr=_rr_for_run(_best_rr),
+                                cfg=cfg, exec_gates=exec_gates)
         test_summary = test_result.summary(initial_balance)
     except Exception as e:
         log.warning("  %s — TEST hiba: %s", symbol, e)
@@ -995,6 +1041,10 @@ def optimize_symbol(symbol, df_m15, df_m1, cfg, initial_balance, progress=None,
         "test_summary":  test_summary,
         "params":        result["params"],
         "rr":            _best_rr,
+        # MELYIK VILÁGBAN lett hangolva. A mentett fájlból így kiderül, hogy a
+        # készlet kapu-tudatos-e — enélkül egy régi (v1.95.0 előtti) és egy új
+        # eredmény ránézésre megkülönböztethetetlen, pedig MÁST jelent.
+        "exec_gates":    exec_gates,
     }
 
 
@@ -1086,6 +1136,9 @@ def run_optimizer(cfg: dict, symbols: Optional[list[str]] = None):
         entry = {
             "symbol":        symbol,
             "optimized_at":  datetime.utcnow().isoformat(),
+            # Kapu-tudatos-e a készlet (v1.95.0+). Hiányzó kulcs = RÉGI eredmény,
+            # ami kapuk NÉLKÜL lett hangolva — élesben más világ.
+            "exec_gates":    result.get("exec_gates", True),
             "train_summary": train_summary,
             "test_summary":  test_summary,
             "params":        result["params"],

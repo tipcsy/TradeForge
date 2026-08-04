@@ -63,10 +63,15 @@ if TK_OK:
         d.tf_align_labels = ["M1", "M5", "M15"]
         d.tf_align_dir = None                    # nincs egyuttallas -> blokkol
         d.market_strategy, d.market_state_label = "regime", "Sz.Bika"
+        # FONTOS: az `ml_ai` a KET stadiuma melle az `ml_proba` SZAM-cellat is
+        # beleirja a `live_cells`-be. Ha a sor a dict osszes kulcsat pottynek
+        # veszi, egy harmadik, orokke halvany kor jelenik meg (elesben pont ez
+        # tortent) — ezert szerepel itt is.
         d.strategy_cells = {
             "wpr_sma": {"sma": ("●", "green"), "m15": ("●", "green"),
                         "m1": ("●", "muted")},
-            "ml_ai": {"model": ("●", "red"), "sig": ("●", "muted")}}
+            "ml_ai": {"model": ("●", "red"), "sig": ("●", "muted"),
+                      "ml_proba": ("0.31/0.12", "white")}}
         d.daily_by_strategy = {
             "wpr_sma": {"pnl": 12.0, "r": 0.8, "r_count": 2},
             "ml_ai": {"pnl": -4.0, "r": 0.0, "r_count": 0}}
@@ -218,6 +223,83 @@ if TK_OK:
     finally:
         if w4 is not None:
             w4.root.destroy()
+
+    # ══ 5. A jelzes-pottyok a strategia KANONIKUS stadiumai ═══════════════
+    # A motor a `strategy_cells`-be a stadiumok MELLE mas cellakat is irhat (az
+    # `ml_ai` az `ml_proba` szam-cellat). A pottyoknek a `columns()` stages
+    # mezoje a forrasa — ugyanaz, amibol a `classic` korei jonnek —, kulonben
+    # a szam-cella harmadik, orokke halvany pottykent jelenne meg.
+    w5 = None
+    try:
+        w5 = build_window("live2")
+        st = {s["name"]: s for s in w5._live2_rows()[0]["strategies"]}
+        check("az ml_ai-nak PONTOSAN 2 pottye van (a proba-cella nem pötty)",
+              len(st["ml_ai"]["stages"]) == 2, str(st["ml_ai"]["stages"]))
+        check("...es a sorrend a columns() szerinti (model, sig)",
+              st["ml_ai"]["stages"] == ["red", "muted"], str(st["ml_ai"]["stages"]))
+        check("a wpr_sma harom stadiuma valtozatlan",
+              st["wpr_sma"]["stages"] == ["green", "green", "muted"],
+              str(st["wpr_sma"]["stages"]))
+        check("a stadium-sorrend a strategiabol jon, nem a dict-bol",
+              w5._live2_stage_order("ml_ai") == ("model", "sig"),
+              str(w5._live2_stage_order("ml_ai")))
+        check("ismeretlen strategianal None (marad a regi viselkedes)",
+              w5._live2_stage_order("nincs_ilyen") is None)
+    finally:
+        if w5 is not None:
+            w5.root.destroy()
+
+    # ══ 6. Napi P&L bontas a GUI-ban — MEGALLITOTT paron is ═══════════════
+    # A `live_trader.daily_split_cached()` csak a `process_pair`-bol hivodik, az
+    # pedig KIZAROLAG LIVE/CLOSING paron fut. Egy megallitott paron (vagy a bot
+    # ujrainditasa utan) a bontas sosem szuletett meg, es a cella `—` maradt,
+    # holott a `classic` oszlop ugyanabbol a `closed_today` cache-bol hozta a
+    # szamot. A GUI ezert maga is kiszamolja.
+    w6 = None
+    try:
+        w6 = build_window("live2")
+        closed = [
+            {"symbol": "GOLD", "magic": 0, "position": 111, "pnl": 21.0},
+            {"symbol": "GOLD", "magic": 0, "position": 112, "pnl": -6.0},
+            {"symbol": "Ger40", "magic": 0, "position": 113, "pnl": 3.0},
+        ]
+        # A feloldo a magicbol dolgozik: a `wpr_sma` magicje a broker.magic (0).
+        split = w6._daily_split(closed)
+        check("a bontas eloallt a lezart listabol", split is not None)
+        check("a GOLD ket kotese OSSZEADODIK",
+              split.get(("GOLD", "wpr_sma"), {}).get("pnl") == 15.0, str(split))
+        check("a masik szimbolum kulon bucket",
+              split.get(("Ger40", "wpr_sma"), {}).get("pnl") == 3.0, str(split))
+
+        # A sor tenyleg ezt mutatja — egy MEGALLITOTT paron is (minden par
+        # STOPPED ebben a tesztben).
+        for _sym, _ds in w6.dashboard_ref.items():
+            _ds.daily_by_strategy = G._pnl_split.for_symbol(split, _sym)
+        by = {r["symbol"]: r for r in w6._live2_rows()}
+        gold = {s["name"]: s for s in by["GOLD"]["strategies"]}
+        check("a megallitott par Napi P&L cellaja NEM ures",
+              gold["wpr_sma"]["daily"]["money"] == 15.0,
+              str(gold["wpr_sma"]["daily"]))
+        check("a sor osszesitoje a blokkok osszege",
+              by["GOLD"]["total"]["daily"]["money"] == 15.0,
+              str(by["GOLD"]["total"]["daily"]))
+
+        # A gyorsitotar: valtozatlan lista -> UGYANAZ az objektum (a `_refresh`
+        # masodpercenkent hiv, folosleges ujraszamolas nelkul).
+        check("valtozatlan listanal a bontas gyorsitotarazott",
+              w6._daily_split(closed) is split)
+        check("valtozott listanal ujraszamol",
+              w6._daily_split(closed[:1]) is not split)
+
+        # Hozza nem rendelt kotes: `None` strategia (nem "—") — az adat ne
+        # keveredjen a formazassal, lasd core/pnl_split.py.
+        orphan = w6._daily_split([{"symbol": "GOLD", "magic": 999999,
+                                   "position": 900, "pnl": 5.0}])
+        check("a hozza nem rendelt kotes None strategiahoz kerul",
+              ("GOLD", None) in orphan, str(orphan))
+    finally:
+        if w6 is not None:
+            w6.root.destroy()
 
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")
