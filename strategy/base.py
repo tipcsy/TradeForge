@@ -10,6 +10,34 @@ A felelősségmegosztás:
     Pozíció, Napi P&L, Opt státusz, Vezérlés) és a visszaszámláló-oszlopokat.
   • A STRATÉGIA adja a saját, középső oszlopait + azok kiszámítását, a
     jelzéslogikát és az optimalizálandó paramétertartományt.
+
+────────────────────────────────────────────────────────────────────────────
+A STRATÉGIA HATÁRAI — mi NEM tartozik rá (szabály, nem ajánlás)
+
+    A stratégia egy BESZÁLLÁSI JELZŐ (+ a saját előszűrőivel).
+    Se azt nem dönti el, MEKKORA pozíció nyílik, se azt, hogy a nyitott
+    pozícióval mi történjék.
+
+  1. MÉRETEZÉS → a kockázatkezelésé (`core/risk_manager.py`, `trading.*`):
+     `account_risk_pct`, `max_open_slots`. A stratégia csak az SL/TP TÁVOT adja
+     (`sl_tp_points`), a lotot nem.
+  2. KIMENET-MENEDZSMENT → a kockázatcsökkentő modulé (`core/risk_reduction.py`
+     + `core/rr_state.py`): breakeven, trailing, részleges zárás, runner-stop,
+     Fibo/Harmados szintek, kiszállási jel, cost-cut.
+  3. VÉGREHAJTÁSI KAPUK → a keretrendszeré (`core/execution_params.py`,
+     `core/spread_gate.py`, `core/gates.py`): spread-tűrés, TF-együttállás,
+     piac-állapot. Ezek a bróker és a piac tulajdonságai, nem a jelzésé.
+
+MIÉRT SZABÁLY. Amíg a BE/trailing a stratégia paraméterei közt élt, három baj
+állt elő EGYSZERRE: (a) minden stratégia configjában DUPLIKÁLVA volt ugyanaz;
+(b) egy páron futó két stratégia KÜLÖNBÖZŐ értéket adhatott ugyanarra a
+pozíció-kezelésre; (c) a legtöbb kockázatcsökkentő preseten a paraméter
+HATÁSTALAN volt, mégis szerkeszthetőnek látszott. Ugyanez történt a
+`max_open_slots`-szal is, ami évekig egy elpazarolt optimalizálási tengely volt.
+
+ÚJ STRATÉGIA ÍRÁSAKOR: ha egy paraméter arról szól, mi történik a BELÉPÉS UTÁN,
+akkor NEM a stratégiáé. Lásd a `new-strategy` checklistet.
+────────────────────────────────────────────────────────────────────────────
 """
 
 from __future__ import annotations

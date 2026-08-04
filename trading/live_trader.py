@@ -1087,13 +1087,17 @@ def _refresh_position(ticket: int):
 
 
 def _apply_be_and_trailing(symbol, pos, ticket, pstate, is_rf, risky,
-                           params, point_size, sym_info, slot_mgr):
+                           rr, point_size, sym_info, slot_mgr):
     """Egy nyitott (off/risky) pozíció költség-tudatos BREAKEVEN + TRAILING kezelése —
     BAR-FÜGGETLEN, ezért a no-trade (szürke) órákban is futtatható, hogy a már nyitott
     pozíció trailingje/BE-je akkor is dolgozzon. A logika AZONOS a `process_pair` fő
     ágának off/risky BE+trailing részével (csak kiemelve, hogy a szünet-ág is hívhassa);
     a Felező/Pajzs részleges zárás + RUNNER_EXIT (ami bart igényel) marad a fő ágban.
     A `pstate`-et módosítja, MT5-öt hív.
+
+    ⚠ A paraméterek az `rr` SPECBŐL jönnek (v1.96.0), nem a stratégia
+    `params`-ából — a BE/trailing a kockázatcsökkentés része. Lásd
+    `core/risk_reduction.BE_TRAIL_KEYS`.
 
     ⚠ IKERPÁR: a `process_pair` off/risky ágában ugyanez a logika fut (ott a
     preset-elágazás részeként). HA ITT VÁLTOZTATSZ, azt is módosítsd."""
@@ -1111,7 +1115,7 @@ def _apply_be_and_trailing(symbol, pos, ticket, pstate, is_rf, risky,
         log.info("✦ %s #%d — SL már a költség-tudatos BE-n (kézi/külső húzás) → BE kész",
                  symbol, ticket)
     # ── Költség-tudatos breakeven ──
-    be_pct = params.get("breakeven_pct", 0.5)
+    be_pct = rr.get("breakeven_pct", 0.5)
     if (risky or be_pct > 0) and not is_rf:
         if pos.type == mt5.ORDER_TYPE_BUY:
             be_price = (pos.price_open if risky
@@ -1144,12 +1148,12 @@ def _apply_be_and_trailing(symbol, pos, ticket, pstate, is_rf, risky,
                 return                     # ismeretlen ATR → nincs trailing (a BE
                                            # ekkor MÁR lefutott feljebb ebben a
                                            # függvényben — azt nem hagyjuk ki)
-            dist_price = (params.get("trail_distance_atr", 0.4) * _atr
+            dist_price = (rr.get("trail_distance_atr", 0.4) * _atr
                           * (0.5 if risky else 1.0))
         min_stop_price = (sym_info.trade_stops_level * point) if sym_info else 0.0
         eff_price = max(dist_price, min_stop_price + point)
         act_price = (0.0 if risky
-                     else params.get("trail_activation_atr", 0.5) * _atr)
+                     else rr.get("trail_activation_atr", 0.5) * _atr)
         # INVARIÁNS (mint a fő ágban): BE után a stop sosem lehet a belépőnél rosszabb.
         _be_floor = pos.price_open if pstate.get("be_done") else None
         if pos.type == mt5.ORDER_TYPE_BUY:
@@ -1269,7 +1273,7 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
                         "entry_atr": 0.0})
                     _apply_be_and_trailing(
                         symbol, _p, _p.ticket, _ps, slot_mgr.is_risk_free(_p.ticket),
-                        risky, params, point_size, _sinfo, slot_mgr)
+                        risky, _spec, point_size, _sinfo, slot_mgr)
             except Exception as _e:
                 log.debug("%s — no-trade pozíció-kezelés hiba: %s", symbol, _e)
         # Ha a stratégia be van kapcsolva rá (`no_trade_resets_signal`), a szünet
@@ -1512,6 +1516,10 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
         _is_partial = _p_eff in (_rr.PRESET_HALVING, _rr.PRESET_SHIELD)
         _is_fibo    = _p_eff == _rr.PRESET_FIBO
         _is_thirds  = _p_eff == _rr.PRESET_THIRDS
+        # „Ki (semmi)": a stop ott marad, ahol a belépéskor volt — se BE, se
+        # trailing, se részleges zárás. Ez az EGYETLEN preset, ami tényleg nem
+        # nyúl a pozícióhoz (a régi `off` mindig BE-zett és trailelt).
+        _is_none    = _p_eff == _rr.PRESET_NONE
 
         # Restart-védelem: ha a bot újraindult egy MÁR részlegesen zárt (Felező/
         # Pajzs) pozíció közben, a pstate elveszett → az MT5 history-ból derítsük ki,
@@ -1647,7 +1655,9 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
             # a preset-elágazás része, ott önálló, bar-független függvény — az
             # összevonás a preset-diszpécser átszervezését jelentené a legkritikusabb
             # úton. HA ITT VÁLTOZTATSZ, a `_apply_be_and_trailing`-et is módosítsd.
-            be_pct = params.get("breakeven_pct", 0.5)
+            # A kulcsok az rr SPECBŐL (v1.96.0) — a BE/trailing a kockázatcsökkentés
+            # paramétere, nem a stratégiáé.
+            be_pct = 0.0 if _is_none else _spec.get("breakeven_pct", 0.5)
             if (risky or be_pct > 0) and not is_rf:
                 if pos.type == mt5.ORDER_TYPE_BUY:
                     be_price = (pos.price_open if risky
@@ -1676,7 +1686,7 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
         # Trailing: off/risky mint eddig; Felező/Pajzsnál CSAK ha a runner-mód trailing;
         # Fibónál/Harmadosnál SOHA (a stop a kijelölt szinten marad — tiszta stop-mozgatás).
         _do_trailing = (is_rf and pstate.get("trailing_enabled", True)
-                        and not _is_fibo and not _is_thirds and
+                        and not _is_none and not _is_fibo and not _is_thirds and
                         (not _is_partial or pstate.get("runner_mode") == _rr.RUNNER_TRAILING))
         if _do_trailing:
             point  = sym_info.point if (sym_info and sym_info.point > 0) else point_size
@@ -1690,7 +1700,7 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
             if override_points is not None:
                 dist_price = override_points * point
             elif _atr > 0:
-                dist_price = (params.get("trail_distance_atr", 0.4) * _atr
+                dist_price = (_spec.get("trail_distance_atr", 0.4) * _atr
                               * (0.5 if risky else 1.0))
             else:
                 dist_price = None          # ismeretlen ATR → nem trailelünk
@@ -1705,7 +1715,7 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
 
             # Risky mód: a trailing AZONNAL induljon (nem várunk aktiválási profitra).
             act_price = (0.0 if risky
-                         else params.get("trail_activation_atr", 0.5) * _atr)
+                         else _spec.get("trail_activation_atr", 0.5) * _atr)
 
             # ── INVARIÁNS: kockázatmentesből sosem lehet kockázatos ──────
             # Ha a BE már megtörtént, a trailing SOSEM tehet a belépőnél rosszabb

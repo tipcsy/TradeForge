@@ -40,21 +40,20 @@ from core.params_store import (
     params_file, trials_file, resolve_trade_hours, save_trade_hours,
 )
 from core import execution_params as _execp
+from core import risk_reduction as _rrx
 
-# A közös, stratégia-független "Végrehajtás" kategória (BE/trailing/atr_period/
-# spread-kapu) — minden stratégia-configból kikerült, itt jelenik meg egységesen.
+# A közös, stratégia-független "Végrehajtás" kategória (atr_period + spread-kapu)
+# — minden stratégia-configból kikerült, itt jelenik meg egységesen.
 # `_EXEC_KEYS` a `core.execution_params.DEFAULTS` kulcsai.
+#
+# ⚠ A BE/trailing v1.96.0 óta NEM ITT van: a kockázatcsökkentő beállító ablakban
+# jelenik meg, és CSAK azokon a preseteken, ahol tényleg hat (Fibo/Harmados
+# preseten például semmit nem csinált — lásd `core.risk_reduction.be_trail_active`).
 _EXEC_CATEGORY = "Végrehajtás"
 _EXEC_KEYS = frozenset(_execp.DEFAULTS)
 _EXEC_PARAM_META = {
     "atr_period": {"category": _EXEC_CATEGORY,
                    "comment": "ATR periódus (spread-kapu + BE/trailing volatilitás-mércéje)"},
-    "breakeven_pct": {"category": _EXEC_CATEGORY,
-                       "comment": "BE: a TP hány %-ánál húzzuk az SL-t a belépőre (0 = ki)"},
-    "trail_activation_atr": {"category": _EXEC_CATEGORY,
-                              "comment": "Trailing ennyi ATR profit UTÁN indul"},
-    "trail_distance_atr": {"category": _EXEC_CATEGORY,
-                            "comment": "Trailing követési távolság (ATR-szorzó)"},
     "max_spread_atr_ratio": {"category": _EXEC_CATEGORY,
                               "comment": "Spread-kapu: max spread az ATR arányában"},
     "min_spread_mult": {"category": _EXEC_CATEGORY,
@@ -67,7 +66,11 @@ _EXEC_PARAM_META = {
 # „Slotok" mezője is azt írja felül. A JSON-ban maradt másolat viszont megjelent
 # a Paraméterek ablakban szerkeszthetőként, és mentéskor újra kiíródott: egy
 # beállítás, ami látszólag hat, valójában nem. Betöltéskor kidobjuk.
-_OBSOLETE_PARAM_KEYS = frozenset({"max_open_slots"})
+# A `max_open_slots` mellé v1.96.0-ban jött a BE/trailing: azok a KOCKÁZAT-
+# CSÖKKENTÉS paraméterei lettek (`core/risk_reduction.py`), tehát a stratégia
+# paraméter-ablakában sem szerkesztendők többé. A régi mentett JSON-okban még
+# ott lehetnek — betöltéskor kidobjuk, hogy ne látszódjanak hatásosnak.
+_OBSOLETE_PARAM_KEYS = frozenset({"max_open_slots", *_rrx.BE_TRAIL_KEYS})
 
 # A trials CSV metrika-oszlopai (ezek NEM paraméterek, hanem az eredmény jellemzői)
 _METRIC_COLS = frozenset({
@@ -521,7 +524,10 @@ class InstrumentParamsDialog:
                            command=self._on_rr_change)
         _style_om(om, self._sf)
         om.grid(row=0, column=1, padx=(4, 0))
-        _attach_tooltip(om, "Ki = alap kezelés (BE a breakeven_pct-nél + trailing). "
+        _attach_tooltip(om, "Ki (semmi) = a stop MARAD, ahol a belépéskor volt — "
+                            "se BE, se trailing (a nyers stratégia-él méréséhez). "
+                            "BE + trailing = a korábbi „Ki”: breakeven a BE %-nál, "
+                            "utána trailing. "
                             "Risky = felezett méret + azonnali BE 1R-nél. "
                             "Felező/Pajzs = 1R-nél 50%/75% zárás + a maradék (runner) külön kezelése. "
                             "Fibo = a belépő→TP táv 61,8%-ánál a stop BE-re (nincs zárás, "
@@ -600,6 +606,43 @@ class InstrumentParamsDialog:
         self._exit_pfrm.pack(side="left", padx=(6, 0))
         self._exit_param_vars = {}
         self._rebuild_exit_params()
+
+        # ── BE + trailing — a preset SAJÁT paraméterei (v1.96.0) ─────────────
+        # Korábban a Stratégia Paraméterek „Végrehajtás" kategóriájában ültek,
+        # MINDEN preseten láthatóan — holott a legtöbbön semmit nem csináltak
+        # (Fibo/Harmados: soha; Felező/Pajzs runner=keep/BE: soha). Itt a helyük,
+        # és CSAK azok látszanak, amelyek az adott preseten tényleg hatnak
+        # (`core.risk_reduction.be_trail_active` — közös igazságforrás a
+        # felületnek és a jövőbeli rr-optimalizálásnak).
+        _bt_row = tk.Frame(rrg, bg=BG)
+        _bt_row.pack(anchor="w", padx=6, pady=(0, 4))
+        self._bt_frames = {}
+        self._bt_vars = {}
+        _BT_META = [
+            ("breakeven_pct", "BE %",
+             "A TP hány részénél megy az SL a belépőre (0 = nincs BE).\n"
+             "Csak a 'BE + trailing' preseten hat — a Risky azonnal BE-zik."),
+            ("trail_activation_atr", "Trail indul",
+             "Ennyi ATR-nyi profit UTÁN indul a trailing.\n"
+             "A Risky azonnal trailel, ezért ott nem látszik."),
+            ("trail_distance_atr", "Trail táv",
+             "Ennyi ATR-rel követi a stop az árat.\n"
+             "Riskynél a motor még felezi is ezt a távolságot."),
+        ]
+        _spec0 = _rrs.spec_for(self.symbol)
+        for _k, _lbl, _tip in _BT_META:
+            _f = tk.Frame(_bt_row, bg=BG)
+            tk.Label(_f, text=f"{_lbl}:", bg=BG, fg=FG_GRAY,
+                     font=self._sf).pack(side="left")
+            _v = tk.StringVar(value=f"{float(_spec0.get(_k, 0)):g}")
+            _e = tk.Entry(_f, textvariable=_v, width=5, bg=BG_HEADER, fg=FG_WHITE,
+                          font=self._sf, relief="flat", insertbackground=FG_WHITE)
+            _e.pack(side="left", padx=(2, 0))
+            _e.bind("<FocusOut>", lambda _ev, k=_k: self._on_be_trail_save(k))
+            _e.bind("<Return>",   lambda _ev, k=_k: self._on_be_trail_save(k))
+            _attach_tooltip(_f, _tip)
+            self._bt_frames[_k] = _f
+            self._bt_vars[_k] = _v
 
         # ── 2. csoport: Pozícióépítés (külön tengely) ────────────────────────
         # A kockázatcsökkentés ALATT (nem mellette, mint korábban): annak a sora
@@ -1385,6 +1428,19 @@ class InstrumentParamsDialog:
             self._cautious_var.set(_rr.wants_cautious_size(preset))
         self._update_rr_visibility()
 
+    def _on_be_trail_save(self, key: str):
+        """Egy BE/trailing mező mentése a per-pár kockázatcsökkentő állapotba.
+
+        Azonnal ment (mint a többi rr-vezérlő), nem a Mentés gombra vár: ezek
+        NEM stratégia-paraméterek, tehát nincs közük a paraméter-űrlap
+        mentéséhez. Érvénytelen szám → visszaírjuk a ténylegesen ható értéket,
+        hogy a mező ne mutasson mást, mint amivel a motor dolgozik."""
+        v = _num(self._bt_vars[key].get())
+        if v is not None and v >= 0:
+            self._rrs._set(self.symbol, **{key: float(v)})
+        cur = self._rrs.spec_for(self.symbol).get(key, 0)
+        self._bt_vars[key].set(f"{float(cur):g}")
+
     def _on_cautious_change(self):
         self._rrs.set_cautious(self.symbol, bool(self._cautious_var.get()))
 
@@ -1453,8 +1509,9 @@ class InstrumentParamsDialog:
         R-lépés csak R-alapú triggernél, Zsug csak R-felezőnél."""
         from core import risk_reduction as _rr
         preset = self._preset_from_name(self._rr_name.get())
-        # Óvatos: Ki-nél elrejtve
-        (self._cautious_cb.grid_remove if preset == _rr.PRESET_OFF
+        # Óvatos: ahol nincs érdemi kockázatcsökkentés, elrejtve
+        (self._cautious_cb.grid_remove
+         if preset in (_rr.PRESET_NONE, _rr.PRESET_OFF)
          else self._cautious_cb.grid)()
         # Runner: csak Felező/Pajzs (+ Pajzs↔Fibo auto, mert Pajzsra oldódhat)
         partial = preset in (_rr.PRESET_HALVING, _rr.PRESET_SHIELD,
@@ -1464,6 +1521,15 @@ class InstrumentParamsDialog:
         runner = self._runner_from_name(self._runner_name.get())
         show_exit = partial and runner == _rr.RUNNER_EXIT
         (self._exit_frame.grid if show_exit else self._exit_frame.grid_remove)()
+        # BE/trailing: CSAK azok, amelyek ezen a preset+runner páron TÉNYLEG hatnak.
+        # Sorrend-tartó (mind elrejt, majd a látókat sorban pack) — mint az
+        # építés-vezérlőknél; enélkül a mezők sorrendje váltogatna.
+        _act = _rr.be_trail_active(preset, runner)
+        for _k, _f in self._bt_frames.items():
+            _f.pack_forget()
+        for _k in _rr.BE_TRAIL_KEYS:
+            if _k in _act:
+                self._bt_frames[_k].pack(side="left", padx=(0, 10))
         # ── Építés-vezérlők (sorrend-tartó: mind elrejt, majd a látókat sorban pack) ──
         for f in (self._build_faktor_frame, self._build_trig_frame,
                   self._build_rstep_frame, self._build_rshrink_frame):

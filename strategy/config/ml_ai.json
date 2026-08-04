@@ -27,7 +27,7 @@
     "tp_points": 0
   },
   "param_meta": {
-    "_comment": "A Paraméterek ablak csoportosítása + megjegyzései. A BE/trailing/atr_period/spread-kapu a közös, stratégia-független \"Végrehajtás\" kategóriában jelenik meg (nem itt).",
+    "_comment": "A Paraméterek ablak csoportosítása + megjegyzései. A BE/trailing a KOCKÁZATCSÖKKENTŐ blokkban jelenik meg (preset-függően), az atr_period és a spread-kapu a közös \"Végrehajtás\" kategóriában — egyik sem a stratégiáé (lásd strategy/base.py).",
     "categories": [
       "ML modell",
       "SL / TP",

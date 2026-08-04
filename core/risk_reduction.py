@@ -23,7 +23,17 @@ import math
 from dataclasses import dataclass
 
 # ── Presetek (2a tengely fő értékei + a Risky mint kombináció) ──────────────
-PRESET_OFF     = "off"       # nincs kockázatcsökkentés
+#
+# ⚠ A `PRESET_OFF` NEVE FÉLREVEZETŐ VOLT, ezért a CÍMKÉJE megváltozott (v1.96.0):
+# ez a preset SOSEM jelentett „semmit" — mindig futtatta a költség-tudatos
+# breakevent és a trailinget (`_manage_position` → `_update_stops`). A KULCS
+# szándékosan `off` MARADT: az átnevezés így nem változtat semmit sem a mentett
+# `data/risk_mode.json`-ban, sem a viselkedésben.
+#
+# Aki tényleg semmit nem akar (a stop marad, ahol a belépéskor volt — pl. a nyers
+# stratégia-él méréséhez), az a ÚJ `PRESET_NONE`-t válassza.
+PRESET_NONE    = "none"      # TÉNYLEG semmi: a stop marad a helyén
+PRESET_OFF     = "off"       # BE + trailing (a „legkisebb" kockázatcsökkentés)
 PRESET_RISKY   = "risky"     # óvatos méret + BE-húzás (NINCS részleges zárás)
 PRESET_HALVING = "halving"   # Felező: 50% zár 1R-nél
 PRESET_SHIELD  = "shield"    # Pajzs: 75% zár 1R-nél
@@ -32,8 +42,8 @@ PRESET_THIRDS  = "thirds"    # Harmados (1/3–2/3): R-alapú stop-létra (nincs
 # Pajzs↔Fibo auto (tananyag 3. pont): alaphelyzetben PAJZS; NAGY mozgásnál
 # (ATR >> átlag a belépéskor) FIBO — hagyjuk futni, később húzunk stopot.
 PRESET_SHIELD_FIBO = "shield_fibo"
-PRESETS = (PRESET_OFF, PRESET_RISKY, PRESET_HALVING, PRESET_SHIELD, PRESET_FIBO,
-           PRESET_THIRDS, PRESET_SHIELD_FIBO)
+PRESETS = (PRESET_NONE, PRESET_OFF, PRESET_RISKY, PRESET_HALVING, PRESET_SHIELD,
+           PRESET_FIBO, PRESET_THIRDS, PRESET_SHIELD_FIBO)
 
 # ── runner-stop (2b tengely) ────────────────────────────────────────────────
 RUNNER_KEEP      = "keep"        # marad a TÁVOLI (eredeti) stop — a videó Pajzsa
@@ -44,9 +54,54 @@ RUNNER_EXIT      = "exit"        # a maradékot KISZÁLLÁSI JELRE zárjuk (core
 _EPS = 1e-9
 
 
+# ── A BE + trailing paraméterei — ITT laknak, nem a stratégiánál ────────────
+#
+# MIÉRT ITT (v1.96.0): ezek a kimenet-menedzsment paraméterei, tehát a
+# kockázatcsökkentésé. Korábban a közös végrehajtási configban voltak
+# (`core/execution_params.py`), és a Stratégia Paraméterek ablak „Végrehajtás"
+# kategóriájában jelentek meg — MINDEN stratégiánál, MINDEN preseten. Csakhogy a
+# preset dönti el, hogy egyáltalán HATNAK-e:
+#
+#   preset                              | breakeven_pct | trail_activation | trail_distance
+#   ------------------------------------|---------------|------------------|----------------
+#   none                                |       —       |        —         |       —
+#   off  (= BE + trailing)              |       ✔       |        ✔         |       ✔
+#   risky                               |  — (azonnali) |   — (azonnali)   |   ✔ (×0,5)
+#   halving/shield + runner=trailing    |       —       |        ✔         |       ✔
+#   halving/shield + runner=keep/BE     |       —       |        —         |       —
+#   fibo / thirds                       |       —       |        —         |       —
+#
+# Fibo vagy Harmados preseten tehát a három érték HALOTT volt: szerkeszthetőnek
+# látszott, és semmit nem csinált. Ugyanaz a hibafajta, mint a `max_open_slots`
+# a stratégia-paraméterek közt.
+BE_TRAIL_KEYS = ("breakeven_pct", "trail_activation_atr", "trail_distance_atr")
+
+
+def be_trail_active(preset: str, runner_stop: str = RUNNER_TRAILING) -> set:
+    """MELY BE/trailing kulcsok hatnak ezen a preset+runner kombináción?
+
+    A felület ez alapján dönti el, mit MUTAT (a nem ható paraméter ne zavarjon
+    bele a listába), az optimalizáló pedig ez alapján, mit KERESSEN (a hatástalan
+    dimenzió elpazarolt trial). Egy igazságforrás mindkettőnek."""
+    if preset == PRESET_OFF:
+        return set(BE_TRAIL_KEYS)
+    if preset == PRESET_RISKY:
+        # A risky azonnal BE-zik és azonnal trailel — csak a TÁVOLSÁG számít.
+        return {"trail_distance_atr"}
+    if preset in (PRESET_HALVING, PRESET_SHIELD, PRESET_SHIELD_FIBO):
+        if runner_stop == RUNNER_TRAILING:
+            return {"trail_activation_atr", "trail_distance_atr"}
+        return set()
+    return set()          # none / fibo / thirds → egyik sem
+
+
 def default_config() -> dict:
-    """A kalibrációs paraméterek alapértékei (a stratégia-config felülírja)."""
+    """A kalibrációs paraméterek alapértékei (a per-pár állapot felülírja)."""
     return {
+        # ── BE + trailing (lásd BE_TRAIL_KEYS / be_trail_active) ──
+        "breakeven_pct":        0.5,        # a TP hány %-ánál megy az SL a belépőre (0 = ki)
+        "trail_activation_atr": 0.5,        # ennyi ATR profit UTÁN indul a trailing
+        "trail_distance_atr":   0.4,        # ennyi ATR-rel követ
         "trigger_R":        1.0,            # hány R-nél lép életbe a részleges zárás
         "halving_fraction": 0.5,            # Felező: a pozíció mekkora részét zárja
         "shield_fraction":  0.75,           # Pajzs: a nagyobb rész

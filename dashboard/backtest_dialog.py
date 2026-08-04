@@ -956,7 +956,7 @@ class BacktestDialog:
                     try:
                         from tools.mt5_export import export_mt5_csv
                         from version import BASE_DIR
-                        _p = export_mt5_csv(result, self.symbol, params,
+                        _p = export_mt5_csv(result, self.symbol, rr_spec,
                                             self.pair_cfg, BASE_DIR / "data" / "mt5_backtest")
                         if _p and summary is not None:
                             summary["_mt5_csv"] = _p.name

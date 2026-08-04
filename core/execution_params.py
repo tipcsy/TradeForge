@@ -1,9 +1,15 @@
 """
-Közös végrehajtás/kockázat paraméterek — STRATÉGIA-FÜGGETLEN, instrumentumonkénti
-érték. Ide tartozik: `atr_period` (a spread-kapu volatilitás-mércéje),
-`breakeven_pct`/`trail_activation_atr`/`trail_distance_atr` (a BE+trailing off/
-risky ága, lásd `trading/live_trader.py` `_apply_be_and_trailing`), valamint
+Közös VÉGREHAJTÁSI paraméterek — STRATÉGIA-FÜGGETLEN, instrumentumonkénti érték.
+Ide tartozik: `atr_period` (a spread-kapu volatilitás-mércéje) és
 `max_spread_atr_ratio`/`min_spread_mult` (`core/spread_gate.py`).
+
+⚠ A BE + trailing (`breakeven_pct`, `trail_activation_atr`, `trail_distance_atr`)
+v1.96.0 óta NEM ITT van: átkerült a KOCKÁZATCSÖKKENTŐ modulba
+(`core/risk_reduction.py` + `core/rr_state.py` per-pár kalibráció). Indok: a
+preset dönti el, hogy egyáltalán hatnak-e (Fibo/Harmados preseten SEMMIT nem
+csináltak), tehát a kimenet-menedzsment paraméterei — nem a végrehajtásé, és
+végképp nem a stratégiáé. A `MIGRATED_KEYS` csak az egyszeri átköltöztetéshez
+kell (`tools/migrate_be_trail.py`), új írás már nem történik rájuk.
 
 Korábban ez az 5-6 kulcs stratégiánként DUPLIKÁLVA élt a `strategy/config/<name>.json`
 indicators/sltp/position_mgmt szekcióiban, és a `wpr_sma` az egyetlen, amelyik
@@ -39,14 +45,32 @@ EXECUTION_DIR = ROOT / "data" / "execution_params"
 # stratégia-config alapértékekkel).
 DEFAULTS = {
     "atr_period": 14,
-    "breakeven_pct": 0.5,
-    "trail_activation_atr": 0.5,
-    "trail_distance_atr": 0.4,
     "max_spread_atr_ratio": 0.20,
     "min_spread_mult": 1.5,
 }
 
 _KEYS = tuple(DEFAULTS.keys())
+
+# A v1.96.0-ban a kockázatcsökkentő modulba ÁTKÖLTÖZTETETT kulcsok. A régi
+# per-szimbólum fájlokban még ott lehetnek; a `load_execution_params` NEM adja
+# vissza őket (a motor máshonnan olvassa), és a `save_execution_params` sem írja
+# ki. Egyedül a migráció olvassa (`tools/migrate_be_trail.py`).
+MIGRATED_KEYS = ("breakeven_pct", "trail_activation_atr", "trail_distance_atr")
+
+
+def read_migrated(symbol: str) -> dict:
+    """A per-szimbólum fájlban MÉG MEGLÉVŐ, átköltöztetett BE/trailing értékek.
+    Üres dict, ha nincs ilyen (már migrált vagy sosem volt)."""
+    p = execution_params_file(symbol)
+    if not p.exists():
+        return {}
+    try:
+        with open(p, encoding="utf-8") as f:
+            params = (json.load(f).get("params") or {})
+    except Exception:
+        return {}
+    return {k: float(params[k]) for k in MIGRATED_KEYS
+            if isinstance(params.get(k), (int, float))}
 
 
 def execution_params_file(symbol: str) -> Path:

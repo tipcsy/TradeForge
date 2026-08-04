@@ -269,16 +269,20 @@ def _risky_trading_cfg(trading_cfg: dict, risky: bool) -> dict:
             "account_risk_pct": trading_cfg["account_risk_pct"] * RISKY_RISK_FACTOR}
 
 
-def _update_stops(trade: "Trade", high: float, low: float, params: dict,
+def _update_stops(trade: "Trade", high: float, low: float, rr: dict,
                   point_size: float, risky: bool) -> None:
     """BE + trailing SL frissítése egy nyitott trade-re (mutálja trade.sl /
     risk_free). risky=False esetén BITAZONOS a korábbi inline logikával; risky=True
-    a live_trader-t modellezi (azonnali BE, azonnali trailing, felezett távolság)."""
+    a live_trader-t modellezi (azonnali BE, azonnali trailing, felezett távolság).
+
+    ⚠ A paraméterek az `rr` SPECBŐL jönnek (v1.96.0), nem a stratégia
+    `params`-ából: a BE/trailing a KOCKÁZATCSÖKKENTÉS része, nem a belépőjelzésé.
+    Lásd `core/risk_reduction.BE_TRAIL_KEYS`."""
     # Épített pozíció (több láb): az SL az ÁTLAGÁRON van (a build kezeli) → nem
     # trailelünk (különben a trailing és az átlagár-stop egymással versenyezne).
     if len(trade.legs) > 1:
         return
-    be_pct     = params.get("breakeven_pct", 0.5)
+    be_pct     = rr.get("breakeven_pct", 0.5)
     # A trailing aktiválása és követési távolsága a BELÉPÉSKORI ATR szorzója.
     # Miért nem abszolút távolság: az önmagában instrumentum-függő lenne (ugyanaz
     # a szám EURUSD-n és egy indexen mást jelent), ezért az optimalizálónak
@@ -288,8 +292,8 @@ def _update_stops(trade: "Trade", high: float, low: float, params: dict,
     # nem függ az ATR-től, és a kockázatmentesítés a fontosabb a kettő közül.
     _atr = float(getattr(trade, "entry_atr", 0.0) or 0.0)
     _trail_ok  = _atr > 0
-    trail_act  = 0.0 if risky else params.get("trail_activation_atr", 0.5) * _atr
-    trail_dist = (params.get("trail_distance_atr", 0.4) * _atr
+    trail_act  = 0.0 if risky else rr.get("trail_activation_atr", 0.5) * _atr
+    trail_dist = (rr.get("trail_distance_atr", 0.4) * _atr
                   * (RISKY_TRAIL_FACTOR if risky else 1.0))
 
     if trade.direction == "BUY":
@@ -330,18 +334,33 @@ def daily_limit_usd(trading_cfg: dict, balance: float) -> float:
     return balance * float(trading_cfg.get("daily_loss_limit_pct", 0.015))
 
 
-def _rr_spec(rr: "dict | None", risky: bool) -> dict:
+def _rr_spec(rr: "dict | None", risky: bool, symbol: str = "") -> dict:
     """A run_pair kockázatcsökkentő specje. rr=None → a régi viselkedés a `risky`
-    flagből (preset off/risky), így a meglévő hívók BITAZONOSAK maradnak."""
+    flagből (preset off/risky), így a meglévő hívók BITAZONOSAK maradnak.
+
+    ⚠ A BE/trailing értékeket a PÁR SAJÁT kalibrációjából vesszük (v1.96.0).
+    Enélkül az átköltöztetés NÉMA VISELKEDÉS-VÁLTOZÁS lett volna: korábban ezek a
+    `params`-ban utaztak (a per-szimbólum execution-overlay-jel), most az rr-ben
+    laknak — az `rr=None` hívók (optimalizáló, `run_backtest`) tehát a modul
+    ALAPÉRTÉKÉRE estek volna vissza (0,5/0,5/0,4), a pár hangolt értéke helyett
+    (pl. Ger40: 0,7/0,1/0,9). A hangolás így más világban történt volna, mint az él."""
     if rr:
         return rr
     from core import risk_reduction as _rrm
     spec = _rrm.default_config()
     spec["preset"] = _rrm.PRESET_RISKY if risky else _rrm.PRESET_OFF
+    if symbol:
+        try:
+            from core import rr_state as _rrs
+            _rrs.ensure_loaded()
+            spec.update({k: v for k, v in _rrs.get_calibration(symbol).items()
+                         if k in _rrm.BE_TRAIL_KEYS})
+        except Exception:
+            pass
     return spec
 
 
-def _manage_position(trade: "Trade", high: float, low: float, params: dict,
+def _manage_position(trade: "Trade", high: float, low: float,
                      point_size: float, min_lot: float, lot_step: float,
                      rr: dict) -> None:
     """Nyitott trade menedzselése egy bar-on: a preset szerint BE/trailing VAGY
@@ -350,7 +369,12 @@ def _manage_position(trade: "Trade", high: float, low: float, params: dict,
     a végső P&L-hez.
 
     Meghívás: CSAK a nem-lezáró bar-okon (miután a TP/SL check nem zárt) — így a
-    részleges zárás a beszálló és a stop KÖZÖTTI mozgásnál történik, 1R-nél."""
+    részleges zárás a beszálló és a stop KÖZÖTTI mozgásnál történik, 1R-nél.
+
+    ⚠ NINCS `params` paramétere (v1.96.0). Ez SZERKEZETI döntés: a
+    kockázatcsökkentés nem láthatja a stratégia paramétereit, mert semmi köze
+    hozzájuk — minden, amire szüksége van, az `rr` specben van. Amíg a `params`
+    itt volt, a BE/trailing „véletlenül" a stratégia listájából olvasott."""
     from core import risk_reduction as _rrm
     preset = rr.get("preset", _rrm.PRESET_OFF)
     if preset == _rrm.PRESET_SHIELD_FIBO:
@@ -358,12 +382,17 @@ def _manage_position(trade: "Trade", high: float, low: float, params: dict,
         # tárolva) — nagy mozgásnál fibo, különben shield.
         preset = trade.rr_preset_eff or _rrm.PRESET_SHIELD
 
-    # off / risky → a régi stop-menedzsment (BITAZONOS a korábbival)
+    # none → TÉNYLEG semmi: a stop ott marad, ahol a belépéskor volt. Ez az egyetlen
+    # preset, ami nem nyúl a pozícióhoz (a nyers stratégia-él méréséhez).
+    if preset == _rrm.PRESET_NONE:
+        return
+    # off / risky → BE + trailing (BITAZONOS a korábbival; a néven változtattunk,
+    # nem a viselkedésen — lásd risk_reduction.PRESET_OFF)
     if preset == _rrm.PRESET_OFF:
-        _update_stops(trade, high, low, params, point_size, risky=False)
+        _update_stops(trade, high, low, rr, point_size, risky=False)
         return
     if preset == _rrm.PRESET_RISKY:
-        _update_stops(trade, high, low, params, point_size, risky=True)
+        _update_stops(trade, high, low, rr, point_size, risky=True)
         return
 
     # fibo → stop-mozgatás a belépő→TP táv fibo_level (61,8%) pontján. NINCS
@@ -457,7 +486,7 @@ def _manage_position(trade: "Trade", high: float, low: float, params: dict,
                 trade.risk_free = True
         elif trade.runner_mode == _rrm.RUNNER_TRAILING:
             trade.risk_free = True
-            _update_stops(trade, high, low, params, point_size, risky=False)
+            _update_stops(trade, high, low, rr, point_size, risky=False)
         # RUNNER_KEEP → a stop marad az EREDETI (távol) helyén — a videó Pajzsa
 
 
@@ -635,7 +664,7 @@ def run_pair(
     params.setdefault("sess_start", pair_cfg.get("sess_start", 0))
     params.setdefault("sess_end",   pair_cfg.get("sess_end", 24))
     from core import risk_reduction as _rrm
-    rr_spec    = _rr_spec(rr, risky)
+    rr_spec    = _rr_spec(rr, risky, symbol)
     # Óvatos (felezett) méret? A spec `cautious` felülbírálja, különben a preset
     # dönti (Risky felezi; a többi alap normál).
     _cautious  = rr_spec.get("cautious")
@@ -864,7 +893,7 @@ def run_pair(
                 else:
                     # A BE/trailing is a KILÉPÉSI (bid) oldalon mér
                     _manage_position(trade, bid_hi, bid_lo,
-                                     params, point_size, min_lot, lot_step, rr_spec)
+                                     point_size, min_lot, lot_step, rr_spec)
 
             elif trade.direction == "SELL":
                 # A SELL az ASK-on zár → a TP/SL az ASK-sorozaton triggerel. Ha MINDKETTŐ
@@ -885,7 +914,7 @@ def run_pair(
                     closed = True
                 else:
                     _manage_position(trade, ask_hi, ask_lo,
-                                     params, point_size, min_lot, lot_step, rr_spec)
+                                     point_size, min_lot, lot_step, rr_spec)
 
             # ── Esemény-napló: a menedzsment-fázis (részleges zárás + stop-mozgás)
             # változásai. A TP/SL-záró bar-on a `else` nem futott → nincs változás.
@@ -1591,7 +1620,7 @@ def run_portfolio_backtest(
             row      = m1_df.loc[m1_time]
             point_size = trade.point_size
             sp       = info["pair_cfg"].get("backtest_spread_points", spread_default)
-            rr_spec  = info.get("rr") or _rr_spec(None, info.get("risky", False))
+            rr_spec  = info.get("rr") or _rr_spec(None, info.get("risky", False), sym)
             _pc      = info["pair_cfg"]
             _minlot  = _pc.get("min_lot", 0.01)
             _lotstep = _pc.get("lot_step", 0.01)
@@ -1612,7 +1641,7 @@ def run_portfolio_backtest(
                     trade.pnl_points    = (trade.sl - trade.open_price) / point_size - sp
                     trade.status      = "sl";  closed = True
                 else:
-                    _manage_position(trade, row["high"], row["low"], params,
+                    _manage_position(trade, row["high"], row["low"],
                                      point_size, _minlot, _lotstep, rr_spec)
 
             else:  # SELL
@@ -1629,7 +1658,7 @@ def run_portfolio_backtest(
                     trade.pnl_points    = (trade.open_price - trade.sl) / point_size - sp
                     trade.status      = "sl";  closed = True
                 else:
-                    _manage_position(trade, row["high"], row["low"], params,
+                    _manage_position(trade, row["high"], row["low"],
                                      point_size, _minlot, _lotstep, rr_spec)
 
             # Runner KISZÁLLÁSI JELRE zárása (mint a run_pair-ben): a részleges zárás

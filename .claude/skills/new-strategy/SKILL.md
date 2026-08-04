@@ -56,6 +56,27 @@ tölthető modult a felderítés kihagyja (warning a logban).
   betöltéskor beolvasztja (`apply_strategy_config`), mentéskor kiszűri
   (`main_config_view`) — a config.json nem szennyeződik stratégia-szekciókkal.
 
+### ⚠ MI NEM A STRATÉGIÁÉ — a legfontosabb szabály
+
+> **A stratégia egy BESZÁLLÁSI JELZŐ (+ előszűrő).** Ha egy paraméter arról szól,
+> mi történik a **belépés UTÁN**, akkor **nem a stratégiáé**.
+
+| tartozik | hova | példa |
+|---|---|---|
+| méretezés | kockázatkezelés (`core/risk_manager.py`, `trading.*`) | `account_risk_pct`, `max_open_slots` |
+| kimenet-menedzsment | **kockázatcsökkentés** (`core/risk_reduction.py` + `core/rr_state.py`) | `breakeven_pct`, `trail_*`, részleges zárás, runner-stop, Fibo/Harmados, exit-jel, cost-cut |
+| végrehajtási kapuk | keretrendszer (`core/execution_params.py`, `spread_gate`, `gates`) | `atr_period`, `max_spread_atr_ratio`, TF-együttállás |
+
+A stratégia az SL/TP **távot** adja (`sl_tp_points` / `bt_entry`), a lotot és a
+stop későbbi mozgatását **nem**.
+
+**Miért szabály, és nem ajánlás.** Amíg a BE/trailing a stratégia paraméterei közt
+élt: (a) minden stratégia configjában duplikálva volt; (b) egy páron futó két
+stratégia MÁS értéket adhatott ugyanarra a pozíció-kezelésre; (c) a legtöbb
+kockázatcsökkentő preseten **hatástalan** volt, mégis szerkeszthetőnek látszott
+(Fibo/Harmados preseten soha nem futott). Ugyanez történt a `max_open_slots`-szal,
+ami sokáig egy **elpazarolt optimalizálási tengely** volt. Lásd `strategy/base.py`.
+
 ## 4. Kritikus buktatók (ezeken bukott már el korábbi stratégia)
 
 - **Live↔backtest paritás:** a belépés-szűrőt ÉS a méretezést a `bt_entry` adja — a

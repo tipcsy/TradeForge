@@ -87,13 +87,9 @@
     "position_record_keep_days": 3
   },
   "execution": {
-    "_comment": "Közös, STRATÉGIA-FÜGGETLEN végrehajtási/kockázati alapértékek — MINDEN stratégia ugyanazt az instrumentum-szintű értéket használja (nem stratégiánként hangolt). Per-szimbólum felülírás: data/execution_params/<SYMBOL>.json (a Stratégia Paraméterek ablak 'Végrehajtás' kategóriája menti oda).",
+    "_comment": "Közös, STRATÉGIA-FÜGGETLEN VÉGREHAJTÁSI alapértékek — MINDEN stratégia ugyanazt az instrumentum-szintű értéket használja. Per-szimbólum felülírás: data/execution_params/<SYMBOL>.json (a Stratégia Paraméterek ablak 'Végrehajtás' kategóriája menti oda).",
+    "_comment_moved": "A BE + trailing (breakeven_pct, trail_activation_atr, trail_distance_atr) v1.96.0 óta NEM ITT van: a KOCKÁZATCSÖKKENTŐ modulba került (core/risk_reduction.py; per-pár érték a data/risk_mode.json-ban, a kockázatcsökkentő blokkban szerkeszthető). Indok: a preset dönti el, hogy egyáltalán hatnak-e — Fibo/Harmados preseten például SEMMIT nem csináltak. Egyszeri átköltöztetés: python tools/migrate_be_trail.py --apply",
     "atr_period": 14,
-    "_comment_be": "breakeven_pct: a TP hány %-ánál toljuk az SL-t az entry szintre (0 = kikapcs)",
-    "breakeven_pct": 0.5,
-    "_comment_trail": "trail_activation_atr: ennyi ATR-nyi profit UTÁN indul a trailing. trail_distance_atr: ennyi ATR-rel követ.",
-    "trail_activation_atr": 0.5,
-    "trail_distance_atr": 0.4,
     "_comment_spread": "Spread-kapu (core/spread_gate.py): max_spread_atr_ratio — a megengedett spread az ATR hányada. min_spread_mult — az alsó küszöb az instrumentum normál spreadjének ennyiszerese.",
     "max_spread_atr_ratio": 0.20,
     "min_spread_mult": 1.5

@@ -18,20 +18,25 @@ from pathlib import Path
 
 from core import risky_mode
 from core.risk_reduction import (
-    PRESET_OFF, PRESET_RISKY, PRESET_HALVING, PRESET_SHIELD, PRESET_FIBO,
-    PRESET_THIRDS, PRESET_SHIELD_FIBO, PRESETS,
+    PRESET_NONE, PRESET_OFF, PRESET_RISKY, PRESET_HALVING, PRESET_SHIELD,
+    PRESET_FIBO, PRESET_THIRDS, PRESET_SHIELD_FIBO, PRESETS,
     RUNNER_KEEP, RUNNER_BREAKEVEN, RUNNER_TRAILING, RUNNER_EXIT,
-    default_config, wants_cautious_size,
+    BE_TRAIL_KEYS, be_trail_active, default_config, wants_cautious_size,
 )
 from core import exit_signal
 
 PATH = Path(__file__).resolve().parents[1] / "data" / "risk_mode.json"
 
-CYCLE = (PRESET_OFF, PRESET_RISKY, PRESET_HALVING, PRESET_SHIELD, PRESET_FIBO,
-         PRESET_THIRDS, PRESET_SHIELD_FIBO)
-LABEL = {PRESET_OFF: "—", PRESET_RISKY: "R", PRESET_HALVING: "F", PRESET_SHIELD: "P",
+CYCLE = (PRESET_NONE, PRESET_OFF, PRESET_RISKY, PRESET_HALVING, PRESET_SHIELD,
+         PRESET_FIBO, PRESET_THIRDS, PRESET_SHIELD_FIBO)
+LABEL = {PRESET_NONE: "—", PRESET_OFF: "BT", PRESET_RISKY: "R",
+         PRESET_HALVING: "F", PRESET_SHIELD: "P",
          PRESET_FIBO: "Fi", PRESET_THIRDS: "H", PRESET_SHIELD_FIBO: "PF"}
-NAME  = {PRESET_OFF: "Ki", PRESET_RISKY: "Risky", PRESET_HALVING: "Felező",
+# ⚠ Az `off` NEVE volt hazug, nem a viselkedése: mindig BE-t és trailinget
+# futtatott. A KULCS marad (a mentett állapot és a viselkedés érintetlen), csak a
+# felirat mond végre igazat. A „semmi" ezentúl a külön `none`.
+NAME  = {PRESET_NONE: "Ki (semmi)", PRESET_OFF: "BE + trailing",
+         PRESET_RISKY: "Risky", PRESET_HALVING: "Felező",
          PRESET_SHIELD: "Pajzs", PRESET_FIBO: "Fibo", PRESET_THIRDS: "Harmados",
          PRESET_SHIELD_FIBO: "Pajzs↔Fibo"}
 RUNNERS = (RUNNER_TRAILING, RUNNER_KEEP, RUNNER_BREAKEVEN, RUNNER_EXIT)
@@ -51,7 +56,10 @@ _state: dict[str, dict] = {}
 # default_config érvényes (visszafelé kompatibilis: a régi fájlokban nincsenek).
 _CALIB_KEYS = ("trigger_R", "halving_fraction", "shield_fraction",
                "fibo_level", "fibo_stop_level", "thirds_base_R", "cost_cut_bars",
-               "big_move_atr_mult")
+               "big_move_atr_mult",
+               # v1.96.0: a BE + trailing IDE költözött a közös végrehajtási
+               # configból — ezek is a kimenet-menedzsment paraméterei.
+               *BE_TRAIL_KEYS)
 
 
 def _norm(v) -> dict:
@@ -91,6 +99,15 @@ def load() -> dict:
         except Exception:
             pass
         return dict(_state)
+
+
+def ensure_loaded() -> None:
+    """Betöltés, ha még nem történt meg. Azoknak a hívóknak kell (pl.
+    `backtest._rr_spec`), amelyek nem tudják, futott-e már a `load()` — és amelyek
+    SZOROS ciklusban hívódnak (az optimalizáló 2000× hív `run_pair`-t), tehát a
+    feltétel nélküli fájlolvasás pazarlás volna."""
+    if not _state:
+        load()
 
 
 def _entry(symbol: str) -> dict:

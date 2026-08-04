@@ -56,16 +56,18 @@ def _rows_from_event_log(t, tid: int, symbol: str, comment: str) -> list[tuple]:
     return out
 
 
-def _rows_legacy(t, symbol: str, params: dict, pair_cfg: dict,
+def _rows_legacy(t, symbol: str, rr: dict, pair_cfg: dict,
                  comment: str) -> list[tuple]:
     """Visszafelé kompatibilis út: ha nincs eseménynapló (record_events=False),
-    a régi OFF-derivált OPEN (kezdeti SL/TP + BE/trail trigger) + CLOSE sorok."""
+    a régi OFF-derivált OPEN (kezdeti SL/TP + BE/trail trigger) + CLOSE sorok.
+
+    A BE/trailing az `rr` SPECBŐL jön (v1.96.0), nem a stratégia paramétereiből."""
     pip        = float(pair_cfg.get("point_size", 0.0001))
-    be_pct     = float(params.get("breakeven_pct", 0.5))
+    be_pct     = float(rr.get("breakeven_pct", 0.5))
     # ATR-szorzó × a kötés belépéskori ATR-je (ÁRban)
     _atr       = float(getattr(t, "entry_atr", 0.0) or 0.0)
-    trail_act  = float(params.get("trail_activation_atr", 0.5)) * _atr
-    trail_dist = float(params.get("trail_distance_atr", 0.4)) * _atr
+    trail_act  = float(rr.get("trail_activation_atr", 0.5)) * _atr
+    trail_dist = float(rr.get("trail_distance_atr", 0.4)) * _atr
     sign    = 1 if t.direction == "BUY" else -1
     init_sl = round(t.open_price - sign * t.sl_points * pip, 5)
     be_trig = round(t.open_price + sign * (t.tp - t.open_price) * be_pct, 5) if be_pct > 0 else 0.0
@@ -85,28 +87,33 @@ def _rows_legacy(t, symbol: str, params: dict, pair_cfg: dict,
     return out
 
 
-def events_from_result(result, symbol: str, params: dict, pair_cfg: dict,
+def events_from_result(result, symbol: str, rr: "dict | None", pair_cfg: dict,
                        comment: str = "wpr_sma") -> list[list]:
     """A BacktestResult trade-jeiből MT5-események (globális időrendben rendezve).
     Elsődlegesen a trade `events` naplójából (az EA VÉGREHAJTJA); ha egy trade-nek
-    nincs naplója, a régi OFF-derivált OPEN/CLOSE (fallback)."""
+    nincs naplója, a régi OFF-derivált OPEN/CLOSE (fallback).
+
+    `rr`: a kockázatcsökkentő spec (a fallback-út BE/trailing értékeihez).
+    None → a modul alapértékei."""
+    from core.risk_reduction import default_config as _rr_default
+    rr = rr or _rr_default()
     events: list[tuple] = []   # (sort_ts, row)
     for tid, t in enumerate(getattr(result, "trades", [])):
         log = getattr(t, "events", None)
         if log:
             events.extend(_rows_from_event_log(t, tid, symbol, comment))
         else:
-            events.extend(_rows_legacy(t, symbol, params, pair_cfg, comment))
+            events.extend(_rows_legacy(t, symbol, rr, pair_cfg, comment))
     events.sort(key=lambda e: e[0])     # időrend (az EA sorrendben dolgozza fel)
     return [row for _, row in events]
 
 
-def export_mt5_csv(result, symbol: str, params: dict, pair_cfg: dict,
+def export_mt5_csv(result, symbol: str, rr: "dict | None", pair_cfg: dict,
                    out_dir, comment: str = "wpr_sma") -> Path | None:
     """A CSV kiírása `mt5_backtest_<symbol>_<ts>.csv` néven. A fájlt az MT5
     `Common\\Files\\` mappájába kell másolni (lásd az EA `ide_kell_helyezni.txt`
     útmutatóját). Visszaad: a fájl útvonala, vagy None, ha nincs esemény."""
-    rows = events_from_result(result, symbol, params, pair_cfg, comment)
+    rows = events_from_result(result, symbol, rr, pair_cfg, comment)
     if not rows:
         return None
     out_dir = Path(out_dir)
