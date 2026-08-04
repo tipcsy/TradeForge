@@ -58,6 +58,30 @@ SPREAD = "spread"
 TF_ALIGN = "tf_align"
 MARKET = "market"
 
+# ── A `reduce` hatás KONKRÉT jelentése a motorban (v1.97.0) ─────────────────
+# „Belép, de kisebb mérettel." A méret-csökkentés ugyanaz a mechanizmus, amit a
+# Risky preset `cautious` kapcsolója is használ (`account_risk_pct × faktor`) —
+# szándékosan NEM új út: egy helyen dől el, mit jelent az „óvatosabb belépő".
+REDUCE_RISK_FACTOR = 0.5
+
+# ── A PIAC-kapu: mely besorolás számít KEDVEZŐTLENNEK ──────────────────────
+# Ez KERESKEDÉSI döntés, ezért configból állítható (`gates.market.adverse`, ill.
+# `pairs.<SYM>.gates.market.adverse`). Az alapértelmezés a két olyan kategória,
+# amit a dashboard is „rossznak" színez: Érdektelen (dead) és Bizonytalan
+# (uncertain). A kapu HATÁSA alapból `none`, tehát ez a lista addig nem számít,
+# amíg a piac-kaput be nem kapcsolod.
+MARKET_ADVERSE_DEFAULT = ("dead", "uncertain")
+
+
+def market_adverse(cfg: dict, symbol: str) -> set:
+    """Mely piac-besorolásoknál „bukik" a piac-kapu ezen a páron."""
+    for section in (((cfg or {}).get("pairs") or {}).get(symbol) or {},
+                    (cfg or {})):
+        g = (section.get("gates") or {}).get(MARKET)
+        if isinstance(g, dict) and isinstance(g.get("adverse"), (list, tuple)):
+            return {str(x) for x in g["adverse"]}
+    return set(MARKET_ADVERSE_DEFAULT)
+
 # A kapuk SORRENDJE stabil: a kapu-blokk oszlopai így mindig ugyanott vannak.
 # A `default_effect` a beépített alapértelmezés, ha a config nem mond mást — a mai
 # viselkedést tükrözi (spread blokkol; a tf_align a `gate` lista szerint; a piac
@@ -298,6 +322,57 @@ def is_blocked(states) -> bool:
 def is_reduced(states) -> bool:
     """Kockázatcsökkentést ír-e elő valamelyik kapu?"""
     return bool(reducing(states))
+
+
+# ---------------------------------------------------------------------------
+# A MOTOR döntése — a belépő-ág közös kapu-logikája (v1.97.0)
+# ---------------------------------------------------------------------------
+# MIÉRT KÜLÖN az `evaluate()`-től. Az `evaluate` a KIJELZÉST szolgálja: az
+# instrumentum szintjén mondja meg, „mi a helyzet", és nem ismeri a jel IRÁNYÁT.
+# A motornak viszont irány-tudatos döntés kell: egy BUY jelet a SELL-irányú
+# együttállás blokkol, egy SELL-t nem. Ha a motor az `evaluate`-re épülne, a
+# TF-kapu GYENGÜLNE (csak a „nincs együttállás" esetet fogná).
+#
+# Ezért a MÉRÉST a hívó végzi (ott van az iránya és a friss adata), és ide csak
+# azt adja be, hogy MELYIK KAPU BUKOTT MEG. Az, hogy ebből mi következik — kimarad
+# a belépő, vagy kisebb mérettel megy —, EGY helyen dől el: itt.
+
+
+def decide(failed: dict, effects: dict) -> dict:
+    """A kapuk hatásának feloldása egy konkrét belépő-kísérletre.
+
+    `failed`:  `{kapu: bukott_e}` — a hívó MÉRÉSE (irány-tudatosan).
+    `effects`: `{kapu: hatás}` — az `effects_for` adja (config + öröklés).
+
+    Visszaad: `{"blocked": [kapu, …], "reduced": [kapu, …], "risk_factor": float}`
+
+    * `EFFECT_NONE` hatású kapu mérése SZÁMÍT SEM — a hívó akár be sem méri.
+    * `EFFECT_BLOCK` + bukás → nincs belépő.
+    * `EFFECT_REDUCE` + bukás → van belépő, de `REDUCE_RISK_FACTOR`-ral kisebb.
+      Több kockázatcsökkentő kapu NEM szorzódik össze: a felezés felezés marad
+      (különben három kapu 1/8-ra vinné a méretet, ami már nem „óvatos", hanem
+      értelmetlen)."""
+    blocked, reduced = [], []
+    for key in KEYS:
+        if not (failed or {}).get(key):
+            continue
+        eff = (effects or {}).get(key) or default_effect_of(key)
+        if eff == EFFECT_BLOCK:
+            blocked.append(key)
+        elif eff == EFFECT_REDUCE:
+            reduced.append(key)
+    return {"blocked": blocked, "reduced": reduced,
+            "risk_factor": REDUCE_RISK_FACTOR if reduced else 1.0}
+
+
+def active(effects: dict, key: str) -> bool:
+    """Be van-e egyáltalán kapcsolva ez a kapu? (`none` → a hívó ne is mérje.)"""
+    return ((effects or {}).get(key) or default_effect_of(key)) != EFFECT_NONE
+
+
+def block_reason(decision: dict) -> str:
+    """Emberi indoklás a naplóba: MELYIK kapu miatt maradt ki a belépő."""
+    return ", ".join(label_of(k) for k in (decision or {}).get("blocked") or [])
 
 
 def badge(states) -> str:

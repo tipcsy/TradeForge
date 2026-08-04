@@ -86,6 +86,13 @@
     "_comment_position_records": "Meddig őrizzük a LEZÁRT pozíciók ticket-szintű bejegyzéseit (data/adopted_positions.json = melyik stratégiához tartozott, data/position_meta.json = mekkora volt a belépéskori kockázat, azaz 1 R). NAPBAN; 0 = soha ne takarítson. A bejegyzések aprók (~170 byte) és csak nyitáskor/kézi hozzárendeléskor keletkeznek, tehát a 0 is biztonságos. Rövid érték mellett a régebbi lezárt kötések elvesztik a stratégia- és R-adatukat.",
     "position_record_keep_days": 3
   },
+  "gates": {
+    "_comment": "BELÉPŐ-KAPUK és a HATÁSUK, per (instrumentum × stratégia). A hatás: 'block' (nincs belépő) | 'reduce' (belép, de FELEZETT mérettel) | 'none' (a kapu nem szól bele). Öröklés (a legszűkebb nyer): pairs.<SYM>.gates.<kapu>.<stratégia> → pairs.<SYM>.gates.<kapu>.default → gates.<kapu>.<stratégia> → gates.<kapu>.default → beépített. A v1.97.0 óta a MOTOR is eszerint dönt (él + backtest + portfólió-backtest); korábban minden bekapcsolt kapu kemény blokk volt, a 'reduce' pedig csak kijelzés.",
+    "_comment_market": "A piac-kapu akkor 'bukik', ha az aktuális besorolás benne van az 'adverse' listában (core/regime.py kategóriái: clean_bull, clean_bear, volatile_bull, volatile_bear, ranging, dead, uncertain, transition). Alap: dead + uncertain. Ez CSAK akkor számít, ha a piac-kapu hatását 'block'/'reduce'-ra állítod — alapból 'none'.",
+    "spread": { "default": "block" },
+    "tf_align": { "default": "none" },
+    "market": { "default": "none", "adverse": ["dead", "uncertain"] }
+  },
   "execution": {
     "_comment": "Közös, STRATÉGIA-FÜGGETLEN VÉGREHAJTÁSI alapértékek — MINDEN stratégia ugyanazt az instrumentum-szintű értéket használja. Per-szimbólum felülírás: data/execution_params/<SYMBOL>.json (a Stratégia Paraméterek ablak 'Végrehajtás' kategóriája menti oda).",
     "_comment_moved": "A BE + trailing (breakeven_pct, trail_activation_atr, trail_distance_atr) v1.96.0 óta NEM ITT van: a KOCKÁZATCSÖKKENTŐ modulba került (core/risk_reduction.py; per-pár érték a data/risk_mode.json-ban, a kockázatcsökkentő blokkban szerkeszthető). Indok: a preset dönti el, hogy egyáltalán hatnak-e — Fibo/Harmados preseten például SEMMIT nem csináltak. Egyszeri átköltöztetés: python tools/migrate_be_trail.py --apply",

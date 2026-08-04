@@ -126,7 +126,7 @@ def row_data(symbol: str, ds, strategy_names, cfg: dict = None,
              params: dict = None, pair_cfg: dict = None, *,
              positions=None, owner_of=None, risk_of=None, quality_of=None,
              opt_of=None, live_of=None, stage_order_of=None,
-             opt_enabled_of=None,
+             opt_enabled_of=None, opt_state_of=None,
              on_toggle=None, on_opt=None, on_stages=None,
              on_symbol=None, on_align=None, on_spread=None) -> dict:
     """Egy instrumentum sorának adata a `live_row.LiveRow` számára.
@@ -170,6 +170,9 @@ def row_data(symbol: str, ds, strategy_names, cfg: dict = None,
             # a paraméterfájlja, és egy nyíló belépő a RÉGI paraméterekkel menne.
             "opt_enabled": (bool(opt_enabled_of(symbol, name))
                             if opt_enabled_of else not live),
+            # `""` | `"running"` | `"queued"` — az OPT vezérlő ebből MORPHOL
+            # (OPT → STOP → SOR), mint a Play/Stop.
+            "opt_state": (opt_state_of(symbol, name) if opt_state_of else ""),
             "on_toggle": (lambda n=name: on_toggle(symbol, n)) if on_toggle else None,
             "on_opt": (lambda n=name: on_opt(symbol, n)) if on_opt else None,
             "on_stages": (lambda n=name: on_stages(symbol, n)) if on_stages else None,

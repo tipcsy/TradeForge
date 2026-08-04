@@ -715,6 +715,10 @@ class OptimizerController:
             if strat is not None:
                 pct = int(done / total * 100) if total else 0
                 self.optimizer_status[symbol] = f"{strat} {done}/{total}  {pct}%"
+                # A 2.0 rövid Opt-cellájához: a haladás SZÁMKÉNT is elérhető legyen
+                # per (pár, stratégia). Enélkül a cella csak „fut…"-ot tudott
+                # mondani — a `classic` hosszú szövege oda nem fér ki.
+                _opt_activity.set_progress(symbol, strat, done, total)
                 self._last_progress[symbol] = time.time()   # halad → stall-óra újraindul
 
     def shutdown(self):
@@ -2919,6 +2923,7 @@ class DashboardWindow:
                 live_of=self._strategy_live,
                 stage_order_of=self._live2_stage_order,
                 opt_enabled_of=self._live2_opt_enabled,
+                opt_state_of=self._live2_opt_state,
                 on_toggle=self._handle_run_strategy,
                 on_opt=self._live2_opt_click,
                 on_stages=self._show_strategy_params,
@@ -2945,6 +2950,22 @@ class DashboardWindow:
         if self.instrument_state.get(symbol) == "CLOSING":
             return False
         return not self._strategy_live(symbol, name)
+
+    def _live2_opt_state(self, symbol: str, name: str) -> str:
+        """Az OPT vezérlő MORPH-állapota: `""` | `"running"` | `"queued"`.
+
+        Ugyanaz a logika, amit a `_live2_opt_click` is követ (fut → leállítás,
+        sorban → törlés, egyébként indítás) — a gomb FELIRATA így sosem ígér
+        mást, mint amit a kattintás tesz."""
+        try:
+            st = _opt_activity.state_of(symbol, name)
+        except Exception:
+            return ""
+        if st == _opt_activity.RUNNING:
+            return "running"
+        if st == _opt_activity.QUEUED:
+            return "queued"
+        return ""
 
     def _show_spread_params(self, symbol: str):
         """A `Spread` cellára kattintva a spread-küszöb paraméterei nyílnak.
@@ -3015,13 +3036,17 @@ class DashboardWindow:
         jelent meg, és mindkét stratégia-blokk ugyanazt mutatta. Pontosan az a
         kétértelműség, amit a 2.0 orvosolni akar.
 
-        Most: ha ez a stratégia ÉPP fut, a saját állapota (`core.opt_activity`
-        per pár × stratégia); különben a SAJÁT utolsó optimalizálásának dátuma."""
+        Most: ha ez a stratégia ÉPP fut, a HALADÁSA (pl. `12%` — a terv 2. pontja:
+        „dátum VAGY folyamat-százalék"); különben a SAJÁT utolsó optimalizálásának
+        dátuma. A `fut…` csak addig áll ott, amíg az első haladás-jelentés meg nem
+        érkezik (az adat-előkészítés alatt még nincs trial)."""
         try:
             from core import opt_activity as _oa
             if _oa.busy(symbol, name):
-                st = _oa.state_of(symbol, name)
-                return "fut…" if st == "OPTIMIZING" else "sorban"
+                if _oa.state_of(symbol, name) != _oa.RUNNING:
+                    return "sorban"
+                pct = _oa.progress_pct(symbol, name)
+                return f"{pct}%" if pct is not None else "fut…"
         except Exception:
             pass
         d = opt_done_date(symbol, name)

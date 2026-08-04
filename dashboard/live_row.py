@@ -166,9 +166,12 @@ def widths(fonts: dict, strategy_names=(), collapsed: dict = None) -> dict:
         out[k] = w + 2 * PAD
     # A Vezérlés a mintaszövegnél SZÉLESEBB: két külön vezérlő, saját margóval és
     # elválasztó hézaggal. Karakterből becsülve kilógna.
+    # A második vezérlő MORPHOL (OPT → STOP → SOR), ezért a LEGSZÉLESEBB felirathoz
+    # mérünk — különben a `STOP` megjelenésekor ugrálna a tábla, vagy levágódna.
+    _opt_w = max(fonts["small"].measure(t) for t in OPT_LABELS.values())
     out["ctrl"] = max(out["ctrl"],
                       fonts["small"].measure("■") + 2 * CTRL_PADX + CTRL_GAP
-                      + fonts["small"].measure("OPT") + 2 * CTRL_PADX + 2 * PAD)
+                      + _opt_w + 2 * CTRL_PADX + 2 * PAD)
     if is_collapsed(collapsed) and strategy_names:
         # A felirat a KAPCSOLÓ-NYILAT is tartalmazza (`▸ wpr_sma`) — enélkül a
         # mérés 4 px-szel kevesebbet ad, és a név utolsó betűje levágódik.
@@ -462,10 +465,11 @@ class LiveRow:
         inner = tk.Frame(ctrl, bg=bg, height=self._h)
         inner.pack(expand=True)
         live = st.get("live")
-        opt_on = st.get("opt_enabled", True)
+        _opt_lbl, _opt_fg = _opt_text(st)
+        opt_on = st.get("opt_enabled", True) or st.get("opt_state")
         for key, txt, fg, cb in (("run", "■" if live else "▶",
                                   FG_RED if live else FG_GREEN, st.get("on_toggle")),
-                                 ("opt", "OPT", _opt_color(opt_on), st.get("on_opt"))):
+                                 ("opt", _opt_lbl, _opt_fg, st.get("on_opt"))):
             # A ket vezerlo KULON dobozban, elvalaszto hezaggal: elesben
             # "osszemosodtak" (padx=3 nem eleg, a Play/Stop es az OPT egy
             # foltnak latszott). A Play/Stop szeles kattinto-feluletet kap.
@@ -602,15 +606,18 @@ class LiveRow:
             live = st.get("live")
             self._set(f"{n}|ctrl_run", "■" if live else "▶",
                       FG_RED if live else FG_GREEN)
-            # Az OPT elhalványul, ha a stratégia kereskedni kezd — a Play/Stop
-            # UGYANEBBEN a frissítésben vált, tehát a kettő sosem mond mást.
-            _opt_lbl = self._lbl.get(f"{n}|ctrl_opt")
-            if _opt_lbl is not None:
-                _on = st.get("opt_enabled", True)
-                self._set(f"{n}|ctrl_opt", "OPT", _opt_color(_on))
+            # Az OPT vezérlő MORPHOL: OPT → STOP (futó optimalizálás leállítása) →
+            # SOR (sorból kivétel). Elhalványul, ha a stratégia kereskedni kezd —
+            # a Play/Stop UGYANEBBEN a frissítésben vált, tehát a kettő sosem
+            # mond mást.
+            _opt_w = self._lbl.get(f"{n}|ctrl_opt")
+            if _opt_w is not None:
+                _txt, _fg = _opt_text(st)
+                self._set(f"{n}|ctrl_opt", _txt, _fg)
+                _on = bool(st.get("opt_enabled", True) or st.get("opt_state"))
                 _cur = "hand2" if _on else ""
-                if _opt_lbl.cget("cursor") != _cur:
-                    _opt_lbl.config(cursor=_cur)
+                if _opt_w.cget("cursor") != _cur:
+                    _opt_w.config(cursor=_cur)
             for i, sc in enumerate(st.get("stages") or []):
                 dots = self._dots.get(n) or []
                 if i < len(dots) and dots[i].cget("fg") != _stage_color(sc):
@@ -640,10 +647,25 @@ def _stage_color(name):
     return _t.SEMANTIC.get(name, FG_GRAY_DIM)
 
 
-def _opt_color(enabled: bool):
-    """Az OPT vezérlő színe. Halvány = a stratégia kereskedik, tehát most nem
-    optimalizálható (a futás végén felülíródna a paraméterfájlja)."""
-    return FG_BLUE if enabled else FG_GRAY_DIM
+# Az OPT vezérlő FELIRATA az optimalizálás állapotától függ — a gomb ugyanaz a
+# morph, mint a Play/Stop: ami épp fut, azt a saját gombja állítja le.
+#   ""        → OPT   (kék)     — indítható
+#   "running" → STOP  (piros)   — kattintva leállítja a futó optimalizálást
+#   "queued"  → SOR   (narancs) — kattintva kiveszi a sorból
+OPT_LABELS = {"": "OPT", "running": "STOP", "queued": "SOR"}
+_OPT_COLORS = {"": FG_BLUE, "running": FG_RED, "queued": FG_ORANGE}
+
+
+def _opt_text(st: dict) -> tuple:
+    """Az OPT vezérlő (felirat, szín) az állapot szerint.
+
+    HALVÁNY (és OPT feliratú), ha a stratégia kereskedik: akkor nem
+    optimalizálható (a futás végén felülíródna a paraméterfájlja). Egy FUTÓ
+    optimalizálás viszont mindig leállítható — azt nem halványítjuk."""
+    state = str(st.get("opt_state") or "")
+    if state in ("running", "queued"):
+        return OPT_LABELS[state], _OPT_COLORS[state]
+    return OPT_LABELS[""], (FG_BLUE if st.get("opt_enabled", True) else FG_GRAY_DIM)
 
 
 def _pnl_color(v):

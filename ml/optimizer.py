@@ -391,8 +391,48 @@ def _suggest_params(trial, opt_cfg: dict, base_params: dict) -> dict:
             hi = int(lo) + ((int(hi) - int(lo)) // step_i) * step_i   # rácsra igazít
             params[key] = trial.suggest_int(key, int(lo), int(hi), step=step_i)
         else:
-            params[key] = trial.suggest_float(key, float(lo), float(hi), step=float(step))
+            # A FELSŐ határt is a rácsra igazítjuk — mint az int-ágon. Enélkül az
+            # optuna minden trialen `UserWarning`-ot ír („the range is not
+            # divisible by step"), és 500 trial × 4 ablak után a napló olvashatatlan.
+            # Az ÉRTÉK nem változik: az optuna is pontosan ezt tenné, csak hangosan.
+            # A tartomány-hibát INDULÁSKOR jelezzük, EGYSZER (`_warn_step_grid`).
+            params[key] = trial.suggest_float(key, float(lo), _grid_max(lo, hi, step),
+                                              step=float(step))
     return params
+
+
+def _grid_max(lo, hi, step) -> float:
+    """A `hi` lefelé igazítva a `lo`-tól induló `step`-rácsra (float-biztosan).
+
+    A lebegőpontos maradék miatt kerekítünk: `(3.0-0.5)/0.2` = 12,4999… lenne,
+    amiből a `floor` 12-t ad — az helyes; de `(1.0-0.0)/0.1` = 9,999… → 9 lenne,
+    ami HIBÁS (10 kell). A 9 tizedesre kerekítés mindkettőt eltalálja."""
+    lo, hi, step = float(lo), float(hi), float(step)
+    if step <= 0 or hi <= lo:
+        return hi
+    n = int(round((hi - lo) / step, 9))
+    return round(lo + n * step, 10)
+
+
+def _warn_step_grid(symbol: str, specs: dict) -> None:
+    """INDULÁSKOR EGYSZER jelzi, ha egy tartomány nem osztható a lépésközzel.
+
+    Ez nem kódhiba, hanem CONFIG-hiba: a felső határ elérhetetlen. Pl.
+    `tp_rr_ratio` [0,5 … 3,0] 0,2-es lépéssel → a rács 0,5; 0,7; …; 2,9, tehát a
+    **3,0 sosem áll elő**. A trialonkénti optuna-figyelmeztetés helyett itt egy
+    sor van, ami meg is mondja, mit érdemes átírni."""
+    for key, spec in sorted(specs.items()):
+        lo, hi, step = spec.get("min"), spec.get("max"), spec.get("step")
+        if not isinstance(step, (int, float)) or step <= 0:
+            continue
+        if isinstance(lo, int) and isinstance(hi, int) and isinstance(step, int):
+            continue
+        eff = _grid_max(lo, hi, step)
+        if abs(float(hi) - eff) > 1e-9:
+            log.warning("  %s — a(z) `%s` tartománya [%g … %g] NEM osztható a "
+                        "%g lépésközzel → a tényleges felső határ %g (a %g nem áll "
+                        "elő). Állítsd a min/max/step valamelyikét, ha a %g kell.",
+                        symbol, key, lo, hi, step, eff, hi, hi)
 
 
 def optimize_pair_optuna(
@@ -438,6 +478,11 @@ def optimize_pair_optuna(
         for _expr, _why in param_constraints.validate(_cons, _known):
             log.warning("%s — hibás paraméter-kényszer (kihagyva) %r: %s",
                         symbol, _expr, _why)
+
+    # Rács-ellenőrzés: elérhetetlen felső határ (nem osztható lépésköz) — EGYSZER,
+    # itt, ahelyett hogy az optuna trialonként figyelmeztetne (lásd `_warn_step_grid`).
+    _warn_step_grid(symbol, {k: v for k, v in opt_cfg.items()
+                             if isinstance(v, dict) and "min" in v})
 
     windows = _walk_forward_windows(df_m15, n_splits, train_months, test_months)
     if not windows:

@@ -41,6 +41,7 @@ from core import trade_mode as _tmode
 from core import adopted
 from core import order_exec
 from core import spread_gate
+from core import gates as _gates
 from core import symbol_policy as _sym_policy
 from core import opt_activity as _opt_activity
 from core.indicator_engine import atr as atr_indicator
@@ -140,6 +141,10 @@ class PairDashboardState:
     market_strategy:    Optional[str] = None
     market_state_label: str = ""
     market_state_color: str = "muted"
+    # A NYERS besorolás (pl. "dead"/"uncertain") — a piac-KAPU ezt nézi. A címke
+    # csak megjelenítés; kapuzni fordítani nem szabad. A MOTOR tölti (`process_pair`),
+    # hogy fej nélküli futásban is legyen — a GUI ugyanide ír, ha rekonstruál.
+    market_state:       str = ""
 
     # (A vizualizáció / jel-replay kapcsolók NEM itt élnek: per PÁR+STRATÉGIA a
     # config.json-ban, `core.viz_prefs` olvassa. Korábban volt itt egy pár-szintű
@@ -1335,6 +1340,22 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
     # épül vissza).
     md = MarketData(symbol=symbol, params=params, bars=bars, no_trade_hours=no_trade_set)
 
+    # --- Piac-állapot (a piac-KAPU bemenete + a `Piac` oszlop) ---
+    # A MOTOR számolja, nem a GUI: fej nélküli futásban (python main.py live GUI
+    # nélkül, vagy amíg a felület nem ért ehhez a párhoz) a kapu különben SOSEM
+    # tüzelne — némán. A GUI ugyanezt írja, ha rekonstruál (STOPPED pár).
+    try:
+        from core import market_strategy as _ms
+        _msname = _ms.market_name_of(pair_cfg)
+        ds.market_strategy = _msname
+        if _msname:
+            _cat = _ms.latest_category(_msname, bars[strategy.timeframes()[0].label])
+            if _cat:
+                ds.market_state = _cat
+                ds.market_state_label, ds.market_state_color = _ms.display(_cat)
+    except Exception:
+        pass
+
     # --- Jelzés a stratégiától (ZÁRT gyertyán, állapottartó) ---
     state.strat_state, signal = strategy.on_bar_close(state.strat_state, md)
     # A mély első bemelegítés megtörtént (az on_bar_close visszajátszotta a mély
@@ -1888,20 +1909,49 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
                     continue
                 _book.append("BUY" if _p.type == mt5.ORDER_TYPE_BUY else "SELL")
             _policy_block = _sym_policy.blocks(_pol, signal, _book)
-    # ── TF-együttállás kapu (opcionális, per-instrumentum config + per-stratégia
-    # bekapcsolás): ha EZ a stratégia kapuzva van ezen az instrumentumon, csak a
-    # trenddel EGYEZŐ jel léphet (az összes figyelt idősík a jel irányába mutat).
+    # ── BELÉPŐ-KAPUK — a HATÁSUKKAL együtt (v1.97.0) ────────────────────────
+    # A `core/gates.py` három hatást ismer (blokkol / kockázatcsökkentés / ki), per
+    # (pár × stratégia × kapu). Eddig ezt CSAK a dashboard olvasta: élesben minden
+    # bekapcsolt kapu kemény blokk volt, a `reduce` pedig puszta kijelzés (narancs
+    # keret). Most a motor is eszerint dönt.
+    #
+    # A MÉRÉS itt marad (irány-tudatosan!), a HATÁS feloldása a közös modulé —
+    # lásd `gates.decide` docstringjét, hogy miért nem az `evaluate`-re épül.
+    _gate_eff = _gates.effects_for(_run_cfg or {}, symbol, strategy.name)
+    _gate_failed = {}
+
+    # Spread — a mérés fentebb megtörtént (`spread_ok`); ha a kapu ki van
+    # kapcsolva erre a stratégiára, a bukás nem számít.
+    _gate_failed[_gates.SPREAD] = (not spread_ok) if _gates.active(
+        _gate_eff, _gates.SPREAD) else False
+
+    # TF-együttállás: csak a trenddel EGYEZŐ jel léphet (irány-tudatos).
     tf_gate_ok = True
-    if signal != "NONE":
+    if signal != "NONE" and _gates.active(_gate_eff, _gates.TF_ALIGN):
         try:
             from core import tf_align as _tfa
             _tf_en, _tf_tfs, _tf_sma, _tf_gate = _tfa.config_for(_run_cfg, symbol)
-            if _tf_en and strategy.name in _tf_gate:
+            # A régi `tf_align.gate` LISTA a hatás forrása is (legacy öröklés a
+            # gates modulban) — itt már csak a figyelés be/ki számít.
+            if _tf_en:
                 _tf_cl = mt5_connector.tf_closes(symbol, _tf_tfs, _tf_sma + 5)
                 _tf_dir, _ = _tfa.alignment(_tf_cl, _tf_tfs, _tf_sma)
                 tf_gate_ok = _tfa.gate_ok(_tf_dir, signal)
         except Exception:
             tf_gate_ok = True
+    _gate_failed[_gates.TF_ALIGN] = not tf_gate_ok
+
+    # Piac-állapot: a besorolás a `ds`-en már ott van (a kijelzés tölti). Eddig
+    # SEMMIT nem tett — most a konfigurált „kedvezőtlen" halmaz dönt.
+    _market_ok = True
+    if signal != "NONE" and _gates.active(_gate_eff, _gates.MARKET):
+        _cat = getattr(ds, "market_state", "") or ""
+        if _cat and _cat in _gates.market_adverse(_run_cfg or {}, symbol):
+            _market_ok = False
+    _gate_failed[_gates.MARKET] = not _market_ok
+
+    _gate_dec = _gates.decide(_gate_failed, _gate_eff)
+    _gates_ok = not _gate_dec["blocked"]
     # Diagnosztika: ha a stratégia JELET adott (a viz ezt rajzolja — a NYERS
     # jelet, végrehajtási szűrők nélkül), de egy VÉGREHAJTÁSI kapu blokkol, írjuk
     # ki, MELYIK — különben úgy tűnik, "látta a jelet, mégsem lépett be". A jel
@@ -1922,16 +1972,21 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
                   if daily_limit_hit else
                   "nincs érvényes ATR (adathiány)" if atr_val is None else
                   "nincs szabad slot" if not slot_mgr.can_open() else
-                  "spread túl nagy (piac-kapu)" if not spread_ok else
-                  "TF-együttállás kapu (nem minden idősík a jel irányába)" if not tf_gate_ok
-                  else None)
+                  f"kapu blokkol: {_gates.block_reason(_gate_dec)}"
+                  if not _gates_ok else None)
         if _block:
             log.info("⏭ %s %s jel — belépő KIHAGYVA: %s", symbol, signal, _block)
+        elif _gate_dec["reduced"]:
+            # A belépő MEGY, de kisebben — ezt ki kell írni, különben a fél méret
+            # rejtélyes lenne („miért ekkora lot?").
+            log.info("⚠ %s %s jel — KOCKÁZATCSÖKKENTÉS (%s): a belépő %.0f%%-os "
+                     "mérettel megy", symbol, signal,
+                     ", ".join(_gates.label_of(k) for k in _gate_dec["reduced"]),
+                     _gate_dec["risk_factor"] * 100)
 
     if (signal != "NONE" and not closing and not already_open and not _policy_block
             and not daily_limit_hit
-            and atr_val is not None and slot_mgr.can_open() and spread_ok
-            and tf_gate_ok):
+            and atr_val is not None and slot_mgr.can_open() and _gates_ok):
         # ── Korreláció / devizakitettség kapu ──────────────────────────────
         cmode    = correlation.get_mode()
         conflict = []
@@ -1951,6 +2006,12 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
                 ctf = {**ctf, "account_risk_pct": ctf["account_risk_pct"] * 0.5}
                 log.info("K: %s fél mérettel (azonos kitettség: %s)",
                          symbol, ", ".join(conflict))
+            # KAPU-hatás: `kockázatcsökkentés` → kisebb mérettel lépünk be. Ugyanaz
+            # a mechanizmus, mint a Risky `cautious`-é és a korreláció-kapué
+            # (`account_risk_pct` szorzó) — nem új út, csak új kiváltó ok.
+            if _gate_dec["risk_factor"] < 1.0:
+                ctf = {**ctf, "account_risk_pct":
+                       ctf["account_risk_pct"] * _gate_dec["risk_factor"]}
             # A belépés-kaput ÉS a méretezést a STRATÉGIA adja (bt_entry:
             # volatilitás-szűrő + SL/TP pip) — UGYANAZ a hook, amit a backtest
             # modellez, így az élő viselkedés egyezik az optimalizált/minősített

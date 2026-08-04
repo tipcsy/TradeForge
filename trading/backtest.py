@@ -570,6 +570,26 @@ def _build_exit_evaluator(m15: pd.DataFrame, rr_spec: dict):
 _TF_EVAL_AUTO = object()
 
 
+def _pair_market_series(cfg, symbol, strategy_name, m15, exec_gates: bool):
+    """A piac-kapu per-gyertya besorolása (`pd.Series` kategória-nevekkel), vagy
+    None, ha a kapu ki van kapcsolva / nincs kiválasztott osztályozó.
+
+    EGYSZER épül párenként (mint a TF-kiértékelő): a besorolás nem függ a
+    stratégia paramétereitől, tehát trialonként újraszámolni pazarlás volna."""
+    if not exec_gates:
+        return None
+    try:
+        from core import gates as _gt
+        from core import market_strategy as _ms
+        if not _gt.active(_gt.effects_for(cfg or {}, symbol, strategy_name),
+                          _gt.MARKET):
+            return None
+        name = _ms.market_name_of((cfg.get("pairs") or {}).get(symbol) or {})
+        return _ms.classify_series(name, m15) if name else None
+    except Exception:
+        return None
+
+
 def _build_tf_align_evaluator(cfg, symbol, strategy_name, df_m1):
     """A TF-együttállás VÉGREHAJTÁSI kapu historikus kiértékelője a backtesthez —
     UGYANAZ a logika, mint az él (`core.tf_align`) és a viz jel-replay-e
@@ -764,12 +784,30 @@ def run_pair(
     # EGYSZER építi, nem trialonként. Az alapérték a saját építés (a `None`
     # ÉRVÉNYES érték: „nincs kapu ezen a páron/stratégián").
     from core import spread_gate as _spread_gate
+    from core import gates as _gt
     _exec_gates = bool(exec_gates)
     if tf_eval is not _TF_EVAL_AUTO:
         _tf_eval = tf_eval if _exec_gates else None
     else:
         _tf_eval = (_build_tf_align_evaluator(cfg, symbol, strategy.name, df_m1)
                     if (_exec_gates and cfg is not None) else None)
+    # ── A kapuk HATÁSA (v1.97.0) — nem csak be/ki, hanem blokkol/csökkent/ki ──
+    # Ugyanaz a config és ugyanaz a döntés-modul, mint élesben (`core/gates.py`),
+    # így a backtest nem modellezhet mást, mint amit az él tesz.
+    _gate_eff = (_gt.effects_for(cfg or {}, symbol, strategy.name)
+                 if _exec_gates else {k: _gt.EFFECT_NONE for k in _gt.KEYS})
+    # A piac-kapu per-gyertya besorolása — EGYSZER, mint a TF-kiértékelő
+    # (paraméter-független). None, ha a kapu ki van kapcsolva vagy nincs osztályozó.
+    _mkt_series, _mkt_adverse = None, set()
+    if _exec_gates and _gt.active(_gate_eff, _gt.MARKET):
+        try:
+            from core import market_strategy as _msx
+            _mname = _msx.market_name_of(pair_cfg)
+            if _mname:
+                _mkt_series = _msx.classify_series(_mname, df_m15)
+                _mkt_adverse = _gt.market_adverse(cfg or {}, symbol)
+        except Exception:
+            _mkt_series = None
 
     # ── BID/ASK modell előkészítés (MT5-hű) ─────────────────────────────────
     # Az MT5 chart/tester gyertyái BID árak; ask-gyertya NINCS. A mi adatunk is
@@ -1059,28 +1097,35 @@ def run_pair(
                 m15_row = m15.iloc[m15_ptr]
 
                 # ── Végrehajtási kapuk (él-paritás) — a stratégia-jel ELŐTT ─────
-                # Ugyanaz a két kapu, ami élesben is szűr: spread (közös képlet) és
-                # TF-együttállás. Kihagyás → a jel megvan, de a belépő nem hajtódik
-                # végre (mint az él „belépő KIHAGYVA" ága).
+                # Ugyanazok a kapuk, amik élesben is szűrnek — és ugyanazzal a
+                # HATÁSSAL (blokkol / kockázatcsökkentés / ki), a közös
+                # `core.gates.decide`-on keresztül. A MÉRÉS itt is irány-tudatos.
+                _gate_risk = 1.0
                 if _exec_gates:
-                    _atr_e = m15_row.get("atr", float("nan"))
-                    if _atr_e and not pd.isna(_atr_e):
-                        _sp_e = _cspread_arr[i] if _cspread_arr is not None else float("nan")
-                        if not (_sp_e > 0):
-                            _sp_e = _spread_arr[i] if _spread_arr is not None else _spread_fallback
-                        if not _spread_gate.spread_ok(
+                    _failed = {}
+                    if _gt.active(_gate_eff, _gt.SPREAD):
+                        _atr_e = m15_row.get("atr", float("nan"))
+                        if _atr_e and not pd.isna(_atr_e):
+                            _sp_e = _cspread_arr[i] if _cspread_arr is not None else float("nan")
+                            if not (_sp_e > 0):
+                                _sp_e = _spread_arr[i] if _spread_arr is not None else _spread_fallback
+                            _failed[_gt.SPREAD] = not _spread_gate.spread_ok(
                                 _sp_e / point_size, float(_atr_e), point_size, params,
-                                pair_cfg.get("backtest_spread_points"))[0]:
-                            prev_m1_row = m1_row
-                            continue
+                                pair_cfg.get("backtest_spread_points"))[0]
                     if _tf_eval is not None:
                         # A belépő M1-gyertya nyitó-idejére, a DÖNTÉSKOR ISMERT árral
                         # (ennek az M1-gyertyának a záróára) — a formálódó TF-gyertya
                         # záróára ez, nem a (még ismeretlen) végleges close.
-                        if not _tf_eval(int(m1_time.timestamp()),
-                                        float(m1_row["close"]), signal):
-                            prev_m1_row = m1_row
-                            continue
+                        _failed[_gt.TF_ALIGN] = not _tf_eval(
+                            int(m1_time.timestamp()), float(m1_row["close"]), signal)
+                    if _mkt_series is not None:
+                        _cat = _mkt_series.get(m15_times[m15_ptr])
+                        _failed[_gt.MARKET] = bool(_cat) and _cat in _mkt_adverse
+                    _dec = _gt.decide(_failed, _gate_eff)
+                    if _dec["blocked"]:
+                        prev_m1_row = m1_row
+                        continue
+                    _gate_risk = _dec["risk_factor"]
 
                 # A stratégia adja a pozíciótervet (SL/TP + saját szűrők); None → kihagyás
                 plan = strategy.bt_entry(m15_row, params, point_size)
@@ -1101,8 +1146,14 @@ def run_pair(
                             prev_m1_row = m1_row
                             continue
                         sl_points, tp_points = _sw
-                    eff_slots = calc_effective_slots(balance, sl_points, pair_cfg, sizing_cfg)
-                    lot = calc_lot(balance, sl_points, pair_cfg, sizing_cfg, eff_slots)
+                    # KAPU-hatás: `kockázatcsökkentés` → kisebb mérettel lépünk be
+                    # (ugyanaz a mechanizmus, mint a Risky `cautious`-é: az
+                    # `account_risk_pct` szorzója).
+                    _size_cfg = (sizing_cfg if _gate_risk >= 1.0 else
+                                 {**sizing_cfg,
+                                  "account_risk_pct": sizing_cfg["account_risk_pct"] * _gate_risk})
+                    eff_slots = calc_effective_slots(balance, sl_points, pair_cfg, _size_cfg)
+                    lot = calc_lot(balance, sl_points, pair_cfg, _size_cfg, eff_slots)
 
                     # A belépő a gyertya ZÁRÁSÁN → a bar UTOLSÓ tickjének spreadje
                     # (`close_spread`) a pontos; tartalék az átlag (_sp).
@@ -1439,6 +1490,7 @@ def run_portfolio_backtest(
 
     # ── Végrehajtási kapuk (él-paritás, opcionális) — UGYANAZ, mint a run_pair-ben ──
     from core import spread_gate as _spread_gate
+    from core import gates as _gt
     _exec_gates = bool(exec_gates)
 
     # Risky mód forrásai: (1) kézi kapcsoló (data/risky_mode.json) + (2) auto:
@@ -1558,6 +1610,14 @@ def run_portfolio_backtest(
             # stratégiára) — a TELJES df_m1-ből, hogy a magasabb idősíkok SMA-ja warmupolt.
             "tf_eval":   (_build_tf_align_evaluator(cfg, sym, strategy.name, df_m1)
                           if _exec_gates else None),
+            # A kapuk HATÁSA per (pár × stratégia) — a `core.gates.decide` bemenete.
+            "gate_eff":  (_gt.effects_for(cfg, sym, strategy.name) if _exec_gates
+                          else {k: _gt.EFFECT_NONE for k in _gt.KEYS}),
+            # Piac-kapu: per-gyertya besorolás (EGYSZER, mint a tf_eval — nem
+            # paraméter-függő). None, ha a kapu ki van kapcsolva/nincs osztályozó.
+            "mkt_series": _pair_market_series(cfg, sym, strategy.name, m15,
+                                              _exec_gates),
+            "mkt_adverse": _gt.market_adverse(cfg, sym),
         }
         log.info("Portfolio BT: %s betöltve — M15=%d M1=%d bar", sym, len(m15), len(m1))
 
@@ -1781,27 +1841,35 @@ def run_portfolio_backtest(
                         sp       = pair_cfg.get("backtest_spread_points", spread_default)
 
                         # ── Végrehajtási kapuk (él-paritás) — UGYANAZ, mint a run_pair ──
-                        # spread-kapu (közös core.spread_gate) + TF-együttállás. Bukás →
-                        # a plan-t None-ozzuk (a belépő kimarad, a prev_row lentebb frissül).
-                        _gate_ok = True
+                        # A HATÁS is: blokkol / kockázatcsökkentés / ki, a közös
+                        # `core.gates.decide`-on keresztül (per pár × stratégia).
+                        _gate_ok, _gate_risk = True, 1.0
                         if _exec_gates:
-                            _atr_e = m15_row.get("atr", float("nan"))
-                            if _atr_e and not pd.isna(_atr_e):
-                                _sp_e = row.get("close_spread", float("nan"))
-                                if not (_sp_e > 0):
-                                    _sp_e = row.get("avg_spread", float("nan"))
-                                if not (_sp_e > 0):
-                                    _sp_e = points_to_price(sp, point_size)
-                                if not _spread_gate.spread_ok(
+                            _eff = info["gate_eff"]
+                            _failed = {}
+                            if _gt.active(_eff, _gt.SPREAD):
+                                _atr_e = m15_row.get("atr", float("nan"))
+                                if _atr_e and not pd.isna(_atr_e):
+                                    _sp_e = row.get("close_spread", float("nan"))
+                                    if not (_sp_e > 0):
+                                        _sp_e = row.get("avg_spread", float("nan"))
+                                    if not (_sp_e > 0):
+                                        _sp_e = points_to_price(sp, point_size)
+                                    _failed[_gt.SPREAD] = not _spread_gate.spread_ok(
                                         _sp_e / point_size, float(_atr_e), point_size, params,
-                                        pair_cfg.get("backtest_spread_points"))[0]:
-                                    _gate_ok = False
-                            if _gate_ok and info.get("tf_eval") is not None:
+                                        pair_cfg.get("backtest_spread_points"))[0]
+                            if info.get("tf_eval") is not None:
                                 # A döntéskor ISMERT árral (az M1-gyertya záróára) —
                                 # a formálódó TF-gyertya close-a ez, nem a végleges.
-                                if not info["tf_eval"](int(m1_time.timestamp()),
-                                                       float(row["close"]), signal):
-                                    _gate_ok = False
+                                _failed[_gt.TF_ALIGN] = not info["tf_eval"](
+                                    int(m1_time.timestamp()), float(row["close"]), signal)
+                            if info.get("mkt_series") is not None:
+                                _cat = info["mkt_series"].get(m15_df.index[ptr])
+                                _failed[_gt.MARKET] = (bool(_cat)
+                                                       and _cat in info["mkt_adverse"])
+                            _dec = _gt.decide(_failed, _eff)
+                            _gate_ok = not _dec["blocked"]
+                            _gate_risk = _dec["risk_factor"]
 
                         # A stratégia adja a pozíciótervet (SL/TP + saját szűrők)
                         plan = (strategy.bt_entry(m15_row, params, point_size)
@@ -1809,11 +1877,15 @@ def run_portfolio_backtest(
                         if plan is not None:
                             sl_points, tp_points = plan
                             # Óvatos (felezett) méret? A kockázatcsökkentő preset dönti
-                            # (Risky felezi; a Felező/Pajzs alap: normál méret).
+                            # (Risky felezi; a Felező/Pajzs alap: normál méret) — ÉS a
+                            # kapu-hatás (`kockázatcsökkentés`), ugyanazon a szorzón.
                             from core import risk_reduction as _rrm
                             _rrp = (info.get("rr") or {}).get("preset", _rrm.PRESET_OFF)
                             sizing_cfg = _risky_trading_cfg(trading_cfg,
                                                             _rrm.wants_cautious_size(_rrp))
+                            if _gate_risk < 1.0:
+                                sizing_cfg = {**sizing_cfg, "account_risk_pct":
+                                              sizing_cfg["account_risk_pct"] * _gate_risk}
                             eff_slots = calc_effective_slots(balance, sl_points, pair_cfg, sizing_cfg)
                             lot = calc_lot(balance, sl_points, pair_cfg, sizing_cfg, eff_slots)
 

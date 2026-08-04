@@ -58,6 +58,28 @@ def set_state(symbol: str, strategy: str, state: "str | None",
                      "status": cur.get("status", "") if status is None else status}
 
 
+def set_progress(symbol: str, strategy: str, done: int, total: int) -> None:
+    """A futás HALADÁSA per (pár, stratégia) — SZÁMKÉNT, nem formázott szövegként.
+
+    Miért külön a `status`-tól: a `status` a hosszú, ember-olvasható sor
+    („wpr_sma 40/500  8%"), ami a `classic` széles Opt-cellájába való. A 2.0
+    Opt-cellája viszont ~5 karakter — oda a puszta százalék kell. Ha a szám
+    formázva utazna, a két nézet formátuma összeragadna."""
+    with _lock:
+        cur = _act.get((symbol, strategy))
+        if cur is not None:
+            cur["done"], cur["total"] = int(done), int(total)
+            cur["pct"] = int(done / total * 100) if total else 0
+
+
+def progress_pct(symbol: str, strategy: str) -> "int | None":
+    """A futás készültsége százalékban, vagy None (nincs bejegyzés / még nincs
+    haladás-jelentés)."""
+    with _lock:
+        cur = _act.get((symbol, strategy))
+        return cur.get("pct") if cur else None
+
+
 def set_status(symbol: str, strategy: str, status: str) -> None:
     """Csak a haladás-szöveg frissítése (a tevékenység-állapot érintetlen).
 
