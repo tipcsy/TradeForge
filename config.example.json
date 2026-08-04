@@ -109,6 +109,8 @@
     "_comment_split": "train_start_date: ettől dolgozik az optimizer | test_start_date: végső out-of-sample teszt",
     "train_start_date": "2025-01-01",
     "test_start_date": "2025-10-01",
+    "_comment_rr": "A KOCKÁZATCSÖKKENTÉS is optimalizált dimenzió legyen-e (preset + runner + kalibráció + BE/trailing)? Alap: false — a stratégia belépő-jelzését és a kimenet-menedzsmentet érdemes KÉT FÁZISBAN hangolni (előbb a jelzés fix rr-rel, aztán az rr a befagyasztott jelzésre): olcsóbb, és látszik, mennyit tesz hozzá maga a kockázatcsökkentés. A keresési tér FELTÉTELES: minden dimenzió CSAK azon a preseten sorsolódik, ahol tényleg hat (v1.96.0) — pl. a halving_fraction nem létezik Pajzs preseten, a BE/trailing pedig Fibo/Harmados preseten sehol. Felülírható: rr_presets (mely presetek közül válasszon), rr_runners, rr_space (tartományok).",
+    "optimize_rr": false,
     "_comment_gates": "ÉL-PARITÁS (v1.95.0): az optimalizáló ugyanazokat a VÉGREHAJTÁSI kapukat modellezze-e, amiket az él — spread-kapu + TF-együttállás. true (ALAP) = a hangolás abban a világban történik, amiben a kereskedés is fut. false = a régi, kapu nélküli viselkedés (csak régi futások reprodukálásához). FIGYELEM: a váltás után ÚJRA KELL OPTIMALIZÁLNI — a korábbi készletek kapuk nélkül lettek hangolva, és a mentett JSON 'exec_gates' mezője mutatja, melyik világhoz tartoznak.",
     "exec_gates": true
   },

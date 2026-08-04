@@ -252,43 +252,95 @@ def _score_trades(trades: list, initial_balance: float, min_trades: int = 5) -> 
 
 # ── Kockázatcsökkentés (rr) optimalizálási tere — opt-in: optimizer.optimize_rr ──
 # Framework-szintű (bármely stratégiával), ezért a config.json optimizer-blokkban
-# felülírható (optimizer.rr_space); a preset+runner kategorikus, a trigger_R és a
-# frakciók float dimenziók. KRITIKUS invariáns: a részleges zárás ≥50% → a
-# halving_fraction alsó határa ≥0.5 (különben stopnál nettó mínusz).
-_RR_PRESETS = ("off", "risky", "halving", "shield")
+# felülírható (optimizer.rr_space / optimizer.rr_presets). KRITIKUS invariáns: a
+# részleges zárás ≥50% → a halving_fraction alsó határa ≥0.5 (különben stopnál
+# nettó mínusz).
+_RR_PRESETS = ("none", "off", "risky", "halving", "shield", "fibo", "thirds")
 _RR_RUNNERS = ("trailing", "keep", "breakeven")
 _RR_SPACE_DEFAULT = {
     "trigger_R":        {"min": 0.5, "max": 2.0, "step": 0.1},
     "halving_fraction": {"min": 0.5, "max": 0.75, "step": 0.05},
     "shield_fraction":  {"min": 0.6, "max": 0.9, "step": 0.05},
+    # Preset-specifikus szintek
+    "fibo_stop_level":  {"min": 0.0, "max": 0.4, "step": 0.1},
+    "thirds_base_R":    {"min": 0.5, "max": 2.0, "step": 0.1},
+    # BE + trailing — v1.96.0 óta szintén az rr-hez tartozik
+    "breakeven_pct":        {"min": 0.0, "max": 1.0, "step": 0.1},
+    "trail_activation_atr": {"min": 0.0, "max": 3.0, "step": 0.1},
+    "trail_distance_atr":   {"min": 0.2, "max": 2.5, "step": 0.1},
 }
 
 
 def _suggest_rr(trial, opt_cfg: dict) -> dict:
-    """Optuna trial → TELJES rr-spec (preset + runner + trigger_R/frakció kalibráció).
+    """Optuna trial → rr-spec, FELTÉTELES keresési térrel.
 
-    Mindig FIX keresési teret ad (a preset akkor is off lehet) — a preset='off'
-    esetén a run_pair felé None-ra fordítjuk (`_rr_for_run`), de a spec-et
-    rögzítjük (a CSV-be + a nyertes rr-hez). A `cautious` a preset szerint."""
+    A korábbi változat LAPOS volt: minden dimenziót minden trialen sorsolt, akkor
+    is, ha a preset nem használja — a `halving_fraction`-t `off`/`risky` preseten,
+    a `shield_fraction`-t `halving`-nál stb. Ezek ELPAZAROLT tengelyek voltak
+    (ugyanaz a hibafajta, mint a `max_open_slots` a stratégia-térben): a TPE
+    mintavevő rájuk is modellezett, a trials-CSV pedig olyan számot mutatott,
+    aminek semmi hatása nem volt az eredményre.
+
+    Most csak abban az ágban `suggest`-elünk, ahol a paraméter TÉNYLEGESEN hat —
+    ezt az Optuna natívan támogatja (feltételes keresési tér).
+
+    ⚠ A `be_trail_active` HALMAZT ad; azon iterálni NEM szabad, mert a str-hash
+    randomizálás miatt a sorrend processzenként más lenne → az azonos seedű study
+    sem lenne reprodukálható. Ezért a rögzített `BE_TRAIL_KEYS` sorrendben megyünk."""
     from core import risk_reduction as _rr
     space = {**_RR_SPACE_DEFAULT, **(opt_cfg.get("rr_space") or {})}
-    preset = trial.suggest_categorical("rr_preset", list(_RR_PRESETS))
-    runner = trial.suggest_categorical("rr_runner", list(_RR_RUNNERS))
-    vals = {}
-    for key in ("trigger_R", "halving_fraction", "shield_fraction"):
+    presets = [p for p in (opt_cfg.get("rr_presets") or _RR_PRESETS)
+               if p in _rr.PRESETS]
+    runners = list(opt_cfg.get("rr_runners") or _RR_RUNNERS)
+
+    def _f(key):
         s = space[key]
-        vals[key] = trial.suggest_float(f"rr_{key}", float(s["min"]),
-                                        float(s["max"]), step=float(s["step"]))
-    return {"preset": preset, "runner_stop": runner,
-            "cautious": _rr.wants_cautious_size(preset), **vals}
+        return trial.suggest_float(f"rr_{key}", float(s["min"]), float(s["max"]),
+                                   step=float(s["step"]))
+
+    preset = trial.suggest_categorical("rr_preset", presets or list(_RR_PRESETS))
+    spec = {"preset": preset, "cautious": _rr.wants_cautious_size(preset)}
+
+    # Runner + részleges zárás: CSAK a Felező/Pajzs (és a rájuk oldódó auto) ágon.
+    partial = preset in (_rr.PRESET_HALVING, _rr.PRESET_SHIELD,
+                         _rr.PRESET_SHIELD_FIBO)
+    if partial:
+        spec["runner_stop"] = trial.suggest_categorical("rr_runner", runners)
+        spec["trigger_R"] = _f("trigger_R")
+        # CSAK a SAJÁT frakcióját — a másik preseté itt értelmezhetetlen.
+        if preset == _rr.PRESET_HALVING:
+            spec["halving_fraction"] = _f("halving_fraction")
+        else:
+            spec["shield_fraction"] = _f("shield_fraction")
+    else:
+        # A spec akkor is TELJES legyen (a mentés/CSV egységes alakot vár), de ez
+        # az érték nem hat — nem is sorsoltuk.
+        spec["runner_stop"] = _rr.RUNNER_TRAILING
+
+    if preset == _rr.PRESET_FIBO:
+        spec["fibo_stop_level"] = _f("fibo_stop_level")
+    if preset == _rr.PRESET_THIRDS:
+        spec["thirds_base_R"] = _f("thirds_base_R")
+
+    # BE + trailing: pontosan ott, ahol hat (a preset ÉS a runner dönti el).
+    _act = _rr.be_trail_active(preset, spec["runner_stop"])
+    for key in _rr.BE_TRAIL_KEYS:          # RÖGZÍTETT sorrend — lásd a docstringet
+        if key in _act:
+            spec[key] = _f(key)
+    return spec
 
 
 def _rr_for_run(spec: "dict | None"):
-    """A run_pair-nek átadható rr: None ha nincs spec vagy a preset 'off' (tiszta
-    OFF-viselkedés, bitazonos a rr=None úttal)."""
-    if not spec or spec.get("preset", "off") == "off":
-        return None
-    return spec
+    """A run_pair-nek átadható rr.
+
+    ⚠ Korábban a `preset == 'off'` esetet None-ra fordítottuk (hogy bitazonos
+    legyen a `rr=None` úttal). v1.96.0 óta ez HIBÁS volna: az `off` preset a
+    BE/trailing értékeit is HORDOZZA, és ha None-t adnánk, a `_rr_spec` a PÁR
+    mentett értékeit venné a trial által keresett helyett — vagyis a keresés
+    eredményét némán eldobnánk.
+
+    A `rr=None` út (optimize_rr kikapcsolva) változatlan: oda spec sem érkezik."""
+    return spec or None
 
 
 def _dep_order(specs: dict) -> list:
@@ -440,11 +492,15 @@ def optimize_pair_optuna(
             if not pk.startswith("_"):
                 row[pk] = pv
         if optimize_rr and rr:
+            # A FELTÉTELES tér miatt egy dimenzió hiányozhat a specből (nem is
+            # sorsoltuk, mert ezen a preseten nem hat). Ilyenkor ÜRES cella megy a
+            # CSV-be — nem 0 és nem alapérték: az azt sugallná, hogy „ezt mértük".
             row["rr_preset"] = rr.get("preset", "off")
             row["rr_runner"] = rr.get("runner_stop", "")
-            row["rr_trigger_R"] = rr.get("trigger_R", "")
-            row["rr_halving_fraction"] = rr.get("halving_fraction", "")
-            row["rr_shield_fraction"] = rr.get("shield_fraction", "")
+            for _k in ("trigger_R", "halving_fraction", "shield_fraction",
+                       "fibo_stop_level", "thirds_base_R",
+                       "breakeven_pct", "trail_activation_atr", "trail_distance_atr"):
+                row[f"rr_{_k}"] = rr.get(_k, "")
         trial.set_user_attr("row", row)
 
     def objective(trial):
