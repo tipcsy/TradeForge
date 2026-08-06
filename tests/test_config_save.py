@@ -137,7 +137,42 @@ check("a ⚙ mentes a kozos (nyers) irot hasznalja",
 check("a ⚙ mentes a hibat a sajat cimkejere teszi",
       "lbl_err.config(text=_err)" in _set)
 
-# ══ 6. Vegpontok: a repo config.json-ja ertelmes marad ════════════════════
+# ══ 6. ISMETELT KULCS: a json.load nemán az UTOLSOT tartja meg ═══════════
+#
+# A `config.example.json`-ban KET `gates` szekcio volt (v2.1.0-ig): az elso
+# teljes egeszeben halott, mert a masodik felulirta. A JSON ezt megengedi, a
+# betoltes nem szol — a fajlt olvasva viszont az ELSOT hiszed ervenyesnek. Ezt
+# egy kezi atnezes talalta meg, nem a program; azota a betoltes elkapja.
+
+from strategy.settings import duplicate_keys
+
+check("egyszeru dupla kulcs -> jelezzuk",
+      duplicate_keys('{"a": 1, "b": 2, "a": 3}') == ["a"],
+      str(duplicate_keys('{"a": 1, "b": 2, "a": 3}')))
+check("tiszta JSON -> ures lista", duplicate_keys('{"a": 1, "b": 2}') == [])
+check("FESZKELT objektumban is fog", duplicate_keys('{"x": {"g": 1, "g": 2}}') == ["g"])
+check("tobb kulonbozo dupla -> mind, rendezve",
+      duplicate_keys('{"b": 1, "b": 2, "a": 3, "a": 4}') == ["a", "b"])
+check("ugyanaz a kulcsnev MAS objektumokban NEM dupla",
+      duplicate_keys('{"x": {"g": 1}, "y": {"g": 2}}') == [])
+check("a dupla kulcs nem valtoztat az EREDMENYEN (az utolso nyer)",
+      json.loads('{"a": 1, "a": 3}') == {"a": 3})
+
+# A ket leszallitott config LEGYEN tiszta.
+for _f in ("config.json", "config.example.json"):
+    _p = ROOT / _f
+    if _p.exists():
+        _d = duplicate_keys(_p.read_text(encoding="utf-8"))
+        check(f"{_f}: NINCS ismetelt kulcs", _d == [], str(_d))
+
+# A `load_config` szol rola (nem gatol).
+_ssrc = (ROOT / "strategy" / "settings.py").read_text(encoding="utf-8")
+_lc = _ssrc.split("def load_config")[1]
+check("load_config: ellenorzi az ismetelt kulcsokat", "duplicate_keys(text)" in _lc)
+check("load_config: csak FIGYELMEZTET, nem gatol",
+      "log.warning" in _lc and "raise" not in _lc)
+
+# ══ 7. Vegpontok: a repo config.json-ja ertelmes marad ════════════════════
 
 real = json.loads((ROOT / "config.json").read_text(encoding="utf-8"))
 check("az eles config.json ervenyes JSON es van benne pairs",

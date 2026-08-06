@@ -20,21 +20,6 @@
     "sma_period": 50,
     "gate": []
   },
-  "gates": {
-    "_comment": "Belépő-kapuk HATÁSA stratégiánként. Értékek: 'block' (akadályozza a beszállást) | 'reduce' (kockázatcsökkentés — belép, de kisebben) | 'none' (ki). A 'default' minden stratégiára érvényes, a stratégia-nevű kulcs felülírja. Páronként is felülírható: pairs.<SYM>.gates. Feloldás: pár+stratégia → pár default → globális stratégia → globális default → beépített. MEGJEGYZÉS: a 'csak jelzés' NEM kapu-hatás — az a stratégiáé (pairs.<SYM>.strategy_mode).",
-    "spread": {
-      "default": "block"
-    },
-    "tf_align": {
-      "_comment": "Ha ez a szekció hiányzik, a régi tf_align.gate LISTA dönt (a benne felsorolt stratégiákat blokkolja) — visszafelé kompatibilis.",
-      "default": "none",
-      "wpr_sma": "block"
-    },
-    "market": {
-      "_comment": "A piac-előszűrő ma nem blokkol, csak a kockázatcsökkentő preset megválasztásához ad bemenetet. 'reduce'-ra állítva viszont kisebb pozíciót nyithat.",
-      "default": "none"
-    }
-  },
   "dashboard": {
     "_comment": "Felület frissítési ütem. price_refresh_sec: BID/ASK/spread MINDEN párra (1-5 ajánlott). live_refresh_sec: indikátor (WPR) a FUTÓ pároknál. all_refresh_sec: indikátor minden párra. watchdog_threshold_sec: ennyi mp blokkolás fölött figyelmeztet a fagyás-watchdog (data/ui_watchdog.log).",
     "price_refresh_sec": 3,
@@ -88,7 +73,9 @@
   },
   "gates": {
     "_comment": "BELÉPŐ-KAPUK és a HATÁSUK, per (instrumentum × stratégia). A hatás: 'block' (nincs belépő) | 'reduce' (belép, de FELEZETT mérettel) | 'none' (a kapu nem szól bele). Öröklés (a legszűkebb nyer): pairs.<SYM>.gates.<kapu>.<stratégia> → pairs.<SYM>.gates.<kapu>.default → gates.<kapu>.<stratégia> → gates.<kapu>.default → beépített. A v1.97.0 óta a MOTOR is eszerint dönt (él + backtest + portfólió-backtest); korábban minden bekapcsolt kapu kemény blokk volt, a 'reduce' pedig csak kijelzés.",
-    "_comment_market": "A piac-kapu akkor 'bukik', ha az aktuális besorolás benne van az 'adverse' listában (core/regime.py kategóriái: clean_bull, clean_bear, volatile_bull, volatile_bear, ranging, dead, uncertain, transition). Alap: dead + uncertain. Ez CSAK akkor számít, ha a piac-kapu hatását 'block'/'reduce'-ra állítod — alapból 'none'.",
+    "_comment_market": "A piac-kapu akkor 'bukik', ha az aktuális besorolás benne van az 'adverse' listában (core/regime.py kategóriái: clean_bull, clean_bear, volatile_bull, volatile_bear, ranging, dead, uncertain, transition). Alap: dead + uncertain. Ez CSAK akkor számít, ha a piac-kapu hatását 'block'/'reduce'-ra állítod — alapból 'none'. FIGYELEM: a hatás beállítása önmagában kevés — a páron KI IS KELL VÁLASZTANI egy piac-előszűrőt (pairs.<SYM>.market_strategy), különben a kapunak nincs mit mérnie, és sosem tüzel. A config-ellenőrző szól, ha ez az állapot előáll.",
+    "_comment_signal": "A 'csak jelzés' NEM kapu-hatás — az a STRATÉGIÁÉ (pairs.<SYM>.strategy_mode). A kapu sosem küld jelzést kötés helyett; vagy blokkol, vagy méretet csökkent, vagy nem szól bele.",
+    "_comment_legacy": "Ha ez a `gates` szekció HIÁNYZIK, a régi `tf_align.gate` LISTA dönt (a benne felsorolt stratégiákat blokkolja) — visszafelé kompatibilis. Ha viszont JELEN VAN, MEGELŐZI a régi listát: a per-pár `tf_align.gate` beállítások ilyenkor hatástalanok. A config-ellenőrző erre is figyelmeztet.",
     "spread": { "default": "block" },
     "tf_align": { "default": "none" },
     "market": { "default": "none", "adverse": ["dead", "uncertain"] }

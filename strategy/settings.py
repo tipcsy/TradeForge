@@ -196,8 +196,48 @@ def save_param_comments(name: str, comments: dict) -> bool:
         return False
 
 
+def duplicate_keys(text: str) -> list[str]:
+    """A JSON-szövegben TÖBBSZÖR szereplő objektum-kulcsok (egy szinten belül).
+
+    MIÉRT KELL. A JSON megengedi az ismételt kulcsot, és a `json.load` NÉMÁN az
+    UTOLSÓT tartja meg — az előzőt eldobja. Egy kettévált szekció (pl. két `gates`
+    blokk egy fájlban) így úgy néz ki, mintha be lenne állítva, közben az egyik
+    fele teljes egészében halott. Pontosan az a hibaosztály, amit a
+    `core/config_check.py` is céloz, csak ez a szintaxis szintjén ül, tehát a
+    dictből MÁR NEM LÁTSZIK — a betöltéskor kell elkapni.
+
+    (Ezt a `config.example.json`-ban egy kézi átnézés találta meg, nem a program.)
+
+    A kulcsneveket adja vissza (rendezve, egyediesítve); a fészkelési utat nem
+    követjük, mert a `object_pairs_hook` nem kap kontextust — a puszta név a
+    keresést így is egy `Ctrl+F`-re szűkíti."""
+    dups: list[str] = []
+
+    def _hook(pairs):
+        seen = {}
+        for k, v in pairs:
+            if k in seen:
+                dups.append(k)
+            seen[k] = v
+        return seen
+
+    json.loads(text, object_pairs_hook=_hook)
+    return sorted(set(dups))
+
+
 def load_config(cfg_path: Path | str) -> dict:
     """config.json betöltése + a stratégia-config beolvasztása (központi belépő)."""
     with open(cfg_path, encoding="utf-8") as f:
-        cfg = json.load(f)
+        text = f.read()
+    cfg = json.loads(text)
+    # Ismételt kulcs: a betöltés némán az UTOLSÓT tartja meg. Szólunk, mert a
+    # fájlt olvasva a felhasználó az ELSŐT hiheti érvényesnek. Sosem gátol.
+    try:
+        dups = duplicate_keys(text)
+        if dups:
+            log.warning("%s — TÖBBSZÖR szereplő kulcs: %s. A JSON-ban az UTOLSÓ "
+                        "előfordulás nyer, a korábbi(ak) NÉMÁN eldobódnak — "
+                        "vond össze őket.", Path(cfg_path).name, ", ".join(dups))
+    except Exception:
+        pass
     return apply_strategy_config(cfg)
