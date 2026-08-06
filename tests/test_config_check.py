@@ -207,6 +207,59 @@ check_("per-par hazirend is szamit (a globalis 'independent' ellenere)",
                                    same_symbol_policy="no_opposite")}),
              "independent_multi_strategy") == [])
 
+# ══ 7b. 'Csak jelzes' mod, amit nem latsz (P3) ════════════════════════════
+#
+# A `signal` mod CELJA a megfigyeles. Kikapcsolt vizualizacioval + kikapcsolt
+# kotes-reteggel viszont vak: pont azt a celt nem szolgalja, amiert bekapcsoltad.
+
+INVIS = dict(BASE, pairs={"X": pair(strategies=["wpr_sma", "ml_ai"],
+                                    strategy_mode={"ml_ai": "signal"},
+                                    strategy_viz={"ml_ai": False},
+                                    strategy_trades={"ml_ai": False},
+                                    run_state={"wpr_sma": "live", "ml_ai": "live"})})
+f = codes(INVIS, "signal_mode_invisible")
+check_("futo 'csak jelzes' + minden rajz KI -> info", len(f) == 1, str(f))
+check_("az uzenet megmondja, MIERT baj", f and "'csak jelzés' épp ezért van" in f[0]["message"])
+
+for _on in ("strategy_viz", "strategy_trades"):
+    _layers = {"strategy_viz": {"ml_ai": False}, "strategy_trades": {"ml_ai": False}}
+    _layers[_on] = {"ml_ai": True}
+    _cfg = dict(BASE, pairs={"X": pair(strategies=["wpr_sma", "ml_ai"],
+                                       strategy_mode={"ml_ai": "signal"},
+                                       run_state={"ml_ai": "live"}, **_layers)})
+    check_(f"ha a ket reteg BARMELYIKE latszik ({_on}) -> nincs lelet",
+           codes(_cfg, "signal_mode_invisible") == [])
+
+check_("MEGALLITOTT strategianal nincs lelet (ott rendben a kikapcsolt rajz)",
+       codes(dict(BASE, pairs={"X": pair(strategies=["wpr_sma", "ml_ai"],
+                                         strategy_mode={"ml_ai": "signal"},
+                                         strategy_viz={"ml_ai": False},
+                                         strategy_trades={"ml_ai": False},
+                                         run_state={"ml_ai": "stopped"})}),
+             "signal_mode_invisible") == [])
+check_("VALODI kotes modu strategianal nincs lelet (nem megfigyelesrol szol)",
+       codes(dict(BASE, pairs={"X": pair(strategies=["wpr_sma", "ml_ai"],
+                                         strategy_viz={"ml_ai": False},
+                                         strategy_trades={"ml_ai": False},
+                                         run_state={"ml_ai": "live"})}),
+             "signal_mode_invisible") == [])
+
+# OSSZEVONAS: tiz par -> EGY sor. Kulonben minden inditasnal tiz azonos uzenet
+# menne ki, es a jelzes pont attol valna lathatatlanna.
+_many = {f"P{i}": pair(strategies=["wpr_sma", "ml_ai"],
+                       strategy_mode={"ml_ai": "signal"},
+                       strategy_viz={"ml_ai": False},
+                       strategy_trades={"ml_ai": False},
+                       run_state={"ml_ai": "live"}) for i in range(10)}
+f = codes(dict(BASE, pairs=_many), "signal_mode_invisible")
+check_("tiz erintett par -> EGY osszevont lelet (nem tiz)", len(f) == 1, str(len(f)))
+check_("az osszevont lelet felsorolja a parokat",
+       f and "10 páron" in f[0]["message"] and "P0" in f[0]["message"] and
+       "P9" in f[0]["message"])
+check_("osszevonasnal nincs egyetlen szimbolumhoz kotve", f and f[0]["symbol"] is None)
+check_("EGY erintett parnal viszont ott a szimbolum",
+       (lambda g: g and g[0]["symbol"] == "X")(codes(INVIS, "signal_mode_invisible")))
+
 # ══ 8. Robusztussag: a vizsgalat SOSEM buktathatja az indulast ════════════
 
 check_("ures cfg -> nem robban", isinstance(cc.check({}), list))
@@ -282,8 +335,6 @@ check_("az eles configon lefut", isinstance(cc.check(real), list))
 # ket TUDOTT, felhasznaloi dontesre varo tetel (Euro50 koltsegek + a holt pct).
 check_("az UsaInd inert Piac-kapuja MEGSZUNT (P2 #1 lezarva)",
        "market_gate_no_classifier" not in real_codes, str(sorted(real_codes)))
-check_("a modul HAT ellenorzest futtat (a 7. a kovetkezo korben jon)",
-       len(cc._CHECKS) == 6, str(len(cc._CHECKS)))
 check_("a hazirend beallt -> nincs 'independent' lelet (P2 #3 lezarva)",
        "independent_multi_strategy" not in real_codes, str(sorted(real_codes)))
 check_("nincs elavult strategia-hivatkozas", "stale_strategy_key" not in real_codes,

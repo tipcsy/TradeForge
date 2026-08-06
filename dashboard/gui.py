@@ -3472,14 +3472,24 @@ class DashboardWindow:
             text.tag_add(tag, f"1.0+{s}c", f"1.0+{e}c")
 
     # ── config.json perzisztálás (CSAK a váz-szekciók) ───────────────────
-    def _save_main_config(self):
+    def _save_main_config(self) -> bool:
         """A config.json-ba csak a VÁZ-szekciókat írjuk (a stratégia-config a
-        saját fájljában él) — így a merge-elt futásidejű cfg nem szennyezi vissza."""
-        try:
-            with open(ROOT / "config.json", "w", encoding="utf-8") as f:
-                json.dump(main_config_view(self.cfg), f, indent=2, ensure_ascii=False)
-        except Exception:
-            pass
+        saját fájljában él) — így a merge-elt futásidejű cfg nem szennyezi vissza.
+
+        Visszaad: sikerült-e. HIBA esetén az állapotsorba írunk: korábban egy néma
+        `except Exception: pass` állt itt, tehát egy zárolt/írhatatlan fájlnál a
+        Play/Stop, a slot- és a limit-állítás úgy nézett ki, mintha megtörtént
+        volna — a futásidejű cfg-ben meg is történt —, és csak ÚJRAINDÍTÁSKOR
+        derült volna ki, hogy semmi nem perzisztált.
+
+        Az atomicitásról (temp→replace) a közös `settings.save_main_config`
+        gondoskodik."""
+        from strategy.settings import save_main_config as _save
+        err = _save(self.cfg, ROOT / "config.json")
+        if err:
+            self._set_status(f"⚠ A beállítás NEM mentődött el: {err}")
+            return False
+        return True
 
     # ── Megjelenés (téma + betűtípus) ────────────────────────────────────
     def _show_appearance(self):
@@ -3690,11 +3700,12 @@ class DashboardWindow:
                 lbl_err.config(text="Legalább egy stratégia legyen elérhető.")
                 return
             new["available_strategies"] = chosen_av
-            try:
-                with open(ROOT / "config.json", "w", encoding="utf-8") as f:
-                    json.dump(new, f, indent=2, ensure_ascii=False)
-            except Exception as e:
-                lbl_err.config(text=f"Mentési hiba: {e}")
+            # A `new` MÁR váz-config (a szerkesztő a `main_config_view`-t mutatta),
+            # ezért a nyers írót hívjuk — a nézet-szűrés pontosan egyszer fut.
+            from strategy.settings import write_config_file as _write
+            _err = _write(new, ROOT / "config.json")
+            if _err:
+                lbl_err.config(text=_err)
                 return
             # In-place frissítés → a live_trader ugyanazt a dict-et látja.
             # A `new` a VÁZ-config; a stratégia beállításait újra beolvasztjuk,
@@ -4192,14 +4203,21 @@ class DashboardWindow:
                              f"előbb állítsd le (OPT).")
             return
         _rs.set_state(self.cfg, symbol, name, _rs.LIVE)
-        self._save_main_config()
+        _saved = self._save_main_config()
         # A pár szintjén is engedni kell, különben a motor hozzá sem nyúl.
         # KIVEZETÉS alatt ez egyben a leállítás visszavonása.
         if self.instrument_state.get(symbol) != "LIVE":
             self.instrument_state[symbol] = "LIVE"
             if self._on_play:
                 self._on_play(symbol)
-        self._set_status(f"{symbol}/{name}: elindítva.")
+        # Sikertelen mentésnél NEM írjuk felül a hibaüzenetet: a stratégia MOST
+        # elindul (a futásidejű cfg-t a motor ugyanabból a dictből olvassa), de a
+        # SZÁNDÉK nem perzisztált — újraindítás után nem folytatódna.
+        if _saved:
+            self._set_status(f"{symbol}/{name}: elindítva.")
+        else:
+            self._set_status(f"{symbol}/{name}: elindítva, DE a szándék NEM "
+                             f"mentődött el — újraindítás után nem folytatódik.")
         self._apply_filter_sort()
 
     def _stop_strategy(self, symbol: str, name: str):
@@ -4212,11 +4230,16 @@ class DashboardWindow:
         pozícióval KIVEZETÉS (a motor tovább kezeli), különben STOPPED."""
         from core import run_state as _rs
         _rs.set_state(self.cfg, symbol, name, _rs.STOPPED)
-        self._save_main_config()
+        _saved = self._save_main_config()
         if any(self._strategy_live(symbol, n)
                for n in self._live2_strategies(symbol)):
-            self._set_status(f"{symbol}/{name}: leállítva "
-                             f"(a pár többi stratégiája fut).")
+            # Mint az indításnál: a hibaüzenetet nem nyomjuk el. A leállítás MOST
+            # érvényes, de újraindítás után a stratégia visszaindulna.
+            self._set_status(
+                f"{symbol}/{name}: leállítva (a pár többi stratégiája fut)."
+                if _saved else
+                f"{symbol}/{name}: leállítva, DE a szándék NEM mentődött el — "
+                f"újraindítás után visszaindulna.")
             self._apply_filter_sort()
             return
         ds = self.dashboard_ref.get(symbol)

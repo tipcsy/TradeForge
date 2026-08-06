@@ -237,6 +237,55 @@ def _check_same_symbol_policy(cfg: dict, out: list) -> None:
 
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# 7. „Csak jelzés" mód kikapcsolt vizualizációval
+# ---------------------------------------------------------------------------
+
+def _check_invisible_signal_mode(cfg: dict, out: list) -> None:
+    """A `signal` mód CÉLJA a megfigyelés — kikapcsolt rajzzal viszont vak.
+
+    A „csak jelzés" azért van, hogy egy stratégiát élesben, pénz nélkül nézhess:
+    mindent kiszámol, de nem küld megbízást. Ha közben a vizualizációja ÉS a
+    kötés-rétege is ki van kapcsolva, a charton semmi nem látszik belőle — a
+    beállítás így pontosan azt a célt nem szolgálja, amiért bekapcsoltad.
+
+    A leletet STRATÉGIÁNKÉNT ÖSSZEVONJUK. Egy „csak jelzés" mód tipikusan az összes
+    páron egyszerre áll be, tehát páronként külön sor tíz azonos üzenetet adna
+    minden induláskor — az ilyen mindenütt-ott-ülő jelzés pontosan úgy válik
+    láthatatlanná, mint amiről a `gates.badge` doksija is ír."""
+    from core import trade_mode as _tm
+    from core import viz_prefs as _vp
+    from core import run_state as _rs
+    from strategy import enabled_strategy_names
+
+    by_strategy: dict = {}
+    for sym, pc in (cfg.get("pairs") or {}).items():
+        if not isinstance(pc, dict):
+            continue
+        names = enabled_strategy_names(cfg, sym) or []
+        live = set(_rs.live_strategies(cfg, sym, names) or [])
+        for n in names:
+            if not _tm.is_signal_only(cfg, sym, n):
+                continue
+            # Csak a ténylegesen FUTÓ stratégia érdekes: egy megállítottnál a
+            # kikapcsolt rajz teljesen rendben van.
+            if n not in live:
+                continue
+            if _vp.viz_on(cfg, sym, n) or _vp.trades_on(cfg, sym, n):
+                continue
+            by_strategy.setdefault(n, []).append(sym)
+
+    for n, syms in by_strategy.items():
+        out.append(_finding(
+            INFO, "signal_mode_invisible",
+            f"{n}: 'csak jelzés' módban FUT {len(syms)} páron ({', '.join(syms)}), "
+            f"de sem a vizualizációja, sem a kötés-rétege nem látszik "
+            f"(strategy_viz / strategy_trades) → nem látod, mit csinálna, pedig a "
+            f"'csak jelzés' épp ezért van. Kapcsold be az instrumentum "
+            f"beállításainál (kattints a pár nevére).",
+            syms[0] if len(syms) == 1 else None))
+
+
 _CHECKS = (
     _check_gate_preconditions,
     _check_stale_strategy_keys,
@@ -244,6 +293,7 @@ _CHECKS = (
     _check_daily_limit,
     _check_gate_config_shadowing,
     _check_same_symbol_policy,
+    _check_invisible_signal_mode,
 )
 
 

@@ -101,6 +101,55 @@ def main_config_view(cfg: dict) -> dict:
     return view
 
 
+def write_config_file(data: dict, path: Path | str) -> str:
+    """Egy MÁR KÉSZ váz-config dict ATOMIKUS kiírása. Visszaad: `""` ha sikerült,
+    különben az EMBERI hibaüzenet (a hívó kiteszi az állapotsorba / hibacímkére).
+
+    Két dolgot rendez, amit a korábbi `open(..., "w")` nem:
+
+    **1. Atomicitás.** A `"w"` mód ELŐBB csonkolja a fájlt, és csak utána ír. Ha a
+    szerializálás közben bármi elszáll (nem JSON-osítható érték), vagy a processz
+    megáll, a `config.json` CSONKÁN marad — és az a fájl tartja a broker-belépőt, a
+    párokat és a kereskedés-szándékot. A projekt MINDEN más állapotfájlja
+    (`params_store`, `adopted`, `build_state`, `execution_params`…) temp→replace-szel
+    ír; a legértékesebb fájl volt az egyetlen kivétel. Ráadásul előbb STRINGGÉ
+    alakítunk, és csak utána nyitunk fájlt: egy szerializálási hiba így hozzá sem
+    ér a lemezhez.
+
+    **2. Beszédes hiba.** A mentés elbukhat (zárolt fájl, jogosultság, tele a
+    lemez). Némán elnyelve a Play/Stop, a slot- és a limit-állítás úgy nézne ki,
+    mintha megtörtént volna — és csak újraindításkor derülne ki, hogy nem. Ezért ad
+    ez a függvény ÜZENETET, nem bool-t."""
+    p = Path(path)
+    try:
+        text = json.dumps(data, indent=2, ensure_ascii=False)
+    except Exception as e:
+        log.error("config.json szerializálási hiba: %s", e)
+        return f"A config nem alakítható JSON-ná: {e}"
+    tmp = p.with_suffix(".json.tmp")
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(text)
+        tmp.replace(p)
+        return ""
+    except Exception as e:
+        log.error("config.json mentési hiba (%s): %s", p, e)
+        try:
+            tmp.unlink(missing_ok=True)      # ne maradjon félkész fájl
+        except Exception:
+            pass
+        return f"Mentési hiba ({p.name}): {e}"
+
+
+def save_main_config(cfg: dict, path: Path | str) -> str:
+    """A FUTÁSIDEJŰ cfg kiírása váz-configként (a stratégia-szekciók kiszűrve).
+
+    Ezt hívja a dashboard minden perzisztálásnál (Play/Stop, slot, napi limit,
+    per-pár kapcsolók). Aki már kész váz-dictet tart a kezében (a ⚙ szerkesztő),
+    az a `write_config_file`-t hívja — így a nézet-szűrés pontosan egyszer fut."""
+    return write_config_file(main_config_view(cfg), path)
+
+
 def config_for_strategy(cfg: dict, name: str) -> dict:
     """A futásidejű cfg átképezése EGY ADOTT stratégia nézetére.
 

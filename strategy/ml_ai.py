@@ -169,6 +169,10 @@ _bundle_cache: dict[str, tuple[tuple, Optional[dict]]] = {}
 # egységgel (pip→pont migráció) VAGY más idősíkon tanult. A hívó ezeknél
 # „tanítsd újra" üzenetet ad.
 _stale_unit_syms: set = set()
+# Azok a szimbolumok, ahol a modell HASZNÁLHATÓ, de még idősík-jelölő NÉLKÜLI
+# (v1.95.0 előtt tanult). Csak azért tartjuk számon, hogy a figyelmeztetés
+# szimbólumonként EGYSZER menjen ki — körönként ismételve zaj lenne.
+_legacy_tf_syms: set = set()
 
 
 def load_bundle(symbol: str) -> Optional[dict]:
@@ -197,7 +201,8 @@ def load_bundle(symbol: str) -> Optional[dict]:
     # rendszer ezt magától nem venné észre. A RÉGI (idősík-jelölő nélküli)
     # modelleket M15-ösnek tekintjük: eddig csak olyan volt.
     if bundle is not None:
-        _tf_model = int((bundle.get("meta") or {}).get("signal_tf_min", DEFAULT_TF_MIN))
+        _meta = bundle.get("meta") or {}
+        _tf_model = int(_meta.get("signal_tf_min", DEFAULT_TF_MIN))
         if _tf_model != tf_now:
             log.warning("%s — az ML modell M%d idősíkon tanult, a beállítás viszont "
                         "M%d (strategy/config/ml_ai.json: signal_tf_min) → a "
@@ -207,6 +212,17 @@ def load_bundle(symbol: str) -> Optional[dict]:
             _bundle_cache[symbol] = (key, None)
             _stale_unit_syms.add(symbol)
             return None
+        # JELÖLŐ NÉLKÜLI (v1.95.0 előtti) modell: elfogadjuk M15-ösként — eddig
+        # csak olyan volt —, de MEGMONDJUK, mielőtt bajt okoz. A csapda ugyanis
+        # csak a váltás UTÁN derülne ki: ha egyszer átállítod a `signal_tf_min`-t,
+        # az ÖSSZES jelöletlen modell M15-nek számít, tehát mind kimarad, és
+        # egyenként újra kell tanítani. Ezt jobb ELŐRE tudni, mint utólag.
+        elif "signal_tf_min" not in _meta and symbol not in _legacy_tf_syms:
+            _legacy_tf_syms.add(symbol)
+            log.info("%s — az ML modell még idősík-jelölő NÉLKÜLI (v1.95.0 előtt "
+                     "tanult) → M%d-ösnek vesszük, ami MOST egyezik a beállítással. "
+                     "Ha a signal_tf_min-t átállítod, ez a modell kimarad, amíg "
+                     "újra nem tanítod.", symbol, DEFAULT_TF_MIN)
     # A jellemzők egysége EGYEZZEN a modellével. A pip→pont migráció (v1.67.0) óta
     # a `compute_smc` PONTBAN normalizál; egy régi, PIP-skálán tanított modell
     # bemenete 10-100×-osra ugrana — a predikció értelmetlen lenne, de a rendszer
