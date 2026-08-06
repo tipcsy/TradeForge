@@ -202,7 +202,8 @@ def load_bundle(symbol: str) -> Optional[dict]:
             log.warning("%s — az ML modell M%d idősíkon tanult, a beállítás viszont "
                         "M%d (strategy/config/ml_ai.json: signal_tf_min) → a "
                         "predikció más gyertyákra vonatkozna. A modell KIHAGYVA; "
-                        "tanítsd újra (Opt gomb).", symbol, _tf_model, tf_now)
+                        "tanítsd újra (Opt gomb / `python main.py optimize %s "
+                        "--strategy ml_ai`).", symbol, _tf_model, tf_now, symbol)
             _bundle_cache[symbol] = (key, None)
             _stale_unit_syms.add(symbol)
             return None
@@ -213,10 +214,13 @@ def load_bundle(symbol: str) -> Optional[dict]:
     stale_unit = (bundle is not None
                   and (bundle.get("meta") or {}).get("feature_unit") != "point")
     if stale_unit:
+        # A parancs a `--strategy ml_ai`-t IS tartalmazza: enélkül a CLI a config
+        # elsődleges stratégiáját hangolná újra (v1.97.0-ig ez volt az egyetlen út),
+        # és aki követi az üzenetet, NÉMÁN mást optimalizálna, mint amit kér.
         log.warning("%s — az ML modell RÉGI (pip-skálájú) jellemzőkkel tanult, a motor "
                     "viszont PONTBAN normalizál → a predikció érvénytelen lenne. "
                     "A modell KIHAGYVA; tanítsd újra (Opt gomb / "
-                    "`python main.py optimize %s`).", symbol, symbol)
+                    "`python main.py optimize %s --strategy ml_ai`).", symbol, symbol)
         bundle = None
     # A gyorsítótár megjegyzi az ELUTASÍTÁS OKÁT is: így a hívó pontos üzenetet ad
     # („elavult modell" vs. „nincs modell-fájl") — a kettő más teendőt jelent.

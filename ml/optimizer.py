@@ -1165,53 +1165,132 @@ def apply_optimized_rr(symbol: str, rr: dict):
         log.warning("  %s — rr_state alkalmazás hiba: %s", symbol, e)
 
 
-def run_optimizer(cfg: dict, symbols: Optional[list[str]] = None):
+def resolve_cli_strategies(cfg: dict, symbol: str,
+                           requested: Optional[list[str]] = None) -> list[str]:
+    """MELY stratégiákat optimalizálja a CLI ezen a páron.
+
+    `requested`: a `--strategy` kapcsoló nevei (a hívó már ellenőrizte, hogy
+    léteznek). None → a pár SAJÁT engedélyezett stratégiái
+    (`pairs.<sym>.strategies`), tehát ugyanaz a halmaz, amit a motor futtat.
+
+    MIÉRT NEM az elsődleges stratégia (a v1.97.0-ig ez volt). A CLI mindig a
+    `strategy.name`-et optimalizálta, függetlenül attól, mi van a páron
+    engedélyezve — így az `ml_ai`-t egyáltalán nem lehetett CLI-ből tanítani, és
+    aki az `ml_ai` „tanítsd újra" üzenetét követte, NÉMÁN a `wpr_sma`-t hangolta
+    újra. A GUI OPT gombja már per stratégia dolgozott; ez a függvény hozza a
+    CLI-t ugyanarra a szintre.
+
+    A pár listáját az ELÉRHETŐKRE szűrjük: egy `available_strategies`-ben
+    kikapcsolt stratégiát a felület sem kínál, tehát a CLI se hangolja némán."""
+    from strategy import enabled_strategy_names, available_strategy_names
+    if requested:
+        return list(requested)
+    avail = set(available_strategy_names(cfg))
+    names = [n for n in (enabled_strategy_names(cfg, symbol) or []) if n in avail]
+    return names
+
+
+def run_optimizer(cfg: dict, symbols: Optional[list[str]] = None,
+                  strategies: Optional[list[str]] = None):
+    """CLI-optimalizálás — pár × STRATÉGIA.
+
+    `symbols`:    mely párok (None → az összes `enabled`).
+    `strategies`: mely stratégiák (None → páronként a sajátjai, lásd
+                  `resolve_cli_strategies`). A hívó (`main.py`) ellenőrzi a neveket.
+
+    Egy szimbólumon TÖBB stratégia egymás után fut; mindegyik a SAJÁT
+    paraméter-terével és saját kimeneti fájljával (`data/optimized_params/
+    <stratégia>/<SYMBOL>.json`), tehát nem írják felül egymást."""
+    from strategy import get_strategy_by_name
     opt_cfg     = cfg["optimizer"]
     method      = opt_cfg.get("method", "random")
     max_trials  = opt_cfg.get("max_trials", 500)
     initial_balance = cfg.get("ml", {}).get("starting_balance_eur", 1000.0)
 
-    # Stratégia-hatókörű tárolás: aktív stratégia + egyszeri migráció.
+    # Egyszeri migráció a RÉGI lapos elrendezésről — ez az ELSŐDLEGES stratégiáé
+    # (a lapos fájlok még egy-stratégiás korból valók), függetlenül attól, mit
+    # optimalizálunk most.
     from strategy.settings import strategy_name as _stratname
-    _sn = _stratname(cfg)
-    set_active_strategy(_sn)
-    migrate_flat_layout(_sn)
+    _primary = _stratname(cfg)
+    set_active_strategy(_primary)
+    migrate_flat_layout(_primary)
 
     # Párok kiválasztása
     all_pairs = {s: p for s, p in cfg["pairs"].items() if isinstance(p, dict) and p.get("enabled", False)}
     if symbols:
+        _known = {s for s, p in cfg["pairs"].items() if isinstance(p, dict)}
+        # Elgépelt vagy LETILTOTT párnév: a kettő más teendőt jelent, ezért külön
+        # mondjuk. Enélkül a futás csak annyit közölne, hogy „nincs mit
+        # optimalizálni" — és úgy tűnne, a parancs lefutott.
+        for s in symbols:
+            if s not in _known:
+                log.warning("Ismeretlen instrumentum: %r (a config.json pairs "
+                            "szekciójában nincs ilyen)", s)
+            elif s not in all_pairs:
+                log.warning("%s — le van tiltva (pairs.%s.enabled = false), kihagyva",
+                            s, s)
         all_pairs = {s: p for s, p in all_pairs.items() if s in symbols}
 
-    # Meglévő per-pár fájlok listázása (folytatás)
-    existing = [f.stem for f in strategy_dir(_sn).glob("*.json")]
-    if existing:
-        log.info("Meglévő optimalizált párok: %s", ", ".join(existing))
+    # A MUNKATÉTELEK: (pár, stratégia). Előre kiszámoljuk, hogy a napló első
+    # sorában látszódjon, MI FOG FUTNI — egy hosszú futásnál ez az egyetlen
+    # pillanat, amikor még olcsó észrevenni, ha nem azt kértük, amit akartunk.
+    jobs: list = []
+    for symbol in all_pairs:
+        for sname in resolve_cli_strategies(cfg, symbol, strategies):
+            jobs.append((symbol, sname))
+    if not jobs:
+        if not all_pairs:
+            log.warning("Nincs mit optimalizálni: egyetlen kiválasztott pár sem "
+                        "aktív (pairs.<sym>.enabled).")
+        else:
+            log.warning("Nincs mit optimalizálni: a kiválasztott párokon egyetlen "
+                        "elérhető stratégia sincs engedélyezve "
+                        "(pairs.<sym>.strategies / available_strategies).")
+        return
 
-    log.info("Optimalizálás indul | módszer: %s | max_trials: %d | párok: %d",
-             method, max_trials, len(all_pairs))
+    _by_strat: dict = {}
+    for _s, _n in jobs:
+        _by_strat.setdefault(_n, []).append(_s)
+    log.info("Optimalizálás indul | módszer: %s | max_trials: %d | tételek: %d",
+             method, max_trials, len(jobs))
+    for _n, _syms in _by_strat.items():
+        _existing = [f.stem for f in strategy_dir(_n).glob("*.json")]
+        log.info("  %-10s → %s%s", _n, ", ".join(_syms),
+                 f"   (már megvan: {', '.join(_existing)})" if _existing else "")
 
-    for symbol, pair_cfg in all_pairs.items():
-        # Ha már van mentett eredmény és nem kényszerített újrafuttatás → kihagyás
-        if params_file(symbol).exists() and not symbols:
+    _loaded: dict = {}          # symbol → (df_m15, df_m1); páronként EGYSZER olvas
+
+    for symbol, sname in jobs:
+        strategy = get_strategy_by_name(sname)
+        # Ha már van mentett eredmény és nem kényszerített újrafuttatás → kihagyás.
+        # A `symbols` (kifejezett pár-lista) a felülírás jelzése — ahogy eddig.
+        if params_file(symbol, sname).exists() and not symbols:
             log.info("─" * 60)
-            log.info("✓  %s — már optimalizálva, kihagyva. (Felülíráshoz: python main.py optimize %s)", symbol, symbol)
+            log.info("✓  %s/%s — már optimalizálva, kihagyva. (Felülíráshoz: "
+                     "python main.py optimize %s --strategy %s)",
+                     symbol, sname, symbol, sname)
             continue
 
         log.info("─" * 60)
-        log.info("▶  %s optimalizálása...", symbol)
+        log.info("▶  %s / %s optimalizálása...", symbol, sname)
         t0 = time.time()
         # Elavult (GUI-s) leállítás-marker törlése — a CLI-futást ne szakítsa meg.
-        stop_marker(symbol, _sn).unlink(missing_ok=True)
+        stop_marker(symbol, sname).unlink(missing_ok=True)
 
-        df_m15, df_m1 = load_data(symbol)
+        if symbol not in _loaded:
+            _loaded[symbol] = load_data(symbol)
+        df_m15, df_m1 = _loaded[symbol]
         if df_m15 is None:
             log.warning("%s — nincs adat, kihagyva.", symbol)
             continue
 
         # ── KÖZÖS dispatch (ugyanaz, mint a GUI-ban) ──────────────────────
-        result = optimize_symbol(symbol, df_m15, df_m1, cfg, initial_balance)
+        # A `strategy` ÁTADÁSA a lényeg: enélkül az `optimize_symbol` a config
+        # elsődleges stratégiájára esne vissza, és minden tétel ugyanazt hangolná.
+        result = optimize_symbol(symbol, df_m15, df_m1, cfg, initial_balance,
+                                 strategy=strategy)
         if "error" in result:
-            log.warning("%s — %s", symbol, result["error"])
+            log.warning("%s/%s — %s", symbol, sname, result["error"])
             continue
 
         train_summary = result["train_summary"]
@@ -1247,7 +1326,10 @@ def run_optimizer(cfg: dict, symbols: Optional[list[str]] = None):
         _rr = result.get("rr")
         if _rr:
             entry["rr"] = _rr
-        out = params_file(symbol)
+        # A célfájl EXPLICIT stratégiával: az `optimize_symbol` menet közben
+        # átállítja a modul-szintű aktív stratégiát, tehát az implicit alak
+        # (`params_file(symbol)`) itt a MÚLTBELI állapotra hagyatkozna.
+        out = params_file(symbol, sname)
         tmp = out.with_suffix(".tmp")
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(entry, f, indent=2, ensure_ascii=False, default=str)
@@ -1257,23 +1339,30 @@ def run_optimizer(cfg: dict, symbols: Optional[list[str]] = None):
             apply_optimized_rr(symbol, _rr)
 
     log.info("=" * 60)
-    log.info("Optimalizálás kész. Eredmények: %s", strategy_dir(_sn))
+    log.info("Optimalizálás kész.")
 
-    # Összesített kimutatás
-    log.info("%-10s  %6s  %6s  %8s  %8s", "Szimbólum", "Kötés", "Win%", "P&L$", "MaxDD%")
-    log.info("-" * 50)
-    for f in sorted(strategy_dir(_sn).glob("*.json")):
-        with open(f, encoding="utf-8") as fh:
-            data = json.load(fh)
-        ts = data.get("test_summary", {})
-        log.info(
-            "%-10s  %6d  %5.0f%%  %8.2f  %7.1f%%",
-            data.get("symbol", f.stem),
-            ts.get("trades", 0),
-            ts.get("win_rate", 0) * 100,
-            ts.get("total_pnl", 0),
-            ts.get("max_drawdown", 0) * 100,
-        )
+    # Összesített kimutatás — STRATÉGIÁNKÉNT (a fájlok is stratégia-almappákban
+    # élnek, tehát egy közös tábla összemosná a két világot).
+    for sname in _by_strat:
+        files = sorted(strategy_dir(sname).glob("*.json"))
+        if not files:
+            continue
+        log.info("")
+        log.info("%s  —  %s", sname, strategy_dir(sname))
+        log.info("%-10s  %6s  %6s  %8s  %8s", "Szimbólum", "Kötés", "Win%", "P&L$", "MaxDD%")
+        log.info("-" * 50)
+        for f in files:
+            with open(f, encoding="utf-8") as fh:
+                data = json.load(fh)
+            ts = data.get("test_summary", {})
+            log.info(
+                "%-10s  %6d  %5.0f%%  %8.2f  %7.1f%%",
+                data.get("symbol", f.stem),
+                ts.get("trades", 0),
+                ts.get("win_rate", 0) * 100,
+                ts.get("total_pnl", 0),
+                ts.get("max_drawdown", 0) * 100,
+            )
 
 
 # ---------------------------------------------------------------------------

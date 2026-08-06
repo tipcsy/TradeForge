@@ -169,8 +169,10 @@ Minden parancs a projekt gyökeréből fut (ahol a `main.py` van):
 | `python main.py dashboard` | csak a felület, demo adatokkal — **MT5 nélkül is** |
 | `python main.py live` | élő motor + dashboard |
 | `python main.py backtest` | backtest az alapértelmezett paraméterekkel |
-| `python main.py optimize` | paraméter-optimalizálás minden aktív párra |
+| `python main.py optimize` | optimalizálás minden aktív párra, páronként a saját stratégiáival |
 | `python main.py optimize EURUSD GBPJPY` | optimalizálás csak a megadott párokra |
+| `python main.py optimize Ger40 --strategy ml_ai` | egy pár, egy stratégia (tanítható stratégiánál = tanítás) |
+| `python main.py optimize -s wpr_sma,ml_ai` | minden pár, csak a felsorolt stratégiák |
 
 Argumentum nélkül (`python main.py`) kiírja ezt a listát.
 
