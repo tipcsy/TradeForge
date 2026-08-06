@@ -4,11 +4,11 @@
     "_comment": "ALAPÉRTELMEZETT stratégia: ezt használja egy pár, ha nincs saját pairs.<sym>.strategies listája. A tényleges vezérlés per-instrumentum (pairs.<sym>.strategies), a felkínált/megjelenített halmaz pedig az available_strategies. Ha a name nincs az available_strategies között, az első elérhetőre esik vissza.",
     "name": "wpr_sma"
   },
-  "available_strategies": [
-    "wpr_sma",
-    "ml_ai"
-  ],
-  "_comment_available_strategies": "A programban ELÉRHETŐVÉ tett stratégiák (a strategy/ csomag regisztráltjainak whitelistje). A per-pár választó ezeket kínálja, a dashboard ezekből képez oszlopot. Kihagyva/üresen = az ÖSSZES regisztrált. A dashboardon a ⚙ Beállítás ablakból is állítható (oszlop-változás újraindítás után).",
+  "available_strategies": {
+    "wpr_sma": true,
+    "ml_ai": true
+  },
+  "_comment_available_strategies": "A programban ELÉRHETŐVÉ tett stratégiák — a strategy/ csomag automatikusan felderített moduljainak ki-be kapcsolója. true = a program felkínálja (per-pár választó) és oszlopot képez belőle a dashboardon; false = nem is látszik. A dashboardon a ⚙ Beállítás ablakból állítható, és MINDIG ide íródik vissza a TELJES készlet — a kikapcsoltak is —, hogy a fájlból kiderüljön, mi LÉTEZIK (nem csak az, mi tér el az alapértelmezéstől). Az oszlop-változás újraindítás után látszik. A régi LISTA alak (whitelist) változatlanul olvasható. Kihagyva/üresen = az ÖSSZES regisztrált. Egy frissen hozzáadott, itt még nem szereplő stratégia alapból ELÉRHETŐ — kikapcsolni kifejezetten kell (false).",
   "tf_align": {
     "_comment": "TF-együttállás figyelő (dashboard 'Együtt' oszlop): idősíkonként sign(close - SMA(sma_period)); ha a figyelt idősíkok MIND egy irányba mutatnak, erős 'S' (zöld BUY / piros SELL). Ez a GLOBÁLIS alapértelmezés; instrumentumonként FELÜLÍRHATÓ a pairs.<sym>.tf_align-nal (más idősíkok/SMA). Az 'Együtt' cellára kattintva a per-pár beállítás nyílik. gate: mely stratégiák belépőjét AKADÁLYOZZA (csak a trenddel egyező jel köthet). enabled=false → az oszlop üres.",
     "enabled": true,

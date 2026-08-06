@@ -743,13 +743,24 @@ class OptimizerController:
         return getattr(self.strategy, "name", "wpr_sma")
 
     def _strategy_live(self, symbol: str, strategy: str) -> bool:
-        """Kereskedik-e ÉPP ez a (symbol, strategy)? A szándék forrása a
-        `core.run_state` — ugyanaz, amit a `live_trader` is használ, tehát a felület
-        és a motor nem mondhat mást. Hibánál KONZERVATÍV: True (inkább nem
-        optimalizálunk, mint hogy egy kereskedő stratégia paraméterei alóla
-        íródjanak át)."""
+        """Kereskedik-e ÉPP ez a (symbol, strategy)? Ez az OPT kapuja: a kereskedő
+        stratégiát nem optimalizáljuk (a futás végén felülíródna a paraméterfájlja).
+
+        A képlet a MOTORÉ (`live_trader.run`): a szándék (`core.run_state`) ÉS a
+        pár engedélyezett stratégiái (`pairs.<sym>.strategies`) METSZETE. A szándék
+        önmagában nem elég: a `run_state` bejegyzés akkor is ott marad, ha közben
+        kikapcsoltad a stratégiát a páron — ilyenkor a motor NEM futtatja, tehát
+        nincs mit félteni, és épp ilyenkor akarnád optimalizálni (mielőtt
+        bekapcsolod). A szűrés nélkül ez NÉMÁN tagadta meg az OPT-ot
+        (`request_optimize` szó nélkül visszatért).
+
+        Hibánál KONZERVATÍV: True (inkább nem optimalizálunk, mint hogy egy
+        kereskedő stratégia paraméterei alóla íródjanak át)."""
         try:
             from core import run_state as _rs
+            from strategy import enabled_strategy_names
+            if strategy not in (enabled_strategy_names(self.cfg, symbol) or []):
+                return False
             return _rs.get_state(self.cfg, symbol, strategy,
                                  self._default_strategy()) == _rs.LIVE
         except Exception:
@@ -2924,6 +2935,7 @@ class DashboardWindow:
                 stage_order_of=self._live2_stage_order,
                 opt_enabled_of=self._live2_opt_enabled,
                 opt_state_of=self._live2_opt_state,
+                enabled_of=self._strategy_enabled,
                 on_toggle=self._handle_run_strategy,
                 on_opt=self._live2_opt_click,
                 on_stages=self._show_strategy_params,
@@ -2932,14 +2944,40 @@ class DashboardWindow:
                 on_spread=self._show_spread_params))
         return rows
 
+    def _strategy_enabled(self, symbol: str, name: str) -> bool:
+        """Engedélyezve van-e ez a stratégia EZEN a páron (`pairs.<sym>.strategies`)?
+
+        A 2.0 sor MINDEN páron ugyanazt a stratégia-listát rajzolja
+        (`_live2_strategies` → `available_strategies`), különben az oszlopok nem
+        állnának egy vonalban. A MOTOR viszont a pár saját listájából dolgozik —
+        ez a metódus hozza vissza a különbséget a felületre, hogy a sor ne
+        ígérjen olyat, amit a motor nem teljesít."""
+        from strategy import enabled_strategy_names
+        return name in (enabled_strategy_names(self.cfg, symbol) or [])
+
     def _strategy_live(self, symbol: str, name: str) -> bool:
-        """Kereskedik-e ÉPP ez a (pár, stratégia)? A `core.run_state` a forrás —
-        ugyanaz, amit a `live_trader` is olvas, tehát a felület és a motor nem
-        mondhat mást. EGY igazságforrás: a sor Play/Stop jelzése, az OPT
-        engedélyezettsége és a „STOPPED elrejtése" szűrő is ezt hívja."""
+        """Kereskedik-e ÉPP ez a (pár, stratégia)?
+
+        A képlet SZÓ SZERINT a motoré (`live_trader.run`):
+
+            _active = _enabled & _intent
+                      ↑ a pár `strategies` listája  ↑ a run_state szándék
+
+        Korábban itt csak a SZÁNDÉK szerepelt, az `available_strategies` listával
+        felkínálva — így egy olyan stratégia is „futónak" látszott, ami nincs
+        engedélyezve a páron, és amivel a motor SOHA nem futott. A `run_state`
+        bejegyzése ilyenkor is ott marad a configban (nem takarítjuk: ha újra
+        engedélyezed a stratégiát, a korábbi szándékod érvényes) — ezért nem elég
+        a szándékot nézni.
+
+        EGY igazságforrás: a sor Play/Stop jelzése, az OPT engedélyezettsége és a
+        „STOPPED elrejtése" szűrő is ezt hívja."""
         from core import run_state as _rst
-        return name in (_rst.live_strategies(self.cfg, symbol,
-                                             self._live2_strategies(symbol)) or [])
+        from strategy import enabled_strategy_names
+        _enabled = enabled_strategy_names(self.cfg, symbol) or []
+        if name not in _enabled:
+            return False
+        return name in (_rst.live_strategies(self.cfg, symbol, _enabled) or [])
 
     def _live2_opt_enabled(self, symbol: str, name: str) -> bool:
         """Optimalizálható-e MOST ez a (pár, stratégia)? Nem, ha kereskedik (a
@@ -3581,17 +3619,19 @@ class DashboardWindow:
         # ── Elérhető stratégiák (config: available_strategies) ────────────────
         # A program ezeket kínálja fel (per-pár választó) és ezekből képez oszlopot.
         # A jelölőnégyzetek AZ IRÁNYADÓK erre a kulcsra (a lenti JSON-t felülírják).
-        from strategy import registered_strategy_names, available_strategy_names
+        from strategy import strategy_availability
         tk.Label(popup, text="Elérhető stratégiák (a program ezeket kínálja és ezekből "
                  "képez oszlopot — az oszlop-változás újraindítás után látszik):",
                  bg=BG, fg=FG_BLUE, font=self._small_font, justify="left",
                  wraplength=680).pack(anchor="w", padx=10, pady=(8, 0))
-        _avail_now  = set(available_strategy_names(self.cfg))
+        # A TELJES készlet (a kikapcsoltakkal együtt) — ugyanaz, ami a configba
+        # is kiíródik, tehát a fájl és az ablak SOSEM mondhat mást.
+        _avail_now  = strategy_availability(self.cfg)
         _avail_vars = {}
         _av_row = tk.Frame(popup, bg=BG)
         _av_row.pack(anchor="w", padx=20, pady=(2, 0))
-        for _sn in registered_strategy_names():
-            _v = tk.BooleanVar(value=(_sn in _avail_now))
+        for _sn, _on in _avail_now.items():
+            _v = tk.BooleanVar(value=bool(_on))
             _avail_vars[_sn] = _v
             tk.Checkbutton(_av_row, text=_sn, variable=_v, bg=BG, fg=FG_WHITE,
                            selectcolor=BG_HEADER, font=self._small_font,
@@ -3638,14 +3678,18 @@ class DashboardWindow:
                 return
             # Az 'Elérhető stratégiák' jelölőnégyzetek az irányadók az
             # available_strategies kulcsra (a szerkesztő JSON-ját felülírják).
-            chosen_av = [n for n in registered_strategy_names() if _avail_vars[n].get()]
-            if not chosen_av:
+            #
+            # MINDIG a TELJES készletet írjuk ki, térkép alakban — a kikapcsoltat is.
+            # Korábban a kulcs TÖRLŐDÖTT, ha minden stratégia be volt kapcsolva
+            # („ne szennyezze a configot"), a kikapcsolt pedig egyszerűen kimaradt
+            # a listából. Ennek az volt az ára, hogy a config.json nem mondta meg,
+            # MI LÉTEZIK — csak azt, mi tér el az alapértelmezéstől. Két stratégiánál
+            # ez zavaró volt, 4-5-nél használhatatlan.
+            chosen_av = {n: bool(v.get()) for n, v in _avail_vars.items()}
+            if not any(chosen_av.values()):
                 lbl_err.config(text="Legalább egy stratégia legyen elérhető.")
                 return
-            if set(chosen_av) == set(registered_strategy_names()):
-                new.pop("available_strategies", None)   # mind → default, ne szennyezze
-            else:
-                new["available_strategies"] = chosen_av
+            new["available_strategies"] = chosen_av
             try:
                 with open(ROOT / "config.json", "w", encoding="utf-8") as f:
                     json.dump(new, f, indent=2, ensure_ascii=False)
@@ -4128,6 +4172,15 @@ class DashboardWindow:
         """Egy stratégia indítása ezen a páron."""
         from core import run_state as _rs
         from core.params_store import params_file
+        # A stratégiának ENGEDÉLYEZVE kell lennie ezen a páron, különben a motor
+        # (`_active = _enabled & _intent`) sosem futtatná — a sor viszont futónak
+        # mutatta volna, a `run_state` pedig `live`-ban ragadt volna a configban.
+        # Néma no-op helyett megmondjuk, hol lehet bekapcsolni.
+        if not self._strategy_enabled(symbol, name):
+            self._set_status(f"{symbol}\\{name}: nincs engedélyezve ezen az "
+                             f"instrumentumon — kapcsold be az instrumentum "
+                             f"beállításainál (kattints a nevére).")
+            return
         # Paraméterek nélkül nincs mit futtatni — a motor amúgy is kihagyná
         # (`_make_state` → None), csak épp NÉMÁN. Itt megmondjuk, miért.
         if not params_file(symbol, name).exists():

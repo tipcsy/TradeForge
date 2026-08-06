@@ -464,17 +464,17 @@ class LiveRow:
         ctrl.pack_propagate(False)
         inner = tk.Frame(ctrl, bg=bg, height=self._h)
         inner.pack(expand=True)
-        live = st.get("live")
+        _run_lbl, _run_fg = _run_text(st)
         _opt_lbl, _opt_fg = _opt_text(st)
+        run_on = st.get("enabled", True)
         opt_on = st.get("opt_enabled", True) or st.get("opt_state")
-        for key, txt, fg, cb in (("run", "■" if live else "▶",
-                                  FG_RED if live else FG_GREEN, st.get("on_toggle")),
+        for key, txt, fg, cb in (("run", _run_lbl, _run_fg, st.get("on_toggle")),
                                  ("opt", _opt_lbl, _opt_fg, st.get("on_opt"))):
             # A ket vezerlo KULON dobozban, elvalaszto hezaggal: elesben
             # "osszemosodtak" (padx=3 nem eleg, a Play/Stop es az OPT egy
             # foltnak latszott). A Play/Stop szeles kattinto-feluletet kap.
             l = tk.Label(inner, text=txt, fg=fg, bg=bg, font=self._f["small"],
-                         cursor="hand2" if (key != "opt" or opt_on) else "",
+                         cursor="hand2" if (opt_on if key == "opt" else run_on) else "",
                          bd=0, padx=CTRL_PADX, pady=0, highlightthickness=0)
             l.pack(side="left", padx=(0, CTRL_GAP) if key == "run" else 0)
             self._lbl[f"{n}|ctrl_{key}"] = l
@@ -603,9 +603,16 @@ class LiveRow:
             q = st.get("quality") or "—"
             self._set(f"{n}|quality", q, _quality_color(q))
             self._set(f"{n}|opt", st.get("opt") or "—", None)
-            live = st.get("live")
-            self._set(f"{n}|ctrl_run", "■" if live else "▶",
-                      FG_RED if live else FG_GREEN)
+            # A Play/Stop MORPHOL: ▶ / ■ / halvány `–` (nincs engedélyezve a
+            # páron). Az utóbbinál a kurzort is levesszük, különben kattinthatónak
+            # látszana — a KÖTÉS viszont marad, hogy kiírhassuk az okot.
+            _run_w = self._lbl.get(f"{n}|ctrl_run")
+            if _run_w is not None:
+                _rtxt, _rfg = _run_text(st)
+                self._set(f"{n}|ctrl_run", _rtxt, _rfg)
+                _rcur = "hand2" if st.get("enabled", True) else ""
+                if _run_w.cget("cursor") != _rcur:
+                    _run_w.config(cursor=_rcur)
             # Az OPT vezérlő MORPHOL: OPT → STOP (futó optimalizálás leállítása) →
             # SOR (sorból kivétel). Elhalványul, ha a stratégia kereskedni kezd —
             # a Play/Stop UGYANEBBEN a frissítésben vált, tehát a kettő sosem
@@ -654,6 +661,21 @@ def _stage_color(name):
 #   "queued"  → SOR   (narancs) — kattintva kiveszi a sorból
 OPT_LABELS = {"": "OPT", "running": "STOP", "queued": "SOR"}
 _OPT_COLORS = {"": FG_BLUE, "running": FG_RED, "queued": FG_ORANGE}
+
+
+def _run_text(st: dict) -> tuple:
+    """A Play/Stop vezérlő (felirat, szín).
+
+    HALVÁNY `–`, ha a stratégia nincs ENGEDÉLYEZVE ezen a páron
+    (`pairs.<sym>.strategies`): a motor ilyenkor sosem futtatná, tehát a `▶`
+    hazugság volna. A blokk nem tűnik el (az oszlopoknak egy vonalban kell
+    állniuk), és a KÖTÉS is megmarad — ugyanaz a recept, mint a halvány OPT-nál:
+    a hívó így ki tudja írni az OKOT az állapotsorba. Egy néma, nem reagáló gomb
+    rosszabb, mint egy halvány, ami megmondja, miért nem."""
+    if not st.get("enabled", True):
+        return "–", FG_GRAY_DIM
+    live = st.get("live")
+    return ("■" if live else "▶"), (FG_RED if live else FG_GREEN)
 
 
 def _opt_text(st: dict) -> tuple:
@@ -835,11 +857,13 @@ def demo_row() -> dict:
             {"name": "wpr_sma", "stages": ["green", "green", "muted"], "frame": "blocked",
              "position": {"money": 1.00, "r": 1.0},
              "daily": {"money": 0.03, "r": 0.01},
-             "quality": "Jó", "live": True, "opt": "06/29", "opt_enabled": False},
+             "quality": "Jó", "live": True, "opt": "06/29", "opt_enabled": False,
+             "enabled": True},
             {"name": "ml_ai", "stages": ["red", "muted"], "frame": "",
              "position": {"money": 1.00, "r": 1.0},
              "daily": {"money": 0.03, "r": 0.01},
-             "quality": "Jó", "live": False, "opt": "85%", "opt_enabled": True},
+             "quality": "Jó", "live": False, "opt": "85%", "opt_enabled": True,
+             "enabled": True},
         ],
         "total": {"position": {"money": 2.00, "r": 2.0},
                   "daily": {"money": 0.06, "r": 0.02}},
@@ -871,6 +895,11 @@ def build_demo(parent, collapsed: dict = None, rows: int = 3):
             d["gates"]["badge"] = "✓"
             d["gates"]["spread"]["text"] = "180/1312"
             d["strategies"][0]["frame"] = ""
+            # + egy stratégia, ami NINCS engedélyezve ezen a páron: a blokk marad
+            # (az oszlopok egy vonalban), a Play viszont halvány `–` és tétlen.
+            # A képernyőkép-ellenőrzés így ezt az állapotot is lefedi.
+            d["strategies"][1]["enabled"] = False
+            d["strategies"][1]["live"] = False
         if i == 2:
             # Kockázatcsökkentés: a K.Össz. PIPA marad, mert a `reduce` hatású
             # kapu NEM akadályozza a kötést — csak kisebbre veszi. (Az első

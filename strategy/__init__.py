@@ -84,28 +84,66 @@ def get_strategy_by_name(name: str) -> Strategy:
     return _INSTANCES[name]
 
 
+def _all_registered_ordered(cfg: dict) -> list[str]:
+    """Az ÖSSZES regisztrált stratégia, a config elsődlegesével ELÖL (a megszokott
+    oszlopsorrend megőrzése; a többi ábécében). A primary-t NYERSEN olvassuk (nem
+    `default_strategy_name`-en át), hogy ne legyen ciklus."""
+    reg = registered_strategy_names()
+    primary = (cfg.get("strategy", {}) or {}).get("name", "")
+    if primary in reg:
+        return [primary] + [n for n in reg if n != primary]
+    return reg
+
+
 def available_strategy_names(cfg: dict) -> list[str]:
     """A programban ELÉRHETŐVÉ tett stratégiák — a regisztráltak config-vezérelt
-    whitelistje (config.json: `available_strategies`). Ez határozza meg, MIT kínál
-    a per-pár választó és MIBŐL képződnek a dashboard-oszlopok. Hiány/üres/csupa-
-    érvénytelen → az ÖSSZES regisztrált (visszafelé kompatibilis). A config
-    sorrendjét megtartja, csak érvényes+egyedi neveket ad vissza."""
+    szűrése (config.json: `available_strategies`). Ez határozza meg, MIT kínál a
+    per-pár választó és MIBŐL képződnek a dashboard-oszlopok.
+
+    KÉT alak támogatott — ugyanaz a jelentés, más olvashatóság:
+
+    * **térkép** (ajánlott, ezt írja a ⚙ Beállítás):
+      ``{"wpr_sma": true, "ml_ai": false}`` — a kikapcsolt stratégia is LÁTSZIK a
+      configban, tehát a fájlból kiderül, mi LÉTEZIK, nem csak az, mi tér el az
+      alapértelmezéstől. 4-5 stratégiánál ez az egyetlen olvasható forma.
+    * **lista** (régi): ``["wpr_sma", "ml_ai"]`` — whitelist, a fel nem sorolt
+      stratégia kimarad. Változatlanul működik.
+
+    Hiány/üres/csupa-érvénytelen → az ÖSSZES regisztrált (visszafelé kompatibilis).
+    A config SORRENDJÉT megtartja, csak érvényes+egyedi neveket ad vissza.
+
+    Térképnél a NEM SZEREPLŐ (de regisztrált) stratégia **elérhető** — egy frissen
+    hozzáadott stratégia-modul így nem tűnik el némán, csak mert a config még nem
+    tud róla. Kikapcsolni KIFEJEZETTEN kell (`false`)."""
     reg = registered_strategy_names()
     want = cfg.get("available_strategies")
+    if isinstance(want, dict):
+        res = [n for n in want if n in reg and want[n]]
+        # A config által nem ismert, de regisztrált stratégiák a végére — lásd a
+        # docstring utolsó bekezdését (néma eltűnés helyett látható újdonság).
+        res += [n for n in _all_registered_ordered(cfg)
+                if n not in want and n not in res]
+        return res or reg
     if not want:
-        # Nincs whitelist → az ÖSSZES felderített, de a config elsődleges stratégiája
-        # ELÖL (a megszokott oszlopsorrend megőrzése; a többi ábécében). A primary-t
-        # NYERSEN olvassuk (nem default_strategy_name-en át), hogy ne legyen ciklus.
-        primary = (cfg.get("strategy", {}) or {}).get("name", "")
-        if primary in reg:
-            return [primary] + [n for n in reg if n != primary]
-        return reg
+        return _all_registered_ordered(cfg)
     seen, res = set(), []
     for n in want:
         if n in reg and n not in seen:
             seen.add(n)
             res.append(n)
     return res or reg
+
+
+def strategy_availability(cfg: dict) -> dict:
+    """`{stratégia_név: elérhető_e}` az ÖSSZES regisztrált stratégiára.
+
+    A ⚙ Beállítás jelölőnégyzetei ebből töltődnek, és ezt írja vissza a configba —
+    így a `config.json` MINDIG felsorolja a teljes készletet (a kikapcsoltakat is).
+    A sorrend a megjelenítési sorrend: az elérhetők előbb (az `available_strategy_names`
+    szerint), utánuk a kikapcsoltak."""
+    avail = available_strategy_names(cfg)
+    rest = [n for n in _all_registered_ordered(cfg) if n not in avail]
+    return {**{n: True for n in avail}, **{n: False for n in rest}}
 
 
 def default_strategy_name(cfg: dict) -> str:
@@ -154,5 +192,5 @@ __all__ = [
     "MarketData", "Cell", "Timeframe",
     "get_strategy", "get_strategy_by_name", "default_strategy_name",
     "enabled_strategy_names", "strategies_for", "registered_strategy_names",
-    "available_strategy_names",
+    "available_strategy_names", "strategy_availability",
 ]

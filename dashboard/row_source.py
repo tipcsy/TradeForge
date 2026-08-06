@@ -126,7 +126,7 @@ def row_data(symbol: str, ds, strategy_names, cfg: dict = None,
              params: dict = None, pair_cfg: dict = None, *,
              positions=None, owner_of=None, risk_of=None, quality_of=None,
              opt_of=None, live_of=None, stage_order_of=None,
-             opt_enabled_of=None, opt_state_of=None,
+             opt_enabled_of=None, opt_state_of=None, enabled_of=None,
              on_toggle=None, on_opt=None, on_stages=None,
              on_symbol=None, on_align=None, on_spread=None) -> dict:
     """Egy instrumentum sorának adata a `live_row.LiveRow` számára.
@@ -138,6 +138,17 @@ def row_data(symbol: str, ds, strategy_names, cfg: dict = None,
     `live_of(symbol, strategy) -> bool`    — fut-e a stratégia
     `opt_enabled_of(symbol, strategy) -> bool` — optimalizálható-e MOST
                   (alap: „nem kereskedik" — a futás felülírná a paraméterfájlt)
+    `enabled_of(symbol, strategy) -> bool` — engedélyezett-e a stratégia EZEN a
+                  páron (`pairs.<sym>.strategies`). Alap: True.
+
+    MIÉRT KELL az `enabled_of`. A sor MINDEN instrumentumon UGYANAZT a stratégia-
+    listát kapja (`available_strategies`), különben a tábla oszlopai nem állnának
+    egy vonalban. A motor viszont a pár SAJÁT listájából dolgozik. E nélkül a
+    jelölés nélkül egy nem engedélyezett stratégia blokkja pontosan úgy néz ki,
+    mint egy engedélyezetté — Play gombbal együtt —, és az indítás néma no-op
+    volna. A blokk ezért NEM tűnik el (az oszlopok maradnak), csak a Play/Stop
+    válik tétlenné; az OPT viszont MARAD, mert egy még nem engedélyezett
+    stratégiát épp optimalizálni akarsz, mielőtt bekapcsolod.
 
     A megnyitó visszahívások (`on_*`) a `classic` nézet kattintásait hozzák át:
     a jelzés-cella a stratégia paramétereit, az instrumentum NEVE az instrumentum
@@ -155,9 +166,16 @@ def row_data(symbol: str, ds, strategy_names, cfg: dict = None,
     for name in strategy_names or []:
         states = _g.evaluate(ctx, _g.effects_for(cfg or {}, symbol, name))
         q = quality_of(symbol, name) if quality_of else None
+        enabled = bool(enabled_of(symbol, name)) if enabled_of else True
+        # Ami nincs engedélyezve a páron, az nem is FUTHAT — ugyanaz a metszet,
+        # amit a motor képez (`_active = _enabled & _intent`). Itt is elvégezzük,
+        # hogy egyetlen hívó se felejthesse el (a `live_of` önmagában a szándékot
+        # is visszaadhatná).
         live = bool(live_of(symbol, name)) if live_of else False
+        live = live and enabled
         strategies.append({
             "name": name,
+            "enabled": enabled,
             "stages": _stages(ds, name,
                               stage_order_of(name) if stage_order_of else None),
             "frame": _g.frame_state(states),

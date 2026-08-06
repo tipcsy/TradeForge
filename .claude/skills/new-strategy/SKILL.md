@@ -45,12 +45,35 @@ tölthető modult a felderítés kihagyja (warning a logban).
 ## 3. Elérhetőség és konfiguráció
 
 - **`available_strategies`** (config.json): a program által felkínált stratégiák
-  whitelistje. Kihagyva = az összes regisztrált. A dashboardon a **⚙ Beállítás**
-  ablakból is állítható (oszlop-változás újraindítás után látszik).
+  ki-be kapcsolója — **térkép**: `{"wpr_sma": true, "ml_ai": false}`. A **⚙ Beállítás**
+  ablak ezt írja, MINDIG a teljes készlettel (a kikapcsoltakat is), hogy a fájlból
+  kiderüljön, mi LÉTEZIK. Oszlop-változás újraindítás után látszik. A régi LISTA alak
+  (whitelist) is olvasható. Kihagyva = az összes regisztrált. **Egy új stratégia-modul,
+  ami itt még nem szerepel, alapból ELÉRHETŐ** — nem tűnik el némán, kikapcsolni
+  kifejezetten kell (`false`).
 - **`strategy.name`** (config.json): az ALAPÉRTELMEZETT stratégia — ezt használja egy
   pár, ha nincs saját `pairs.<sym>.strategies` listája. Ha nincs az elérhetők között,
   az elsőre esik vissza.
 - **`pairs.<sym>.strategies`**: a tényleges per-instrumentum engedélyezés (több is).
+
+### ⚠ A KÉT LISTA nem ugyanaz — és a felület összemoshatja
+
+`available_strategies` = **mit MUTAT** a felület · `pairs.<sym>.strategies` = **mit FUTTAT**
+a motor. A 2.0 sor szándékosan az *available*-ből dolgozik (különben az oszlopok nem
+állnának egy vonalban), a motor viszont metszetet képez:
+
+```python
+_active = _enabled & _intent      # a pár `strategies` listája ∩ a run_state szándék
+```
+
+**Minden felületi „fut-e?" kérdésnek EZT a képletet kell tükröznie**
+(`gui.DashboardWindow._strategy_live`, `gui.OptimizerController._strategy_live`) — a
+szándék önmagában nem elég, mert a `run_state` bejegyzés akkor is megmarad, ha közben
+kikapcsoltad a stratégiát a páron. E nélkül a sor futónak mutat valamit, amivel a motor
+soha nem fut (v1.98.0-ban javítva; őrzi: `tests/test_strategy_availability.py`). Egy új
+stratégia bevezetésekor a `row_source.row_data` `enabled_of` seamje adja a különbséget
+a sornak: a nem engedélyezett blokk **marad** (oszlop-egyvonal), csak a Play tétlenedik
+— az OPT viszont használható, hisz épp optimalizálni akarod, mielőtt bekapcsolod.
 - **Stratégia-config fájl**: `strategy/config/<name>.json` — `indicators`, `sltp`,
   `position_mgmt`, `quality`, és az optimalizáló-tér + `constraints`. A váz-config ezt
   betöltéskor beolvasztja (`apply_strategy_config`), mentéskor kiszűri
