@@ -30,6 +30,10 @@ ROWS = {
     "mode":       ("Kötés módja",           True),
     "market":     ("Piac-előszűrő",         False),
     "market_viz": ("Piac-állapot sáv",      False),
+    # PÉNZT ÉRINT: a preset dönti el, mi történik a pozícióval 1R-nél (részleges
+    # zárás, stop-húzás, méret). Nem a config.json-ban él, hanem a per-pár
+    # `data/risk_mode.json`-ban — a tömeges alkalmazás mégis ugyanúgy működik rá.
+    "rr_preset":  ("Kockázatcsökkentés",    True),
 }
 
 

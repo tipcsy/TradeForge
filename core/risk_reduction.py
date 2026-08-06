@@ -233,6 +233,29 @@ def can_reduce_lot(cur_lot: float, min_lot: float, lot_step: float) -> bool:
 PARTIAL_CLOSE_PRESETS = (PRESET_HALVING, PRESET_SHIELD, PRESET_SHIELD_FIBO)
 
 
+def preset_blockers(cur_lot, min_lot: float, lot_step: float,
+                    netting: bool = False) -> dict:
+    """`{preset: MIÉRT nem választható}` — csak a TILTOTTAK szerepelnek benne.
+
+    EGY igazságforrás a felületnek: a Pozíciók-fül menüje ÉS az instrumentum-ablak
+    preset-választója is ezt hívja, tehát nem tudnak szétcsúszni (korábban a
+    szabály csak a menüben élt, kézzel bemásolva).
+
+    `cur_lot=None` → nincs (még) nyitott pozíció: a lot-alapú tiltás ilyenkor NEM
+    érvényes, mert a jövőbeli belépő mérete még nem ismert. A netting-korlát
+    viszont akkor is áll: az a SZÁMLA tulajdonsága, nem a pozícióé.
+
+    Tiszta függvény (se MT5, se config) — a hívó méri be a számlát és a lotot."""
+    if netting:
+        # NETTING/EXCHANGE számla: egy szimbólumon egy nettó pozíció lehet, így a
+        # kockázatmentes runner mellé nyíló új belépő ÖSSZEVONÓDNA vele — a
+        # részleges záráson alapuló technikák nem működnének helyesen.
+        return {p: "NETTING számla" for p in PARTIAL_CLOSE_PRESETS}
+    if cur_lot is not None and not can_reduce_lot(cur_lot, min_lot, lot_step):
+        return {p: "nem felezhető" for p in PARTIAL_CLOSE_PRESETS}
+    return {}
+
+
 @dataclass
 class Plan:
     """Amit a technika 1R-nél tesz — a motor ezt hajtja végre."""

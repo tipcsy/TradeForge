@@ -2746,17 +2746,27 @@ class DashboardWindow:
 
         legend = tk.Frame(parent, bg=BG, pady=2)
         legend.pack(fill="x", padx=6)
-        for text, col in [
-            ("■ LIVE", FG_GREEN), ("■ STOPPED", FG_GRAY),
-            ("⏹ Kivezetés (nincs új belépő)", FG_ORANGE),
-            ("■ Nem tanított", FG_GRAY_DIM),
-            ("■ Optimalizálás", FG_YELLOW), ("✦ Kockázatmentes", FG_CYAN),
-            ("Kockázatcsökk. (kattints):", FG_GRAY),
-            ("R Risky", FG_ORANGE), ("F Felező", FG_CYAN), ("P Pajzs", FG_GREEN),
-            ("Fi Fibo", FG_YELLOW), ("H Harmados", FG_PURPLE),
-            ("PF Pajzs↔Fibo", FG_TEAL),
-        ]:
-            tk.Label(legend, text=text, bg=BG, fg=col, font=small_font, padx=6).pack(side="left")
+        # A jelmagyarázat a `classic` nézet SZÍNKÓDJAIT írja le: ott a szimbólum
+        # neve az állapot szerint színeződik, és a soron van egy kattintható „R"
+        # (kockázatcsökkentő preset) gomb. A 2.0 sorban EGYIK SEM létezik — a
+        # szimbólum mindig fehér, preset-cella pedig nincs —, tehát ott mind a 12
+        # elem félrevezet, és elvisz egy sávnyi helyet a főképernyőről.
+        #
+        # Ezért config-vezérelt (`dashboard.show_legend`), és az ALAPÉRTELMEZÉS
+        # elrendezés-függő: `classic`-ban BE (ott igaz), `live2`-ben KI.
+        if self._show_legend():
+            for text, col in [
+                ("■ LIVE", FG_GREEN), ("■ STOPPED", FG_GRAY),
+                ("⏹ Kivezetés (nincs új belépő)", FG_ORANGE),
+                ("■ Nem tanított", FG_GRAY_DIM),
+                ("■ Optimalizálás", FG_YELLOW), ("✦ Kockázatmentes", FG_CYAN),
+                ("Kockázatcsökk. (kattints):", FG_GRAY),
+                ("R Risky", FG_ORANGE), ("F Felező", FG_CYAN), ("P Pajzs", FG_GREEN),
+                ("Fi Fibo", FG_YELLOW), ("H Harmados", FG_PURPLE),
+                ("PF Pajzs↔Fibo", FG_TEAL),
+            ]:
+                tk.Label(legend, text=text, bg=BG, fg=col, font=small_font,
+                         padx=6).pack(side="left")
 
         # ── Visszaszámláló-sáv (közös, minden instrumentumnál azonos) ───────
         # Config-vezérelt: dashboard.countdown_timeframes (percek listája) vagy
@@ -2864,6 +2874,20 @@ class DashboardWindow:
     def _layout_mode(self) -> str:
         """`classic` (alap) vagy `live2`. A configból: `dashboard.layout`."""
         return str((self.cfg.get("dashboard") or {}).get("layout", "classic"))
+
+    def _show_legend(self) -> bool:
+        """Látszik-e a felső jelmagyarázat-sáv (`dashboard.show_legend`).
+
+        HIÁNYZÓ kulcs → az ELRENDEZÉS dönt: `classic`-ban BE (a szín-jelmagyarázat
+        ott érvényes: a szimbólum állapot szerint színeződik, és a soron ott az
+        „R" preset-gomb), `live2`-ben KI (ott egyik elem sem igaz).
+
+        Így senki nem veszít: a régi nézet változatlan, a 2.0-ból eltűnik a
+        félrevezető sáv, és aki mégis kéri, egy kulccsal visszakapja."""
+        v = (self.cfg.get("dashboard") or {}).get("show_legend")
+        if v is None:
+            return self._layout_mode() != "live2"
+        return bool(v)
 
     def _build_live2(self, parent):
         """A 2.0 tábla felépítése. A sor-adatot a `dashboard.row_source` állítja
@@ -3832,6 +3856,50 @@ class DashboardWindow:
                        bg=BG, fg=FG_WHITE, selectcolor=BG_HEADER, font=self._small_font,
                        activebackground=BG, activeforeground=FG_WHITE).pack(anchor="w", padx=20)
 
+        # ── Kockázatcsökkentő PRESET — instrumentumonként EGY ────────────────
+        # MIÉRT ITT. A preset PER INSTRUMENTUM él (nem per stratégia és nem per
+        # pozíció), tehát ez az ablak a helye — nem a stratégia-paraméterek ablaké.
+        # A `classic` sor „R" gombja állította; a 2.0 elrendezésben viszont NINCS
+        # ilyen cella, így egy nyitott pozíció NÉLKÜLI párra sehogy nem lehetett
+        # beállítani (a Pozíciók-fül menüje csak meglévő pozíciónál nyílik).
+        from core import rr_state as _rrs
+        from core import risk_reduction as _rrx
+        from core import mt5_connector as _mc
+        _pl = (self.cfg.get("pairs", {}).get(symbol, {}) or {})
+        try:
+            _netting = _mc.is_netting()
+        except Exception:
+            _netting = False
+        # cur_lot=None: nincs (még) pozíció → a lot-alapú tiltás nem érvényes, a
+        # jövőbeli belépő mérete még nem ismert. A netting-korlát viszont áll.
+        _lots_now = [float(p.get("volume", 0.0) or 0.0)
+                     for p in getattr(self, "_mt5_cache", {}).get("positions_detail", [])
+                     if p.get("symbol") == symbol]
+        _blocked_rr = _rrx.preset_blockers(
+            max(_lots_now) if _lots_now else None,
+            float(_pl.get("min_lot", 0.01) or 0.01),
+            float(_pl.get("lot_step", 0.01) or 0.01), _netting)
+        tk.Label(popup, text="Kockázatcsökkentés (a pár MINDEN mostani és jövőbeli "
+                             "pozíciójára hat):",
+                 bg=BG, fg=FG_GRAY, font=self._small_font).pack(anchor="w", padx=12,
+                                                                pady=(8, 2))
+        _rr_choices = [_rrs.NAME[p] + (f"  — {_blocked_rr[p]}" if p in _blocked_rr else "")
+                       for p in _rrs.CYCLE]
+        _rr_by_label = {lbl: p for lbl, p in zip(_rr_choices, _rrs.CYCLE)}
+        _rr_cur = _rrs.effective_preset(symbol)
+        rr_var = tk.StringVar(value=next(
+            (l for l, p in _rr_by_label.items() if p == _rr_cur), _rrs.NAME[_rr_cur]))
+        _om3 = tk.OptionMenu(popup, rr_var, *_rr_choices)
+        _om3.config(bg=BG_HEADER, fg=FG_WHITE, font=self._small_font, relief="flat",
+                    highlightthickness=0, activebackground=BG_HEADER)
+        _om3["menu"].config(bg=BG_HEADER, fg=FG_WHITE)
+        # A TILTOTT tételek látszanak (az OKKAL), de nem választhatók — ugyanaz a
+        # recept, mint a Pozíciók-fül menüjében: a néma hiány rejtélyes volna.
+        for _i, _p in enumerate(_rrs.CYCLE):
+            if _p in _blocked_rr:
+                _om3["menu"].entryconfig(_i, state="disabled")
+        _om3.pack(anchor="w", padx=20)
+
         # ── „Minden instrumentumra" ─────────────────────────────────────────
         # SZÁNDÉKOSAN nem az egész ablakot viszi át, hanem CSAK AZT, AMIT ITT
         # MEGVÁLTOZTATTÁL. Egy mindent-átmásoló pipa ugyanis a nem piszkált
@@ -3845,6 +3913,7 @@ class DashboardWindow:
             "mode":   {n: _tm.mode_of(self.cfg, symbol, n)         for n in _names},
             "market":     (_ms.market_name_of(_pc0) or "Nincs"),
             "market_viz": bool(_pc0.get("market_viz", True)),
+            "rr_preset":  _rr_cur,
         }
         all_var = tk.BooleanVar(value=False)
         tk.Checkbutton(popup, text="A MÓDOSÍTOTT sorokat minden instrumentumra",
@@ -3872,6 +3941,7 @@ class DashboardWindow:
                            for n in _names},
                 "market":     ms_var.get(),
                 "market_viz": bool(viz_var.get()),
+                "rr_preset":  _rr_by_label.get(rr_var.get(), _rr_cur),
             }
 
         # A sor-metaadat és a „mi terjed" döntés a core.bulk_apply-ban él (tiszta
@@ -3910,6 +3980,21 @@ class DashboardWindow:
                     pc.pop("market_viz", None)     # True az alap → ne szennyezze
                 else:
                     pc["market_viz"] = False
+            if "rr_preset" in rows:
+                # NEM a config.json-ba megy: a preset a per-pár `data/risk_mode.json`-ban
+                # él (`rr_state`). Ugyanazt az utat járjuk, mint a Pozíciók-fül menüje
+                # és a `classic` „R" gombja — a régi `risky_mode` szinkronban tartásával
+                # együtt, hogy az azt olvasó live/backtest változatlanul működjön.
+                from core import risky_mode as _rm
+                _rrs.set_preset(sym, cur_vals["rr_preset"])
+                try:
+                    _rm.set_risky(sym, cur_vals["rr_preset"] == _rrx.PRESET_RISKY)
+                except Exception:
+                    pass
+                _ds_rr = self.dashboard_ref.get(sym)
+                if _ds_rr is not None:
+                    _ds_rr.rr_preset = cur_vals["rr_preset"]
+                    _ds_rr.risky = (cur_vals["rr_preset"] == _rrx.PRESET_RISKY)
             # A chart azonnal kövesse: egyszeri CLEAR + friss pillanatkép, hogy a
             # kikapcsolt stratégia objektumai eltűnjenek (a viz-modell nem töröl
             # magától). Ha EGYIK stratégia rajza sem látszik, a motor meg sem
@@ -4830,15 +4915,13 @@ class DashboardWindow:
                  for p in getattr(self, "_mt5_cache", {}).get("positions_detail", [])
                  if p.get("symbol") == symbol]
         cur_lot  = max(_lots) if _lots else None
-        halvable = cur_lot is None or _rrx.can_reduce_lot(cur_lot, min_lot, lot_step)
-
-        # NETTING/EXCHANGE számla: egy szimbólumon csak EGY nettó pozíció lehet, így
-        # a kockázatmentes runner mellé nyíló új belépő összevonódna vele → a részleges
-        # záráson alapuló technikák nem működnek helyesen. Ilyenkor NEM választhatók.
+        # MELYIK preset nem választható és MIÉRT — a KÖZÖS szabályból (ugyanezt
+        # hívja az instrumentum-ablak preset-választója is, lásd
+        # `risk_reduction.preset_blockers`).
         from core import mt5_connector as _mc
         _netting = _mc.is_netting()
-        if _netting:
-            halvable = False
+        _blocked = _rrx.preset_blockers(cur_lot, min_lot, lot_step, _netting)
+        halvable = not _blocked
 
         menu = tk.Menu(self.root, tearoff=0, bg=BG_HEADER, fg=FG_WHITE,
                        activebackground=BTN_OPT_BG, activeforeground=FG_ON_ACCENT)
@@ -4853,11 +4936,10 @@ class DashboardWindow:
                 label=f"  (a lot {cur_lot:.2f} < 2× min {min_lot:.2f} → Felező/Pajzs nem osztható)",
                 state="disabled")
         for preset in _rrs.CYCLE:
-            if preset in _rrx.PARTIAL_CLOSE_PRESETS and not halvable:
+            if preset in _blocked:
                 # Netting számla / nem felezhető lot → a részleges zárást igénylő
-                # preset nem választható.
-                _why = "NETTING számla" if _netting else "nem felezhető"
-                menu.add_command(label=f"    {_rrs.NAME[preset]}  — {_why}",
+                # preset nem választható. Az OKOT is kiírjuk.
+                menu.add_command(label=f"    {_rrs.NAME[preset]}  — {_blocked[preset]}",
                                  state="disabled")
                 continue
             menu.add_command(

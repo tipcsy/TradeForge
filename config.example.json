@@ -28,6 +28,8 @@
     "watchdog_threshold_sec": 2.0,
     "_comment_layout": "Dashboard-elrendezés: 'classic' (ALAP, a megszokott tábla) | 'live2' (Dashboard 2.0: egy sor = egy instrumentum, a stratégiák VÍZSZINTESEN, összecsukható kapu- és stratégia-blokkokkal, fix–görgethető–fix szélességgel). A 2.0 kísérleti: bármikor visszaváltható 'classic'-ra.",
     "layout": "classic",
+    "_comment_legend": "Látszik-e a felső JELMAGYARÁZAT-sáv (LIVE/STOPPED/Kivezetés színek + a kockázatcsökkentő preset betűkódjai). KIHAGYVA az elrendezés dönt: 'classic'-ban BE (ott érvényes — a szimbólum neve állapot szerint színeződik, és a soron ott a kattintható 'R' preset-gomb), 'live2'-ben KI (ott a szimbólum mindig fehér és nincs preset-cella, tehát mind a 12 elem félrevezetne, miközben elvisz egy sávnyi helyet). true/false-szal felülírható.",
+    "show_legend": null,
     "_comment_pnl": "CSAK a 'live2' elrendezésben: mit mutasson a Pozíció és a Napi P&L cella. 'money' (ALAP) = csak dollár | 'r' = csak R (1 R = a belépéskor kockáztatott összeg) | 'both' = mindkettő. Az oszlopszélesség követi. Az R csak ott van, ahol a belépéskori kockázat rögzült (v1.81.0 óta); ezért nem a 'both' az alapértelmezés — enélkül a cella fele üresen állna.",
     "pnl_display": "money",
     "_comment_countdown": "Mely időkeretek visszaszámlálója látszik a felső sávban (percben). Üres/hiányzó = a stratégia összes időkerete.",
