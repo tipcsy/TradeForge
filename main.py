@@ -34,7 +34,17 @@ CFG_PATH = ROOT / "config.json"
 def load_cfg() -> dict:
     # A váz config.json + az aktív stratégia saját beállításainak beolvasztása.
     from strategy.settings import load_config
-    return load_config(CFG_PATH)
+    cfg = load_config(CFG_PATH)
+    # KOHERENCIA-ellenőrzés: az önmagában érvényes, de önellentmondó beállítások
+    # kiírása (pl. bekapcsolt kapu, aminek nincs mit mérnie). MINDEN parancs ezen
+    # a függvényen jön be, tehát a live, a backteszt és az optimalizálás ugyanazt
+    # a képet kapja. Csak SZÓL — nem javít és nem gátol (lásd core/config_check.py).
+    try:
+        from core import config_check
+        config_check.log_findings(cfg)
+    except Exception:
+        pass
+    return cfg
 
 
 def _setup_log():

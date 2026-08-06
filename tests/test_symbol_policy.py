@@ -26,11 +26,23 @@ check("per-par nelkul a globalis ervenyes", sp.resolve(CFG, "UsaTec") == sp.ONE_
 check("ervenytelen per-par ertek -> a GLOBALIS ervenyesul (+ figyelmeztetes)",
       sp.resolve(CFG, "UK100") == sp.ONE_PER_SYMBOL)
 check("ervenytelen GLOBALIS is -> alapertelmezes",
-      sp.resolve({"trading": {"same_symbol_policy": "izeee"}}, "X") == sp.INDEPENDENT)
+      sp.resolve({"trading": {"same_symbol_policy": "izeee"}}, "X") == sp.DEFAULT)
 check("a figyelmeztetes EGYSZER megy ki (nem spam-el)",
       len([k for k in sp._warned]) >= 1)
-check("ures config -> alapertelmezes", sp.resolve({}, "X") == sp.INDEPENDENT)
-check("az alapertelmezes az EDDIGI viselkedes", sp.DEFAULT == sp.INDEPENDENT)
+check("ures config -> alapertelmezes", sp.resolve({}, "X") == sp.DEFAULT)
+# v2.0.0: az alapertelmezes `independent` -> `no_opposite`. A hazirend v1.69.0 ota
+# keszen allt es be volt kotve, de a config.json-ba sosem kerult bele a kulcs, az
+# alap pedig a megengedo `independent` volt -> a mechanizmus NEMAN tetlen maradt.
+check("az alapertelmezes no_opposite (v2.0.0)", sp.DEFAULT == sp.NO_OPPOSITE)
+# A valtas IRANYA teszi biztonsagossa: a hazirend csak SZIGORIT. Ha az uj alap
+# barhol MEGENGEDOBB lenne a reginel, egy alapertelmezes-valtas varatlanul UJ
+# poziciot nyithatna — ezt zarjuk ki, minden allapotra.
+for _sig in ("BUY", "SELL"):
+    for _book in ([], ["BUY"], ["SELL"], ["BUY", "SELL"]):
+        _old = sp.blocks(sp.INDEPENDENT, _sig, _book)
+        _new = sp.blocks(sp.DEFAULT, _sig, _book)
+        check(f"az uj alap sosem MEGENGEDOBB a reginel ({_sig}, {_book})",
+              not (_old is not None and _new is None))
 check("kis-nagybetu es szokoz turese",
       sp.resolve({"trading": {"same_symbol_policy": "  No_Opposite "}}, "X") == sp.NO_OPPOSITE)
 

@@ -8,11 +8,22 @@ SZEMBE is. Ez nem feltétlenül baj (két önálló modell két önálló tézis
 
 Ezért a viselkedés VÁLASZTHATÓ, nem bedrótozott:
 
-    "independent"     — a stratégiák egymástól függetlenek (ALAPÉRTELMEZÉS,
-                        a korábbi viselkedés bitazonos mása)
+    "independent"     — a stratégiák egymástól függetlenek (a v1.69.0–1.99.0
+                        alapértelmezése; a több-stratégia előtti viselkedés mása)
     "one_per_symbol"  — szimbólumonként EGY pozíció: aki előbb jelez, az köt
     "no_opposite"     — azonos irányba többen is nyithatnak (piramis), de
-                        ELLENTÉTES irányba nem
+                        ELLENTÉTES irányba nem   ← **ALAPÉRTELMEZÉS (v2.0.0)**
+
+Az alapértelmezés v2.0.0-ban `independent`-ről `no_opposite`-ra változott. MIÉRT:
+a házirend v1.69.0 óta készen állt, teszteltten és bekötve — de a `config.json`-ba
+sosem került bele a kulcs, az alapértelmezés pedig a megengedő `independent` volt,
+így a mechanizmus **nyolc napon át némán tétlen maradt**. Ugyanaz a minta, ami a
+2026-08-05-i átvizsgálás gyökere volt: a config csak az ELTÉRÉST rögzítette, tehát
+egy kész funkció úgy nézett ki, mintha nem is lenne.
+
+A váltás IRÁNYA teszi biztonságossá: a házirend csak SZIGORÍTHAT (lásd lent), tehát
+egy alapértelmezés-váltás sosem nyithat váratlanul új pozíciót — legfeljebb kihagy
+egyet, és azt meg is indokolja a naplóban.
 
 Config (a per-pár nyer a globális fölött):
 
@@ -41,7 +52,9 @@ ONE_PER_SYMBOL = "one_per_symbol"
 NO_OPPOSITE = "no_opposite"
 POLICIES = (INDEPENDENT, ONE_PER_SYMBOL, NO_OPPOSITE)
 
-DEFAULT = INDEPENDENT
+# v2.0.0: `independent` → `no_opposite` (lásd a modul-doksit). Csak szigorít, tehát
+# a váltás sosem nyit váratlanul új pozíciót.
+DEFAULT = NO_OPPOSITE
 
 
 _warned: set = set()

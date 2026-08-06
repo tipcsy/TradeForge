@@ -1893,8 +1893,11 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
     # SAJÁT pozícióira vonatkozik, és MINDIG érvényes.
     already_open = len(symbol_positions) > 0
     # Szimbólum-házirend: mit tehet EGY páron TÖBB stratégia egyszerre (config —
-    # lásd core/symbol_policy). Csak SZIGORÍTHAT az `independent` alaphoz képest,
-    # tehát a bekapcsolása sosem nyit váratlanul új pozíciót.
+    # lásd core/symbol_policy). Csak SZIGORÍTHAT: sosem nyit váratlanul új
+    # pozíciót, legfeljebb kihagy egyet — indoklással a naplóba.
+    # v2.0.0 óta az ALAPÉRTELMEZÉS `no_opposite`, tehát ez az ág alapból FUT (előtte
+    # az `independent` alap miatt gyakorlatilag sosem). Nem drágább: az
+    # `_all_positions` már a kezünkben van, nincs plusz MT5-hívás.
     _policy_block = None
     if signal != "NONE" and not already_open:
         _pol = _sym_policy.resolve(_run_cfg, symbol)
