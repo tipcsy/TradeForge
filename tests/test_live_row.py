@@ -161,6 +161,51 @@ if TK_OK:
           abs(demo["total"]["position"]["money"]
               - sum(s["position"]["money"] for s in demo["strategies"])) < 1e-9)
 
+    # ══ Az „Együtt" cella BERAGADASA (elesben bejelentve, v2.1.2) ═════════
+    #
+    # A sor INDULASKOR epul fel, amikor a TF-egyuttallas meg URES (a piaci
+    # adat-loop 5 mp-et var az elso lekeres elott). Az `_align_cell` ilyenkor egy
+    # `—` cimket rajzol es KILEP — a pottylistat meg sem hozza letre. Az
+    # `update()` viszont csak MEGLEVO pottyoket szinez, tehat amikor megjott az
+    # adat, a cella `—` maradt. A `structure_key` pedig nem vette eszre a 0 -> 3
+    # valtozast, igy a tabla SOSEM epitette ujra: az oszlop az EGESZ
+    # munkamenetre beragadt.
+
+    from dashboard.theme import FG_GREEN as _FG_GREEN
+
+    def _row(signs):
+        d = lr.demo_row()
+        d["gates"]["align"] = {"signs": signs}
+        return d
+
+    _root2 = tk.Tk()
+    try:
+        _f = {"mono": tkfont.Font(family="Consolas", size=10),
+              "mono_bold": tkfont.Font(family="Consolas", size=10, weight="bold"),
+              "small": tkfont.Font(family="Segoe UI", size=9)}
+
+        _a = lr.LiveRow(_root2, _row([]), _f)
+        check("A HIBA: ures jelekkel epult sor -> nincs pottylista",
+              _a._dots.get("align") is None)
+        check("JAVITAS: a megjott adat SZERKEZET-valtozas -> a tabla ujraepit",
+              _a.update(_row([1, -1, -1])) is False)
+
+        _b = lr.LiveRow(_root2, _row([1, -1, -1]), _f)
+        check("meglevo pottyok szinvaltasa viszont HELYBEN megy (nem epit ujra)",
+              _b.update(_row([1, 1, 1])) is True)
+        check("...es a szinek tenyleg valtoznak",
+              all(w.cget("fg") == _FG_GREEN for w in _b._dots["align"]))
+        check("ures -> ures: nincs felesleges ujraepites",
+              lr.LiveRow(_root2, _row([]), _f).update(_row([])) is True)
+        check("HAROM -> KETTO idosik is ujraepitest kivan (mas cellaszam)",
+              lr.LiveRow(_root2, _row([1, 1, 1]), _f).update(_row([1, 1])) is False)
+        _c, _d2 = lr.LiveRow(_root2, lr.demo_row(), _f), lr.demo_row()
+        _d2["strategies"][0]["stages"] = ["green"]
+        check("a strategia-stadiumok szama tovabbra is a kulcs resze",
+              _c.update(_d2) is False)
+    finally:
+        _root2.destroy()
+
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")
 sys.exit(0 if all(results) else 1)

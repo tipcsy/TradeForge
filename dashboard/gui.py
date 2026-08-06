@@ -5361,13 +5361,38 @@ class DashboardWindow:
             _tfa_en, _tfa_tfs, _tfa_sma, _ = _tfa.config_for(self.cfg, symbol)
             if _tfa_en:
                 _closes = _mc.tf_closes(symbol, _tfa_tfs, _tfa_sma + 5)
+                # HIÁNYZÓ idősík: a `tf_closes` a nem elérhetőt CSENDBEN kihagyja,
+                # az `alignment` pedig 0-t (semleges pötty) ad rá — vagyis egy
+                # tartósan üres idősík úgy néz ki, mint egy semleges piac.
+                # Szimbólumonként EGYSZER kiírjuk, hogy ne kelljen találgatni.
+                _miss = [t for t in _tfa_tfs if len(_closes.get(t) or []) < _tfa_sma]
+                if _miss and symbol not in getattr(self, "_tfa_warned", set()):
+                    if not hasattr(self, "_tfa_warned"):
+                        self._tfa_warned = set()
+                    self._tfa_warned.add(symbol)
+                    import logging as _logging
+                    _logging.getLogger(__name__).warning(
+                        "%s — TF-együttállás: nincs elég gyertya (%s; kell "
+                        "%d). Az érintett idősík SEMLEGES pöttyöt kap, és a "
+                        "kapu emiatt blokkolhat.", symbol,
+                        ", ".join(_tfa.TF_LABEL.get(t, str(t)) for t in _miss),
+                        _tfa_sma)
                 ds.tf_align_dir, ds.tf_align_signs = _tfa.alignment(
                     _closes, _tfa_tfs, _tfa_sma)
                 ds.tf_align_labels = _tfa.labels(_tfa_tfs)
             else:
                 ds.tf_align_signs, ds.tf_align_dir = [], None
-        except Exception:
-            pass
+        except Exception as _e:
+            # Korábban néma `pass` állt itt. Az „Együtt" oszlop üresen maradása
+            # PONTOSAN így nézne ki, mint egy hiányzó adat — a kettőt meg kell
+            # tudni különböztetni. Szimbólumonként egyszer szólunk.
+            if symbol not in getattr(self, "_tfa_err", set()):
+                if not hasattr(self, "_tfa_err"):
+                    self._tfa_err = set()
+                self._tfa_err.add(symbol)
+                import logging as _logging
+                _logging.getLogger(__name__).warning(
+                    "%s — TF-együttállás számítási hiba: %s", symbol, _e)
         # 'Utolsó opt' PERZISZTENS címke (a done-marker idejéből) — ha nem épp optimalizál.
         # Így restart / opt közben sem tűnik el (nem az in-memory 'Kész ✓'-ra hagyatkozik).
         if not _opt_activity.symbol_busy(symbol):

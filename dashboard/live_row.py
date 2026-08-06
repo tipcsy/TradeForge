@@ -540,11 +540,25 @@ class LiveRow:
 
     # ── HELYBEN frissítés ────────────────────────────────────────────────
     def structure_key(self) -> tuple:
-        """A sor SZERKEZETÉT azonosító kulcs: a stratégiák neve+sorrendje és a
-        stádiumok száma. Ha ez változik, a sort ÚJRA KELL ÉPÍTENI (más cellák
-        kellenek); ha nem, elég a helyben frissítés."""
-        return tuple((s.get("name", ""), len(s.get("stages") or []))
-                     for s in (self.data.get("strategies") or []))
+        """A sor SZERKEZETÉT azonosító kulcs: a stratégiák neve+sorrendje, a
+        stádiumok száma és az IDŐSÍK-PÖTTYÖK SZÁMA. Ha ez változik, a sort ÚJRA
+        KELL ÉPÍTENI (más cellák kellenek); ha nem, elég a helyben frissítés.
+
+        MIÉRT VAN BENNE AZ „EGYÜTT" PÖTTYEINEK SZÁMA (v2.1.2). A sor INDULÁSKOR
+        épül fel, amikor a TF-együttállás még ÜRES (a piaci adat-loop 5 mp-et vár
+        az első lekérés előtt). Az `_align_cell` ilyenkor egy `—` címkét rajzol és
+        KILÉP — a pötty-listát (`_dots["align"]`) meg sem hozza létre. Az `update()`
+        viszont csak MEGLÉVŐ pöttyöket színez át, tehát amikor megjött az adat, a
+        cella `—` maradt… és mivel a kulcs nem vette észre a 0 → 3 változást, a
+        tábla sosem építette újra. Az „Együtt" oszlop így az EGÉSZ munkamenetre
+        beragadt (élesben bejelentve: „az együttállás nem működik").
+
+        Ugyanaz a fajta hiba, mint a stádium-pöttyöknél — azért van ott a
+        `len(stages)` is. A tanulság: MINDEN olyan cella, ami VÁLTOZÓ SZÁMÚ
+        widgetből áll, tartozzon bele ebbe a kulcsba."""
+        return (tuple((s.get("name", ""), len(s.get("stages") or []))
+                      for s in (self.data.get("strategies") or [])),
+                len(((self.data.get("gates") or {}).get("align") or {}).get("signs") or []))
 
     def _set(self, key, text, fg):
         """Egy cella átírása — CSAK ha tényleg változott.
@@ -564,8 +578,9 @@ class LiveRow:
 
         `False`, ha a SZERKEZET változott (más stratégiák/stádiumok) — ilyenkor a
         hívó (a tábla) újraépít. Így a gyakori eset olcsó, a ritka eset helyes."""
-        new_key = tuple((s.get("name", ""), len(s.get("stages") or []))
-                        for s in (data.get("strategies") or []))
+        new_key = (tuple((s.get("name", ""), len(s.get("stages") or []))
+                         for s in (data.get("strategies") or [])),
+                   len(((data.get("gates") or {}).get("align") or {}).get("signs") or []))
         if new_key != self.structure_key():
             return False
         self.data = data
