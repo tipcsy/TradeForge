@@ -39,7 +39,8 @@ from dashboard.theme import (BG, BG_HEADER, BG_ROW_ODD, BG_ROW_EVEN, FG_WHITE,
 PAD = _lr.PAD
 GAP = _lr.GAP
 ROW_PAD = 1
-BAR_H = 8
+BAR_H = 8      # a vízszintes sáv magassága
+BAR_W = 14     # a FÜGGŐLEGESÉ szélesebb: azt húzod a leggyakrabban
 
 _FRAME_COLOR = {"blocked": FG_RED, "reduced": FG_ORANGE}
 
@@ -69,50 +70,68 @@ def groups(strategies, collapsed: dict = None) -> list:
 
 
 class _ThinScrollbar(tk.Canvas):
-    """Vékony, témához illő vízszintes gördítősáv (a `live_table`-ből átemelve:
-    a natív `tk.Scrollbar` Windowson figyelmen kívül hagyja a `bg`-t)."""
+    """Vékony, TÉMÁHOZ ILLŐ gördítősáv — vízszintes ÉS függőleges.
 
-    def __init__(self, parent, canvases):
-        super().__init__(parent, height=BAR_H, bg=BG, highlightthickness=0, bd=0)
+    Miért nem `tk.Scrollbar`: Windowson a natív megjelenítést használja, és a
+    `bg`/`troughcolor` beállítást figyelmen kívül hagyja — a sötét táblán vakító
+    fehér csík marad. (A `live_table` ugyanezért rajzolja a sajátját; itt a
+    függőleges változat is kellett, mert a vászon-tábla maga görget.)
+
+    A FÜGGŐLEGES szándékosan szélesebb (`BAR_W`), mint a vízszintes magassága:
+    azt húzod a leggyakrabban, és egy 8 px-es csíkot nehéz eltalálni."""
+
+    def __init__(self, parent, canvases, orient="horizontal"):
+        self._vert = (orient == "vertical")
+        kw = ({"width": BAR_W} if self._vert else {"height": BAR_H})
+        super().__init__(parent, bg=BG, highlightthickness=0, bd=0, **kw)
         self._cs = list(canvases)
         self._lo, self._hi = 0.0, 1.0
-        self._thumb = self.create_rectangle(0, 0, 0, BAR_H, fill=BG_HEADER,
-                                            outline="")
-        self._drag_x = None
+        self._thumb = self.create_rectangle(0, 0, 0, 0, fill=BG_HEADER, outline="")
+        self._drag = None
         self.bind("<Configure>", lambda _e: self._redraw())
         self.bind("<Button-1>", self._press)
-        self.bind("<B1-Motion>", self._drag)
-        self.bind("<ButtonRelease-1>", lambda _e: setattr(self, "_drag_x", None))
+        self.bind("<B1-Motion>", self._motion)
+        self.bind("<ButtonRelease-1>", lambda _e: setattr(self, "_drag", None))
 
     def set(self, lo, hi):
         self._lo, self._hi = float(lo), float(hi)
         self._redraw()
 
+    def _span(self) -> int:
+        return max(1, self.winfo_height() if self._vert else self.winfo_width())
+
     def _redraw(self):
-        w = max(1, self.winfo_width())
-        x0, x1 = self._lo * w, self._hi * w
-        if x1 - x0 < 24:
-            x1 = x0 + 24
-        self.coords(self._thumb, x0, 1, min(x1, w), BAR_H - 1)
+        n = self._span()
+        a, b = self._lo * n, self._hi * n
+        if b - a < 24:                      # túl rövid fogantyú nem megfogható
+            b = a + 24
+        b = min(b, n)
+        if self._vert:
+            self.coords(self._thumb, 1, a, BAR_W - 1, b)
+        else:
+            self.coords(self._thumb, a, 1, b, BAR_H - 1)
 
     def _moveto(self, frac):
         for c in self._cs:
-            c.xview_moveto(max(0.0, frac))
+            (c.yview_moveto if self._vert else c.xview_moveto)(max(0.0, frac))
+
+    def _pos(self, e):
+        return e.y if self._vert else e.x
 
     def _press(self, e):
-        w = max(1, self.winfo_width())
-        x0, x1 = self._lo * w, self._hi * w
-        if x0 <= e.x <= x1:
-            self._drag_x = e.x
+        n = self._span()
+        a, b = self._lo * n, self._hi * n
+        if a <= self._pos(e) <= b:
+            self._drag = self._pos(e)       # a fogantyún kezdtük → húzás
         else:
-            self._moveto(e.x / w - (self._hi - self._lo) / 2)
+            self._moveto(self._pos(e) / n - (self._hi - self._lo) / 2)
 
-    def _drag(self, e):
-        if self._drag_x is None:
+    def _motion(self, e):
+        if self._drag is None:
             return
-        w = max(1, self.winfo_width())
-        self._moveto(self._lo + (e.x - self._drag_x) / w)
-        self._drag_x = e.x
+        n = self._span()
+        self._moveto(self._lo + (self._pos(e) - self._drag) / n)
+        self._drag = self._pos(e)
 
 
 class CanvasTable:
@@ -170,10 +189,10 @@ class CanvasTable:
         body.pack(fill="both", expand=True)
 
         self._hc, self._bc = {}, {}
-        vsb = tk.Scrollbar(body, orient="vertical", command=self._yview)
         # A JOBB sáv kapja meg először a helyét (mint a widget-táblában), különben
         # a közép kiszorítaná a képernyőről.
-        vsb.pack(side="right", fill="y")
+        self._vbar = _ThinScrollbar(body, [], orient="vertical")
+        self._vbar.pack(side="right", fill="y")
         for pane, side in (("left", "left"), ("right", "right"), ("mid", "left")):
             wd = self._pane_width(pane)
             hc = tk.Canvas(head, bg=BG_HEADER, highlightthickness=0,
@@ -185,18 +204,24 @@ class CanvasTable:
             else:
                 hc.pack(side=side, fill="y")
                 bc.pack(side=side, fill="y")
-            bc.configure(yscrollcommand=vsb.set)
+            bc.configure(yscrollcommand=self._vbar.set)
             self._hc[pane], self._bc[pane] = hc, bc
 
         # A közép vízszintes görgetése: a fejléc és a törzs EGYÜTT mozog.
+        self._vbar._cs = list(self._bc.values())     # mind a három sáv EGYÜTT gördül
         self._hbar = _ThinScrollbar(self.frame, [self._hc["mid"], self._bc["mid"]])
         self._bc["mid"].configure(xscrollcommand=self._on_xscroll)
 
         self._draw_header()
         self._draw_rows(rows)
         self._sync_regions()
+        # ⚠ A görgetési tartományt SZÁNDÉKOSAN NEM kötjük `<Configure>`-re.
+        # Az a TARTALOMTÓL függ (oszlop-szélesség × sorszám), nem az ablakmérettől
+        # — átméretezéskor tehát nincs mit újraszámolni. Egy korábbi változat
+        # mégis rákötötte, és ezzel visszahozta pontosan azt a mintát, amit a
+        # widget-tábláról kimutattunk: a kezelő `configure()`-t hív, az ÚJABB
+        # `<Configure>`-t kelt. Mérve 75 → 156 ms/lépés volt az ára.
         for pane in ("left", "mid", "right"):
-            self._bc[pane].bind("<Configure>", lambda _e: self._sync_regions())
             self._bc[pane].bind("<Enter>", self._wheel_on)
             self._bc[pane].bind("<Leave>", self._wheel_off)
 

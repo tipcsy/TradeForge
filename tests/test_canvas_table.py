@@ -205,6 +205,68 @@ if TK_OK:
     check("ha egy soron sincs mert Piac/Lendulet, az oszlop KIMARAD",
           (0, "market") not in tbl4._items and (0, "momentum") not in tbl4._items)
 
+    # ══ 7. EGYETLEN fuggoleges gorgetosav ═══════════════════════════════
+    # Az elso eles proban KETTO latszott: a vaszon-tabla sajat gorgetese MELLE a
+    # gui.py regi, kulso gorgetheto vaszna is odatette a magaet. A kulsonek nem
+    # volt mit gorgetnie (teljes magassagu, INAKTIV sav), a belso pedig csak
+    # akkora helyet kapott, amekkorat a kulso adott — rovid fogantyu.
+    def scrollbars(w, out=None):
+        out = [] if out is None else out
+        for c in w.winfo_children():
+            if isinstance(c, tk.Scrollbar) or isinstance(c, ct._ThinScrollbar):
+                out.append(c)
+            scrollbars(c, out)
+        return out
+
+    tbl5 = ct.CanvasTable(root, fonts, rows=make_rows(3), collapsed={})
+    tbl5.frame.pack(fill="both", expand=True)
+    root.update_idletasks()
+    bars = scrollbars(tbl5.frame)
+    check("a tabla PONTOSAN egy fuggoleges gorgetosavot hoz",
+          len([b for b in bars if getattr(b, "_vert", False)]) == 1,
+          f"osszes sav={len(bars)}")
+    check("...es az NEM a natív (Windowson fehér, a sotet temahoz nem illo)",
+          not any(isinstance(b, tk.Scrollbar) for b in bars))
+
+    # A gui.py oldala: `canvas` elrendezesben a tabla NEM kerulhet a kulso,
+    # gorgetheto vaszonba — ez a szerkezeti feltetel, ami a ket savot okozta.
+    import dashboard.gui as G
+    from trading.live_trader import PairDashboardState
+    _theme._FONTS.clear()
+    G.DashboardWindow._start_bg_poller = lambda self: None
+    G.DashboardWindow._poll_mt5 = lambda self: None
+    G.OptimizerController._ensure_pool = lambda self: None
+    G.DashboardWindow._save_main_config = lambda self: None
+    cfgc = {"strategy": {"name": "wpr_sma"},
+            "available_strategies": {"wpr_sma": True},
+            "trading": {"account_risk_pct": 0.01, "max_open_slots": 4,
+                        "daily_loss_limit_pct": 0.015, "daily_loss_limit_usd": 0},
+            "dashboard": {"layout": "canvas"},
+            "pairs": {"GOLD": {"enabled": True, "point_size": 0.01,
+                               "pv1_point": 0.88, "min_lot": 0.01,
+                               "lot_step": 0.01, "strategies": ["wpr_sma"]}}}
+    ds = PairDashboardState(symbol="GOLD", trained=True, enabled=True)
+    ds.digits, ds.bid, ds.ask = 2, 2000.0, 2000.5
+    w = None
+    try:
+        w = G.DashboardWindow(cfgc, {"GOLD": ds}, {"GOLD": "LIVE"}, {},
+                              on_play_pair=None, on_stop_pair=None)
+        w.root.withdraw(); w.root.update_idletasks()
+        check("a `canvas` elrendezes NEM agyazza a tablat kulso gorgetheto vaszonba",
+              not isinstance(w._table_frame.master, tk.Canvas),
+              type(w._table_frame.master).__name__)
+        # CSAK a tabla teruletet nezzuk: a tobbi ful (Poziciok, Lezart,
+        # Backtest) sajat gorgetosavja jogos, es nem ehhez a kerdeshez tartozik.
+        area = w._table_frame.master
+        vbars = [b for b in scrollbars(area) if getattr(b, "_vert", False)]
+        natives = [b for b in scrollbars(area) if isinstance(b, tk.Scrollbar)]
+        check("...igy a tabla teruleten EGY fuggoleges sav van, natív nelkul",
+              len(vbars) == 1 and not natives,
+              f"tematizalt={len(vbars)}, nativ={len(natives)}")
+    finally:
+        if w is not None:
+            w.root.destroy()
+
     root.destroy()
 
 print()

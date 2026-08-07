@@ -2802,6 +2802,24 @@ class DashboardWindow:
         if not self._is_table_layout():
             header_holder.pack(fill="x")
 
+        # ── A VÁSZON-tábla SAJÁT görgetést hoz → nincs külső görgethető vászon ──
+        # A `canvas` elrendezés lényege, hogy a függőleges görgetés a vászon NATÍV
+        # `yview`-ja. Ha ilyenkor a táblát mégis beletennénk a lenti, görgethető
+        # külső vászonba, KÉT egymásba ágyazott görgetősáv keletkezne: a külsőnek
+        # nincs mit görgetnie (teljes magasságú, inaktív sáv), a belső pedig csak
+        # akkora helyet kapna, amekkorát a külső ad neki — rövid, nehezen fogható
+        # fogantyú. Pontosan ez látszott az első éles próbán.
+        if self._layout_mode() == "canvas":
+            self._table_frame = tk.Frame(table_holder, bg=BG)
+            self._table_frame.pack(fill="both", expand=True)
+            self.rows: dict[str, PairRow] = {}
+            self._build_live2(self._table_frame)
+            tk.Frame(parent, bg=FG_GRAY_DIM, height=1).pack(fill="x", padx=2, pady=2)
+            self.lbl_status = tk.Label(parent, text="Indulás...", bg=BG,
+                                       fg=FG_GRAY, font=small_font)
+            self.lbl_status.pack(side="bottom", pady=4)
+            return
+
         canvas = tk.Canvas(table_holder, bg=BG, highlightthickness=0)
         vsb = tk.Scrollbar(table_holder, orient="vertical", command=canvas.yview)
         canvas.configure(yscrollcommand=vsb.set)
