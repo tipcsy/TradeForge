@@ -107,6 +107,8 @@
     "wf_test_months": 2,
     "_comment_split": "train_start_date: ettől dolgozik az optimizer | test_start_date: végső out-of-sample teszt",
     "train_start_date": "2025-01-01",
+    "_comment_training": "ML-tanitas (`ml_ai`). min_calibration_signals: a kuszob elfogadasahoz MINIMALISAN szukseges jel-darabszam a kalibracios szeleten (alap 40). Ez maximum-torzitas elleni vedelem: a kalibracio 51 kuszob-jeloltet probal vegig es a legjobb talalati aranyut valasztja, tehat nehany mintabol a magas win-rate a kereses mellekterméke, nem kepesseg. A 2026-08-06-i Ger40-modell 12 jel alapjan lett elesitve „75% talalattal” — eles OOS-on 0 kotest adott. min_model_win_rate (0.4) es max_signal_coverage (0.08) a masik ket kapu.",
+    "training": { "min_calibration_signals": 40 },
     "test_start_date": "2025-10-01",
     "_comment_rr": "A KOCKÁZATCSÖKKENTÉS is optimalizált dimenzió legyen-e (preset + runner + kalibráció + BE/trailing)? Alap: false — a stratégia belépő-jelzését és a kimenet-menedzsmentet érdemes KÉT FÁZISBAN hangolni (előbb a jelzés fix rr-rel, aztán az rr a befagyasztott jelzésre): olcsóbb, és látszik, mennyit tesz hozzá maga a kockázatcsökkentés. A keresési tér FELTÉTELES: minden dimenzió CSAK azon a preseten sorsolódik, ahol tényleg hat (v1.96.0) — pl. a halving_fraction nem létezik Pajzs preseten, a BE/trailing pedig Fibo/Harmados preseten sehol. Felülírható: rr_presets (mely presetek közül válasszon), rr_runners, rr_space (tartományok).",
     "optimize_rr": false,

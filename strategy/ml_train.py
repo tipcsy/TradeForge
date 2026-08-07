@@ -113,18 +113,41 @@ def _make_classifier(pos_ratio: float):
         ), "randomforest"
 
 
+# A küszöb elfogadásához MINIMÁLISAN szükséges jel-darabszám a kalibrációs
+# szeleten. Ez nem kozmetika — enélkül a modell rendszeresen ZAJRA élesedett:
+#
+#   Ger40 (2026-08-06-i tanítás): long irány BEKAPCSOLVA 12 jel alapján,
+#   „75% találattal". Éles OOS-on ugyanez a modell 0 kötést adott.
+#
+# Az ok szerkezeti: a kalibráció 51 küszöb-jelöltet próbál végig, és a LEGJOBB
+# találati arányút választja. Néhány mintából a legjobbat kiválasztva a magas
+# win-rate nem képesség, hanem a keresés mellékterméke (maximum-torzítás). A
+# régi korlát (n < 6) ezt gyakorlatilag szabadon engedte.
+#
+# 40: a kalibrációs szelet ~5000 sor, a lefedettség-sapka 8% (≈400 jel), tehát
+# a 40 ~1% lefedettség — elérhető, de már ad valamennyi statisztikai alapot
+# (0.5 körüli arányon a szórás ~8 százalékpont). Configból hangolható:
+# `optimizer.training.min_calibration_signals`.
+MIN_CALIB_SIGNALS = 40
+
+
 def _calibrate_threshold(proba: np.ndarray, y: np.ndarray,
-                         min_wr: float, max_coverage: float) -> tuple[float, dict]:
+                         min_wr: float, max_coverage: float,
+                         min_signals: int = MIN_CALIB_SIGNALS) -> tuple[float, dict]:
     """Küszöb-választás a kalibrációs szeleten (a forrás két-menetes logikája):
     max win-rate, lefedettség-sapkával; ha a szoros sapka alatt nincs érvényes
-    küszöb, lazítunk (2×, majd korlátlan). Nincs érvényes küszöb (WR < min_wr)
-    → 1.01 (az irány de facto kikapcsolva)."""
+    küszöb, lazítunk (2×, majd korlátlan). Nincs érvényes küszöb (WR < min_wr
+    VAGY túl kevés jel) → 1.01 (az irány de facto kikapcsolva).
+
+    A `min_signals` a MAXIMUM-TORZÍTÁS elleni védelem — lásd a konstans fölött."""
     best_t, best_score = 1.01, 0.0
+    too_few = 0
     for cap in (max_coverage, max_coverage * 2, 1.0):
         for t in np.arange(0.44, 0.95, 0.01):
             mask = proba >= t
             n = int(mask.sum())
-            if n < 6:
+            if n < min_signals:
+                too_few += 1
                 break
             coverage = n / len(proba)
             if coverage > cap:
@@ -143,12 +166,18 @@ def _calibrate_threshold(proba: np.ndarray, y: np.ndarray,
         "coverage":   n / len(proba) if len(proba) else 0.0,
         "win_rate":   float((y[mask] == 1).mean()) if n else 0.0,
         "enabled":    best_score > 0.0,
+        "min_signals": int(min_signals),
     }
+    if best_score <= 0.0 and too_few:
+        stats["reason"] = (f"nincs küszöb legalább {min_signals} jellel "
+                           f"(a kevesebb mintán a magas találati arány a keresés "
+                           f"mellékterméke lenne)")
     return best_t, stats
 
 
 def _train_direction(train_all: pd.DataFrame, label_col: str, features: list,
-                     min_wr: float, max_coverage: float) -> tuple[dict | None, dict]:
+                     min_wr: float, max_coverage: float,
+                     min_signals: int = MIN_CALIB_SIGNALS) -> tuple[dict | None, dict]:
     """Egy irány (long/short) tanítása: scaler a TELJES train-en, modell a
     kalibrációs farok NÉLKÜL, küszöb a farkon, majd VÉGSŐ újratanítás a teljes
     train-en (retrain-mód — a mentett modell minden friss adatot lát).
@@ -182,7 +211,8 @@ def _train_direction(train_all: pd.DataFrame, label_col: str, features: list,
     except ValueError:
         auc = float("nan")
 
-    thr, stats = _calibrate_threshold(proba_cal, y_cal, min_wr, max_coverage)
+    thr, stats = _calibrate_threshold(proba_cal, y_cal, min_wr, max_coverage,
+                                      min_signals)
 
     # Végső modell: a TELJES train-en (kalibrációs farokkal együtt) újratanítva
     X_all = scaler.transform(train_all[features].to_numpy(dtype=float))
@@ -230,6 +260,7 @@ def train_symbol(symbol: str, df_m15: pd.DataFrame, cfg: dict, pair_cfg: dict,
     lookahead    = int(tr_cfg.get("label_lookahead_bars", 32))
     min_wr       = float(tr_cfg.get("min_model_win_rate", 0.4))
     max_coverage = float(tr_cfg.get("max_signal_coverage", 0.08))
+    min_signals  = int(tr_cfg.get("min_calibration_signals", MIN_CALIB_SIGNALS))
     lookback_yrs = float(tr_cfg.get("lookback_years", 3))
 
     from strategy import get_strategy_by_name
@@ -289,7 +320,7 @@ def train_symbol(symbol: str, df_m15: pd.DataFrame, cfg: dict, pair_cfg: dict,
     dir_stats: dict = {}
     for direction, label_col in (("long", "label_long"), ("short", "label_short")):
         d, stats = _train_direction(train_all, label_col, features,
-                                    min_wr, max_coverage)
+                                    min_wr, max_coverage, min_signals)
         if d is None:
             d = {"model": None, "scaler": None, "threshold": 1.01}
         bundle[direction] = d
