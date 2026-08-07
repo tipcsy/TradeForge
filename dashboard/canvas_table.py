@@ -391,21 +391,22 @@ class CanvasTable:
     def _draw_row(self, i: int, d: dict):
         y0 = i * (self._h + ROW_PAD)
         bg = BG_ROW_EVEN if i % 2 == 0 else BG_ROW_ODD
+        rtag = f"r{i}"                      # a sor ÖSSZES eleme ezt viseli
         cells = _cc.cells_for(d, self._collapsed,
                               on_close=(lambda s=d.get("symbol"): self._close(s)))
         for pane, bc in self._bc.items():
             x0 = self._pane_x0[pane]
             bc.create_rectangle(0, y0, self._pane_width(pane) + 4000,
-                                y0 + self._h, fill=bg, outline="")
+                                y0 + self._h, fill=bg, outline="", tags=(rtag,))
         for key, x, w in self._cols:
             cell = cells.get(key)
             if cell is None:
                 continue
             pane = _cc.PANE_OF(_cols.base_key(key))
             self._draw_cell(self._bc[pane], i, cell, x - self._pane_x0[pane], w,
-                            y0, bg)
+                            y0, bg, rtag)
 
-    def _draw_cell(self, bc, i, cell, x, w, y0, bg):
+    def _draw_cell(self, bc, i, cell, x, w, y0, bg, rtag=""):
         ids = []
         cy = y0 + self._h / 2
         tag = f"c{i}_{cell.key}"
@@ -425,11 +426,11 @@ class CanvasTable:
                 r = bc.create_rectangle(sx - 4, y0 + 2, sx + total + 4,
                                         y0 + self._h - 2, outline="",
                                         dash=st.get("dash", ()),
-                                        width=st.get("width", 1))
+                                        width=st.get("width", 1), tags=(rtag,))
                 ids.append(r)
             for k, col in enumerate(cell.dots):
                 ids.append(bc.create_text(sx + k * dw + dw / 2, cy, text=_lr._DOT,
-                                          fill=col, font=fdot, tags=(tag,)))
+                                          fill=col, font=fdot, tags=(tag, rtag)))
         elif cell.kind == "ctrl":
             fsm = self._f["small"]
             widths = [fsm.measure(p[1]) + 2 * _lr.CTRL_PADX for p in cell.parts]
@@ -437,7 +438,7 @@ class CanvasTable:
             sx = x + (w - total) / 2
             for (sub, txt, fg, cb, active), pw in zip(cell.parts, widths):
                 t = bc.create_text(sx + pw / 2, cy, text=txt, fill=fg, font=fsm,
-                                   tags=(f"{tag}_{sub}",))
+                                   tags=(f"{tag}_{sub}", rtag))
                 ids.append(t)
                 if cb:
                     # A KÖTÉS akkor is megmarad, ha a vezérlő HALVÁNY (tétlen):
@@ -464,13 +465,13 @@ class CanvasTable:
                 tx, anc = x + PAD, "w"
             ids.append(bc.create_text(tx, cy, text=cell.text, fill=cell.fg,
                                       anchor=anc, font=self._f[cell.font],
-                                      tags=(tag,)))
+                                      tags=(tag, rtag)))
         if cell.on_click:
             # A kattintható cella TELJES területe fogjon, ne csak a betűk — a
             # widget-változatban ezt a keret adta. Átlátszó téglalap NINCS a
             # vásznon, ezért a háttér színével rajzolunk, és legalulra tesszük.
             hit = bc.create_rectangle(x, y0, x + w, y0 + self._h,
-                                      fill=bg, outline="", tags=(tag,))
+                                      fill=bg, outline="", tags=(tag, rtag))
             bc.tag_lower(hit)
             ids.insert(0, hit)
             self._clicks[(i, cell.key)] = cell.on_click
@@ -502,22 +503,67 @@ class CanvasTable:
 
     # ── HELYBEN frissítés ────────────────────────────────────────────────
     def refresh(self, rows):
-        """Új adat. Ha a SZERKEZET változott (más sorok/stratégiák/oszlopok),
-        újraépít; egyébként CSAK a ténylegesen megváltozott cellákat írja át —
-        ez az, ami miatt a 3 másodperces frissítés nem villog."""
-        old_key = self._structure_key()
+        """Új adat — a lehető legkevesebb írással.
+
+        ⚠ A SOR-SORREND változása NEM ok az újraépítésre. Ez élesben derült ki: a
+        felhasználó a `Spread` szerint rendezte a táblát, a spread pedig minden
+        tickkel változik — a régi szerkezet-kulcs a sorok SORRENDJÉT is
+        tartalmazta, tehát másodpercenként teljes újraépítés futott, és a felület
+        „vibrált". Ugyanez igaz volna minden ingadozó oszlopra (Lendület,
+        Költség, BID/ASK, Vált.%).
+
+        A vászon a sorokat REKESZKÉNT címzi (`(sor_index, oszlop)` → elem-azonosító),
+        tehát a sorrend-változás egyszerűen annyi, hogy egy rekeszbe MÁSIK
+        instrumentum adata kerül — az pedig sima helyben-írás. Csak akkor kell
+        újraépíteni, ha az ELRENDEZÉS változik (más oszlopok/stratégiák/sorszám),
+        és csak azt az EGY SORT újrarajzolni, ahol a cella SZERKEZETE más lett
+        (pl. 0 → 3 idősík-pötty)."""
+        old_layout = self._layout_key()
         self._rows = list(rows)
-        if self._structure_key() != old_key:
+        if self._layout_key() != old_layout:
             self._build()
             return
         for i, d in enumerate(self._visible()):
             cells = _cc.cells_for(d, self._collapsed,
                                   on_close=(lambda s=d.get("symbol"): self._close(s)))
+            if self._slot_structure_changed(i, cells):
+                self._redraw_row(i, d)
+                continue
             for key, cell in cells.items():
                 if self._visual.get((i, key)) == cell.visual():
                     continue          # nem változott → egyetlen írás sem
                 self._visual[(i, key)] = cell.visual()
                 self._apply(i, cell)
+
+    def _slot_structure_changed(self, i: int, cells: dict) -> bool:
+        """Változott-e a rekesz CELLA-SZERKEZETE (nem csak a tartalma)?
+
+        Ma egyetlen ilyen van: a pöttyök DARABSZÁMA (idősík-irányok, stádiumok).
+        Ha 0-ról 3-ra vált, nincs mit színezni — a sort újra kell rajzolni. (Ez
+        a v2.1.2-es „Együtt beragadt" hiba magva; ott az egész tábla újraépült,
+        itt elég az az egy sor.)"""
+        for key, cell in cells.items():
+            if cell.kind != "dots":
+                continue
+            prev = self._visual.get((i, key))
+            if prev is None or len(prev[2]) != len(cell.dots):
+                return True
+        return False
+
+    def _redraw_row(self, i: int, d: dict):
+        """EGY sor újrarajzolása — a többi érintetlen marad."""
+        for bc in self._bc.values():
+            bc.delete(f"r{i}")
+        for k in [k for k in self._items if k[0] == i]:
+            self._items.pop(k, None)
+            self._visual.pop(k, None)
+        for k in [k for k in self._clicks if k[0] == i]:
+            self._clicks.pop(k, None)
+        self._draw_row(i, d)
+        # Az elválasztó vonalak a sorok ALATT keletkeztek; az újrarajzolt sor
+        # háttere eltakarná őket.
+        for bc in self._bc.values():
+            bc.tag_raise("sep")
 
     def _apply(self, i: int, cell):
         ids = self._items.get((i, cell.key)) or []
@@ -540,13 +586,17 @@ class CanvasTable:
         elif texts:
             bc.itemconfigure(texts[0], text=cell.text, fill=cell.fg)
 
-    def _structure_key(self) -> tuple:
-        """Mi kényszerít ÚJRAÉPÍTÉST: a sorok azonossága/sorrendje, a stratégiák
-        listája, a pöttyök száma és az elrejthető oszlopok állapota."""
-        return (tuple(d.get("symbol") for d in self._visible()),
+    def _layout_key(self) -> tuple:
+        """Mi kényszerít TELJES újraépítést — az ELRENDEZÉS, nem a tartalom.
+
+        SORREND-FÜGGETLEN (rendezett szimbólum-halmaz): a sorok átrendeződése
+        csak azt jelenti, hogy egy rekeszbe másik instrumentum adata kerül, és
+        azt helyben ki tudjuk írni. A pöttyök darabszáma sem itt van: az
+        REKESZENKÉNT változhat, és akkor elég azt az egy sort újrarajzolni
+        (`_slot_structure_changed`)."""
+        return (tuple(sorted(d.get("symbol") or "" for d in self._rows)),
+                len(self._rows),
                 tuple(self._strategy_names()),
-                tuple(len(((d.get("gates") or {}).get("align") or {}).get("signs") or [])
-                      for d in self._visible()),
                 self._want_hide("market"), self._want_hide("momentum"),
                 self._want_hide("cost"),
                 _lr.pnl_mode(self._collapsed))

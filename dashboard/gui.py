@@ -5617,16 +5617,30 @@ class DashboardWindow:
         # A TERVEZETT stop/cél a KÖLTSÉG-kapuhoz. A stratégia adja (`sl_tp_points`),
         # nem a kapu számol sajátot — így a cella pontosan azt mutatja, amivel a
         # motor is dolgozna, ha most jelet kapna.
+        #
+        # ⚠ A stratégia INDIKÁTOR-oszlopot vár a soron (`wpr_sma` → `atr`,
+        # `ml_ai` → `atr14`), a `bars` viszont NYERS MT5-gyertya: nincs benne
+        # egyik sem. Az első változat emiatt mindig `None`-t kapott, és a
+        # Költség-oszlop SOSEM jelent meg — némán, mert a `sl_tp_points` a
+        # hiányzó ATR-re szabályosan `None`-t ad. Ezért itt SZÁMOLJUK az ATR-t
+        # (ugyanazzal az `indicator_engine.atr`-rel és `atr_period`-dal, amit a
+        # motor is használ), és MINDKÉT néven ráírjuk az utolsó ZÁRT sorra.
+        ds.plan_sl_points = ds.plan_tp_points = None
         try:
+            from core.indicator_engine import atr as _atr_fn
             _pf = bars.get(primary)
             if _pf is not None and len(_pf) > 2:
-                _plan = self.strategy.sl_tp_points(_pf.iloc[-2], params,
-                                                   _pcfg.get("point_size", 0.0001))
-                ds.plan_sl_points, ds.plan_tp_points = (_plan if _plan else (None, None))
-            else:
-                ds.plan_sl_points = ds.plan_tp_points = None
+                _a = _atr_fn(_pf["high"], _pf["low"], _pf["close"],
+                             params.get("atr_period", 14)).iloc[-2]
+                if _a == _a and _a > 0:                     # not NaN
+                    _row = _pf.iloc[-2].copy()
+                    _row["atr"] = _row["atr14"] = float(_a)
+                    _plan = self.strategy.sl_tp_points(
+                        _row, params, _pcfg.get("point_size", 0.0001))
+                    if _plan:
+                        ds.plan_sl_points, ds.plan_tp_points = _plan
         except Exception:
-            ds.plan_sl_points = ds.plan_tp_points = None
+            pass
 
         # Max spread (ATR-alapú) — a fő időkeret ATR-jéből
         if info and info.point > 0:

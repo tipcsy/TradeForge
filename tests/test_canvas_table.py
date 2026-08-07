@@ -377,6 +377,63 @@ if TK_OK:
     check("HAROM -> KETTO idosik is ujraepitest kivan (mas cellaszam)",
           len(glyph_list(tblg, 0, "align")) == 2)
 
+    # ══ 6d. A SOR-SORREND valtozasa NEM ok az ujraepitesre ══════════════
+    # Eles hiba (user): a tabla `Spread` szerint volt rendezve, a spread pedig
+    # minden tickkel valtozik -> a regi szerkezet-kulcs a SORRENDET is
+    # tartalmazta, tehat masodpercenkent teljes ujraepites futott es a felulet
+    # "vibralt". Ugyanez igaz volna minden ingadozo oszlopra.
+    def rows_spread(a, b):
+        rs2 = make_rows(2)
+        rs2[0]["symbol"], rs2[1]["symbol"] = "AAA", "BBB"
+        rs2[0]["gates"]["spread"] = {"text": f"{a}/999", "value": a}
+        rs2[1]["gates"]["spread"] = {"text": f"{b}/999", "value": b}
+        return rs2
+
+    tbls = ct.CanvasTable(root, fonts, rows=rows_spread(40, 60), collapsed={})
+    tbls.frame.pack(fill="both", expand=True)
+    root.update_idletasks()
+    tbls._sort("spread")
+    builds = {"n": 0}
+    _orig_build = ct.CanvasTable._build
+
+    def _counting(self):
+        builds["n"] += 1
+        return _orig_build(self)
+
+    ct.CanvasTable._build = _counting
+    try:
+        for a, b in ((40, 60), (60, 40), (40, 60), (70, 30)):
+            tbls.refresh(rows_spread(a, b))
+        check("a sorrend oszcillalasa NEM epit ujra (nincs vibralas)",
+              builds["n"] == 0, f"ujraepites={builds['n']}")
+        check("...de a rendezes tenylegesen kovet",
+              [d["symbol"] for d in tbls._visible()] == ["BBB", "AAA"],
+              str([d["symbol"] for d in tbls._visible()]))
+        # UJ instrumentum viszont MAR elrendezes-valtozas
+        tbls.refresh(rows_spread(40, 60) + [make_rows(1)[0]])
+        check("uj instrumentum viszont UJRAEPIT", builds["n"] == 1,
+              f"ujraepites={builds['n']}")
+    finally:
+        ct.CanvasTable._build = _orig_build
+
+    # A pottyok DARABSZAMA rekeszenkent valtozhat -> eleg AZ AZ EGY sor
+    tbld = ct.CanvasTable(root, fonts, rows=with_signs([], 2), collapsed={})
+    builds["n"] = 0
+    ct.CanvasTable._build = _counting
+    try:
+        _mixed = with_signs([1, -1, -1], 2)
+        _mixed[1]["gates"]["align"] = {"signs": []}
+        tbld.refresh(_mixed)
+        check("potty-szam valtozasnal NEM a teljes tabla epul ujra",
+              builds["n"] == 0, f"ujraepites={builds['n']}")
+        check("...de az erintett sor MEGIS megkapja a pottyoket",
+              len(glyph_list(tbld, 0, "align")) == 3,
+              str(glyph_list(tbld, 0, "align")))
+        check("...a masik sor pedig ures marad",
+              not glyph_list(tbld, 1, "align"))
+    finally:
+        ct.CanvasTable._build = _orig_build
+
     # ══ 7. EGYETLEN fuggoleges gorgetosav ═══════════════════════════════
     # Az elso eles proban KETTO latszott: a vaszon-tabla sajat gorgetese MELLE a
     # gui.py regi, kulso gorgetheto vaszna is odatette a magaet. A kulsonek nem
