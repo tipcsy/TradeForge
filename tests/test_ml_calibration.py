@@ -78,6 +78,41 @@ check("a minimum atadhato (configbol hangolhato)",
 check("a statisztika KIIRJA a hasznalt minimumot (visszakovetheto legyen)",
       s2.get("min_signals") == MIN_CALIB_SIGNALS, str(s2.get("min_signals")))
 
+# ══ A CIMKE a SPREADET is megfizeti (kulonben elerhetetlen celt tuz ki) ═══
+# A gyertyak BID arak. Egy SHORT-ot bid-en nyitsz es ASK-on zarsz -> az SL egy
+# spreaddel KOZELEBB, a TP egy spreaddel TAVOLABB. Ugyanez a LONG-nal is igaz.
+# Meres (2026-08-07): EURCHF-en az SL 47 pont, a spread 15 — a stop HARMADA.
+import pandas as pd
+from strategy.ml_train import label_outcomes
+
+n = 60
+idx = pd.date_range("2026-01-01", periods=n, freq="15min", tz="UTC")
+close = np.full(n, 1000.0)
+high = close.copy()
+low = close.copy()
+# ATR=100 -> SL=150, TP=300. Spread=40.
+# A 6. gyertyan az ar 1130-ig megy FEL: a nyers (spread nelkuli) SHORT-stop
+# (1150) MEG all, a spreades (1150-40=1110) viszont MAR kiutott.
+high[6] = 1130.0
+# Utana lemegy 660-ig: a TP mindket esetben teljesulne (700 ill. 660).
+low[10] = 660.0
+f = pd.DataFrame({"close": close, "high": high, "low": low, "atr14": 100.0},
+                 index=idx)
+P = {"sl_atr_mult": 1.5, "tp_rr_ratio": 2.0}
+a = label_outcomes(f, P, 1.0, 32, 0.0)      # spread NELKUL
+b = label_outcomes(f, P, 1.0, 32, 40.0)     # spreaddel
+
+check("spread NELKUL a short cimke NYERO (a 1130-as kiles nem uti ki)",
+      int(a["label_short"].iloc[0]) == 1)
+check("spreaddel viszont VESZTO (a stop kozelebb van -> elobb utott ki)",
+      int(b["label_short"].iloc[0]) == 0)
+check("a LONG oldalt is bunteti (nem csak a shortot)",
+      label_outcomes(f, P, 1.0, 32, 40.0)["label_long"].sum()
+      <= label_outcomes(f, P, 1.0, 32, 0.0)["label_long"].sum())
+check("nulla spread -> a regi viselkedes valtozatlan",
+      (label_outcomes(f, P, 1.0, 32).values
+       == label_outcomes(f, P, 1.0, 32, 0.0).values).all())
+
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")
 sys.exit(0 if all(results) else 1)

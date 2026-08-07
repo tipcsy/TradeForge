@@ -34,14 +34,26 @@ from strategy import ml_ai
 # ---------------------------------------------------------------------------
 
 def label_outcomes(feats: pd.DataFrame, params: dict, point_size: float,
-                   lookahead: int) -> pd.DataFrame:
+                   lookahead: int, spread_points: float = 0.0) -> pd.DataFrame:
     """Gyertyánként: ha a záráson belépnék LONG-ba (ill. SHORT-ba), a TP előbb
     üt-e, mint az SL, a következő `lookahead` gyertyán belül? label = 1 (TP) /
     0 (SL vagy kifutás). A long és a short független.
 
     Az SL/TP a stratégia `sl_tp_points` sémája: dynamic_sltp → ATR14 × sl_atr_mult,
     TP = SL × tp_rr_ratio; különben fix sl_points/tp_points. Így a modell PONTOSAN
-    arra a kérdésre tanul, amit a végrehajtás feltesz."""
+    arra a kérdésre tanul, amit a végrehajtás feltesz.
+
+    ⚠ `spread_points` — A CÍMKE NEM LEHET SPREAD NÉLKÜLI. A gyertyák BID árak; egy
+    LONG-ot ASK-on nyitsz és BID-en zársz, egy SHORT-ot BID-en nyitsz és ASK-on
+    zársz. Mindkét irányban IGAZ, hogy az SL egy spreaddel közelebb, a TP egy
+    spreaddel távolabb van, mint amit a nyers bid-gyertyákon mérnénk.
+
+    Miért számít ennyire: 2026-08-07-i mérés, friss OOS. EURCHF-en/EURGBP-n az
+    SL (ATR14 × 1.5) mindössze ~43-47 pont, a tipikus spread 14-15 — a stop
+    HARMADA. A spread nélküli címke ott 37,6/38,8%-os alap-találatot mutatott, a
+    spreaddel számolt 23,1/23,2%-ot. A modell tehát olyan célra tanult és olyan
+    küszöbre kalibrálódott, ami a valóságban nem elérhető: éles OOS-on a
+    backtest 16,5%-os TP-arányt hozott a címke ígérte 44,6% helyett."""
     closes = feats["close"].values
     highs  = feats["high"].values
     lows   = feats["low"].values
@@ -53,6 +65,7 @@ def label_outcomes(feats: pd.DataFrame, params: dict, point_size: float,
     rr      = float(params.get("tp_rr_ratio", 2.0))
     fix_sl  = float(params.get("sl_points", 0) or 0) * point_size
     fix_tp  = fix_sl * rr
+    spread  = max(0.0, float(spread_points or 0.0)) * point_size
 
     label_long  = np.zeros(n, dtype=np.int8)
     label_short = np.zeros(n, dtype=np.int8)
@@ -70,8 +83,10 @@ def label_outcomes(feats: pd.DataFrame, params: dict, point_size: float,
                 continue
 
         entry = closes[i]
-        tp_l, sl_l = entry + tp, entry - sl
-        tp_s, sl_s = entry - tp, entry + sl
+        # A szinteket a BID-gyertyákhoz igazítjuk (azokon mérünk `highs`/`lows`-t),
+        # de a VÉGREHAJTÁS oldalával: mindkét irányban a spreaddel rosszabb.
+        tp_l, sl_l = entry + tp + spread, entry - sl + spread
+        tp_s, sl_s = entry - tp - spread, entry + sl - spread
 
         for j in range(i + 1, i + lookahead + 1):
             if lows[j] <= sl_l:
@@ -283,7 +298,10 @@ def train_symbol(symbol: str, df_m15: pd.DataFrame, cfg: dict, pair_cfg: dict,
     # ── Feature-ök + címkék ────────────────────────────────────────────────
     feats = mlf.build_feature_frame(df_sig, pip)
     _step("features")
-    feats = label_outcomes(feats, params, pip, lookahead)
+    # A pár TIPIKUS spreadje (a `tools/refresh_point_values.py` a valós előzmény
+    # mediánjából tölti) — enélkül a címke elérhetetlen célt tűzne ki.
+    _spread_pts = float(pair_cfg.get("backtest_spread_points", 0) or 0)
+    feats = label_outcomes(feats, params, pip, lookahead, _spread_pts)
     _step("címkézés")
 
     # ── Session-szűrés (a live/backtest session-kapujával azonos órák) ─────
