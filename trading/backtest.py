@@ -590,6 +590,30 @@ def _pair_market_series(cfg, symbol, strategy_name, m15, exec_gates: bool):
         return None
 
 
+def _pair_momentum(cfg, symbol, strategy_name, m15, df_m1, exec_gates: bool) -> dict:
+    """A Lendület-kapu előkészítése egy párra: `{mom_series, mom_cfg, mom_mode}`.
+
+    EGYSZER épül párenként (mint a piac-besorolás és a TF-kiértékelő): a fordulat
+    nem függ a stratégia paramétereitől. A `mom_series` `None`, ha a kapu ki van
+    kapcsolva erre a (pár, stratégia) párosra — ilyenkor mérni sem kell."""
+    out = {"mom_series": None, "mom_cfg": None, "mom_mode": None}
+    if not exec_gates:
+        return out
+    try:
+        from core import gates as _gt
+        from core import momentum as _momx
+        if not _gt.active(_gt.effects_for(cfg or {}, symbol, strategy_name),
+                          _gt.MOMENTUM):
+            return out
+        pc = (cfg.get("pairs") or {}).get(symbol) or {}
+        out["mom_cfg"] = _gt.momentum_config(pc, cfg)
+        out["mom_mode"] = _gt.mode_for(cfg or {}, symbol, strategy_name)
+        out["mom_series"] = _momx.series_at(df_m1, m15.index, out["mom_cfg"])
+    except Exception:
+        out["mom_series"] = None
+    return out
+
+
 def _build_tf_align_evaluator(cfg, symbol, strategy_name, df_m1):
     """A TF-együttállás VÉGREHAJTÁSI kapu historikus kiértékelője a backtesthez —
     UGYANAZ a logika, mint az él (`core.tf_align`) és a viz jel-replay-e
@@ -808,6 +832,17 @@ def run_pair(
                 _mkt_adverse = _gt.market_adverse(cfg or {}, symbol)
         except Exception:
             _mkt_series = None
+    # A Lendulet-kapu per-gyertya sorozata — EGYSZER, a dontesi idopontokra,
+    # look-ahead nelkul (`momentum.series_at`: zarasi idohoz igazitva).
+    _mom_series, _mom_cfg, _mom_mode = None, None, None
+    if _exec_gates and _gt.active(_gate_eff, _gt.MOMENTUM):
+        try:
+            from core import momentum as _momx
+            _mom_cfg = _gt.momentum_config(pair_cfg, cfg)
+            _mom_mode = _gt.mode_for(cfg or {}, symbol, strategy.name)
+            _mom_series = _momx.series_at(df_m1, df_m15.index, _mom_cfg)
+        except Exception:
+            _mom_series = None
 
     # ── BID/ASK modell előkészítés (MT5-hű) ─────────────────────────────────
     # Az MT5 chart/tester gyertyái BID árak; ask-gyertya NINCS. A mi adatunk is
@@ -1121,6 +1156,11 @@ def run_pair(
                     if _mkt_series is not None:
                         _cat = _mkt_series.get(m15_times[m15_ptr])
                         _failed[_gt.MARKET] = bool(_cat) and _cat in _mkt_adverse
+                    if _mom_series is not None:
+                        from core import momentum as _momx
+                        _failed[_gt.MOMENTUM] = _momx.failed(
+                            _mom_series.get(m15_times[m15_ptr], float("nan")),
+                            signal, _mom_mode, _mom_cfg)
                     _dec = _gt.decide(_failed, _gate_eff)
                     if _dec["blocked"]:
                         prev_m1_row = m1_row
@@ -1618,6 +1658,9 @@ def run_portfolio_backtest(
             "mkt_series": _pair_market_series(cfg, sym, strategy.name, m15,
                                               _exec_gates),
             "mkt_adverse": _gt.market_adverse(cfg, sym),
+            # Lendulet-kapu: per-gyertya fordulat (EGYSZER, mint a mkt_series),
+            # a dontesi idopontokra, look-ahead nelkul.
+            **_pair_momentum(cfg, sym, strategy.name, m15, df_m1, _exec_gates),
         }
         log.info("Portfolio BT: %s betöltve — M15=%d M1=%d bar", sym, len(m15), len(m1))
 
@@ -1867,6 +1910,12 @@ def run_portfolio_backtest(
                                 _cat = info["mkt_series"].get(m15_df.index[ptr])
                                 _failed[_gt.MARKET] = (bool(_cat)
                                                        and _cat in info["mkt_adverse"])
+                            if info.get("mom_series") is not None:
+                                from core import momentum as _momx
+                                _failed[_gt.MOMENTUM] = _momx.failed(
+                                    info["mom_series"].get(m15_df.index[ptr],
+                                                           float("nan")),
+                                    signal, info["mom_mode"], info["mom_cfg"])
                             _dec = _gt.decide(_failed, _eff)
                             _gate_ok = not _dec["blocked"]
                             _gate_risk = _dec["risk_factor"]

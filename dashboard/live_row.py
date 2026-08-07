@@ -66,7 +66,8 @@ _SAMPLE = {
     "symbol": ("mono_bold", "XXXXXXXX"), "bid": ("mono", "99999.99"),
     "ask": ("mono", "99999.99"), "change": ("mono", "+99.99%"),
     "spread": ("mono", "99999/99999"), "align": ("mono", "●●●●"),
-    "market": ("small", "Sz.Bika"), "badge": ("mono", "⛔9"),
+    "market": ("small", "Sz.Bika"), "momentum": ("mono", "↑9.99"),
+    "badge": ("mono", "⛔9"),
     "stages": ("mono", "●●●●"), "quality": ("small", "Közepes"),
     "ctrl": ("small", "■ OPT"), "opt": ("small", "99/99"),
     "position": ("mono", "+9999.99$ +99.99R"),
@@ -105,6 +106,7 @@ def pnl_mode(collapsed: dict) -> str:
 _HEADER_TEXT = {
     "symbol": "Symbol", "bid": "BID", "ask": "ASK", "change": "Vált.%",
     "spread": "Spread", "align": "Együtt", "market": "Piac",
+    "momentum": "Lendület",
     "badge": "K.Össz.", "stages": "jelzés", "position": "Pozíció",
     "daily": "Napi P&L", "quality": "Min.", "ctrl": "Vezérlés", "opt": "Opt",
     "total_pos": "Pozíció", "total_daily": "Napi P&L", "close": "",
@@ -119,6 +121,16 @@ def show_market(collapsed: dict) -> bool:
     teszi a dontest (a tabla szamolja ki az adatbol) — a sor es a fejlec
     UGYANAZT az erteket kapja, kulonben elcsusznanak az oszlopok."""
     return not (collapsed or {}).get("hide_market")
+
+
+def show_momentum(collapsed: dict) -> bool:
+    """Latszik-e a `Lendulet` oszlop?
+
+    Ugyanaz a szabaly, mint a `Piac`-nal: ha egyetlen paron sincs bekapcsolva a
+    kapu, az oszlop minden soron ugyanazt mondana ket szammal — helyet foglal,
+    informaciot nem ad. A hivo `collapsed["hide_momentum"]`-ba teszi a dontest,
+    es a SOR es a FEJLEC ugyanazt kapja (kulonben elcsusznanak az oszlopok)."""
+    return not (collapsed or {}).get("hide_momentum")
 
 
 def is_collapsed(collapsed: dict, name: str = None) -> bool:
@@ -380,6 +392,14 @@ class LiveRow:
                 # besorolások kedvezőtlenek) — eddig ez a cella néma volt, és a
                 # beállítás csak az instrumentum-ablakból volt elérhető.
                 _bind_click(_mk_lbl, _mk.get("on_click"))
+            if show_momentum(self._collapsed):
+                _mo = g.get("momentum") or {}
+                _mo_lbl = self._rc("momentum", self.mid, _mo.get("text", "—"),
+                                   self._w["momentum"],
+                                   FG_RED if _mo.get("blocking") else FG_WHITE,
+                                   self._f["mono"], anchor="center", bg=bg,
+                                   height=self._h)
+                _bind_click(_mo_lbl, _mo.get("on_click"))
         badge = g.get("badge", "✓")
         self._rc("badge", self.mid, badge, self._w["badge"],
                  FG_RED if badge != "✓" else FG_GREEN, self._f["mono"],
@@ -602,6 +622,9 @@ class LiveRow:
         self._set("spread", sp.get("text", "—"),
                   FG_RED if sp.get("blocking") else FG_GREEN)
         self._set("market", (g.get("market") or {}).get("text", "—"), None)
+        _mo = g.get("momentum") or {}
+        self._set("momentum", _mo.get("text", "—"),
+                  FG_RED if _mo.get("blocking") else FG_WHITE)
         badge = g.get("badge", "✓")
         self._set("badge", badge, FG_RED if badge != "✓" else FG_GREEN)
 
@@ -792,7 +815,12 @@ def build_header(parent, fonts: dict, strategies: list, collapsed: dict = None,
     # ── 1. sor: csoportok (a terv „Instrumentum / Kapuk / Stratégiák" sávja) ──
     group(tl, ("symbol", "bid", "ask", "change"), "Instrumentum")
     if not collapsed.get("gates"):
-        _gk = ("spread", "align", "market") if show_market(collapsed)             else ("spread", "align")
+        _gk = ["spread", "align"]
+        if show_market(collapsed):
+            _gk.append("market")
+        if show_momentum(collapsed):
+            _gk.append("momentum")
+        _gk = tuple(_gk)
         group(tm, _gk, "Kapuk", key="gates")
     _cell(tm, "", w["badge"], FG_GRAY_DIM, f, bg=BG_HEADER, height=h)
     for name in strategies:
@@ -821,6 +849,9 @@ def build_header(parent, fonts: dict, strategies: list, collapsed: dict = None,
         if show_market(collapsed):
             _sorted_head(bm, "market", "Piac", w["market"], f, h, on_sort,
                          sort_key, sort_dir)
+        if show_momentum(collapsed):
+            _sorted_head(bm, "momentum", "Lendület", w["momentum"], f, h,
+                         on_sort, sort_key, sort_dir)
     # Összecsukott kapuknál a K.Össz. fejléce lesz a kapcsoló (különben nem
     # lehetne visszanyitni — a „Kapuk" felirat ilyenkor nem létezik).
     if collapsed.get("gates") and on_toggle is not None:

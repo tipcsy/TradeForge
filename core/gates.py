@@ -57,6 +57,29 @@ EFFECT_LABEL = {
 SPREAD = "spread"
 TF_ALIGN = "tf_align"
 MARKET = "market"
+MOMENTUM = "momentum"
+
+# ── A LENDÜLET-kapu MÓDJA: MIT figyeljen ───────────────────────────────────
+# A többi kapunál egyértelmű, mi a „bukás" (túl tág spread, nincs együttállás,
+# kedvezőtlen besorolás). A lendület viszont KÉTFÉLEKÉPPEN mondhat nemet, és a
+# kettő teljesen más kereskedési döntés — ezért választható, stratégiánként:
+#
+#   idle  „alapjárat": a piac áll (|fordulat| < küszöb) → ne kössünk bele
+#   dir   „irány": a fordulat SZEMBEN megy a jellel → ne kössünk ellene
+#   both  mindkettő
+#
+# A `mode` a HATÁSTÓL (block/reduce/none) FÜGGETLEN: a mód azt mondja meg, MIKOR
+# bukik a kapu, a hatás azt, hogy AKKOR mi történjék.
+MOM_IDLE = "idle"
+MOM_DIR = "dir"
+MOM_BOTH = "both"
+MOM_MODES = (MOM_IDLE, MOM_DIR, MOM_BOTH)
+MOM_MODE_LABEL = {
+    MOM_IDLE: "Alapjárat (túl alacsony fordulat)",
+    MOM_DIR:  "Irány-szűrő (szemben megy a jellel)",
+    MOM_BOTH: "Mindkettő",
+}
+MOM_MODE_DEFAULT = MOM_IDLE
 
 # ── A `reduce` hatás KONKRÉT jelentése a motorban (v1.97.0) ─────────────────
 # „Belép, de kisebb mérettel." A méret-csökkentés ugyanaz a mechanizmus, amit a
@@ -90,6 +113,10 @@ REGISTRY = (
     {"key": SPREAD,   "label": "Spread",             "default_effect": EFFECT_BLOCK},
     {"key": TF_ALIGN, "label": "Idősík-együttállás", "default_effect": EFFECT_NONE},
     {"key": MARKET,   "label": "Piac-állapot",       "default_effect": EFFECT_NONE},
+    # ÚJ kapu alapból NEM szól bele (`none`): egy frissítés SOHA ne kezdjen el
+    # némán másképp kereskedni, mint amit tegnap tesztelted. Bekapcsolni a
+    # kapu ablakában, stratégiánként kell.
+    {"key": MOMENTUM, "label": "Lendület",           "default_effect": EFFECT_NONE},
 )
 
 KEYS = tuple(g["key"] for g in REGISTRY)
@@ -124,13 +151,31 @@ def default_effect_of(key: str) -> str:
 #
 # Így a 60-ból a gyakorlatban 3-6 lesz ténylegesen kitöltve.
 
+def _as_effect(v):
+    """Egy bejegyzés HATÁSA. Két alak él egymás mellett:
+
+        "block"                          — a régi, egyszerű alak
+        {"effect": "block", "mode": …}   — ha a kapunak MÓDJA is van (Lendület)
+
+    A szótáras alak azért kellett, mert a lendület kétféleképpen bukhat
+    (alapjárat / irány), és a kettő stratégiánként külön választható. A régi
+    alak változatlanul érvényes — a meglévő configok nem nyúlnak."""
+    if v in EFFECTS:
+        return v
+    if isinstance(v, dict) and v.get("effect") in EFFECTS:
+        return v["effect"]
+    return None
+
+
 def _effect_from(section: dict, key: str, strategy: str):
     g = (section or {}).get(key)
     if not isinstance(g, dict):
         return None
     for k in (strategy, "default"):
-        if k and g.get(k) in EFFECTS:
-            return g[k]
+        if k:
+            e = _as_effect(g.get(k))
+            if e is not None:
+                return e
     return None
 
 
@@ -176,23 +221,53 @@ def effect_with_source(cfg: dict, symbol: str, strategy: str,
     különben nem derülne ki, mit állítottál el ténylegesen, és mi jön feljebbről."""
     cfg = cfg or {}
     pair_gates = ((cfg.get("pairs") or {}).get(symbol) or {}).get("gates")
-    g = (pair_gates or {}).get(key)
-    if isinstance(g, dict):
-        if g.get(strategy) in EFFECTS:
-            return g[strategy], SRC_PAIR
-        if g.get("default") in EFFECTS:
-            return g["default"], SRC_PAIR_DEFAULT
-    g = (cfg.get("gates") or {}).get(key)
-    if isinstance(g, dict):
-        if g.get(strategy) in EFFECTS:
-            return g[strategy], SRC_GLOBAL
-        if g.get("default") in EFFECTS:
-            return g["default"], SRC_GLOBAL_DEFAULT
+    for section, s_own, s_def in (
+            ((pair_gates or {}).get(key), SRC_PAIR, SRC_PAIR_DEFAULT),
+            (((cfg.get("gates") or {}).get(key)), SRC_GLOBAL, SRC_GLOBAL_DEFAULT)):
+        if isinstance(section, dict):
+            e = _as_effect(section.get(strategy))
+            if e is not None:
+                return e, s_own
+            e = _as_effect(section.get("default"))
+            if e is not None:
+                return e, s_def
     if key == TF_ALIGN:
         e = _legacy_tf_align_effect(cfg, symbol, strategy)
         if e:
             return e, SRC_LEGACY
     return default_effect_of(key), SRC_BUILTIN
+
+
+# ── A LENDÜLET MÓDJA — ugyanaz a feloldási lánc, mint a hatásé ─────────────
+
+def _as_mode(v):
+    if v in MOM_MODES:
+        return v
+    if isinstance(v, dict) and v.get("mode") in MOM_MODES:
+        return v["mode"]
+    return None
+
+
+def mode_with_source(cfg: dict, symbol: str, strategy: str,
+                     key: str = MOMENTUM) -> tuple:
+    """`(mód, forrás)` — MIT figyeljen a kapu erre a (pár, stratégia) párosra."""
+    cfg = cfg or {}
+    pair_gates = ((cfg.get("pairs") or {}).get(symbol) or {}).get("gates")
+    for section, s_own, s_def in (
+            ((pair_gates or {}).get(key), SRC_PAIR, SRC_PAIR_DEFAULT),
+            (((cfg.get("gates") or {}).get(key)), SRC_GLOBAL, SRC_GLOBAL_DEFAULT)):
+        if isinstance(section, dict):
+            m = _as_mode(section.get(strategy))
+            if m is not None:
+                return m, s_own
+            m = _as_mode(section.get("default"))
+            if m is not None:
+                return m, s_def
+    return MOM_MODE_DEFAULT, SRC_BUILTIN
+
+
+def mode_for(cfg: dict, symbol: str, strategy: str, key: str = MOMENTUM) -> str:
+    return mode_with_source(cfg, symbol, strategy, key)[0]
 
 
 def inherited_effect(cfg: dict, symbol: str, strategy: str, key: str) -> tuple:
@@ -269,7 +344,28 @@ def _eval_market(ctx: dict):
     return PASS, lbl
 
 
-_EVAL = {SPREAD: _eval_spread, TF_ALIGN: _eval_tf_align, MARKET: _eval_market}
+def _eval_momentum(ctx: dict):
+    """A piac „fordulatszáma" (`core.momentum`).
+
+    A kijelzés NEM ismeri a jel irányát (az instrumentum szintjén állunk), ezért
+    itt csak az ALAPJÁRAT-ot tudjuk eldönteni — az irány-szűrő irány-tudatos, azt
+    a motor méri (`gates.decide`, ugyanaz a szétválasztás, mint a tf_align-nál).
+    Így a sor nem ígér olyat, amit ezen a szinten nem lehet tudni."""
+    import math as _math
+    val = ctx.get("momentum")
+    if val is None or (isinstance(val, float) and _math.isnan(val)):
+        return UNKNOWN, "még nincs elég gyertya a méréshez"
+    arrow = "↑" if val > 0 else ("↓" if val < 0 else "·")
+    thr = ctx.get("momentum_idle_threshold")
+    txt = f"fordulat {arrow}{abs(val):.2f}"
+    if thr is None:
+        return PASS, txt
+    txt += f"  /  alapjárat-küszöb {float(thr):.2f}"
+    return (BLOCKING if abs(val) < float(thr) else PASS), txt
+
+
+_EVAL = {SPREAD: _eval_spread, TF_ALIGN: _eval_tf_align, MARKET: _eval_market,
+         MOMENTUM: _eval_momentum}
 
 
 def evaluate(ctx: dict, effects: dict = None) -> list:
@@ -445,4 +541,30 @@ def ctx_from_state(ds, params: dict, pair_cfg: dict) -> dict:
         "tf_align_dir": getattr(ds, "tf_align_dir", None),
         "market_name": getattr(ds, "market_strategy", None),
         "market_label": getattr(ds, "market_state_label", "") or "",
+        # Lendület: a MÉRT fordulat (a kijelzés tölti `ds.momentum`-ba) és a
+        # küszöb, amihez az „alapjárat" mérődik. A küszöb a kapu configjából jön,
+        # hogy a sor és a beállító ablak UGYANAZT a számot mutassa.
+        "momentum": getattr(ds, "momentum", None),
+        "momentum_idle_threshold": momentum_idle_threshold(pair_cfg),
     }
+
+
+def momentum_config(pair_cfg: dict, cfg: dict = None) -> dict:
+    """A Lendület-kapu MÉRÉSI paraméterei erre a párra (alap ← globális ← pár).
+
+    A hatás/mód per stratégia dől el, a MÉRÉS viszont instrumentum-tulajdonság:
+    egy páron egy fordulatszámmérő van, különben a `Lendület` oszlop nem tudna
+    mit mutatni."""
+    from core import momentum as _m
+    out = dict(_m.DEFAULTS)
+    for section in ((cfg or {}).get("gates") or {}, (pair_cfg or {}).get("gates") or {}):
+        g = section.get(MOMENTUM)
+        if isinstance(g, dict):
+            for k in _m.DEFAULTS:
+                if k in g:
+                    out[k] = g[k]
+    return out
+
+
+def momentum_idle_threshold(pair_cfg: dict, cfg: dict = None) -> float:
+    return float(momentum_config(pair_cfg, cfg).get("idle_threshold", 0.35))

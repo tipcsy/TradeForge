@@ -160,6 +160,7 @@ class LiveTable:
                                                   anchor="nw")
 
         self._collapsed["hide_market"] = self._want_hide_market()
+        self._collapsed["hide_momentum"] = self._want_hide_momentum()
 
         # ── Fejléc: a három rész a három oszlopba ──
         names = self._strategy_names()
@@ -193,6 +194,13 @@ class LiveTable:
         kulonben elcsusznanak az oszlopok."""
         return not any(
             ((d.get("gates") or {}).get("market") or {}).get("text")
+            not in (None, "", "—") for d in self._rows)
+
+    def _want_hide_momentum(self) -> bool:
+        """Elrejtsuk-e a `Lendulet` oszlopot? Ugyanaz a szabaly, mint a `Piac`-nal:
+        ha egyetlen soron sincs mert fordulat, az oszlop vegig `—` lenne."""
+        return not any(
+            ((d.get("gates") or {}).get("momentum") or {}).get("text")
             not in (None, "", "—") for d in self._rows)
 
     def _visible(self) -> list:
@@ -318,6 +326,7 @@ class LiveTable:
         # A `Piac` oszlop meg/eltunese SZERKEZETI valtozas (mas cellak kellenek),
         # tehat ujraepitest kivan — a helyben frissites itt hazudna.
         if (self._want_hide_market() != self._collapsed.get("hide_market")
+                or self._want_hide_momentum() != self._collapsed.get("hide_momentum")
                 or old != new or len(self._row_widgets) != len(new)):
             self._build()
             return

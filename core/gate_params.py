@@ -123,6 +123,34 @@ _SPECS = {
         ParamSpec("market_viz", "Piac-sáv a charton (viz)", BOOL, False,
                   "Csak rajz."),
     ),
+    _g.MOMENTUM: (
+        ParamSpec("basis", "Mérési alap", CHOICE, "sma",
+                  "„Egy idősík, 3 SMA”: a gyors/közép/lassú átlag távolsága — ez a "
+                  "legszorosabb fordulatszámmérő. „Három idősík”: idősíkonként a "
+                  "záróár SMA-tól vett távolsága, átlagolva.",
+                  choices=lambda: [("sma", "Egy idősík, 3 SMA"),
+                                   ("tf", "Három idősík, egy SMA")]),
+        ParamSpec("idle_threshold", "Alapjárat-küszöb", FLOAT, 0.35,
+                  "Ez alatt „áll a piac”. Egysége: átlagos gyertya-elmozdulás — "
+                  "0,35 azt jelenti, hogy az átlagok egy átlagos gyertya "
+                  "harmadánál közelebb vannak egymáshoz.", lo=0.0, hi=20.0),
+        ParamSpec("timeframe", "Idősík (az „egy idősík” alaphoz)", CHOICE, 15,
+                  "Ezen fut a három SMA.", choices=_TF_CHOICES),
+        ParamSpec("sma_fast", "Gyors SMA", INT, 8, "", lo=2, hi=1000),
+        ParamSpec("sma_mid", "Közepes SMA", INT, 32, "", lo=2, hi=2000),
+        ParamSpec("sma_slow", "Lassú SMA", INT, 100,
+                  "A három SMA-ból két „fordulat” adódik (gyors↔közép, "
+                  "közép↔lassú), az átlaguk a mutató.", lo=2, hi=5000),
+        ParamSpec("timeframes", "Idősíkok (a „három idősík” alaphoz)", MULTI,
+                  [1, 5, 15], "Idősíkonként egy fordulat, átlagolva.",
+                  choices=_TF_CHOICES),
+        ParamSpec("tf_sma", "SMA-periódus (a „három idősík” alaphoz)", INT, 50,
+                  "Minden kiválasztott idősíkon ugyanez.", lo=2, hi=1000),
+        ParamSpec("vol_window", "Normáló ablak (gyertya)", INT, 14,
+                  "Ennyi gyertya átlagos abszolút záróár-elmozdulása a mérce — "
+                  "ettől jelent ugyanazt a szám GOLD-on és EURUSD-n.",
+                  lo=2, hi=500),
+    ),
 }
 
 
@@ -193,6 +221,10 @@ def extra_errors(key: str, values: dict) -> list:
         if tfs is not None and not (2 <= len(tfs) <= 6):
             out.append("Idősíkok: 2 és 6 között válassz "
                        f"(most {len(tfs)}) — egyetlen idősík nem „együttállás”.")
+    if key == _g.MOMENTUM:
+        out += extra_errors_momentum(values)
+        if str(values.get("basis")) == "tf" and not values.get("timeframes"):
+            out.append("A „három idősík” alaphoz legalább egy idősík kell.")
     return out
 
 
@@ -232,4 +264,30 @@ def measured_rows(key: str, ctx: dict) -> list:
     if key == _g.MARKET:
         return [("Osztályozó", ctx.get("market_name") or "nincs kiválasztva"),
                 ("Jelenlegi besorolás", ctx.get("market_label") or "—")]
+    if key == _g.MOMENTUM:
+        from core import momentum as _m
+        val = ctx.get("momentum")
+        thr = ctx.get("momentum_idle_threshold")
+        rows = [("Fordulat most", _m.cell_text(val))]
+        d = _m.direction(val if val is not None else float("nan"))
+        rows.append(("Irány", {"BUY": "felfelé", "SELL": "lefelé"}.get(d, "—")))
+        if thr is not None:
+            rows.append(("Alapjárat-küszöb", f"{float(thr):.2f}"))
+            rows.append(("Állapot", "ALAPJÁRAT (a kapu bukik)"
+                         if _m.is_idle(val if val is not None else float("nan"),
+                                       {"idle_threshold": thr})
+                         else "pörög"))
+        return rows
+    return []
+
+
+def extra_errors_momentum(values: dict) -> list:
+    """A három SMA-nak NÖVEKVŐ sorrendben kell lennie, különben a „fordulat”
+    előjele értelmetlen (a gyors-mínusz-lassú megfordulna)."""
+    f, m, s = (values.get("sma_fast"), values.get("sma_mid"),
+               values.get("sma_slow"))
+    if None in (f, m, s):
+        return []
+    if not (f < m < s):
+        return [f"SMA-k: gyors < közepes < lassú kell legyen (most {f}/{m}/{s})."]
     return []

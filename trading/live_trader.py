@@ -1953,6 +1953,34 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
             _market_ok = False
     _gate_failed[_gates.MARKET] = not _market_ok
 
+    # Lendület („fordulatszám") — KÉTFÉLEKÉPPEN bukhat, és hogy melyik számít, az
+    # stratégiánként dől el (`gates.mode_for`):
+    #   idle  a piac áll (|fordulat| < küszöb) → ne kössünk bele
+    #   dir   a fordulat SZEMBEN megy a jellel → ne kössünk ellene (irány-tudatos,
+    #         ezért van itt és nem az `evaluate`-ben — mint a TF-együttállásnál)
+    _mom_ok = True
+    if signal != "NONE" and _gates.active(_gate_eff, _gates.MOMENTUM):
+        try:
+            from core import momentum as _mom
+            _mcfg = _gates.momentum_config(pair_cfg, _run_cfg)
+            _mval = _mom.rpm(mt5_connector.tf_closes(
+                symbol, _mom.needed_timeframes(_mcfg), _mom.needed_bars(_mcfg)),
+                _mcfg)
+            ds.momentum = _mval
+            _mmode = _gates.mode_for(_run_cfg or {}, symbol, strategy.name)
+            if _mmode in (_gates.MOM_IDLE, _gates.MOM_BOTH) and _mom.is_idle(
+                    _mval, _mcfg):
+                _mom_ok = False
+            if _mmode in (_gates.MOM_DIR, _gates.MOM_BOTH):
+                _mdir = _mom.direction(_mval)
+                # Adathiánynál (`_mdir` üres) NEM szűrünk — fail-open, ugyanúgy,
+                # ahogy a spread-kapu is teszi.
+                if _mdir and _mdir != signal:
+                    _mom_ok = False
+        except Exception:
+            _mom_ok = True
+    _gate_failed[_gates.MOMENTUM] = not _mom_ok
+
     _gate_dec = _gates.decide(_gate_failed, _gate_eff)
     _gates_ok = not _gate_dec["blocked"]
     # Diagnosztika: ha a stratégia JELET adott (a viz ezt rajzolja — a NYERS

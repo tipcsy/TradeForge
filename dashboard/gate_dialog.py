@@ -110,10 +110,35 @@ def _save_market(cfg: dict, symbol: str, values: dict, all_symbols: list):
                 pc.pop("gates", None)
 
 
+def _load_momentum(cfg: dict, symbol: str) -> dict:
+    pc = ((cfg.get("pairs") or {}).get(symbol) or {})
+    return dict(_g.momentum_config(pc, cfg))
+
+
+def _save_momentum(cfg: dict, symbol: str, values: dict, all_symbols: list):
+    """A MÉRÉS paraméterei a `pairs.<SYM>.gates.momentum`-ba mennek — ugyanabba a
+    szótárba, ahol a per-stratégia hatás/mód is lakik. Nem ütköznek: a mérési
+    kulcsok (`basis`, `sma_fast`, …) és a stratégia-nevek diszjunktak (a `market`
+    kapu `adverse` kulcsa ugyanígy él a stratégia-nevek mellett)."""
+    from core import momentum as _m
+    for sym in all_symbols:
+        pc = cfg.setdefault("pairs", {}).setdefault(sym, {})
+        g = pc.setdefault("gates", {}).setdefault(_g.MOMENTUM, {})
+        for k, v in values.items():
+            # A config csak az ELTÉRÉST rögzítse: az alapértékkel egyező mezőt
+            # kivesszük, hogy egy jövőbeli alapérték-változás ne maradjon némán
+            # hatástalan ezen a páron.
+            if k in _m.DEFAULTS and v == _m.DEFAULTS[k]:
+                g.pop(k, None)
+            else:
+                g[k] = list(v) if isinstance(v, list) else v
+
+
 _STORE = {
     _g.SPREAD:   (_load_spread,   _save_spread),
     _g.TF_ALIGN: (_load_tf_align, _save_tf_align),
     _g.MARKET:   (_load_market,   _save_market),
+    _g.MOMENTUM: (_load_momentum, _save_momentum),
 }
 
 
@@ -164,7 +189,8 @@ class GateDialog:
         self._all_symbols = list(all_symbols or [symbol])
         self._f = _theme.fonts()
         self._vars = {}          # paraméter-kulcs → tk változó (vagy dict MULTI-nál)
-        self._eff_vars = {}      # stratégia → tk.StringVar
+        self._eff_vars = {}      # stratégia → tk.StringVar (hatás)
+        self._mode_vars = {}     # stratégia → tk.StringVar (mód — csak a Lendületnél)
 
         self.top = tk.Toplevel(parent)
         self.top.title(f"{symbol} — {_g.label_of(gate_key)}")
@@ -293,11 +319,26 @@ class GateDialog:
             _style_om(om, self._f["small"])
             om.config(width=max(len(t) for t in choices), anchor="w")
             om.grid(row=i, column=1, sticky="w", padx=6)
+            col = 2
+            # A Lendület KÉTFÉLEKÉPPEN bukhat (alapjárat / irány), és a kettő más
+            # kereskedési döntés — ezért itt a hatás mellé egy „mit figyeljen"
+            # választó is kell, szintén stratégiánként.
+            if self.key == _g.MOMENTUM:
+                mode, _msrc = _g.mode_with_source(self.cfg, self.symbol, name)
+                mv = tk.StringVar(value=_g.MOM_MODE_LABEL[mode])
+                self._mode_vars[name] = mv
+                mom = tk.OptionMenu(grid, mv,
+                                    *[_g.MOM_MODE_LABEL[m] for m in _g.MOM_MODES])
+                _style_om(mom, self._f["small"])
+                mom.config(width=max(len(t) for t in _g.MOM_MODE_LABEL.values()),
+                           anchor="w")
+                mom.grid(row=i, column=col, sticky="w", padx=6)
+                col += 1
             tk.Label(grid, text=f"→ {_g.EFFECT_LABEL[eff]}  "
                                 f"({_g.SOURCE_LABEL.get(src, src)})", bg=BG,
                      fg=(FG_WHITE if src == _g.SRC_PAIR else FG_GRAY_DIM),
                      font=self._f["small"], anchor="w").grid(
-                     row=i, column=2, sticky="w", padx=(6, 0))
+                     row=i, column=col, sticky="w", padx=(6, 0))
 
     # ── Lábléc: „összes instrumentumra” + gombok ─────────────────────────
     def _build_footer(self):
@@ -382,7 +423,17 @@ class GateDialog:
                     eff = by_label.get(txt)
                     if eff is None:
                         continue
-                    gg[name] = eff
+                    mv = self._mode_vars.get(name)
+                    if mv is None:
+                        gg[name] = eff
+                    else:
+                        # A Lendületnél a bejegyzés SZÓTÁR: a hatás mellé a mód is
+                        # kell (`{"effect": …, "mode": …}`) — a `gates._as_effect`
+                        # mindkét alakot érti, a régi configok nem törnek.
+                        mode = next((m for m in _g.MOM_MODES
+                                     if _g.MOM_MODE_LABEL[m] == mv.get()),
+                                    _g.MOM_MODE_DEFAULT)
+                        gg[name] = {"effect": eff, "mode": mode}
                 if not gg:
                     gates.pop(self.key, None)
                 if not gates:

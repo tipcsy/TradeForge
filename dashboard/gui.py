@@ -2966,7 +2966,8 @@ class DashboardWindow:
                 on_symbol=self._show_instrument_settings,
                 on_align=self._show_tfalign_settings,
                 on_spread=self._show_spread_params,
-                on_market=self._show_market_gate))
+                on_market=self._show_market_gate,
+                on_momentum=self._show_momentum_gate))
         return rows
 
     def _strategy_enabled(self, symbol: str, name: str) -> bool:
@@ -3081,6 +3082,11 @@ class DashboardWindow:
         """A `Spread` cellára kattintva a SPREAD-KAPU ablaka nyílik."""
         from core import gates as _g
         self._open_gate_dialog(symbol, _g.SPREAD)
+
+    def _show_momentum_gate(self, symbol: str):
+        """A `Lendület` cellára kattintva a LENDÜLET-KAPU ablaka nyílik."""
+        from core import gates as _g
+        self._open_gate_dialog(symbol, _g.MOMENTUM)
 
     def _show_market_gate(self, symbol: str):
         """A `Piac` cellára kattintva a PIAC-KAPU ablaka nyílik (osztályozó
@@ -5553,6 +5559,22 @@ class DashboardWindow:
                                              for k, c in cells.items()}
                 except Exception:
                     pass
+
+        # Lendület („fordulatszám") — a mérés instrumentum-tulajdonság, ezért
+        # ITT készül, nem stratégiánként. A záróárakat UGYANAZON a csatornán
+        # kérjük, amin a TF-együttallás is (`tf_closes`) — így a két alap
+        # (egy idősík 3 SMA-val / három idősík) EGY kódúton fut, és az M5-höz
+        # sem kell új adatút.
+        try:
+            from core import momentum as _mom
+            from core import gates as _gts
+            from core import mt5_connector as _mc
+            _mcfg = _gts.momentum_config(_pcfg, self.cfg)
+            _mcloses = _mc.tf_closes(symbol, _mom.needed_timeframes(_mcfg),
+                                     _mom.needed_bars(_mcfg))
+            ds.momentum = _mom.rpm(_mcloses, _mcfg)
+        except Exception:
+            ds.momentum = float("nan")
 
         # Max spread (ATR-alapú) — a fő időkeret ATR-jéből
         if info and info.point > 0:

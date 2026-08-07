@@ -260,6 +260,40 @@ if TK_OK:
               "adverse" not in ((cfg["pairs"]["GOLD"].get("gates") or {})
                                 .get(g.MARKET) or {}),
               json.dumps(cfg["pairs"]["GOLD"].get("gates"), ensure_ascii=False))
+        # ── Lendulet (a negyedik kapu — a kozos vazat "ingyen" kapja) ─────
+        dm = gd.GateDialog(root, cfg, "GOLD", g.MOMENTUM, ["wpr_sma", "ml_ai"],
+                           ctx={"momentum": 1.2, "momentum_idle_threshold": 0.35},
+                           all_symbols=["GOLD"])
+        check("a Lendulet ablak a meresi parametereket tolti be",
+              {"basis", "idle_threshold", "sma_fast", "sma_mid", "sma_slow",
+               "timeframes", "tf_sma", "vol_window", "timeframe"}
+              == set(dm.raw_values()), str(sorted(dm.raw_values())))
+        check("...es a hatas MELLE mod-valaszto is van (csak itt)",
+              set(dm._mode_vars) == {"wpr_sma", "ml_ai"} and not d._mode_vars,
+              str(set(dm._mode_vars)))
+        # A harom SMA-nak novekvonek kell lennie
+        dm._vars["sma_fast"].set("200")
+        dm._save()
+        check("a rossz sorrendu SMA-k (gyors > lassu) NEM mentodnek",
+              "gyors < k" in dm.lbl_err.cget("text"), dm.lbl_err.cget("text"))
+        dm._vars["sma_fast"].set("10")
+        dm._eff_vars["wpr_sma"].set(g.EFFECT_LABEL[g.EFFECT_BLOCK])
+        dm._mode_vars["wpr_sma"].set(g.MOM_MODE_LABEL[g.MOM_DIR])
+        dm._vars["idle_threshold"].set("0,5")
+        dm._save()
+        check("a Lendulet hatasa ES modja is a configba kerul",
+              g.effect_for(cfg, "GOLD", "wpr_sma", g.MOMENTUM) == g.EFFECT_BLOCK
+              and g.mode_for(cfg, "GOLD", "wpr_sma") == g.MOM_DIR,
+              json.dumps(cfg["pairs"]["GOLD"]["gates"].get(g.MOMENTUM),
+                         ensure_ascii=False))
+        _mc = g.momentum_config(cfg["pairs"]["GOLD"], cfg)
+        check("...es a meresi parameterek is (a magyar tizedesvesszot ertve)",
+              _mc["idle_threshold"] == 0.5 and _mc["sma_fast"] == 10, str(_mc))
+        check("az alapertekkel egyezo mezo NEM keszit config-bejegyzest",
+              "vol_window" not in cfg["pairs"]["GOLD"]["gates"][g.MOMENTUM],
+              json.dumps(cfg["pairs"]["GOLD"]["gates"][g.MOMENTUM],
+                         ensure_ascii=False))
+
     finally:
         root.destroy()
 

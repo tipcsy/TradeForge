@@ -53,6 +53,28 @@ def _spread_cell(ctx: dict) -> dict:
     return {"text": f"{cur:.0f}/{cap:.0f}", "blocking": cur > cap, "value": cur}
 
 
+def _momentum_cell(ctx: dict, on_click=None, symbol: str = None) -> dict:
+    """`↑1.24` — a piac „fordulatszáma": előjel = irány, nagyság = mennyire pörög.
+
+    A `blocking` CSAK az alapjáratot jelzi (a mért érték a küszöb alatt van). Az
+    irány-szűrő szándékosan NEM látszik itt: az irány-tudatos döntés a motoré, a
+    sor pedig az instrumentum szintjén áll, ahol nincs jel-irány — különben a
+    cella olyat ígérne, amit ezen a szinten nem lehet tudni (ugyanaz a
+    szétválasztás, mint a `tf_align`-nál).
+
+    A `value` a RENDEZÉSHEZ kell (a `↑`/`↓` előjelet visszafejteni törékeny)."""
+    import math
+    from core import momentum as _m
+    val = ctx.get("momentum")
+    click = (lambda: on_click(symbol)) if (on_click and symbol) else None
+    if val is None or (isinstance(val, float) and math.isnan(val)):
+        return {"text": "—", "blocking": False, "value": None, "on_click": click}
+    thr = ctx.get("momentum_idle_threshold")
+    idle = _m.is_idle(val, {"idle_threshold": thr}) if thr is not None else False
+    return {"text": _m.cell_text(val), "blocking": idle, "value": float(val),
+            "on_click": click}
+
+
 def _stages(ds, name: str, order=None) -> list:
     """A stratégia stádium-pöttyeinek SZÍNNEVEI, a stádiumok sorrendjében.
 
@@ -129,7 +151,7 @@ def row_data(symbol: str, ds, strategy_names, cfg: dict = None,
              opt_enabled_of=None, opt_state_of=None, enabled_of=None,
              on_toggle=None, on_opt=None, on_stages=None,
              on_symbol=None, on_align=None, on_spread=None,
-             on_market=None) -> dict:
+             on_market=None, on_momentum=None) -> dict:
     """Egy instrumentum sorának adata a `live_row.LiveRow` számára.
 
     `ds`          — `live_trader.PairDashboardState` (duck-typed).
@@ -211,6 +233,7 @@ def row_data(symbol: str, ds, strategy_names, cfg: dict = None,
                       "on_click": (lambda: on_align(symbol)) if on_align else None},
             "market": {"text": getattr(ds, "market_state_label", "") or "—",
                        "on_click": (lambda: on_market(symbol)) if on_market else None},
+            "momentum": _momentum_cell(ctx, on_momentum, symbol),
             "badge": badge,
             "blocking_count": blocking_count,
         },
