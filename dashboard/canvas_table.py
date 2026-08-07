@@ -34,7 +34,7 @@ from dashboard import canvas_cells as _cc
 from dashboard import canvas_columns as _cols
 from dashboard import live_row as _lr
 from dashboard.theme import (BG, BG_HEADER, BG_ROW_ODD, BG_ROW_EVEN, FG_WHITE,
-                             FG_GRAY_DIM, FG_BLUE, FG_ORANGE, FG_RED, FG_GREEN)
+                             FG_GRAY_DIM, FG_BLUE, FG_ORANGE, FG_RED)
 
 PAD = _lr.PAD
 GAP = _lr.GAP
@@ -53,10 +53,6 @@ BAR_W = 14     # a FÜGGŐLEGESÉ szélesebb: azt húzod a leggyakrabban
 # megkulonboztetheto, hogy a kapu blokkol-e vagy csak meretet csokkent.
 _FRAME_STYLE = {"blocked":  {"outline": FG_RED,    "dash": (), "width": 1},
                 "reduced":  {"outline": FG_ORANGE, "dash": (3, 2), "width": 1}}
-
-
-# Az idősík-irány GLIFÁJA a színéből: a jelentés így nem csak a színen múlik.
-_ARROW_OF = {FG_GREEN: "▲", FG_RED: "▼", FG_GRAY_DIM: "·"}
 
 
 def groups(strategies, collapsed: dict = None) -> list:
@@ -330,7 +326,14 @@ class CanvasTable:
         return out
 
     def _draw_separators(self, n_rows: int):
-        """Függőleges blokk-elválasztók a TELJES tábla magasságában."""
+        """Függőleges blokk-elválasztók a TELJES tábla magasságában.
+
+        ⚠ A SZÍN nem mindegy. Az első változat `BG_HEADER`-rel rajzolt, ami a
+        Mocha témában `#181825` — a sorok háttere `#1e1e2e` és `#242438`, tehát
+        csatornánként ~6 árnyalat a különbség: a vonal LÉTEZETT, de gyakorlatilag
+        láthatatlan volt (a felhasználó éles próbán nem is vette észre). A
+        `FG_GRAY_DIM` az a szín, amit a keretrendszer máshol is elválasztásra
+        használ — látszik, de nem hangos."""
         h = max(1, n_rows * (self._h + ROW_PAD))
         edges = self._block_edges()
         for pane, bc in self._bc.items():
@@ -339,13 +342,14 @@ class CanvasTable:
             for x in edges[pane]:
                 if x >= right - 1:
                     continue          # a sáv szélén nem kell vonal
-                bc.create_line(x - x0, 0, x - x0, h, fill=BG_HEADER, tags="sep")
+                bc.create_line(x - x0, 0, x - x0, h, fill=FG_GRAY_DIM,
+                               tags="sep")
             self._hc[pane].delete("sep")
             for x in edges[pane]:
                 if x >= right - 1:
                     continue
                 self._hc[pane].create_line(x - x0, 0, x - x0, 2 * self._h,
-                                           fill=BG, tags="sep")
+                                           fill=FG_GRAY_DIM, tags="sep")
 
     def _draw_row(self, i: int, d: dict):
         y0 = i * (self._h + ROW_PAD)
@@ -371,11 +375,11 @@ class CanvasTable:
         if cell.kind == "dots":
             # A pöttyök a cella KÖZEPÉN, egy sorban — a keret (az engedély
             # jelzése) egy 1 px-es téglalap köréjük.
-            # Az „Együtt" IRÁNYOKAT mutat (idősíkonként fel/le), a stádium-cellák
-            # viszont ÁLLAPOTOKAT — ezért csak az előbbi kap nyilat. Eddig
-            # mindkettő ● volt, tehát az irány KIZÁRÓLAG színnel látszott.
+            # MINDEN pötty ● marad — az „Együtt" oszlopban is. (Egy köztes
+            # változat ott ▲/▼ nyilat rajzolt, hogy az irány ne csak a színen
+            # múljon; a felhasználó eldobta: a zöld/piros pötty a megszokott, és
+            # a nyilak zsúfoltabbá tették a cellát.)
             fdot = self._f["mono"]
-            glyphs = (_ARROW_OF if _cols.base_key(cell.key) == "align" else None)
             dw = fdot.measure(_lr._DOT)
             total = dw * max(1, len(cell.dots))
             sx = x + (w - total) / 2
@@ -387,8 +391,7 @@ class CanvasTable:
                                         width=st.get("width", 1))
                 ids.append(r)
             for k, col in enumerate(cell.dots):
-                ch = glyphs.get(col, _lr._DOT) if glyphs else _lr._DOT
-                ids.append(bc.create_text(sx + k * dw + dw / 2, cy, text=ch,
+                ids.append(bc.create_text(sx + k * dw + dw / 2, cy, text=_lr._DOT,
                                           fill=col, font=fdot, tags=(tag,)))
         elif cell.kind == "ctrl":
             fsm = self._f["small"]

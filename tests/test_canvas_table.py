@@ -38,6 +38,7 @@ if TK_OK:
     from dashboard import canvas_table as ct
     from dashboard import live_row as lr
     from dashboard import theme as _theme
+    from dashboard.theme import BG_ROW_ODD, BG_ROW_EVEN
 
     root = tk.Tk(); root.withdraw()
     _theme._FONTS.clear()
@@ -239,9 +240,9 @@ if TK_OK:
     check("keret nelkuli allapotban nincs latszo keret",
           r2 is None or str(bmid.itemcget(r2, "outline")) in ("", "{}"))
 
-    # IRANYNYILAK: az „Egyutt" IRANYT mutat, a stadium-cella ALLAPOTOT — ezert
-    # csak az elobbi kap nyilat. Eddig mindketto ● volt, tehat az irany
-    # KIZAROLAG szinnel latszott.
+    # A POTTYOK MINDENHOL POTTYOK maradnak — az „Egyutt" oszlopban is. Egy
+    # koztes valtozat ott ▲/▼ nyilat rajzolt (hogy az irany ne csak a szinen
+    # muljon); a felhasznalo eldobta. Ez az allitas orzi, hogy ne csusszon vissza.
     def glyphs(i, key):
         pane = cc.PANE_OF(key.split("|")[-1])
         b = tblv._bc[pane]
@@ -249,17 +250,35 @@ if TK_OK:
                 if b.type(t) == "text"]
 
     al = glyphs(0, "align")
-    check("az „Egyutt” oszlop NYILAKAT rajzol (nem csak szines pottyot)",
-          bool(al) and all(ch in ("▲", "▼", "·") for ch in al), str(al))
+    check("az „Egyutt” oszlop zold/piros POTTYOKAT rajzol (nem nyilat)",
+          bool(al) and all(ch == "●" for ch in al), str(al))
     stg = glyphs(0, "wpr_sma|stages")
-    check("...a stadium-pottyok viszont pottyok maradnak",
+    check("...es a stadium-cella is pottyokkel",
           bool(stg) and all(ch == "●" for ch in stg), str(stg))
+    dot_colors = [tblv._bc["mid"].itemcget(t, "fill")
+                  for t in tblv._items[(0, "align")]
+                  if tblv._bc["mid"].type(t) == "text"]
+    check("...a SZIN hordozza az iranyt (zold/piros/halvany)",
+          all(c for c in dot_colors) and len(set(dot_colors)) >= 2,
+          str(dot_colors))
 
     # BLOKK-ELVALASZTO VONALAK: soronkent kulon keret-widget helyett savonkent
     # EGY vonal az egesz oszlopra.
     lines = [t for t in bmid.find_all() if bmid.type(t) == "line"]
     check("a blokkok kozott elvalaszto VONAL van",
           len(lines) >= 2, f"vonal={len(lines)}")
+    # ⚠ A vonal LETEZESE nem eleg: az elso valtozat BG_HEADER-rel rajzolt, ami a
+    # sorok hattereten gyakorlatilag lathatatlan volt (a user eles proban nem is
+    # vette eszre). Azt is meg kell kovetelni, hogy ELUSSON a hattertol.
+    def rgb(w, c):
+        r, g, b = w.winfo_rgb(c)
+        return (r // 256, g // 256, b // 256)
+
+    lc = rgb(bmid, bmid.itemcget(lines[0], "fill"))
+    for bgname in (BG_ROW_ODD, BG_ROW_EVEN):
+        d = sum(abs(a - b) for a, b in zip(lc, rgb(bmid, bgname)))
+        check(f"...es LATSZIK is a sorhatteren ({bgname})", d >= 40,
+              f"csatorna-kulonbseg={d}")
     check("...es a vonal a TELJES tabla magassagaban fut (nem soronkent)",
           bool(lines) and bmid.coords(lines[0])[3] >= 3 * tblv._h,
           str(bmid.coords(lines[0]) if lines else None))
