@@ -102,10 +102,15 @@ check("strategy_availability: kulcs nelkul mind True",
 src = (ROOT / "dashboard" / "gui.py").read_text(encoding="utf-8")
 check("a mentes NEM torli tobbe az available_strategies kulcsot",
       'new.pop("available_strategies"' not in src)
-check("a mentes a TELJES keszletet irja (terkep a jelolonegyzetekbol)",
-      'chosen_av = {n: bool(v.get()) for n, v in _avail_vars.items()}' in src)
-check("a mentes megtagadja az ures keszletet",
-      "if not any(chosen_av.values()):" in src)
+# v2.9.0 ota a jelolonegyzetek helyett KET LISTA all (Beallitasok -> Strategiak
+# ful): a bekapcsoltak SORRENDBEN, a kikapcsoltak utanuk. A kulcs tovabbra is a
+# TELJES keszletet sorolja fel — csak igy derul ki a fajlbol, MI LETEZIK.
+check("a mentes a TELJES keszletet irja (bekapcsoltak + kikapcsoltak)",
+      "chosen_av = {n: True for n in _on}" in src
+      and "for n in _strat_ed.disabled():" in src)
+check("a mentes megtagadja az ures keszletet", "if not _on:" in src)
+check("a bekapcsoltak SORRENDJE a listabol jon (az lesz az oszlop-sorrend)",
+      "_on = _strat_ed.get()" in src)
 
 # ══ 5. A leszallitott config-fajlok felsoroljak a keszletet ═══════════════
 
@@ -396,17 +401,20 @@ if HAS_TK:
                             btns.append(c)
                         _walk(c)
                 _walk(tops[0])
-                # A jelolonegyzetek: MINDEN regisztralt strategia (a kikapcsolt is)
-                cbs = []
+                # v2.9.0: jelolonegyzetek helyett KET LISTA (Beallitasok ->
+                # Strategiak ful). A keszlet UGYANAZ: minden regisztralt
+                # strategia szerepel — a bekapcsoltak jobbra, a kikapcsoltak
+                # balra —, kulonben a kikapcsolt strategia elerhetetlenne valna.
+                _items = []
 
-                def _walk_cb(wd):
+                def _walk_lb(wd):
                     for c in wd.winfo_children():
-                        if isinstance(c, _tk.Checkbutton):
-                            cbs.append(str(c.cget("text")))
-                        _walk_cb(c)
-                _walk_cb(tops[0])
+                        if isinstance(c, _tk.Listbox):
+                            _items.extend(c.get(0, "end"))
+                        _walk_lb(c)
+                _walk_lb(tops[0])
                 check("a ⚙ MINDEN regisztralt strategiat felkinal",
-                      set(cbs) == set(REG), str(sorted(cbs)))
+                      set(REG) <= set(_items), str(sorted(set(_items))))
                 save_btn = next((b for b in btns if b.cget("text") == "Mentés"), None)
                 check("van Mentes gomb", save_btn is not None)
                 if save_btn is not None:

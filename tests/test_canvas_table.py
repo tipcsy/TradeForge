@@ -224,24 +224,22 @@ if TK_OK:
     tbl3._sort("symbol")
     check("...masodikra csokkeno", tbl3.sort() == ("symbol", -1), str(tbl3.sort()))
 
-    # ══ 6. Az elrejtheto oszlopok szabalya AZONOS a widget-tablaeval ════
+    # ══ 6. A kapu-oszlopok a BEALLITASOKBOL jonnek ══════════════════════
     plain = make_rows(2)
-    for r in plain:
-        r["gates"]["market"] = {"text": "—"}
-        r["gates"]["momentum"] = {"text": "—"}
-    tbl4 = ct.CanvasTable(root, fonts, rows=plain, collapsed={})
-    for r in plain:
-        r["gates"]["cost"] = {"text": "—"}
-    tbl4 = ct.CanvasTable(root, fonts, rows=plain, collapsed={})
-    check("ha egy soron sincs mert Piac/Lendulet/Koltseg, az oszlop KIMARAD",
-          not ({(0, "market"), (0, "momentum"), (0, "cost")} & set(tbl4._items)))
-    # ...de amint VAN mert ertek, meg is jelenik
-    with_cost = make_rows(2)
-    for r in with_cost:
-        r["gates"]["cost"] = {"text": "3.4:1 +70%", "blocking": True}
-    tbl4b = ct.CanvasTable(root, fonts, rows=with_cost, collapsed={})
-    check("...amint van mert koltseg-ertek, az oszlop MEGJELENIK",
+    tbl4 = ct.CanvasTable(root, fonts, rows=plain,
+                          collapsed={"gate_columns": ["spread", "align"]})
+    check("a kikapcsolt kapu oszlopa nem keszul el",
+          (0, "market") not in tbl4._items and (0, "cost") not in tbl4._items
+          and (0, "spread") in tbl4._items)
+    tbl4b = ct.CanvasTable(root, fonts, rows=plain,
+                           collapsed={"gate_columns": ["cost", "spread"]})
+    check("a bekapcsolt oszlop AKKOR IS latszik, ha nincs mert ertek",
           (0, "cost") in tbl4b._items)
+    _blk = next(b for b in ct.blocks(["wpr_sma"],
+                                     {"gate_columns": ["cost", "spread"]})
+                if "badge" in b)
+    check("a blokk-vonalak is a beallitott sorrendet kovetik",
+          _blk == ["cost", "spread", "badge"], str(_blk))
 
     # ══ 6b. AMIT CSAK A VASZON TUD ══════════════════════════════════════
     # Ezek NEM a widget-tabla masolatai — az a paritas mar igazolva van. Ezek az

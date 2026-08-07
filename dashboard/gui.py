@@ -47,6 +47,7 @@ from core import adopted as _adopted
 from core import position_meta as _pmeta
 from core import pnl_split as _pnl_split
 from core import opt_activity as _opt_activity
+from core import gate_layout as _gate_layout
 from version import APP_NAME, APP_VERSION
 
 
@@ -2928,7 +2929,10 @@ class DashboardWindow:
         from dashboard.canvas_table import CanvasTable as _Table
         self._live2 = _Table(
             parent, _t.fonts(), rows=self._live2_visible_rows(),
-            collapsed={"pnl_mode": self._pnl_display()},
+            collapsed={"pnl_mode": self._pnl_display(),
+                       # Mely kapu-oszlopok látszanak és milyen sorrendben —
+                       # a Beállítások „Kapuk" fülének eredménye.
+                       "gate_columns": _gate_layout.enabled_columns(self.cfg)},
             on_close=self._handle_delete)
         self._live2.frame.pack(fill="both", expand=True)
 
@@ -3734,6 +3738,74 @@ class DashboardWindow:
         popup.configure(bg=BG)
         popup.geometry("720x640")
         popup.grab_set()
+        # ── BAL OLDALI FÜLEK ─────────────────────────────────────────────
+        # Nem `ttk.Notebook`: annak a bal oldali fülei Windowson elforgatott
+        # feliratot adnak. Saját gombsáv + tartalom-keret: teljes kontroll,
+        # nulla mellékhatás (ugyanaz a döntés, mint a gördítősávnál).
+        _shell = tk.Frame(popup, bg=BG)
+        _shell.pack(fill="both", expand=True)
+        _tabs = tk.Frame(_shell, bg=BG_HEADER, width=130)
+        _tabs.pack(side="left", fill="y")
+        _tabs.pack_propagate(False)
+        _pages = tk.Frame(_shell, bg=BG)
+        _pages.pack(side="left", fill="both", expand=True)
+
+        _page = {}
+        _btn = {}
+
+        def _show_page(name):
+            for n, pg in _page.items():
+                pg.pack_forget()
+                _btn[n].config(bg=BG_HEADER, fg=FG_GRAY)
+            _page[name].pack(fill="both", expand=True)
+            _btn[name].config(bg=BG, fg=FG_WHITE)
+
+        for _nm in ("Json", "Kapuk", "Stratégiák"):
+            _page[_nm] = tk.Frame(_pages, bg=BG)
+            _btn[_nm] = tk.Label(_tabs, text=_nm, bg=BG_HEADER, fg=FG_GRAY,
+                                 font=self._small_font, anchor="w", padx=12,
+                                 pady=8, cursor="hand2")
+            _btn[_nm].pack(fill="x")
+            _btn[_nm].bind("<Button-1>", lambda _e, n=_nm: _show_page(n))
+
+        # ── KAPUK lap ────────────────────────────────────────────────────
+        from core import gates as _gts, gate_layout as _glay
+        from dashboard.order_editor import OrderEditor
+        _kp = _page["Kapuk"]
+        tk.Label(_kp, text="Mely kapuk látszanak és milyen sorrendben",
+                 bg=BG, fg=FG_BLUE, font=self._header_font, anchor="w").pack(
+                 anchor="w", padx=10, pady=(10, 4))
+        _gate_ed = OrderEditor(
+            _kp, {k: _gts.label_of(k) for k in _gts.KEYS},
+            _glay.enabled_gates(self.cfg),
+            note="A KIKAPCSOLT kapu oszlopa eltűnik, ÉS a kapu egyetlen "
+                 "instrumentumon sem szól bele a kereskedésbe. A per-pár "
+                 "beállítások nem vesznek el: felfüggesztjük őket, és "
+                 "visszakapcsolaskor ujra elnek. "
+                 "A bekapcsolt oszlop AKKOR IS látszik, ha épp nincs mért érték "
+                 "(nincs többé automatikus elrejtés — így egy oka van annak, ha "
+                 "valami nem látszik: te kapcsoltad ki).")
+        _gate_ed.frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+        # ── STRATÉGIÁK lap ───────────────────────────────────────────────
+        _st = _page["Stratégiák"]
+        tk.Label(_st, text="Mely stratégiák elérhetők és milyen sorrendben",
+                 bg=BG, fg=FG_BLUE, font=self._header_font, anchor="w").pack(
+                 anchor="w", padx=10, pady=(10, 4))
+        from strategy import strategy_availability as _savail
+        _av_now = _savail(self.cfg)
+        _strat_ed = OrderEditor(
+            _st, {n: n for n in _av_now},
+            [n for n, on in _av_now.items() if on],
+            note="A program a bekapcsoltakat kínálja fel (per-pár választó) és "
+                 "ezekbol kepez oszlopot. A sorrend a tabla oszlop-sorrendje. "
+                 "Az oszlop-változás ÚJRAINDÍTÁS után látszik.")
+        _strat_ed.frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+        # ── JSON lap (a korábbi tartalom) ────────────────────────────────
+        popup = _page["Json"]          # a lenti kód VÁLTOZATLANUL ide épül
+        _show_page("Json")
+
         tk.Label(popup, text="config.json szerkesztése (mentéskor JSON-validálás):",
                  bg=BG, fg=FG_BLUE, font=self._header_font).pack(anchor="w", padx=10, pady=(10, 2))
         tk.Label(popup, text="Megjegyzés: itt csak a VÁZ-config szerkeszthető. A stratégia "
@@ -3741,28 +3813,6 @@ class DashboardWindow:
                  "stratégia saját fájljában élnek: strategy/config/<name>.json.",
                  bg=BG, fg=FG_GRAY, font=self._small_font, justify="left",
                  wraplength=680).pack(anchor="w", padx=10)
-
-        # ── Elérhető stratégiák (config: available_strategies) ────────────────
-        # A program ezeket kínálja fel (per-pár választó) és ezekből képez oszlopot.
-        # A jelölőnégyzetek AZ IRÁNYADÓK erre a kulcsra (a lenti JSON-t felülírják).
-        from strategy import strategy_availability
-        tk.Label(popup, text="Elérhető stratégiák (a program ezeket kínálja és ezekből "
-                 "képez oszlopot — az oszlop-változás újraindítás után látszik):",
-                 bg=BG, fg=FG_BLUE, font=self._small_font, justify="left",
-                 wraplength=680).pack(anchor="w", padx=10, pady=(8, 0))
-        # A TELJES készlet (a kikapcsoltakkal együtt) — ugyanaz, ami a configba
-        # is kiíródik, tehát a fájl és az ablak SOSEM mondhat mást.
-        _avail_now  = strategy_availability(self.cfg)
-        _avail_vars = {}
-        _av_row = tk.Frame(popup, bg=BG)
-        _av_row.pack(anchor="w", padx=20, pady=(2, 0))
-        for _sn, _on in _avail_now.items():
-            _v = tk.BooleanVar(value=bool(_on))
-            _avail_vars[_sn] = _v
-            tk.Checkbutton(_av_row, text=_sn, variable=_v, bg=BG, fg=FG_WHITE,
-                           selectcolor=BG_HEADER, font=self._small_font,
-                           activebackground=BG, activeforeground=FG_WHITE).pack(
-                           side="left", padx=(0, 12))
 
         txt_frame = tk.Frame(popup, bg=BG)
         txt_frame.pack(fill="both", expand=True, padx=10, pady=4)
@@ -3811,11 +3861,19 @@ class DashboardWindow:
             # a listából. Ennek az volt az ára, hogy a config.json nem mondta meg,
             # MI LÉTEZIK — csak azt, mi tér el az alapértelmezéstől. Két stratégiánál
             # ez zavaró volt, 4-5-nél használhatatlan.
-            chosen_av = {n: bool(v.get()) for n, v in _avail_vars.items()}
-            if not any(chosen_av.values()):
+            # A „Stratégiák" fül SORRENDBEN adja a bekapcsoltakat; a kikapcsoltak
+            # utána jönnek, hogy a fájlból kiderüljön, MI LÉTEZIK (nem csak az,
+            # mi tér el az alapértelmezéstől).
+            _on = _strat_ed.get()
+            if not _on:
                 lbl_err.config(text="Legalább egy stratégia legyen elérhető.")
                 return
+            chosen_av = {n: True for n in _on}
+            for n in _strat_ed.disabled():
+                chosen_av[n] = False
             new["available_strategies"] = chosen_av
+            # A „Kapuk" fül: mely kapuk látszanak/hatnak, milyen sorrendben.
+            _glay.apply_order(new, _gate_ed.get())
             # A `new` MÁR váz-config (a szerkesztő a `main_config_view`-t mutatta),
             # ezért a nyers írót hívjuk — a nézet-szűrés pontosan egyszer fut.
             from strategy.settings import write_config_file as _write

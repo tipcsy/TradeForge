@@ -131,7 +131,9 @@ check("_stop_strategy: sikertelen mentesnel MAS uzenetet ad",
       "if _saved else" in _stop and "visszaindulna" in _stop)
 
 # A ⚙ szerkeszto is atomikusan ir (es a nyers irot hasznalja: a `new` mar vaz)
-_set = gsrc.split("Elérhető stratégiák (a program")[1][:6000]
+# v2.9.0: a ⚙ ablak HAROM bal oldali fulre bomlott (Json / Kapuk / Strategiak);
+# a mentes-ag a "Json" lap ala kerult, de UGYANAZ a kozos iro.
+_set = gsrc.split("def _show_settings")[1]
 check("a ⚙ mentes a kozos (nyers) irot hasznalja",
       "write_config_file as _write" in _set and "_write(new," in _set)
 check("a ⚙ mentes a hibat a sajat cimkejere teszi",

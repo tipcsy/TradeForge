@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import tkinter as tk
 
+from core import gate_layout as _gl
 from dashboard import canvas_cells as _cc
 from dashboard import canvas_columns as _cols
 from dashboard import live_row as _lr
@@ -55,6 +56,16 @@ _FRAME_STYLE = {"blocked":  {"outline": FG_RED,    "dash": (), "width": 1},
                 "reduced":  {"outline": FG_ORANGE, "dash": (3, 2), "width": 1}}
 
 
+def _gate_columns(collapsed: dict) -> list:
+    """A megjelenítendő kapu-OSZLOPOK, sorrendben.
+
+    A hívó (`gui._build_live2`) a configból tölti a `collapsed["gate_columns"]`-t
+    (`dashboard.gate_order`, a Beállítások „Kapuk" fülén szerkeszthető). Ha nem
+    adta meg, a beépített sorrend az alapértelmezés."""
+    v = (collapsed or {}).get("gate_columns")
+    return list(v) if v is not None else _gl.enabled_columns(None)
+
+
 def groups(strategies, collapsed: dict = None) -> list:
     """`[(felirat, [oszlopkulcs, …], kapcsoló_kulcs), …]` — a fejléc 1. sora.
 
@@ -63,14 +74,9 @@ def groups(strategies, collapsed: dict = None) -> list:
     collapsed = collapsed or {}
     out = [("Instrumentum", ["symbol", "bid", "ask", "change"], None)]
     if not collapsed.get("gates"):
-        gk = ["spread", "align"]
-        if _lr.show_market(collapsed):
-            gk.append("market")
-        if _lr.show_momentum(collapsed):
-            gk.append("momentum")
-        if _lr.show_cost(collapsed):
-            gk.append("cost")
-        out.append(("Kapuk", gk, "gates"))
+        gk = list(_gate_columns(collapsed))
+        if gk:
+            out.append(("Kapuk", gk, "gates"))
     for n in (strategies or []):
         if _lr.is_collapsed(collapsed, n):
             out.append((n, [f"{n}|stages", f"{n}|ctrl"], n))
@@ -96,13 +102,7 @@ def blocks(strategies, collapsed: dict = None) -> list:
     out = [["symbol", "bid", "ask", "change"]]
     gate = []
     if not collapsed.get("gates"):
-        gate += ["spread", "align"]
-        if _lr.show_market(collapsed):
-            gate.append("market")
-        if _lr.show_momentum(collapsed):
-            gate.append("momentum")
-        if _lr.show_cost(collapsed):
-            gate.append("cost")
+        gate += list(_gate_columns(collapsed))
     gate.append("badge")            # a kapuk ÖSSZESÍTŐJE — ide tartozik
     out.append(gate)
     for n in (strategies or []):
@@ -216,9 +216,6 @@ class CanvasTable:
         self._clicks.clear()
         rows = self._visible()
         strategies = self._strategy_names()
-        self._collapsed["hide_market"] = self._want_hide("market")
-        self._collapsed["hide_momentum"] = self._want_hide("momentum")
-        self._collapsed["hide_cost"] = self._want_hide("cost")
         self._cols = _cols.layout(self._f, strategies, self._collapsed)
         # Sávonként külön vászon: a bal és a jobb RÖGZÍTETT, a közép görög —
         # ugyanaz az elrendezés, mint a widget-táblában.
@@ -278,12 +275,12 @@ class CanvasTable:
             return 1
         return (cs[-1][1] + cs[-1][2]) - cs[0][1] + GAP
 
-    def _want_hide(self, key: str) -> bool:
-        """Elrejtsük-e a `Piac` / `Lendület` oszlopot? Ugyanaz a szabály, mint a
-        widget-táblában: ha EGYETLEN soron sincs mért érték, az oszlop végig `—`
-        lenne. A döntés EGY helyen születik, a fejléc és a sorok ugyanazt kapják."""
-        return not any(((d.get("gates") or {}).get(key) or {}).get("text")
-                       not in (None, "", "—") for d in self._rows)
+    # ⚠ Az AUTOMATIKUS oszlop-elrejtés MEGSZŰNT (v2.9.0). Korábban a
+    # Piac/Lendület/Költség oszlop magától eltűnt, ha egyetlen páron sem volt mért
+    # érték — így KÉT oka is lehetett annak, hogy valami nem látszik (nincs adat,
+    # vagy kikapcsoltad), és nehéz volt kitalálni, melyik. Mostantól a Beállítások
+    # „Kapuk" fülén megadott lista dönt: amit bekapcsolsz, az látszik, akkor is,
+    # ha épp minden sorban `—`.
 
     # ── Fejléc ───────────────────────────────────────────────────────────
     def _draw_header(self):
@@ -597,8 +594,7 @@ class CanvasTable:
         return (tuple(sorted(d.get("symbol") or "" for d in self._rows)),
                 len(self._rows),
                 tuple(self._strategy_names()),
-                self._want_hide("market"), self._want_hide("momentum"),
-                self._want_hide("cost"),
+                tuple(_gate_columns(self._collapsed)),
                 _lr.pnl_mode(self._collapsed))
 
     def rebuild(self):

@@ -206,6 +206,7 @@ SRC_GLOBAL = "global"              # gates.<kapu>.<stratégia>
 SRC_GLOBAL_DEFAULT = "global_default"
 SRC_LEGACY = "legacy"              # a régi tf_align.gate lista
 SRC_BUILTIN = "builtin"            # REGISTRY default_effect
+SRC_MASTER_OFF = "master_off"      # a Beállításokban KIKAPCSOLT kapu
 
 SOURCE_LABEL = {
     SRC_PAIR: "ezen a páron beállítva",
@@ -214,6 +215,7 @@ SOURCE_LABEL = {
     SRC_GLOBAL_DEFAULT: "örökölt — globális alapérték",
     SRC_LEGACY: "örökölt — a régi tf_align.gate listából",
     SRC_BUILTIN: "örökölt — beépített alapérték",
+    SRC_MASTER_OFF: "a Beállításokban KIKAPCSOLVA (a per-pár beállítások megmaradnak, visszakapcsoláskor újra élnek)",
 }
 
 
@@ -224,6 +226,17 @@ def effect_with_source(cfg: dict, symbol: str, strategy: str,
     A beállító felület ezt mutatja („ezen a páron beállítva" vs. „örökölt"),
     különben nem derülne ki, mit állítottál el ténylegesen, és mi jön feljebbről."""
     cfg = cfg or {}
+    # ── MESTER-KAPCSOLÓ: a Beállításokban kikapcsolt kapu SEHOL nem szól bele ──
+    # Nem töröljük a per-pár beállításokat — csak FELFÜGGESZTJÜK. Visszakapcsolva
+    # minden úgy folytatódik, ahogy volt. A külön forrás-kód azért kell, hogy a
+    # kapu ablaka KIÍRHASSA az okot: enélkül „Ki"-t mutatna, ami azt sugallná,
+    # hogy a felhasználó állította így.
+    try:
+        from core import gate_layout as _gl
+        if not _gl.is_enabled(cfg, key):
+            return EFFECT_NONE, SRC_MASTER_OFF
+    except Exception:
+        pass
     pair_gates = ((cfg.get("pairs") or {}).get(symbol) or {}).get("gates")
     for section, s_own, s_def in (
             ((pair_gates or {}).get(key), SRC_PAIR, SRC_PAIR_DEFAULT),

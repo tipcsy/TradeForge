@@ -65,10 +65,24 @@ if TK_OK:
           and "ml_ai|position" not in ks, str([k for k in ks if k.startswith("ml_ai")]))
     check("...a masik strategia blokkja teljes marad",
           len([k for k in ks if k.startswith("wpr_sma|")]) == 6)
-    kh = cc.column_keys(STRATS, {"hide_market": True, "hide_momentum": True,
-                                 "hide_cost": True})
-    check("az elrejtett Piac/Lendulet/Koltseg oszlop KIMARAD",
-          not ({"market", "momentum", "cost"} & set(kh)))
+    # A kapu-oszlopok KÖRE és SORRENDJE a configból jon (`dashboard.gate_order`).
+    # Az AUTOMATIKUS elrejtes (v2.9.0 elott: ha egy paron sincs mert ertek, az
+    # oszlop eltunik) MEGSZUNT — ket oka is lehetett annak, hogy valami nem
+    # latszik, es nehez volt kitalalni, melyik.
+    from core import gate_layout as gl
+    kh = cc.column_keys(STRATS, {"gate_columns": ["spread", "align"]})
+    check("a kikapcsolt kapu oszlopa KIMARAD",
+          "market" not in kh and "momentum" not in kh and "cost" not in kh
+          and "spread" in kh and "align" in kh, str(kh[:8]))
+    ko = cc.column_keys(STRATS, {"gate_columns": ["cost", "align", "spread"]})
+    check("...es a SORREND a listat koveti",
+          ko[4:7] == ["cost", "align", "spread"], str(ko[4:7]))
+    check("a K.Ossz. a kapu-oszlopok UTAN marad", ko[7] == "badge", str(ko[7]))
+    check("ures lista -> csak a K.Ossz.",
+          cc.column_keys(STRATS, {"gate_columns": []})[4] == "badge")
+    check("hianyzo config -> MINDEN kapu, a REGISTRY sorrendjeben",
+          gl.enabled_columns(None) == ["spread", "align", "market", "momentum", "cost"],
+          str(gl.enabled_columns(None)))
 
     # ── A SZELESSEGEK a meglevo live_row.widths()-bol jonnek ──────────────
     for coll in ({}, {"gates": True}, {"strategies": True},

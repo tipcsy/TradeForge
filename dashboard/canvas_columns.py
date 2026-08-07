@@ -22,6 +22,7 @@ A SORREND kötött, és pontosan a `live_row.build_header` sorrendje:
 
 from __future__ import annotations
 
+from core import gate_layout as _gl
 from dashboard import live_row as _lr
 
 # A cellák közti hézag — a widget-táblában `padx=(0, GAP)`, itt az x-lépés része.
@@ -37,13 +38,14 @@ def column_keys(strategies, collapsed: dict = None) -> list:
     collapsed = collapsed or {}
     keys = ["symbol", "bid", "ask", "change"]
     if not collapsed.get("gates"):
-        keys += ["spread", "align"]
-        if _lr.show_market(collapsed):
-            keys.append("market")
-        if _lr.show_momentum(collapsed):
-            keys.append("momentum")
-        if _lr.show_cost(collapsed):
-            keys.append("cost")
+        # A kapu-oszlopok KÖRE és SORRENDJE a configból jön (`dashboard.gate_order`,
+        # a Beállítások „Kapuk" fülén szerkeszthető). Korábban be volt drótozva, és
+        # a Piac/Lendület/Költség oszlop MAGÁTÓL eltűnt, ha egyetlen páron sem volt
+        # mért érték — így két oka is lehetett annak, hogy valami nem látszik.
+        # Mostantól a kifejezett lista dönt: amit bekapcsolsz, az látszik.
+        keys += list((collapsed.get("gate_columns")
+                      if collapsed.get("gate_columns") is not None
+                      else _gl.enabled_columns(None)))
     keys.append("badge")
     for name in (strategies or []):
         keys.append(f"{name}|stages")
