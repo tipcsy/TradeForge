@@ -834,6 +834,8 @@ def run_pair(
             _mkt_series = None
     # A Lendulet-kapu per-gyertya sorozata — EGYSZER, a dontesi idopontokra,
     # look-ahead nelkul (`momentum.series_at`: zarasi idohoz igazitva).
+    # A költség-kapu küszöbe (alap ← globális ← pár) — a mérés a belépőnél megy.
+    _cost_cap = _gt.cost_max_distortion(pair_cfg, cfg)
     _mom_series, _mom_cfg, _mom_mode = None, None, None
     if _exec_gates and _gt.active(_gate_eff, _gt.MOMENTUM):
         try:
@@ -1186,6 +1188,25 @@ def run_pair(
                             prev_m1_row = m1_row
                             continue
                         sl_points, tp_points = _sw
+
+                    # ── KÖLTSÉG/KOCKÁZAT kapu — a TERV ISMERETÉBEN ────────────
+                    # Ez az EGYETLEN kapu, ami a belépő-terv UTÁN dől el: a
+                    # mérőszáma a spread és a TERVEZETT stop viszonya, tehát
+                    # előbb tudni kell, mekkora stopot szán a stratégia.
+                    if _exec_gates and _gt.active(_gate_eff, _gt.COST):
+                        from core import cost_gate as _cgx
+                        _csp = _cspread_arr[i] if _cspread_arr is not None else float("nan")
+                        if not (_csp > 0):
+                            _csp = _sp
+                        _cdec = _gt.decide(
+                            {_gt.COST: _cgx.failed(sl_points, tp_points,
+                                                   _csp / point_size, _cost_cap)},
+                            _gate_eff)
+                        if _cdec["blocked"]:
+                            prev_m1_row = m1_row
+                            continue
+                        _gate_risk = min(_gate_risk, _cdec["risk_factor"])
+
                     # KAPU-hatás: `kockázatcsökkentés` → kisebb mérettel lépünk be
                     # (ugyanaz a mechanizmus, mint a Risky `cautious`-é: az
                     # `account_risk_pct` szorzója).
@@ -1923,6 +1944,20 @@ def run_portfolio_backtest(
                         # A stratégia adja a pozíciótervet (SL/TP + saját szűrők)
                         plan = (strategy.bt_entry(m15_row, params, point_size)
                                 if _gate_ok else None)
+                        if plan is not None:
+                            sl_points, tp_points = plan
+                            # ── KÖLTSÉG/KOCKÁZAT kapu — a TERV ISMERETÉBEN ────
+                            # (Ugyanaz, mint a run_pair-ben: a mérőszám a spread
+                            # és a TERVEZETT stop viszonya, tehát a terv UTÁN dől el.)
+                            if _exec_gates and _gt.active(info["gate_eff"], _gt.COST):
+                                from core import cost_gate as _cgx
+                                if _cgx.failed(sl_points, tp_points, sp,
+                                               _gt.cost_max_distortion(pair_cfg, cfg)):
+                                    _cd = _gt.decide({_gt.COST: True}, info["gate_eff"])
+                                    if _cd["blocked"]:
+                                        plan = None
+                                    else:
+                                        _gate_risk = min(_gate_risk, _cd["risk_factor"])
                         if plan is not None:
                             sl_points, tp_points = plan
                             # Óvatos (felezett) méret? A kockázatcsökkentő preset dönti

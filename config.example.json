@@ -83,7 +83,9 @@
     "spread": { "default": "block" },
     "tf_align": { "default": "none" },
     "market": { "default": "none", "adverse": ["dead", "uncertain"] },
-    "momentum": { "default": "none" }
+    "_comment_cost": "KOLTSEG/KOCKAZAT kapu (core/cost_gate.py): nem a spread NAGYSAGAT meri, hanem hogy mennyire rontja el az uzletet. tenyleges_RR = (TP + spread) / (SL - spread). A spread a stopot KOZELEBB, a celt TAVOLABB teszi, tehat mindket oldalon fizetsz. max_rr_distortion (alap 0.25) = a tervezett RR-t ennyivel ronthatja. Merve 2026-08-07-en: EURCHF +64%, EURGBP +68%, EURJPY +26%, EURUSD +18%, GOLD +6%, UsaTec +4% — a 0.25 az elso harmat zarja ki. MIERT KELL, HA MAR VAN SPREAD-KAPU: annak relativ PADLOJA (min_spread_mult x normal_spread) konstrukcio szerint nagyobb a par normal spreadjenel, tehat a par a sajat szokasos spreadjen SOHA nem akad fenn rajta — a spread-kapu a KITAGULO spreadet fogja, a KRONIKUSAN draga instrumentumot nem. MIERT KAPU ES NEM SZINT-MODOSITO: merve a stop szelesitese nem menti meg a draga part (a 2x szelesebb TP elerhetetlenne valik), es ha egy kapu atirhatna az SL-t, az „1 R” elveszitene a jelenteset az egesz R-alapu elszamolasban.",
+    "momentum": { "default": "none" },
+    "cost": { "default": "none" }
   },
   "execution": {
     "_comment": "Közös, STRATÉGIA-FÜGGETLEN VÉGREHAJTÁSI alapértékek — MINDEN stratégia ugyanazt az instrumentum-szintű értéket használja. Per-szimbólum felülírás: data/execution_params/<SYMBOL>.json (a Stratégia Paraméterek ablak 'Végrehajtás' kategóriája menti oda).",

@@ -123,6 +123,13 @@ _SPECS = {
         ParamSpec("market_viz", "Piac-sáv a charton (viz)", BOOL, False,
                   "Csak rajz."),
     ),
+    _g.COST: (
+        ParamSpec("max_rr_distortion", "Megengedett RR-torzítás", FLOAT, 0.25,
+                  "A spread ennyivel ronthatja a TERVEZETT kockázat/hozamot. "
+                  "0,25 = „a 2:1-ből legfeljebb 2,5:1 lehet”. Mérve: EURCHF +64%, "
+                  "EURGBP +68%, EURJPY +26%, EURUSD +18%, GOLD +6%, UsaTec +4%.",
+                  lo=0.0, hi=10.0),
+    ),
     _g.MOMENTUM: (
         ParamSpec("basis", "Mérési alap", CHOICE, "sma",
                   "„Egy idősík, 3 SMA”: a gyors/közép/lassú átlag távolsága — ez a "
@@ -264,6 +271,20 @@ def measured_rows(key: str, ctx: dict) -> list:
     if key == _g.MARKET:
         return [("Osztályozó", ctx.get("market_name") or "nincs kiválasztva"),
                 ("Jelenlegi besorolás", ctx.get("market_label") or "—")]
+    if key == _g.COST:
+        from core import cost_gate as _cg
+        sl, tp = ctx.get("plan_sl_points"), ctx.get("plan_tp_points")
+        sp = ctx.get("spread_points")
+        cap = ctx.get("cost_max_distortion")
+        rows = [("Tervezett SL", f"{sl:.0f} pont" if sl else "—"),
+                ("Jelenlegi spread", f"{sp:.0f} pont" if sp is not None else "—")]
+        if sl and tp:
+            rows.append(("Tervezett RR", f"{float(tp) / float(sl):.1f}:1"))
+            rows.append(("Tényleges RR (spreaddel)",
+                         _cg.cell_text(sl, tp, sp)))
+        if cap is not None:
+            rows.append(("Határ", f"{float(cap) * 100:+.0f}%"))
+        return rows
     if key == _g.MOMENTUM:
         from core import momentum as _m
         val = ctx.get("momentum")

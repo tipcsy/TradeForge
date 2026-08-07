@@ -134,11 +134,29 @@ def _save_momentum(cfg: dict, symbol: str, values: dict, all_symbols: list):
                 g[k] = list(v) if isinstance(v, list) else v
 
 
+def _load_cost(cfg: dict, symbol: str) -> dict:
+    pc = ((cfg.get("pairs") or {}).get(symbol) or {})
+    return {"max_rr_distortion": _g.cost_max_distortion(pc, cfg)}
+
+
+def _save_cost(cfg: dict, symbol: str, values: dict, all_symbols: list):
+    from core import cost_gate as _cg
+    for sym in all_symbols:
+        pc = cfg.setdefault("pairs", {}).setdefault(sym, {})
+        g = pc.setdefault("gates", {}).setdefault(_g.COST, {})
+        v = values.get("max_rr_distortion")
+        if v is None or v == _cg.DEFAULT_MAX_DISTORTION:
+            g.pop("max_rr_distortion", None)   # csak az ELTÉRÉST rögzítjük
+        else:
+            g["max_rr_distortion"] = v
+
+
 _STORE = {
     _g.SPREAD:   (_load_spread,   _save_spread),
     _g.TF_ALIGN: (_load_tf_align, _save_tf_align),
     _g.MARKET:   (_load_market,   _save_market),
     _g.MOMENTUM: (_load_momentum, _save_momentum),
+    _g.COST:     (_load_cost, _save_cost),
 }
 
 

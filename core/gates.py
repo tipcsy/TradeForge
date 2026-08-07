@@ -58,6 +58,7 @@ SPREAD = "spread"
 TF_ALIGN = "tf_align"
 MARKET = "market"
 MOMENTUM = "momentum"
+COST = "cost"
 
 # ── A LENDÜLET-kapu MÓDJA: MIT figyeljen ───────────────────────────────────
 # A többi kapunál egyértelmű, mi a „bukás" (túl tág spread, nincs együttállás,
@@ -117,6 +118,9 @@ REGISTRY = (
     # némán másképp kereskedni, mint amit tegnap tesztelted. Bekapcsolni a
     # kapu ablakában, stratégiánként kell.
     {"key": MOMENTUM, "label": "Lendület",           "default_effect": EFFECT_NONE},
+    # Költség/kockázat: a spread mennyire torzítja a TERVEZETT RR-t. Alapból
+    # `none` — a meglévő párok viselkedése nem változhat egy frissítéstől.
+    {"key": COST,     "label": "Költség/kockázat",   "default_effect": EFFECT_NONE},
 )
 
 KEYS = tuple(g["key"] for g in REGISTRY)
@@ -344,6 +348,28 @@ def _eval_market(ctx: dict):
     return PASS, lbl
 
 
+def _eval_cost(ctx: dict):
+    """A spread okozta RR-torzítás. A MÉRT bemenetet (tervezett SL/TP + spread) a
+    hívó adja: a stop a STRATÉGIA terve (`sl_tp_points`), nem a kapué."""
+    import math as _math
+    from core import cost_gate as _cg
+    sl = ctx.get("plan_sl_points")
+    tp = ctx.get("plan_tp_points")
+    sp = ctx.get("spread_points")
+    if not sl or not tp:
+        return UNKNOWN, "nincs belépő-terv (SL/TP)"
+    d = _cg.distortion(sl, tp, sp)
+    if d != d:
+        return UNKNOWN, "nincs elég adat"
+    cap = ctx.get("cost_max_distortion")
+    txt = (f"tervezett {float(tp) / float(sl):.1f}:1 → tényleges "
+           f"{_cg.effective_rr(sl, tp, sp):.1f}:1  ({d * 100:+.0f}%)")
+    if cap is None:
+        return PASS, txt
+    txt += f"  /  határ {float(cap) * 100:+.0f}%"
+    return (BLOCKING if d > float(cap) else PASS), txt
+
+
 def _eval_momentum(ctx: dict):
     """A piac „fordulatszáma" (`core.momentum`).
 
@@ -365,7 +391,7 @@ def _eval_momentum(ctx: dict):
 
 
 _EVAL = {SPREAD: _eval_spread, TF_ALIGN: _eval_tf_align, MARKET: _eval_market,
-         MOMENTUM: _eval_momentum}
+         MOMENTUM: _eval_momentum, COST: _eval_cost}
 
 
 def evaluate(ctx: dict, effects: dict = None) -> list:
@@ -547,6 +573,21 @@ def ctx_from_state(ds, params: dict, pair_cfg: dict) -> dict:
         "momentum": getattr(ds, "momentum", None),
         "momentum_idle_threshold": momentum_idle_threshold(pair_cfg),
     }
+
+
+def cost_max_distortion(pair_cfg: dict, cfg: dict = None) -> float:
+    """A megengedett RR-torzítás erre a párra (alap ← globális ← pár)."""
+    from core import cost_gate as _cg
+    out = _cg.DEFAULT_MAX_DISTORTION
+    for section in ((cfg or {}).get("gates") or {},
+                    (pair_cfg or {}).get("gates") or {}):
+        g = section.get(COST)
+        if isinstance(g, dict) and g.get("max_rr_distortion") is not None:
+            try:
+                out = float(g["max_rr_distortion"])
+            except (TypeError, ValueError):
+                pass
+    return out
 
 
 def momentum_config(pair_cfg: dict, cfg: dict = None) -> dict:

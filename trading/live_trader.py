@@ -2090,6 +2090,29 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
                 log.info("↔ %s %s — az SL a bróker minimum stop-távolságára tágítva "
                          "(%.1f pip); a lot ennek megfelelően kisebb, az R:R változatlan.",
                          symbol, signal, sl_points)
+
+            # ── KÖLTSÉG/KOCKÁZAT kapu — a TERV ISMERETÉBEN ────────────────────
+            # Ez az EGYETLEN kapu, ami a belépő-terv UTÁN dől el: a mérőszáma a
+            # spread és a TERVEZETT stop viszonya, tehát előbb tudni kell,
+            # mekkora stopot szán a stratégia (a min-stop tágítás UTÁN, mert a
+            # ténylegesen vállalt kockázat az).
+            if _gates.active(_gate_eff, _gates.COST):
+                from core import cost_gate as _cgx
+                _spr_pts = float(getattr(sym_info, "spread", 0) or 0)
+                if _cgx.failed(sl_points, tp_points, _spr_pts,
+                               _gates.cost_max_distortion(pair_cfg, _run_cfg)):
+                    _cd = _gates.decide({_gates.COST: True}, _gate_eff)
+                    if _cd["blocked"]:
+                        log.info("⛔ %s %s — a spread a tervezett kockázat/hozamot "
+                                 "%.0f%%-kal rontja (tényleges %.1f:1) → kimarad. "
+                                 "SL=%.0f pont, spread=%.0f pont.",
+                                 symbol, signal,
+                                 _cgx.distortion(sl_points, tp_points, _spr_pts) * 100,
+                                 _cgx.effective_rr(sl_points, tp_points, _spr_pts),
+                                 sl_points, _spr_pts)
+                        return
+                    _gate_dec["risk_factor"] = min(_gate_dec.get("risk_factor", 1.0),
+                                                   _cd["risk_factor"])
             # ── ÉLŐ méretezési adatok a brókertől ────────────────────────────
             # A config `pv1_point`-je egyetlen PILLANATKÉP az instrumentum
             # felvételekor. EUR-számlán minden USD/GBP/JPY-alapú instrumentum
