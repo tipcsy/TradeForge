@@ -1,7 +1,18 @@
-"""A Dashboard 2.0 sora — dashboard/live_row.py.
+"""A Dashboard 2.0 tabla MODELLJE — dashboard/live_row.py.
 
-A geometriat orzik: az 1. kor tanulsagai szerint a sor akkor bukik meg, ha
-NEMAN levag vagy ugral. Mindketto merheto kepernyokep nelkul, ezert itt fut.
+⚠ Ez a modul v2.7.0 ota MAR NEM RAJZOL: a widget-alapu renderelo (`LiveRow`,
+`build_header`, `_cell`) megszunt, a rajzolas a `dashboard/canvas_table.py`-e.
+Ami itt maradt — es amit ez a teszt oriz —, azt a VASZON-tabla hasznalja:
+
+  • `widths()` / `row_height()`: a MERT oszlop-szelessegek. A vaszon ebbol
+    szamolja az x-eltolasokat, tehat ha ez elcsuszik, az egesz tabla elcsuszik.
+  • a formazok (`_money_r`, …): EGY forras arra, mi kerul a cellaba.
+  • `demo_row()`: a bemeneti szerzodes, adatkent.
+
+A korabbi geometria-allitasok (semmi nem esik ossze / nem vagodik le / a cellak
+azonos magassaguak) a WIDGET-renderelot mertek — azzal egyutt megszuntek. Amit
+ertelmes volt atmenteni, az az OSSZECSUKAS szukito hatasa: az most a MODELLBOL
+merodik (oszlop-terkep), nem a kirajzolt keretekbol.
 """
 import sys
 from pathlib import Path
@@ -33,61 +44,21 @@ if TK_OK:
     GATES = {"gates": True}
     ALL = {"gates": True, "strategies": True}
 
-    # A SOR-demo egy szuloben rakja egymas melle a harom reszt (a tablaban ezek
-    # KULON oszlopok). Ezert az ablaknak el kell birnia a TELJES sort, kulonben a
-    # `pack` a jobb oszlopot osszeszoritja — az nem a sor hibaja, hanem a demo
-    # elrendezese. (Az elso valtozat 2200-at hasznalt, es a szuk ablak miatt
-    # levagott jobb oszlopot a `truncated` szuroje elrejtette.)
-    WIDE = 3000
-
-    def nodes_for(collapsed, w=WIDE):
-        return up.inspect(lambda p: lr.build_demo(p, collapsed), size=(w, 300))
-
-    def real_truncation(nodes, w):
-        """A kulso keretek azert 'lognak ki', mert a tartalom szelesebb az
-        ablaknal — ez a TERVEZETT allapot (a kozep gorgetheto lesz). Csak azt
-        nezzuk, ami az ablakon BELUL vagodott le.
-
-        ⚠ A `req_w > w` szuro KORABBAN tul sokat rejtett: a szuk ablakban
-        osszeszoritott JOBB oszlop levagott feliratai is kiestek. A LABEL-eket
-        ezert MINDIG nezzuk — egy levagott felirat sosem "tervezett"."""
-        return [t for t in up.truncated(nodes)
-                if t["cls"] == "Label"
-                or not (t["cls"] == "Frame" and t["req_w"] > w)]
-
-    # ══ 1. Semmi nem esik ossze, semmi nem vagodik le ══════════════════════
-    # A pack_propagate(False) MAGASSAG NELKUL 1 px-re lapitja a keretet — ez a
-    # sor elso valtozataban tenylegesen meg is tortent, a kepernyokep mutatta meg.
-    for label, coll, w in (("kinyitva", OPEN, WIDE), ("kapuk csukva", GATES, WIDE),
-                           ("minden csukva", ALL, 1400)):
-        n = nodes_for(coll, w)
-        check(f"{label}: semmi nem esik ossze", up.collapsed(n) == [],
-              f"{len(up.collapsed(n))} osszeesett")
-        check(f"{label}: semmi nem vagodik le", real_truncation(n, w) == [],
-              "; ".join(f"{t['text']!r} {t['req_w']}>{t['w']}"
-                        for t in real_truncation(n, w)[:3]))
-
-    # ══ 2. A sorok NEM ugralnak ════════════════════════════════════════════
-    # Az 1. korben a Button magasabb volt a Label-nel, es a tabla ugralt.
-    # A fa: content(0) > holder(1) > sor(2) > left/mid/right(3) > CELLA(4) >
-    # belso diszek(5+). A cellak a 4. szinten vannak; a melyebb keretek (pottyok,
-    # vezerlok kozepre igazitott dobozai) jogosan alacsonyabbak.
-    n = nodes_for(OPEN)
-    cells = [x for x in n if x["cls"] == "Frame" and x["mapped"]
-             and x["h"] > 1 and x["depth"] in (3, 4)]
-    heights = {x["h"] for x in cells}
-    check("minden oszlop-cella AZONOS magassagu", len(heights) == 1,
-          f"{len(cells)} cella, magassagok: {sorted(heights)}")
-
-    # Nincs egyetlen Button sem: a vezerlok kattinthato Labelek (lasd modul-doksi)
-    check("a sorban NINCS tk.Button (kattinthato Label helyette)",
-          not [x for x in n if x["cls"] == "Button"])
-
     # ══ 3. Az osszecsukas TENYLEG szukit ═══════════════════════════════════
-    def total_w(collapsed, w=WIDE):
-        return max(x["req_w"] for x in nodes_for(collapsed, w) if x["depth"] <= 1)
+    # A tabla teljes szelessege az OSZLOP-TERKEPBOL (nem a kirajzolt keretekbol):
+    # ugyanaz a szam, amibol a vaszon-tabla is dolgozik.
+    from dashboard import canvas_columns as _cx
+    _rt = tk.Tk(); _rt.withdraw()
+    from dashboard import theme as _th
+    _th._FONTS.clear()
+    _fonts = _th.fonts()
+    STRATS = ["wpr_sma", "ml_ai"]
 
-    w_open, w_gates, w_all = total_w(OPEN), total_w(GATES), total_w(ALL, 1400)
+    def total_w(collapsed, w=None):
+        return _cx.total_width(_cx.layout(_fonts, STRATS, collapsed or {}))
+
+    w_open, w_gates, w_all = total_w(OPEN), total_w(GATES), total_w(ALL)
+    _rt.destroy()
     check("a kapuk osszecsukasa szukit", w_gates < w_open, f"{w_gates} < {w_open}")
     check("a strategiak osszecsukasa tovabb szukit", w_all < w_gates,
           f"{w_all} < {w_gates}")
@@ -160,51 +131,6 @@ if TK_OK:
     check("...es az osszesito a blokkok osszege",
           abs(demo["total"]["position"]["money"]
               - sum(s["position"]["money"] for s in demo["strategies"])) < 1e-9)
-
-    # ══ Az „Együtt" cella BERAGADASA (elesben bejelentve, v2.1.2) ═════════
-    #
-    # A sor INDULASKOR epul fel, amikor a TF-egyuttallas meg URES (a piaci
-    # adat-loop 5 mp-et var az elso lekeres elott). Az `_align_cell` ilyenkor egy
-    # `—` cimket rajzol es KILEP — a pottylistat meg sem hozza letre. Az
-    # `update()` viszont csak MEGLEVO pottyoket szinez, tehat amikor megjott az
-    # adat, a cella `—` maradt. A `structure_key` pedig nem vette eszre a 0 -> 3
-    # valtozast, igy a tabla SOSEM epitette ujra: az oszlop az EGESZ
-    # munkamenetre beragadt.
-
-    from dashboard.theme import FG_GREEN as _FG_GREEN
-
-    def _row(signs):
-        d = lr.demo_row()
-        d["gates"]["align"] = {"signs": signs}
-        return d
-
-    _root2 = tk.Tk()
-    try:
-        _f = {"mono": tkfont.Font(family="Consolas", size=10),
-              "mono_bold": tkfont.Font(family="Consolas", size=10, weight="bold"),
-              "small": tkfont.Font(family="Segoe UI", size=9)}
-
-        _a = lr.LiveRow(_root2, _row([]), _f)
-        check("A HIBA: ures jelekkel epult sor -> nincs pottylista",
-              _a._dots.get("align") is None)
-        check("JAVITAS: a megjott adat SZERKEZET-valtozas -> a tabla ujraepit",
-              _a.update(_row([1, -1, -1])) is False)
-
-        _b = lr.LiveRow(_root2, _row([1, -1, -1]), _f)
-        check("meglevo pottyok szinvaltasa viszont HELYBEN megy (nem epit ujra)",
-              _b.update(_row([1, 1, 1])) is True)
-        check("...es a szinek tenyleg valtoznak",
-              all(w.cget("fg") == _FG_GREEN for w in _b._dots["align"]))
-        check("ures -> ures: nincs felesleges ujraepites",
-              lr.LiveRow(_root2, _row([]), _f).update(_row([])) is True)
-        check("HAROM -> KETTO idosik is ujraepitest kivan (mas cellaszam)",
-              lr.LiveRow(_root2, _row([1, 1, 1]), _f).update(_row([1, 1])) is False)
-        _c, _d2 = lr.LiveRow(_root2, lr.demo_row(), _f), lr.demo_row()
-        _d2["strategies"][0]["stages"] = ["green"]
-        check("a strategia-stadiumok szama tovabbra is a kulcs resze",
-              _c.update(_d2) is False)
-    finally:
-        _root2.destroy()
 
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")

@@ -14,6 +14,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+# A K.Ossz. badge ⛔ glifat ir ki, a Windows-konzol pedig cp1250: enelkul a
+# `print` szallna el, nem a teszt. (A `run_all.py` maga is ezt hivja.)
+from core import applog
+applog.harden_console()
+
 results = []
 
 
@@ -100,10 +105,14 @@ if TK_OK:
     # ══ 1. A 2.0 elrendezes felepul ═══════════════════════════════════════
     w2 = None
     try:
+        # A REGI "live2" ertek v2.7.0 ota `canvas`-ra fordul (a widget-alapu
+        # renderelo megszunt) — a meglevo configok nem torhetnek el emiatt.
         w2 = build_window("live2")
-        check("a layout felismerve", w2._layout_mode() == "live2")
+        check("a regi 'live2' config-ertek canvas-ra fordul",
+              w2._layout_mode() == "canvas", w2._layout_mode())
         check("felepult a 2.0 tabla", getattr(w2, "_live2", None) is not None)
-        check("annyi sor, ahany par", len(w2._live2._row_widgets) == len(CFG["pairs"]))
+        _syms = {k[0] for k in w2._live2._items}
+        check("annyi sor, ahany par", len(_syms) == len(CFG["pairs"]), str(_syms))
         # A classic sorok URESEN maradnak -> a classic frissito-ag magatol kimarad
         check("a classic sorok uresek (nincs ketto tabla)", len(w2.rows) == 0)
 
@@ -124,10 +133,12 @@ if TK_OK:
                   == [s["name"] for s in rows[0]["strategies"]] for r in rows))
 
         # A frissites HELYBEN megy (nem epul ujra): ugyanazok a widgetek.
-        ids_before = [id(x) for x in w2._live2._row_widgets]
+        # A frissites HELYBEN megy: ugyanazok a vaszon-ELEMEK maradnak
+        # (ujraepiteskor uj azonositokat kapnanak).
+        ids_before = dict(w2._live2._items)
         w2._live2.refresh(w2._live2_rows())
         check("a frissites HELYBEN tortenik (nincs ujraepites)",
-              [id(x) for x in w2._live2._row_widgets] == ids_before)
+              w2._live2._items == ids_before)
     finally:
         if w2 is not None:
             w2.root.destroy()
@@ -138,9 +149,15 @@ if TK_OK:
         wc = build_window("classic")
         check("classic: nincs 2.0 tabla", getattr(wc, "_live2", None) is None)
         check("classic: vannak PairRow-sorok", len(wc.rows) == len(CFG["pairs"]))
-        check("classic az ALAPERTELMEZES",
-              G.DashboardWindow._layout_mode(
-                  type("C", (), {"cfg": {"dashboard": {}}})()) == "classic")
+        # v2.7.0 ota a VASZON az alapertelmezes (a widget-alapu 2.0 tabla
+        # megszunt, a classic pedig kifejezetten kerendo).
+        _no_key = type("C", (), {"cfg": {"dashboard": {}}})()
+        check("hianyzo kulcs -> canvas az ALAPERTELMEZES",
+              G.DashboardWindow._layout_mode(_no_key) == "canvas",
+              G.DashboardWindow._layout_mode(_no_key))
+        _classic = type("C", (), {"cfg": {"dashboard": {"layout": "classic"}}})()
+        check("...a classic viszont kifejezetten kerheto",
+              G.DashboardWindow._layout_mode(_classic) == "classic")
     finally:
         if wc is not None:
             wc.root.destroy()

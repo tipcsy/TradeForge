@@ -44,6 +44,13 @@ if TK_OK:
     _theme._FONTS.clear()
     fonts = _theme.fonts()
 
+    def glyph_list(tbl, i, key):
+        """Egy pottyos cella kirajzolt glifai (a szinvaltas/ujraepites merese)."""
+        pane = cc.PANE_OF(key.split("|")[-1])
+        b = tbl._bc[pane]
+        return [b.itemcget(t, "text") for t in tbl._items.get((i, key), [])
+                if b.type(t) == "text"]
+
     def make_rows(n=3, strategies=("wpr_sma", "ml_ai")):
         base = lr.demo_row()
         proto = base["strategies"][0]
@@ -62,44 +69,64 @@ if TK_OK:
             out.append(r)
         return out
 
-    # ══ 1. PARITAS: ugyanaz a szoveg es szin, mint a widget-sorban ═══════
-    holder = tk.Frame(root)
-    rows = make_rows(3)
-    collapsed = {"gates": False, "strategies": set()}
-    mismatch = []
-    for i, d in enumerate(rows):
-        wrow = lr.LiveRow(holder, d, fonts, collapsed, stripe=i)
-        cells = cc.cells_for(d, collapsed)
-        for key, lbl in wrow._lbl.items():
-            if key.endswith("|ctrl_run") or key.endswith("|ctrl_opt"):
-                n, sub = key.split("|ctrl_")
-                cell = cells.get(f"{n}|ctrl")
-                part = next((p for p in cell.parts if p[0] == sub), None)
-                got = (part[1], part[2])
-            else:
-                cell = cells.get(key)
-                if cell is None:
-                    continue
-                got = (cell.text, cell.fg)
-            want = (lbl.cget("text"), str(lbl.cget("fg")))
-            if (str(got[0]), str(got[1])) != want:
-                mismatch.append((key, want, got))
-        # a pottyok szine is
-        for nm, dots in wrow._dots.items():
-            cell = cells.get(f"{nm}|stages") if nm != "align" else cells.get("align")
-            if cell is None:
-                continue
-            wd = [str(x.cget("fg")) for x in dots]
-            if [str(c) for c in cell.dots] != wd:
-                mismatch.append((f"dots:{nm}", wd, cell.dots))
+    # ══ 1. A CELLA-MODELL kimenete — RÖGZITETT ertekekkel ═══════════════
+    # Korabban ez PARITAS-teszt volt: ugyanarra a sor-adatra felepult egy valodi
+    # `LiveRow` is, es cellankent osszevetettuk a szoveget/szint. A widget-alapu
+    # renderelo v2.7.0-ban megszunt, tehat nincs mihez merni — a formazok viszont
+    # (`_money_r`, `_run_text`, `_pnl_color`, …) tovabbra is a `live_row`-ban
+    # laknak, es most mar a vaszon az EGYETLEN fogyasztojuk.
+    #
+    # Ezert PILLANATKEP: ha barmelyik formazo eszrevetlenul elvandorol (mas
+    # kerekites, mas szin-szabaly), ez a lista buknia kell — nem elesben derul ki.
+    from dashboard.theme import (FG_WHITE, FG_GREEN, FG_RED, FG_GRAY,
+                                 FG_GRAY_DIM, FG_BLUE)
+    snap_row = lr.demo_row()
+    snap_row["symbol"], snap_row["bid"] = "GOLD", 2000.0
+    snap_row["ask"], snap_row["digits"] = 2000.5, 2
+    snap_row["change_pct"] = -0.42
+    st0 = snap_row["strategies"][0]
+    st0["name"], st0["enabled"], st0["live"] = "wpr_sma", True, True
+    st0["quality"], st0["opt"], st0["opt_state"] = "Jó", "08/06", ""
+    st0["opt_enabled"] = True
+    st0["position"] = {"money": 12.5, "r": 0.5}
+    st0["daily"] = {"money": -3.25, "r": None}
+    cells = cc.cells_for(snap_row, {"gates": False, "strategies": set()})
 
-    check("MINDEN cella szovege es szine egyezik a widget-sorral",
-          not mismatch, str(mismatch[:3]))
-    check("...es a paritas tenylegesen mert valamit (nem ures halmaz)",
-          len(rows) * 10 < sum(len(lr.LiveRow(holder, d, fonts, collapsed)._lbl)
-                               for d in rows[:1]) * len(rows) + 1)
+    GOLDEN = {
+        "symbol":          ("GOLD",        FG_WHITE),
+        "bid":             ("2000.00",     FG_WHITE),
+        "ask":             ("2000.50",     FG_WHITE),
+        "change":          ("-0.42%",      FG_RED),
+        "wpr_sma|position": ("+12.50$ +0.50R", FG_WHITE),
+        "wpr_sma|daily":   ("-3.25$",      FG_RED),     # R nelkul CSAK a penz
+        "wpr_sma|quality": ("Jó",          FG_GREEN),
+        "wpr_sma|opt":     ("08/06",       FG_GRAY),
+    }
+    bad = [(k, (cells[k].text, cells[k].fg), v)
+           for k, v in GOLDEN.items() if (cells[k].text, cells[k].fg) != v]
+    check("a cellak szovege es szine a ROGZITETT ertekeket adja", not bad, str(bad))
+
+    run = next(p for p in cells["wpr_sma|ctrl"].parts if p[0] == "run")
+    opt = next(p for p in cells["wpr_sma|ctrl"].parts if p[0] == "opt")
+    check("a futo strategian PIROS stop-jel all", (run[1], run[2]) == ("■", FG_RED),
+          str((run[1], run[2])))
+    check("...es az OPT kek, amig inditható", (opt[1], opt[2]) == ("OPT", FG_BLUE),
+          str((opt[1], opt[2])))
+    # Kereskedo strategian az OPT HALVANY: a futas vegen felulirodna a
+    # parameterfajlja, tehat tiltott muvelet — de a felirat marad "OPT".
+    st0["opt_enabled"] = False
+    _o2 = next(p for p in cc.cells_for(snap_row, {})["wpr_sma|ctrl"].parts
+               if p[0] == "opt")
+    check("...es HALVANY, ha a strategia epp kereskedik",
+          (_o2[1], _o2[2]) == ("OPT", FG_GRAY_DIM), str((_o2[1], _o2[2])))
+    st0["live"], st0["enabled"] = False, False
+    cells2 = cc.cells_for(snap_row, {})
+    run2 = next(p for p in cells2["wpr_sma|ctrl"].parts if p[0] == "run")
+    check("a NEM engedelyezett strategian halvany gondolatjel (nem ▶)",
+          (run2[1], run2[2]) == ("–", FG_GRAY_DIM), str((run2[1], run2[2])))
 
     # ══ 2. A tabla felepul es ELEMEKET rajzol, nem widgeteket ═══════════
+    rows = make_rows(3)
     tbl = ct.CanvasTable(root, fonts, rows=rows, collapsed={},
                          on_close=lambda s: None)
     tbl.frame.pack(fill="both", expand=True)
@@ -308,6 +335,37 @@ if TK_OK:
     edges = tblb._block_edges()["mid"]
     check("a kapu-blokk vonala a K.Ossz. UTAN es a jelzes ELOTT fut",
           any(bx + bw <= e <= sx for e in edges), f"badge veg={bx+bw}, jelzes={sx}, vonalak={edges}")
+
+    # ══ 6c. Az „Egyutt" cella BERAGADASA (elesben bejelentve, v2.1.2) ═══
+    #
+    # A sor INDULASKOR epul fel, amikor a TF-egyuttallas meg URES (a piaci
+    # adat-loop 5 mp-et var az elso lekeres elott). Ilyenkor nincs mit rajzolni,
+    # tehat nincs pottylista sem. A HELYBEN frissites viszont csak MEGLEVO
+    # pottyoket szinez — amikor megjott az adat, a cella `—` maradt volna. A
+    # szerkezet-kulcsba ezert bele KELL tartozzon az idosik-pottyok SZAMA is,
+    # kulonben az oszlop az EGESZ munkamenetre beragad.
+    def with_signs(signs, n=1):
+        rs = make_rows(n)
+        for r in rs:
+            r["gates"]["align"] = {"signs": list(signs)}
+        return rs
+
+    tblg = ct.CanvasTable(root, fonts, rows=with_signs([]), collapsed={})
+    tblg.frame.pack(fill="both", expand=True)
+    root.update_idletasks()
+    check("ures jelekkel epult sor -> nincs potty", not glyph_list(tblg, 0, "align"))
+    ids0 = dict(tblg._items)
+    tblg.refresh(with_signs([1, -1, -1]))
+    check("a megjott adat SZERKEZET-valtozas -> UJRAEPIT (nem ragad be)",
+          tblg._items != ids0 and len(glyph_list(tblg, 0, "align")) == 3,
+          str(glyph_list(tblg, 0, "align")))
+    ids1 = dict(tblg._items)
+    tblg.refresh(with_signs([1, 1, 1]))
+    check("meglevo pottyok SZINVALTASA viszont helyben megy",
+          tblg._items == ids1)
+    tblg.refresh(with_signs([1, 1]))
+    check("HAROM -> KETTO idosik is ujraepitest kivan (mas cellaszam)",
+          len(glyph_list(tblg, 0, "align")) == 2)
 
     # ══ 7. EGYETLEN fuggoleges gorgetosav ═══════════════════════════════
     # Az elso eles proban KETTO latszott: a vaszon-tabla sajat gorgetese MELLE a

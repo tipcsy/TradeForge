@@ -247,14 +247,48 @@ check("_run_text: hianyzo 'enabled' -> a regi viselkedes (True)",
       lr._run_text({"live": True}) == (STOP, FG_RED))
 
 lsrc = (ROOT / "dashboard" / "live_row.py").read_text(encoding="utf-8")
-check("a Play/Stop KOTESE megmarad (hogy kiirhassuk az okot)",
-      "if cb:" in lsrc and "l.bind" in lsrc)
-check("a nem engedelyezett Play-en nincs kez-kurzor",
-      'cursor="hand2" if (opt_on if key == "opt" else run_on) else ""' in lsrc)
-check("a HELYBEN frissites is a _run_text-et hasznalja (nem csuszik szet)",
-      "_rtxt, _rfg = _run_text(st)" in lsrc)
 check("a demo-szerzodes tartalmazza az 'enabled' kulcsot",
       '"enabled": True' in lsrc)
+
+# A RAJZOLAS v2.7.0 ota a vaszon-tablae (a widget-alapu `LiveRow` megszunt), de
+# a KET RECEPT valtozatlan — es epp ezert kell orizni oket:
+#   • a KOTES a halvany vezerlon is megmarad (a hivo kiirja az OKOT),
+#   • a KEZ-KURZOR viszont CSAK az aktivon (kulonben azt igerne, hogy tesz valamit).
+import tkinter as _tkc
+_tkok = True
+try:
+    _p = _tkc.Tk(); _p.destroy()
+except Exception:
+    _tkok = False
+
+if _tkok:
+    from dashboard import canvas_table as _ctb
+    from dashboard import theme as _thm
+    _r = _tkc.Tk(); _r.withdraw()
+    _thm._FONTS.clear()
+    _rowd = lr.demo_row()
+    _rowd["strategies"][0]["enabled"] = False        # HALVANY Play
+    _rowd["strategies"][0]["on_toggle"] = lambda: None
+    _rowd["strategies"][1]["enabled"] = True         # AKTIV Play
+    _rowd["strategies"][1]["on_toggle"] = lambda: None
+    _t = _ctb.CanvasTable(_r, _thm.fonts(), rows=[_rowd], collapsed={})
+    _t.frame.pack(); _r.update_idletasks()
+    _n0 = _rowd["strategies"][0]["name"]
+    _n1 = _rowd["strategies"][1]["name"]
+    check("a Play/Stop KOTESE a HALVANY vezerlon is megmarad (kiirhassuk az okot)",
+          (0, f"{_n0}|ctrl", "run") in _t.clickable(),
+          str(sorted(k for k in _t.clickable() if "ctrl" in str(k))))
+    _bc = _t._bc["mid"]
+
+    def _has_cursor(n):
+        return bool(_bc.tag_bind(f"c0_{n}|ctrl_run", "<Enter>"))
+
+    check("a nem engedelyezett Play-en NINCS kez-kurzor", not _has_cursor(_n0))
+    check("...az engedelyezetten viszont VAN", _has_cursor(_n1))
+    _csrc = (ROOT / "dashboard" / "canvas_cells.py").read_text(encoding="utf-8")
+    check("a cella-modell a _run_text-et hasznalja (nem csuszik szet)",
+          "_lr._run_text(st)" in _csrc)
+    _r.destroy()
 
 # ══ 10. FUNKCIONALIS: valodi DashboardWindow (tkinter) ═══════════════════
 #

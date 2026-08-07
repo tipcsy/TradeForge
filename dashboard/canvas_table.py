@@ -435,9 +435,20 @@ class CanvasTable:
                                    tags=(f"{tag}_{sub}",))
                 ids.append(t)
                 if cb:
+                    # A KÖTÉS akkor is megmarad, ha a vezérlő HALVÁNY (tétlen):
+                    # a hívó így ki tudja írni az OKOT az állapotsorba. Egy néma,
+                    # nem reagáló gomb rosszabb, mint egy halvány, ami megmondja,
+                    # miért nem. (Ugyanez volt a widget-változat receptje.)
                     self._clicks[(i, cell.key, sub)] = cb
                     bc.tag_bind(f"{tag}_{sub}", "<Button-1>",
                                 lambda _e, a=(i, cell.key, sub): self.fire(*a))
+                    # KÉZ-KURZOR csak az AKTÍV vezérlőn — a halványon nem, mert
+                    # az azt ígérné, hogy most tenni fog valamit.
+                    if active:
+                        bc.tag_bind(f"{tag}_{sub}", "<Enter>",
+                                    lambda _e, b=bc: b.configure(cursor="hand2"))
+                        bc.tag_bind(f"{tag}_{sub}", "<Leave>",
+                                    lambda _e, b=bc: b.configure(cursor=""))
                 sx += pw + (_lr.CTRL_GAP if sub == "run" else 0)
         else:
             if cell.anchor == "e":
