@@ -2799,7 +2799,7 @@ class DashboardWindow:
         # fejléc ilyenkor nem jelenik meg. Megépítjük, de nem csomagoljuk ki: a
         # rendezés/szűrés kódja hivatkozik rá (`_header_row.set_sort`), és egy
         # None-ellenőrzés minden hívási helyre elszórva több kárt okozna.
-        if self._layout_mode() != "live2":
+        if not self._is_table_layout():
             header_holder.pack(fill="x")
 
         canvas = tk.Canvas(table_holder, bg=BG, highlightthickness=0)
@@ -2841,7 +2841,7 @@ class DashboardWindow:
         # `classic`: az 1. körben HÁROM elrendezés bukott meg, ezért a 2.0 nem
         # veszi át a helyét, amíg nem bizonyított — a `self.rows` üresen marad,
         # így a classic frissítő-ág (`hasattr`/üres ciklus) magától kimarad.
-        if self._layout_mode() == "live2":
+        if self._is_table_layout():
             self._build_live2(self._table_frame)
             tk.Frame(parent, bg=FG_GRAY_DIM, height=1).pack(fill="x", padx=2, pady=2)
             self.lbl_status = tk.Label(parent, text="Indulás...", bg=BG,
@@ -2872,8 +2872,21 @@ class DashboardWindow:
 
     # ── Dashboard 2.0 tábla ──────────────────────────────────────────────
     def _layout_mode(self) -> str:
-        """`classic` (alap) vagy `live2`. A configból: `dashboard.layout`."""
+        """`classic` (alap) | `live2` | `canvas`. A configból: `dashboard.layout`.
+
+        A `canvas` UGYANAZT a táblát rajzolja, mint a `live2` — csak vászonra,
+        widgetek helyett (`dashboard/canvas_table.py`). Azért külön érték, és nem
+        a `live2` lecserélése, hogy egyetlen config-kulccsal vissza lehessen
+        váltani, ha valami mégsem stimmel."""
         return str((self.cfg.get("dashboard") or {}).get("layout", "classic"))
+
+    def _is_table_layout(self) -> bool:
+        """A 2.0 tábla valamelyik renderelője fut-e? (`live2` vagy `canvas`)
+
+        Ami ettől függ, az a TÁBLA szerkezetéből következik, nem a rajzolási
+        módból: a saját fejléc-sáv, a jelmagyarázat és a P&L-mód. Ezért egy
+        kérdés, nem kettő — különben a `canvas` némán a `classic` ágra esne."""
+        return self._layout_mode() in ("live2", "canvas")
 
     def _show_legend(self) -> bool:
         """Látszik-e a felső jelmagyarázat-sáv (`dashboard.show_legend`).
@@ -2886,15 +2899,21 @@ class DashboardWindow:
         félrevezető sáv, és aki mégis kéri, egy kulccsal visszakapja."""
         v = (self.cfg.get("dashboard") or {}).get("show_legend")
         if v is None:
-            return self._layout_mode() != "live2"
+            return not self._is_table_layout()
         return bool(v)
 
     def _build_live2(self, parent):
         """A 2.0 tábla felépítése. A sor-adatot a `dashboard.row_source` állítja
         elő a motor pillanatképeiből — itt csak a forrásokat kötjük be."""
-        from dashboard.live_table import LiveTable
         from dashboard import theme as _t
-        self._live2 = LiveTable(
+        # A KÉT renderelő publikus felülete azonos (`frame`, `refresh`, `rebuild`,
+        # `sort`, `collapsed`), ezért a választás egyetlen sor — minden további
+        # bekötés (sor-adat, kattintások, frissítés) változatlan.
+        if self._layout_mode() == "canvas":
+            from dashboard.canvas_table import CanvasTable as _Table
+        else:
+            from dashboard.live_table import LiveTable as _Table
+        self._live2 = _Table(
             parent, _t.fonts(), rows=self._live2_visible_rows(),
             collapsed={"pnl_mode": self._pnl_display()},
             on_close=self._handle_delete)

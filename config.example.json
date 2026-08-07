@@ -27,7 +27,7 @@
     "all_refresh_sec": 30,
     "watchdog_threshold_sec": 2.0,
     "watchdog_stacks": true,
-    "_comment_layout": "Dashboard-elrendezés: 'classic' (ALAP, a megszokott tábla) | 'live2' (Dashboard 2.0: egy sor = egy instrumentum, a stratégiák VÍZSZINTESEN, összecsukható kapu- és stratégia-blokkokkal, fix–görgethető–fix szélességgel). A 2.0 kísérleti: bármikor visszaváltható 'classic'-ra.",
+    "_comment_layout": "Dashboard-elrendezés: 'classic' (ALAP, a megszokott tábla) | 'live2' (Dashboard 2.0: egy sor = egy instrumentum, a stratégiák VÍZSZINTESEN, összecsukható kapu- és stratégia-blokkokkal, fix–görgethető–fix szélességgel) | 'canvas' (UGYANAZ a 2.0 tábla, de VÁSZONRA rajzolva widgetek helyett). A 'canvas' azonos látványt ad, de nagyságrendekkel olcsóbb: 30 instrumentum × 10 stratégia mellett a tábla felépítése 13,3 mp helyett 0,46 mp, egy átméretezési lépés 585 ms helyett 12 ms — a widget-változat ekkora táblát 6427 widgetből épít, a vászon 12-ből. Bármikor visszaváltható.",
     "layout": "classic",
     "_comment_legend": "Látszik-e a felső JELMAGYARÁZAT-sáv (LIVE/STOPPED/Kivezetés színek + a kockázatcsökkentő preset betűkódjai). KIHAGYVA az elrendezés dönt: 'classic'-ban BE (ott érvényes — a szimbólum neve állapot szerint színeződik, és a soron ott a kattintható 'R' preset-gomb), 'live2'-ben KI (ott a szimbólum mindig fehér és nincs preset-cella, tehát mind a 12 elem félrevezetne, miközben elvisz egy sávnyi helyet). true/false-szal felülírható.",
     "show_legend": null,
