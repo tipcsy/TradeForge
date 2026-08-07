@@ -205,6 +205,65 @@ if TK_OK:
     check("ha egy soron sincs mert Piac/Lendulet, az oszlop KIMARAD",
           (0, "market") not in tbl4._items and (0, "momentum") not in tbl4._items)
 
+    # ══ 6b. AMIT CSAK A VASZON TUD ══════════════════════════════════════
+    # Ezek NEM a widget-tabla masolatai — az a paritas mar igazolva van. Ezek az
+    # a haromfele rajzelem, amit widgetekkel nem (vagy csak dragan) lehetett.
+    marked = make_rows(3)
+    marked[0]["strategies"][0]["frame"] = "blocked"
+    marked[1]["strategies"][0]["frame"] = "reduced"
+    marked[2]["strategies"][0]["frame"] = ""
+    tblv = ct.CanvasTable(root, fonts, rows=marked, collapsed={})
+    tblv.frame.pack(fill="both", expand=True)
+    root.update_idletasks()
+    bmid = tblv._bc["mid"]
+
+    def frame_rect(i):
+        ids = tblv._items[(i, "wpr_sma|stages")]
+        rects = [t for t in ids if bmid.type(t) == "rectangle"]
+        return rects[-1] if rects else None
+
+    # A SZAGGATOTT keret az EREDETI terv volt (live_row.py `_DOT` folott): a
+    # tkinter `highlightthickness` nem tud szaggatott lenni, ezert maradt a
+    # csak-szines megkulonboztetes. Vasznon ingyen van.
+    r0, r1 = frame_rect(0), frame_rect(1)
+    check("blokkolo kapunal TOMOR keret",
+          bmid.itemcget(r0, "dash") in ("", "()") and
+          str(bmid.itemcget(r0, "outline")) != "",
+          f"dash={bmid.itemcget(r0, 'dash')!r}")
+    check("kockazatcsokkentesnel SZAGGATOTT keret (nem csak mas szin)",
+          bmid.itemcget(r1, "dash") not in ("", "()"),
+          f"dash={bmid.itemcget(r1, 'dash')!r}")
+    check("...es a ket keret szine is kulonbozo",
+          bmid.itemcget(r0, "outline") != bmid.itemcget(r1, "outline"))
+    r2 = frame_rect(2)
+    check("keret nelkuli allapotban nincs latszo keret",
+          r2 is None or str(bmid.itemcget(r2, "outline")) in ("", "{}"))
+
+    # IRANYNYILAK: az „Egyutt" IRANYT mutat, a stadium-cella ALLAPOTOT — ezert
+    # csak az elobbi kap nyilat. Eddig mindketto ● volt, tehat az irany
+    # KIZAROLAG szinnel latszott.
+    def glyphs(i, key):
+        pane = cc.PANE_OF(key.split("|")[-1])
+        b = tblv._bc[pane]
+        return [b.itemcget(t, "text") for t in tblv._items[(i, key)]
+                if b.type(t) == "text"]
+
+    al = glyphs(0, "align")
+    check("az „Egyutt” oszlop NYILAKAT rajzol (nem csak szines pottyot)",
+          bool(al) and all(ch in ("▲", "▼", "·") for ch in al), str(al))
+    stg = glyphs(0, "wpr_sma|stages")
+    check("...a stadium-pottyok viszont pottyok maradnak",
+          bool(stg) and all(ch == "●" for ch in stg), str(stg))
+
+    # BLOKK-ELVALASZTO VONALAK: soronkent kulon keret-widget helyett savonkent
+    # EGY vonal az egesz oszlopra.
+    lines = [t for t in bmid.find_all() if bmid.type(t) == "line"]
+    check("a blokkok kozott elvalaszto VONAL van",
+          len(lines) >= 2, f"vonal={len(lines)}")
+    check("...es a vonal a TELJES tabla magassagaban fut (nem soronkent)",
+          bool(lines) and bmid.coords(lines[0])[3] >= 3 * tblv._h,
+          str(bmid.coords(lines[0]) if lines else None))
+
     # ══ 7. EGYETLEN fuggoleges gorgetosav ═══════════════════════════════
     # Az elso eles proban KETTO latszott: a vaszon-tabla sajat gorgetese MELLE a
     # gui.py regi, kulso gorgetheto vaszna is odatette a magaet. A kulsonek nem

@@ -34,7 +34,7 @@ from dashboard import canvas_cells as _cc
 from dashboard import canvas_columns as _cols
 from dashboard import live_row as _lr
 from dashboard.theme import (BG, BG_HEADER, BG_ROW_ODD, BG_ROW_EVEN, FG_WHITE,
-                             FG_GRAY_DIM, FG_BLUE, FG_ORANGE, FG_RED)
+                             FG_GRAY_DIM, FG_BLUE, FG_ORANGE, FG_RED, FG_GREEN)
 
 PAD = _lr.PAD
 GAP = _lr.GAP
@@ -42,7 +42,21 @@ ROW_PAD = 1
 BAR_H = 8      # a vízszintes sáv magassága
 BAR_W = 14     # a FÜGGŐLEGESÉ szélesebb: azt húzod a leggyakrabban
 
-_FRAME_COLOR = {"blocked": FG_RED, "reduced": FG_ORANGE}
+# A jelzes-cella KERETE: tomor piros = blokkolva, SZAGGATOTT sarga =
+# kockazatcsokkentes. A szaggatas az EREDETI terv volt (lasd `live_row.py`
+# `_DOT` folott): widgetekkel nem ment, mert a `highlightthickness` nem tud
+# szaggatott lenni, es cellankent kulon `Canvas` "sok sornal folosleges teher"
+# lett volna. A tabla most eleve vaszon -> ingyen van.
+#
+# MIERT SZAMIT: eddig a ket allapotot CSAK a szin kulonboztette meg. Most az
+# ALAKJA is mas, tehat egy pillantasbol — es szin-teveszto szemmel is —
+# megkulonboztetheto, hogy a kapu blokkol-e vagy csak meretet csokkent.
+_FRAME_STYLE = {"blocked":  {"outline": FG_RED,    "dash": (), "width": 1},
+                "reduced":  {"outline": FG_ORANGE, "dash": (3, 2), "width": 1}}
+
+
+# Az idősík-irány GLIFÁJA a színéből: a jelentés így nem csak a színen múlik.
+_ARROW_OF = {FG_GREEN: "▲", FG_RED: "▼", FG_GRAY_DIM: "·"}
 
 
 def groups(strategies, collapsed: dict = None) -> list:
@@ -296,6 +310,42 @@ class CanvasTable:
             bc.delete("all")
         for i, d in enumerate(rows):
             self._draw_row(i, d)
+        self._draw_separators(len(rows))
+
+    def _block_edges(self) -> dict:
+        """Sávonként az x-ek, ahol EGYIK blokk véget ér és a másik kezdődik.
+
+        Widgetekkel ez külön keret-widgeteket jelentett volna SORONKÉNT (10 sor ×
+        12 blokk = 120 widget csak a vonalakhoz); vásznon sávonként EGY
+        `create_line` az egész oszlopra. A 10 stratégiás nézetben ez az, ami a
+        blokkokat egyáltalán elkülöníthetővé teszi."""
+        out = {"left": [], "mid": [], "right": []}
+        for _label, keys, _tkey in groups(self._strategy_names(), self._collapsed):
+            cols = [c for c in self._cols if c[0] in keys]
+            if not cols:
+                continue
+            key = cols[-1][0]
+            pane = _cc.PANE_OF(_cols.base_key(key))
+            out[pane].append(cols[-1][1] + cols[-1][2] + GAP / 2)
+        return out
+
+    def _draw_separators(self, n_rows: int):
+        """Függőleges blokk-elválasztók a TELJES tábla magasságában."""
+        h = max(1, n_rows * (self._h + ROW_PAD))
+        edges = self._block_edges()
+        for pane, bc in self._bc.items():
+            x0 = self._pane_x0[pane]
+            right = self._pane_width(pane) + x0
+            for x in edges[pane]:
+                if x >= right - 1:
+                    continue          # a sáv szélén nem kell vonal
+                bc.create_line(x - x0, 0, x - x0, h, fill=BG_HEADER, tags="sep")
+            self._hc[pane].delete("sep")
+            for x in edges[pane]:
+                if x >= right - 1:
+                    continue
+                self._hc[pane].create_line(x - x0, 0, x - x0, 2 * self._h,
+                                           fill=BG, tags="sep")
 
     def _draw_row(self, i: int, d: dict):
         y0 = i * (self._h + ROW_PAD)
@@ -321,16 +371,24 @@ class CanvasTable:
         if cell.kind == "dots":
             # A pöttyök a cella KÖZEPÉN, egy sorban — a keret (az engedély
             # jelzése) egy 1 px-es téglalap köréjük.
+            # Az „Együtt" IRÁNYOKAT mutat (idősíkonként fel/le), a stádium-cellák
+            # viszont ÁLLAPOTOKAT — ezért csak az előbbi kap nyilat. Eddig
+            # mindkettő ● volt, tehát az irány KIZÁRÓLAG színnel látszott.
             fdot = self._f["mono"]
+            glyphs = (_ARROW_OF if _cols.base_key(cell.key) == "align" else None)
             dw = fdot.measure(_lr._DOT)
             total = dw * max(1, len(cell.dots))
             sx = x + (w - total) / 2
             if cell.frame:
+                st = _FRAME_STYLE.get(cell.frame) or {}
                 r = bc.create_rectangle(sx - 4, y0 + 2, sx + total + 4,
-                                        y0 + self._h - 2, outline="", width=1)
+                                        y0 + self._h - 2, outline="",
+                                        dash=st.get("dash", ()),
+                                        width=st.get("width", 1))
                 ids.append(r)
             for k, col in enumerate(cell.dots):
-                ids.append(bc.create_text(sx + k * dw + dw / 2, cy, text=_lr._DOT,
+                ch = glyphs.get(col, _lr._DOT) if glyphs else _lr._DOT
+                ids.append(bc.create_text(sx + k * dw + dw / 2, cy, text=ch,
                                           fill=col, font=fdot, tags=(tag,)))
         elif cell.kind == "ctrl":
             fsm = self._f["small"]
@@ -373,7 +431,8 @@ class CanvasTable:
         self._visual[(i, cell.key)] = cell.visual()
         if cell.kind == "dots" and cell.frame:
             bc.itemconfigure(ids[1] if cell.on_click else ids[0],
-                             outline=_FRAME_COLOR.get(cell.frame, ""))
+                             outline=(_FRAME_STYLE.get(cell.frame) or {}).get(
+                                 "outline", ""))
 
     def fire(self, row_index: int, key: str, sub: str = None) -> bool:
         """Egy cella kattintásának KIVÁLTÁSA. Minden `tag_bind` ide mutat, tehát
@@ -419,9 +478,11 @@ class CanvasTable:
                 bc.itemconfigure(t, fill=col)
             rects = [t for t in ids if bc.type(t) == "rectangle"]
             if cell.frame and rects:
-                bc.itemconfigure(rects[-1], outline=_FRAME_COLOR.get(cell.frame, ""))
+                st = _FRAME_STYLE.get(cell.frame) or {}
+                bc.itemconfigure(rects[-1], outline=st.get("outline", ""),
+                                 dash=st.get("dash", ()), width=st.get("width", 1))
             elif rects:
-                bc.itemconfigure(rects[-1], outline="")
+                bc.itemconfigure(rects[-1], outline="", dash=())
         elif cell.kind == "ctrl":
             for t, part in zip(texts, cell.parts):
                 bc.itemconfigure(t, text=part[1], fill=part[2])
