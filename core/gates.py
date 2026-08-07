@@ -572,6 +572,12 @@ def ctx_from_state(ds, params: dict, pair_cfg: dict) -> dict:
         # hogy a sor és a beállító ablak UGYANAZT a számot mutassa.
         "momentum": getattr(ds, "momentum", None),
         "momentum_idle_threshold": momentum_idle_threshold(pair_cfg),
+        # Költség/kockázat: a STRATÉGIA tervezett stopja/célja (a kijelzés tölti
+        # `ds.plan_sl_points`/`plan_tp_points`-ba) + a pár küszöbe. A kapu csak
+        # ezekből dolgozik — nem számol saját stopot.
+        "plan_sl_points": getattr(ds, "plan_sl_points", None),
+        "plan_tp_points": getattr(ds, "plan_tp_points", None),
+        "cost_max_distortion": cost_max_distortion(pair_cfg),
     }
 
 

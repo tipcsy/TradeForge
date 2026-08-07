@@ -63,6 +63,7 @@ _SAMPLE = {
     "ask": ("mono", "99999.99"), "change": ("mono", "+99.99%"),
     "spread": ("mono", "99999/99999"), "align": ("mono", "●●●●"),
     "market": ("small", "Sz.Bika"), "momentum": ("mono", "↑9.99"),
+    "cost": ("mono", "99.9:1 +999%"),
     "badge": ("mono", "⛔9"),
     "stages": ("mono", "●●●●"), "quality": ("small", "Közepes"),
     "ctrl": ("small", "■ OPT"), "opt": ("small", "99/99"),
@@ -102,7 +103,7 @@ def pnl_mode(collapsed: dict) -> str:
 _HEADER_TEXT = {
     "symbol": "Symbol", "bid": "BID", "ask": "ASK", "change": "Vált.%",
     "spread": "Spread", "align": "Együtt", "market": "Piac",
-    "momentum": "Lendület",
+    "momentum": "Lendület", "cost": "Költség",
     "badge": "K.Össz.", "stages": "jelzés", "position": "Pozíció",
     "daily": "Napi P&L", "quality": "Min.", "ctrl": "Vezérlés", "opt": "Opt",
     "total_pos": "Pozíció", "total_daily": "Napi P&L", "close": "",
@@ -127,6 +128,12 @@ def show_momentum(collapsed: dict) -> bool:
     informaciot nem ad. A hivo `collapsed["hide_momentum"]`-ba teszi a dontest,
     es a SOR es a FEJLEC ugyanazt kapja (kulonben elcsusznanak az oszlopok)."""
     return not (collapsed or {}).get("hide_momentum")
+
+
+def show_cost(collapsed: dict) -> bool:
+    """Latszik-e a `Koltseg` oszlop? Ugyanaz a szabaly, mint a Piac/Lendulet:
+    ha egyetlen paron sincs merheto terv (SL/TP), az oszlop vegig `—` lenne."""
+    return not (collapsed or {}).get("hide_cost")
 
 
 def is_collapsed(collapsed: dict, name: str = None) -> bool:

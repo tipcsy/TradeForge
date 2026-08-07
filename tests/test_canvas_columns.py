@@ -45,13 +45,13 @@ if TK_OK:
     keys = cc.column_keys(STRATS, {})
     check("a fix oszlopok elol allnak, a megszokott sorrendben",
           keys[:4] == ["symbol", "bid", "ask", "change"], str(keys[:4]))
-    check("a kapu-blokk: Spread · Egyutt · Piac · Lendulet, majd a K.Ossz.",
-          keys[4:9] == ["spread", "align", "market", "momentum", "badge"],
-          str(keys[4:9]))
+    check("a kapu-blokk: Spread · Egyutt · Piac · Lendulet · Koltseg, majd K.Ossz.",
+          keys[4:10] == ["spread", "align", "market", "momentum", "cost", "badge"],
+          str(keys[4:10]))
     check("a strategia-oszlopok kulcsa '<nev>|<mezo>' (a rendezes blokkra hat)",
-          keys[9:15] == ["wpr_sma|stages", "wpr_sma|position", "wpr_sma|daily",
-                         "wpr_sma|quality", "wpr_sma|ctrl", "wpr_sma|opt"],
-          str(keys[9:15]))
+          keys[10:16] == ["wpr_sma|stages", "wpr_sma|position", "wpr_sma|daily",
+                          "wpr_sma|quality", "wpr_sma|ctrl", "wpr_sma|opt"],
+          str(keys[10:16]))
     check("a vegen az osszesito + a torles",
           keys[-3:] == ["total_pos", "total_daily", "close"], str(keys[-3:]))
 
@@ -65,9 +65,10 @@ if TK_OK:
           and "ml_ai|position" not in ks, str([k for k in ks if k.startswith("ml_ai")]))
     check("...a masik strategia blokkja teljes marad",
           len([k for k in ks if k.startswith("wpr_sma|")]) == 6)
-    kh = cc.column_keys(STRATS, {"hide_market": True, "hide_momentum": True})
-    check("az elrejtett Piac/Lendulet oszlop KIMARAD (mint a widget-tablaban)",
-          "market" not in kh and "momentum" not in kh)
+    kh = cc.column_keys(STRATS, {"hide_market": True, "hide_momentum": True,
+                                 "hide_cost": True})
+    check("az elrejtett Piac/Lendulet/Koltseg oszlop KIMARAD",
+          not ({"market", "momentum", "cost"} & set(kh)))
 
     # ── A SZELESSEGEK a meglevo live_row.widths()-bol jonnek ──────────────
     for coll in ({}, {"gates": True}, {"strategies": True},

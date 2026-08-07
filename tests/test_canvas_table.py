@@ -230,8 +230,18 @@ if TK_OK:
         r["gates"]["market"] = {"text": "—"}
         r["gates"]["momentum"] = {"text": "—"}
     tbl4 = ct.CanvasTable(root, fonts, rows=plain, collapsed={})
-    check("ha egy soron sincs mert Piac/Lendulet, az oszlop KIMARAD",
-          (0, "market") not in tbl4._items and (0, "momentum") not in tbl4._items)
+    for r in plain:
+        r["gates"]["cost"] = {"text": "—"}
+    tbl4 = ct.CanvasTable(root, fonts, rows=plain, collapsed={})
+    check("ha egy soron sincs mert Piac/Lendulet/Koltseg, az oszlop KIMARAD",
+          not ({(0, "market"), (0, "momentum"), (0, "cost")} & set(tbl4._items)))
+    # ...de amint VAN mert ertek, meg is jelenik
+    with_cost = make_rows(2)
+    for r in with_cost:
+        r["gates"]["cost"] = {"text": "3.4:1 +70%", "blocking": True}
+    tbl4b = ct.CanvasTable(root, fonts, rows=with_cost, collapsed={})
+    check("...amint van mert koltseg-ertek, az oszlop MEGJELENIK",
+          (0, "cost") in tbl4b._items)
 
     # ══ 6b. AMIT CSAK A VASZON TUD ══════════════════════════════════════
     # Ezek NEM a widget-tabla masolatai — az a paritas mar igazolva van. Ezek az

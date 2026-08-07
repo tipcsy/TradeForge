@@ -68,6 +68,8 @@ def groups(strategies, collapsed: dict = None) -> list:
             gk.append("market")
         if _lr.show_momentum(collapsed):
             gk.append("momentum")
+        if _lr.show_cost(collapsed):
+            gk.append("cost")
         out.append(("Kapuk", gk, "gates"))
     for n in (strategies or []):
         if _lr.is_collapsed(collapsed, n):
@@ -99,6 +101,8 @@ def blocks(strategies, collapsed: dict = None) -> list:
             gate.append("market")
         if _lr.show_momentum(collapsed):
             gate.append("momentum")
+        if _lr.show_cost(collapsed):
+            gate.append("cost")
     gate.append("badge")            # a kapuk ÖSSZESÍTŐJE — ide tartozik
     out.append(gate)
     for n in (strategies or []):
@@ -214,6 +218,7 @@ class CanvasTable:
         strategies = self._strategy_names()
         self._collapsed["hide_market"] = self._want_hide("market")
         self._collapsed["hide_momentum"] = self._want_hide("momentum")
+        self._collapsed["hide_cost"] = self._want_hide("cost")
         self._cols = _cols.layout(self._f, strategies, self._collapsed)
         # Sávonként külön vászon: a bal és a jobb RÖGZÍTETT, a közép görög —
         # ugyanaz az elrendezés, mint a widget-táblában.
@@ -543,6 +548,7 @@ class CanvasTable:
                 tuple(len(((d.get("gates") or {}).get("align") or {}).get("signs") or [])
                       for d in self._visible()),
                 self._want_hide("market"), self._want_hide("momentum"),
+                self._want_hide("cost"),
                 _lr.pnl_mode(self._collapsed))
 
     def rebuild(self):

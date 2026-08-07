@@ -75,6 +75,25 @@ def _momentum_cell(ctx: dict, on_click=None, symbol: str = None) -> dict:
             "on_click": click}
 
 
+def _cost_cell(ctx: dict, on_click=None, symbol: str = None) -> dict:
+    """`3.4:1 +70%` — a megteendő ÚT aránya és a hátrány a kifizetéshez képest.
+
+    A `blocking` a pár küszöbéhez mér. Fontos, amit NEM mond: a kifizetés aránya
+    (és így a nullszaldó win-rate) a spreadtől nem változik — csak az út lesz
+    hosszabb a nyeréshez, mint a vesztéshez."""
+    import math
+    from core import cost_gate as _cg
+    sl, tp = ctx.get("plan_sl_points"), ctx.get("plan_tp_points")
+    sp, cap = ctx.get("spread_points"), ctx.get("cost_max_distortion")
+    click = (lambda: on_click(symbol)) if (on_click and symbol) else None
+    d = _cg.distortion(sl, tp, sp) if (sl and tp) else float("nan")
+    if d != d:
+        return {"text": "—", "blocking": False, "value": None, "on_click": click}
+    return {"text": _cg.cell_text(sl, tp, sp),
+            "blocking": (cap is not None and d > float(cap)),
+            "value": float(d) if d != float("inf") else 9e9, "on_click": click}
+
+
 def _stages(ds, name: str, order=None) -> list:
     """A stratégia stádium-pöttyeinek SZÍNNEVEI, a stádiumok sorrendjében.
 
@@ -151,7 +170,7 @@ def row_data(symbol: str, ds, strategy_names, cfg: dict = None,
              opt_enabled_of=None, opt_state_of=None, enabled_of=None,
              on_toggle=None, on_opt=None, on_stages=None,
              on_symbol=None, on_align=None, on_spread=None,
-             on_market=None, on_momentum=None) -> dict:
+             on_market=None, on_momentum=None, on_cost=None) -> dict:
     """Egy instrumentum sorának adata a `live_row.LiveRow` számára.
 
     `ds`          — `live_trader.PairDashboardState` (duck-typed).
@@ -234,6 +253,7 @@ def row_data(symbol: str, ds, strategy_names, cfg: dict = None,
             "market": {"text": getattr(ds, "market_state_label", "") or "—",
                        "on_click": (lambda: on_market(symbol)) if on_market else None},
             "momentum": _momentum_cell(ctx, on_momentum, symbol),
+            "cost": _cost_cell(ctx, on_cost, symbol),
             "badge": badge,
             "blocking_count": blocking_count,
         },

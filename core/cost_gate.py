@@ -14,14 +14,24 @@ Az ATR-tag (6,2) rég blokkolna, a padló (23,1) viszont átengedi. A spread-kap
 tehát a KITÁGULÓ spreadet fogja, a KRÓNIKUSAN drága instrumentumot nem — pedig
 EURCHF-en a spread a tervezett stop HARMADA.
 
-MIT MÉR EZ A KAPU. Nem a spread nagyságát önmagában, hanem azt, hogy mennyire
-rontja el az üzletet. A stop és a cél a bróker másik oldalán teljesül:
+MIT MÉR EZ A KAPU — és mit NEM. A spread NEM változtatja meg a KIFIZETÉST: ha a
+TP üt, `tp`-t nyersz, ha az SL, `sl`-t veszítesz, tehát a nyereség/veszteség
+aránya (és így a nullszaldó win-rate, 1/(1+RR)) VÁLTOZATLAN. Amit a spread
+elront, az a megteendő TÁVOLSÁG — a stop a bróker másik oldalán teljesül:
 
-    tényleges_RR = (TP + spread) / (SL − spread)
+    tav_nyereshez / tav_veszteshez = (TP + spread) / (SL - spread)
 
-EURCHF-en a tervezett 2,0-ból így 3,3 lesz (+64%): nem 2:1-re kötsz, hanem
-3,3:1-re — a stopod közelebb, a célod távolabb. Ugyanaz a jel ott strukturálisan
-rosszabb üzlet, és ezt EGYETLEN meglévő kapu sem veszi észre.
+EURCHF-en a kifizetés marad 2:1, a megteendő út aránya viszont 3,4:1 — vagyis
+2:1-ert kell 3,4:1 eselyu utat megtenni. Ez a rés a költség, és EGYETLEN meglévő
+kapu sem veszi észre.
+
+MÉRVE (véletlen belépés várható értéke kötésenként, R-ben, 12 000 M15 gyertyán):
+
+    GOLD    +0,029R      UsaTec  -0,075R      EURUSD  -0,127R
+    EURJPY  -0,196R      EURCHF  -0,201R      EURGBP  -0,201R
+
+EURCHF-en tehát MINDEN kötés -0,20R-rel indul, mielőtt bármilyen jel-minőség
+szóba kerülne. Ez az, amit a kapu megfog.
 
 MIÉRT KAPU ÉS NEM SZINT-MÓDOSÍTÓ. Mérve: a stop szélesítése NEM váltja meg a
 drága instrumentumot. EURCHF-en a `sl_atr_mult` 1,5 → 3,0 emelése a spread/SL

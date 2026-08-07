@@ -2999,7 +2999,8 @@ class DashboardWindow:
                 on_align=self._show_tfalign_settings,
                 on_spread=self._show_spread_params,
                 on_market=self._show_market_gate,
-                on_momentum=self._show_momentum_gate))
+                on_momentum=self._show_momentum_gate,
+                on_cost=self._show_cost_gate))
         return rows
 
     def _strategy_enabled(self, symbol: str, name: str) -> bool:
@@ -3119,6 +3120,11 @@ class DashboardWindow:
         """A `Lendület` cellára kattintva a LENDÜLET-KAPU ablaka nyílik."""
         from core import gates as _g
         self._open_gate_dialog(symbol, _g.MOMENTUM)
+
+    def _show_cost_gate(self, symbol: str):
+        """A `Költség` cellára kattintva a KÖLTSÉG/KOCKÁZAT kapu ablaka nyílik."""
+        from core import gates as _g
+        self._open_gate_dialog(symbol, _g.COST)
 
     def _show_market_gate(self, symbol: str):
         """A `Piac` cellára kattintva a PIAC-KAPU ablaka nyílik (osztályozó
@@ -5607,6 +5613,20 @@ class DashboardWindow:
             ds.momentum = _mom.rpm(_mcloses, _mcfg)
         except Exception:
             ds.momentum = float("nan")
+
+        # A TERVEZETT stop/cél a KÖLTSÉG-kapuhoz. A stratégia adja (`sl_tp_points`),
+        # nem a kapu számol sajátot — így a cella pontosan azt mutatja, amivel a
+        # motor is dolgozna, ha most jelet kapna.
+        try:
+            _pf = bars.get(primary)
+            if _pf is not None and len(_pf) > 2:
+                _plan = self.strategy.sl_tp_points(_pf.iloc[-2], params,
+                                                   _pcfg.get("point_size", 0.0001))
+                ds.plan_sl_points, ds.plan_tp_points = (_plan if _plan else (None, None))
+            else:
+                ds.plan_sl_points = ds.plan_tp_points = None
+        except Exception:
+            ds.plan_sl_points = ds.plan_tp_points = None
 
         # Max spread (ATR-alapú) — a fő időkeret ATR-jéből
         if info and info.point > 0:

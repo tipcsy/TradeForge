@@ -42,6 +42,8 @@ def column_keys(strategies, collapsed: dict = None) -> list:
             keys.append("market")
         if _lr.show_momentum(collapsed):
             keys.append("momentum")
+        if _lr.show_cost(collapsed):
+            keys.append("cost")
     keys.append("badge")
     for name in (strategies or []):
         keys.append(f"{name}|stages")

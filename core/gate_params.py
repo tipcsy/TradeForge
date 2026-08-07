@@ -124,11 +124,11 @@ _SPECS = {
                   "Csak rajz."),
     ),
     _g.COST: (
-        ParamSpec("max_rr_distortion", "Megengedett RR-torzítás", FLOAT, 0.25,
-                  "A spread ennyivel ronthatja a TERVEZETT kockázat/hozamot. "
-                  "0,25 = „a 2:1-ből legfeljebb 2,5:1 lehet”. Mérve: EURCHF +64%, "
-                  "EURGBP +68%, EURJPY +26%, EURUSD +18%, GOLD +6%, UsaTec +4%.",
-                  lo=0.0, hi=10.0),
+        ParamSpec("max_rr_distortion", "Megengedett tavolsag-hatrany", FLOAT, 0.25,
+                  "A KIFIZETES aranya nem valtozik a spreadtol — a megteendo "
+                  "UT igen. 0,25 = a 2:1-es kifizetesert legfeljebb 2,5:1 eselyu "
+                  "utat vallalunk. Merve: EURCHF +70%, EURGBP +72%, EURJPY +31%, "
+                  "EURUSD +21%, GOLD +5%, UsaTec +4%.", lo=0.0, hi=10.0),
     ),
     _g.MOMENTUM: (
         ParamSpec("basis", "Mérési alap", CHOICE, "sma",
@@ -279,9 +279,8 @@ def measured_rows(key: str, ctx: dict) -> list:
         rows = [("Tervezett SL", f"{sl:.0f} pont" if sl else "—"),
                 ("Jelenlegi spread", f"{sp:.0f} pont" if sp is not None else "—")]
         if sl and tp:
-            rows.append(("Tervezett RR", f"{float(tp) / float(sl):.1f}:1"))
-            rows.append(("Tényleges RR (spreaddel)",
-                         _cg.cell_text(sl, tp, sp)))
+            rows.append(("Kifizetes aranya", f"{float(tp) / float(sl):.1f}:1"))
+            rows.append(("Megteendo ut aranya", _cg.cell_text(sl, tp, sp)))
         if cap is not None:
             rows.append(("Határ", f"{float(cap) * 100:+.0f}%"))
         return rows

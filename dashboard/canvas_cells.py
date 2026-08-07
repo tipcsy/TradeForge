@@ -100,6 +100,11 @@ def cells_for(d: dict, collapsed: dict, on_close=None) -> dict:
             out["momentum"] = Cell("momentum", text=mo.get("text", "—"),
                                    anchor="center", on_click=mo.get("on_click"),
                                    fg=(FG_RED if mo.get("blocking") else FG_WHITE))
+        if _lr.show_cost(collapsed):
+            co = g.get("cost") or {}
+            out["cost"] = Cell("cost", text=co.get("text", "—"), anchor="center",
+                               on_click=co.get("on_click"),
+                               fg=(FG_RED if co.get("blocking") else FG_GREEN))
     badge = g.get("badge", "✓")
     out["badge"] = Cell("badge", text=badge, anchor="center",
                         fg=(FG_RED if badge != "✓" else FG_GREEN))
