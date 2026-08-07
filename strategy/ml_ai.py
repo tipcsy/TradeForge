@@ -173,6 +173,13 @@ _stale_unit_syms: set = set()
 # (v1.95.0 előtt tanult). Csak azért tartjuk számon, hogy a figyelmeztetés
 # szimbólumonként EGYSZER menjen ki — körönként ismételve zaj lenne.
 _legacy_tf_syms: set = set()
+# (symbol) → (kulcs, cellák) a `compute_display` MEMOIZÁLÁSÁHOZ. A kijelzés
+# KIZÁRÓLAG a ZÁRT jel-gyertyákból számol (a formálódót levágjuk), tehát két
+# gyertyazárás KÖZÖTT az eredmény változatlan — a dashboard viszont 3–30
+# másodpercenként újrahívja páronként. A teljes feature-frame felépítése
+# (`build_feature_frame`, ~3000 soron) ~200 ms/pár, amiből a végén EGY sort
+# használunk: memoizálás nélkül ez volt a felület belassulásának másik fele.
+_display_cache: dict[str, tuple[tuple, dict]] = {}
 
 
 def load_bundle(symbol: str) -> Optional[dict]:
@@ -439,8 +446,21 @@ class MlAiStrategy(Strategy):
         cells["model"] = _stage_bool(bundle is not None)
         if bundle is None:
             return cells
+        closed = df15.iloc[:-1]                     # a formálódó gyertya levágva
+        # Memoizálás: a kulcsban MINDEN bemenet szerepel, amitől az eredmény függ
+        # — az utolsó zárt gyertya ideje ÉS az ablak mérete (ugyanannak a
+        # sorozatnak a farka), a pip, a modellfájl mtime-ja (újratanítás), a
+        # jel-idősík és a session-kapu órái. Bármelyik változik → újraszámolás.
         try:
-            closed = df15.iloc[:-1]                 # a formálódó gyertya levágva
+            _mtime = model_path(md.symbol).stat().st_mtime
+        except OSError:
+            _mtime = None
+        key = (closed.index[-1], len(closed), float(pip), _mtime, signal_tf_min(),
+               md.params.get("sess_start"), md.params.get("sess_end"))
+        _hit = _display_cache.get(md.symbol)
+        if _hit is not None and _hit[0] == key:
+            return dict(_hit[1])
+        try:
             feats = mlf.build_feature_frame(closed, float(pip))
             tail = feats.iloc[[-1]]
             p_long, p_short = _predict_frame(tail, bundle)
@@ -449,6 +469,7 @@ class MlAiStrategy(Strategy):
             sig = _evaluate(p_long[-1], p_short[-1], thr_l, thr_s, hour, md.params)
             cells["sig"] = _stage_signal(sig)
             cells["ml_proba"] = _proba_cell(p_long[-1], p_short[-1], thr_l, thr_s)
+            _display_cache[md.symbol] = (key, dict(cells))
         except Exception as ex:
             log.debug("%s — ML display hiba: %s", md.symbol, ex)
         return cells

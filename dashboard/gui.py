@@ -5901,13 +5901,43 @@ class DashboardWindow:
         self.root.after(1000, self._refresh)
 
     # ── Fagyás-watchdog ──────────────────────────────────────────────────
+    @staticmethod
+    def _stall_report() -> str:
+        """MINDEN élő szál Python-hívási verme, a fő szállal az élen.
+
+        A puszta „nem frissült N mp-ig" üzenet csak azt mondta, hogy VOLT akadás
+        — azt nem, hogy HOL. Márpedig a fő szál gyakran ártatlan: a Tk ciklusát
+        egy HÁTTÉRSZÁL is megállítja, ha CPU-kötött pandas/numpy munkát végez,
+        mert az tartja a GIL-t (pontosan ez volt a `_refresh_pair_data` →
+        `compute_display` út). Ezért nem elég a fő szálat kiírni: a vermek
+        EGYÜTT mutatják meg, ki fogja a GIL-t. Legfeljebb 6 keret szálanként,
+        hogy a napló olvasható maradjon."""
+        import traceback as _tb
+        frames = sys._current_frames()
+        main_id = threading.main_thread().ident
+        alive = {t.ident: (t.name or "?") for t in threading.enumerate()}
+        out = []
+        for tid in sorted(frames, key=lambda i: (i != main_id, alive.get(i, ""))):
+            if tid not in alive:
+                continue          # időközben véget ért szál
+            head = "FŐ SZÁL" if tid == main_id else alive[tid]
+            stack = "".join(_tb.format_stack(frames[tid])[-6:]).rstrip()
+            body = "\n".join(f"    {ln}" for ln in stack.splitlines())
+            out.append(f"    [{head}]\n{body}")
+        return "\n".join(out)
+
     def _start_watchdog(self):
         """Háttérszál: jelzi, ha a fő (UI) szál túl sokáig nem lélegzett.
-        A küszöb fölötti késés = a fő szálon blokkoló hívás (fejlesztői jelzés)."""
+        A küszöb fölötti késés = blokkoló hívás a fő szálon VAGY GIL-t tartó
+        háttérmunka — a naplózott vermek (`_stall_report`) megmondják, melyik."""
         if hasattr(self, "_watchdog_running"):
             return
         self._watchdog_running = True
-        threshold = self.cfg.get("dashboard", {}).get("watchdog_threshold_sec", 2.0)
+        _dash = self.cfg.get("dashboard", {})
+        threshold = _dash.get("watchdog_threshold_sec", 2.0)
+        # A vermek kiírása hasznos, de bőbeszédű — kapcsolható, és epizódonként
+        # EGYSZER megy ki (a `warned` kapu alatt), nem félmásodpercenként.
+        want_stacks = bool(_dash.get("watchdog_stacks", True))
 
         def _loop():
             import logging as _logging
@@ -5918,11 +5948,19 @@ class DashboardWindow:
                 if lag > threshold:
                     if not warned:
                         msg = f"⚠ A FŐ SZÁL {lag:.1f} mp-ig nem frissült (blokkoló hívás?)."
-                        log.warning(msg)
+                        report = ""
+                        if want_stacks:
+                            try:
+                                report = self._stall_report()
+                            except Exception as ex:
+                                report = f"    (a vermek kiírása elbukott: {ex})"
+                        log.warning(msg + ("\n" + report if report else ""))
                         try:
                             with open(ROOT / "data" / "ui_watchdog.log", "a",
                                       encoding="utf-8") as f:
                                 f.write(f"{datetime.now()}  {msg}\n")
+                                if report:
+                                    f.write(report + "\n")
                         except Exception:
                             pass
                         warned = True

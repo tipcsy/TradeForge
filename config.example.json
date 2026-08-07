@@ -21,11 +21,12 @@
     "gate": []
   },
   "dashboard": {
-    "_comment": "Felület frissítési ütem. price_refresh_sec: BID/ASK/spread MINDEN párra (1-5 ajánlott). live_refresh_sec: indikátor (WPR) a FUTÓ pároknál. all_refresh_sec: indikátor minden párra. watchdog_threshold_sec: ennyi mp blokkolás fölött figyelmeztet a fagyás-watchdog (data/ui_watchdog.log).",
+    "_comment": "Felület frissítési ütem. price_refresh_sec: BID/ASK/spread MINDEN párra (1-5 ajánlott). live_refresh_sec: indikátor (WPR) a FUTÓ pároknál. all_refresh_sec: indikátor minden párra. watchdog_threshold_sec: ennyi mp blokkolás fölött figyelmeztet a fagyás-watchdog (data/ui_watchdog.log). watchdog_stacks: a figyelmeztetés mellé MINDEN szál hívási vermét is naplózza (alap: true) — enélkül csak az látszik, hogy volt akadás, az nem, hogy hol; a Tk ciklusát egy GIL-t tartó HÁTTÉRSZÁL is megállítja, tehát a fő szál verme önmagában félrevezethet.",
     "price_refresh_sec": 3,
     "live_refresh_sec": 7,
     "all_refresh_sec": 30,
     "watchdog_threshold_sec": 2.0,
+    "watchdog_stacks": true,
     "_comment_layout": "Dashboard-elrendezés: 'classic' (ALAP, a megszokott tábla) | 'live2' (Dashboard 2.0: egy sor = egy instrumentum, a stratégiák VÍZSZINTESEN, összecsukható kapu- és stratégia-blokkokkal, fix–görgethető–fix szélességgel). A 2.0 kísérleti: bármikor visszaváltható 'classic'-ra.",
     "layout": "classic",
     "_comment_legend": "Látszik-e a felső JELMAGYARÁZAT-sáv (LIVE/STOPPED/Kivezetés színek + a kockázatcsökkentő preset betűkódjai). KIHAGYVA az elrendezés dönt: 'classic'-ban BE (ott érvényes — a szimbólum neve állapot szerint színeződik, és a soron ott a kattintható 'R' preset-gomb), 'live2'-ben KI (ott a szimbólum mindig fehér és nincs preset-cella, tehát mind a 12 elem félrevezetne, miközben elvisz egy sávnyi helyet). true/false-szal felülírható.",

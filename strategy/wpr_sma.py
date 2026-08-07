@@ -70,16 +70,24 @@ def _rebuild_m1_armed(state, m1, win_open_ts, params, upto: int) -> str:
     `state`: PairState (m15_window_open=True, direction beállítva). `win_open_ts`: az
     ablak nyitásának ideje (csak az ennél KÉSŐBBI M1 gyertyák számítanak). `upto`: eddig
     az M1-indexig (KIZÁRÓLAG) dolgozunk. Visszaadja az UTOLSÓ feldolgozott M1 jelet
-    (a rekonstruált kijelzés/kör ezt használhatja). A `state`-et módosítja."""
+    (a rekonstruált kijelzés/kör ezt használhatja). A `state`-et módosítja.
+
+    TELJESÍTMÉNY: az ablak eleje `searchsorted`-tal (bináris keresés a MONOTON M1
+    időindexen), nem gyertyánkénti `idx[k] <= win_open_ts` összehasonlítással. A
+    hívó ablaka MÉLY (`signal_warmup_bars` M1-en ~30 nap ≈ 43 000 gyertya), a
+    nyitott M15 ablak viszont jellemzően órákat fed — a régi változat gyertyánként
+    BOXOLT egy pandas Timestampet, ami önmagában ~0,3 mp-et evett HÍVÁSONKÉNT (a
+    dashboard 10 páron 30 mp-enként hívja → a fő szál fagyása). Az eredmény
+    bitazonos: a kihagyott szakasz úgyis csak a `prev`-et léptette."""
     wl = m1["wpr"].values
-    idx = m1.index
-    prev = None
+    end = min(int(upto), len(m1))
+    # Az ELSŐ gyertya, ami SZIGORÚAN a nyitás után van (a régi ciklus eddig csak
+    # a prev-et vitte tovább) — és a közvetlenül előtte lévő `prev`.
+    start = int(m1.index.searchsorted(win_open_ts, side="right"))
+    prev = wl[start - 1] if start >= 1 else None
     last_sig = "NONE"
-    for k in range(min(int(upto), len(m1))):
+    for k in range(start, end):
         cur = wl[k]
-        if idx[k] <= win_open_ts:          # az ablak nyitása ELŐTTI gyertya → csak prev
-            prev = cur
-            continue
         if prev is not None and not (math.isnan(prev) or math.isnan(cur)):
             last_sig = check_m1_entry(state, float(prev), float(cur), params)
         prev = cur
