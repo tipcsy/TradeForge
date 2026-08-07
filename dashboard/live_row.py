@@ -372,9 +372,14 @@ class LiveRow:
             _bind_click(_sp_lbl, g.get("on_spread"))
             self._align_cell(bg, g.get("align") or {})
             if show_market(self._collapsed):
-                self._rc("market", self.mid, (g.get("market") or {}).get("text", "—"),
-                         self._w["market"], FG_GRAY, self._f["small"], bg=bg,
-                         height=self._h)
+                _mk = g.get("market") or {}
+                _mk_lbl = self._rc("market", self.mid, _mk.get("text", "—"),
+                                   self._w["market"], FG_GRAY, self._f["small"],
+                                   bg=bg, height=self._h)
+                # Kattintva a PIAC-kapu ablaka nyílik (osztályozó + mely
+                # besorolások kedvezőtlenek) — eddig ez a cella néma volt, és a
+                # beállítás csak az instrumentum-ablakból volt elérhető.
+                _bind_click(_mk_lbl, _mk.get("on_click"))
         badge = g.get("badge", "✓")
         self._rc("badge", self.mid, badge, self._w["badge"],
                  FG_RED if badge != "✓" else FG_GREEN, self._f["mono"],

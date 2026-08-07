@@ -433,6 +433,13 @@ def ctx_from_state(ds, params: dict, pair_cfg: dict) -> dict:
     return {
         "spread_points": getattr(ds, "spread_pts", None),
         "max_spread_points": cap,
+        # A NYERS bemenetek is átjönnek — nem a döntéshez (a `cap` már kész),
+        # hanem hogy a kapu beállító ablaka MEGMUTATHASSA, miből jött a határ
+        # (`core/gate_params.measured_rows`). Külön kiszámolva „kb. ugyanaz”
+        # lenne, ami épp a legrosszabb fajta eltérés: némán szétcsúszna.
+        "atr_price": getattr(ds, "atr_price", None),
+        "point_size": point_size,
+        "normal_spread_points": (pair_cfg or {}).get("backtest_spread_points"),
         "tf_align_signs": list(getattr(ds, "tf_align_signs", []) or []),
         "tf_align_labels": list(getattr(ds, "tf_align_labels", []) or []),
         "tf_align_dir": getattr(ds, "tf_align_dir", None),

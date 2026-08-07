@@ -2965,7 +2965,8 @@ class DashboardWindow:
                 on_stages=self._show_strategy_params,
                 on_symbol=self._show_instrument_settings,
                 on_align=self._show_tfalign_settings,
-                on_spread=self._show_spread_params))
+                on_spread=self._show_spread_params,
+                on_market=self._show_market_gate))
         return rows
 
     def _strategy_enabled(self, symbol: str, name: str) -> bool:
@@ -3029,16 +3030,63 @@ class DashboardWindow:
             return "queued"
         return ""
 
-    def _show_spread_params(self, symbol: str):
-        """A `Spread` cellára kattintva a spread-küszöb paraméterei nyílnak.
+    def _open_gate_dialog(self, symbol: str, gate_key: str):
+        """A kapu SAJÁT beállító ablaka (`dashboard/gate_dialog.py`).
 
-        Ezek a KÖZÖS, stratégia-független végrehajtási paraméterek
-        (`max_spread_atr_ratio`, `min_spread_mult` — `core/execution_params.py`),
-        tehát egy instrumentumon minden stratégiára ugyanazok. Az ablakuk a
-        paraméter-ablak „Végrehajtás" kategóriája; az első stratégia nézetében
-        nyitjuk meg (bármelyik ugyanazt az értéket mutatná)."""
-        names = self._live2_strategies(symbol)
-        self._show_strategy_params(symbol, names[0] if names else "")
+        MIÉRT NEM a stratégia paraméter-ablaka. A `Spread` cella korábban a teljes
+        wpr_sma-paraméterlistát nyitotta meg abban a reményben, hogy a felhasználó
+        megtalálja benne a „Végrehajtás" kategóriát — miközben a spread-kapunak
+        mindössze három saját száma van, és azok stratégia-FÜGGETLENEK. Most
+        minden kapu ugyanazt a vázat kapja: mért állapot → saját számok →
+        per-stratégia hatás."""
+        from dashboard.gate_dialog import open_gate_dialog
+        ds = self.dashboard_ref.get(symbol)
+        pc = self.cfg.get("pairs", {}).get(symbol) or {}
+        # A MÉRT állapot pontosan az, amiből a kapu dönt — ugyanaz a ctx, amit a
+        # sor is kap (`row_source`), nem külön számolt „kb. ugyanaz".
+        try:
+            from core import gates as _g
+            ctx = _g.ctx_from_state(ds, getattr(ds, "params", None) or {}, pc)
+        except Exception:
+            ctx = {}
+        open_gate_dialog(
+            self.root, self.cfg, symbol, gate_key,
+            self._live2_strategies(symbol), ctx=ctx,
+            all_symbols=[s for s, p in self.cfg.get("pairs", {}).items()
+                         if isinstance(p, dict)],
+            on_saved=lambda: self._on_gate_saved(symbol))
+
+    def _on_gate_saved(self, symbol: str):
+        """Mentés után: config.json kiírása + a pár adatainak frissítése, hogy a
+        sor AZONNAL az új küszöbbel számoljon (különben a következő kör
+        piaci-adat-frissítéséig a régi határ látszana)."""
+        try:
+            self._save_main_config()
+        except Exception as ex:
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "A kapu-beállítás mentése elbukott: %s", ex)
+        # A chart azonnal kövesse a rajz-kapcsolókat (SMA-vonalak, piac-sáv):
+        # egyszeri CLEAR + friss pillanatkép. A viz-modell nem töröl magától, így
+        # enélkül a levett vonalak a következő paraméter-váltásig ottmaradnának.
+        try:
+            from trading import live_trader as _lt
+            _lt.request_viz_clear(symbol)
+        except Exception:
+            pass
+        threading.Thread(target=lambda: self._refresh_pair_data(symbol),
+                         daemon=True, name="GateSaveRefresh").start()
+
+    def _show_spread_params(self, symbol: str):
+        """A `Spread` cellára kattintva a SPREAD-KAPU ablaka nyílik."""
+        from core import gates as _g
+        self._open_gate_dialog(symbol, _g.SPREAD)
+
+    def _show_market_gate(self, symbol: str):
+        """A `Piac` cellára kattintva a PIAC-KAPU ablaka nyílik (osztályozó
+        választás + mely besorolások számítanak kedvezőtlennek)."""
+        from core import gates as _g
+        self._open_gate_dialog(symbol, _g.MARKET)
 
     def _live2_stage_order(self, name: str) -> tuple:
         """A stratégia jelölő-stádiumainak KANONIKUS sorrendje (`columns()`).
@@ -4530,146 +4578,15 @@ class DashboardWindow:
                            no_trade=no_trade)
 
     def _show_tfalign_settings(self, symbol: str):
-        """A TF-együttállás beállításai az ADOTT instrumentumra (per-pár): mely
-        idősíkokat figyelje (2–6) + SMA-periódus + be/ki, ÉS stratégiánként egy
-        kapcsoló, hogy az együttállás AKADÁLYOZZA-e a belépőt (csak a trenddel
-        egyező jel köthet). Mentés a `pairs.<sym>.tf_align`-ba. Az „Együtt" cellára
-        kattintva nyílik.
+        """Az „Együtt" cellára kattintva a TF-EGYÜTTÁLLÁS kapu ablaka nyílik.
 
-        Az „Az összes instrumentumra vonatkozzon" pipával a szabály EGY mentéssel
-        minden párra kiterjed (nem kell egyesével végigkattintani) — ez felülírja
-        a többi pár saját beállítását, ezért megerősítést kér."""
-        from core import tf_align as _tfa
-        from strategy import available_strategy_names
-        _en, _tfs, _sma, _gate = _tfa.config_for(self.cfg, symbol)
-        popup = tk.Toplevel(self.root)
-        popup.title(f"{symbol} — TF-együttállás")
-        popup.configure(bg=BG)
-        popup.resizable(False, False)
-        popup.grab_set()
-        tk.Label(popup, text=f"{symbol} — TF-együttállás figyelő", bg=BG, fg=FG_WHITE,
-                 font=self._header_font).pack(anchor="w", padx=12, pady=(12, 2))
-        tk.Label(popup, text="Mely idősíkokat figyelje (válassz 2–6-ot):", bg=BG,
-                 fg=FG_GRAY, font=self._small_font).pack(anchor="w", padx=12, pady=(4, 2))
-        _AVAIL = [(1, "M1"), (5, "M5"), (15, "M15"), (30, "M30"), (60, "H1"), (240, "H4")]
-        _vars = {}
-        _row = tk.Frame(popup, bg=BG)
-        _row.pack(anchor="w", padx=18)
-        for mins, lbl in _AVAIL:
-            v = tk.BooleanVar(value=(mins in _tfs))
-            _vars[mins] = v
-            tk.Checkbutton(_row, text=lbl, variable=v, bg=BG, fg=FG_WHITE,
-                           selectcolor=BG_HEADER, font=self._small_font,
-                           activebackground=BG, activeforeground=FG_WHITE).pack(
-                           side="left", padx=(0, 10))
-
-        _f2 = tk.Frame(popup, bg=BG)
-        _f2.pack(anchor="w", padx=12, pady=(8, 2))
-        tk.Label(_f2, text="SMA-periódus:", bg=BG, fg=FG_GRAY,
-                 font=self._small_font).pack(side="left")
-        sma_var = tk.StringVar(value=str(_sma))
-        tk.Entry(_f2, textvariable=sma_var, width=6, bg=BG_HEADER, fg=FG_WHITE,
-                 font=self._small_font, insertbackground=FG_WHITE).pack(side="left", padx=6)
-        # A FIGYELÉS és a chart-RAJZ két külön kapcsoló: figyelheted az együttállást
-        # tiszta charton, és fordítva, kirajzoltathatod az SMA-kat anélkül, hogy az
-        # oszlop/kapu dolgozna. (Korábban egy kapcsoló vezérelte mindkettőt.)
-        en_var = tk.BooleanVar(value=_en)
-        tk.Checkbutton(popup, text='Bekapcsolva — figyeli az együttállást '
-                                   '(„Együtt" oszlop + belépő-kapu)',
-                       variable=en_var,
-                       bg=BG, fg=FG_WHITE, selectcolor=BG_HEADER, font=self._small_font,
-                       activebackground=BG, activeforeground=FG_WHITE).pack(
-                       anchor="w", padx=12, pady=(6, 0))
-        viz_tf_var = tk.BooleanVar(value=_tfa.viz_on(self.cfg, symbol))
-        tk.Checkbutton(popup, text="SMA-vonalak a charton (viz)", variable=viz_tf_var,
-                       bg=BG, fg=FG_WHITE, selectcolor=BG_HEADER, font=self._small_font,
-                       activebackground=BG, activeforeground=FG_WHITE).pack(
-                       anchor="w", padx=12, pady=(0, 2))
-
-        # ── Kapu: az együttállás akadályozza-e a belépőt (per stratégia) ──────
-        tk.Label(popup, text="Az együttállás AKADÁLYOZZA a belépőt (csak a trenddel "
-                 "egyező jel köthet) ezeknél a stratégiáknál:", bg=BG, fg=FG_GRAY,
-                 font=self._small_font, justify="left", wraplength=340).pack(
-                 anchor="w", padx=12, pady=(10, 2))
-        _gate_vars = {}
-        _grow = tk.Frame(popup, bg=BG)
-        _grow.pack(anchor="w", padx=18)
-        for sn in available_strategy_names(self.cfg):
-            gv = tk.BooleanVar(value=(sn in _gate))
-            _gate_vars[sn] = gv
-            tk.Checkbutton(_grow, text=sn, variable=gv, bg=BG, fg=FG_WHITE,
-                           selectcolor=BG_HEADER, font=self._small_font,
-                           activebackground=BG, activeforeground=FG_WHITE).pack(
-                           side="left", padx=(0, 12))
-
-        # ── Tömeges alkalmazás: ugyanez a szabály MINDEN instrumentumra ──────
-        # Enélkül minden párt egyesével kell végigkattintani, ha pl. a H1-et is
-        # látni akarod mindenhol. FELÜLÍRJA a párok egyedi tf_align-ját, ezért
-        # mentés előtt megerősítést kér (lásd `_save`).
-        all_var = tk.BooleanVar(value=False)
-        tk.Checkbutton(popup, text="Az összes instrumentumra vonatkozzon",
-                       variable=all_var, bg=BG, fg=FG_WHITE, selectcolor=BG_HEADER,
-                       font=self._small_font, activebackground=BG,
-                       activeforeground=FG_WHITE).pack(anchor="w", padx=12, pady=(10, 0))
-        tk.Label(popup, text="(felülírja a többi instrumentum saját TF-beállítását)",
-                 bg=BG, fg=FG_GRAY_DIM, font=self._small_font).pack(
-                 anchor="w", padx=32, pady=(0, 2))
-
-        lbl_err = tk.Label(popup, text="", bg=BG, fg=FG_RED, font=self._small_font,
-                           wraplength=340, justify="left")
-        lbl_err.pack(anchor="w", padx=12, pady=(6, 0))
-
-        def _save():
-            chosen = [m for m, _ in _AVAIL if _vars[m].get()]
-            if not (2 <= len(chosen) <= 6):
-                lbl_err.config(text="2–6 idősíkot válassz.")
-                return
-            try:
-                sma = max(2, int(sma_var.get().strip()))
-            except ValueError:
-                lbl_err.config(text="Az SMA-periódus egész szám legyen.")
-                return
-            gate = [sn for sn, gv in _gate_vars.items() if gv.get()]
-            rule = {"enabled": bool(en_var.get()), "viz": bool(viz_tf_var.get()),
-                    "timeframes": chosen, "sma_period": sma, "gate": gate}
-            pairs = self.cfg.setdefault("pairs", {})
-            if all_var.get():
-                # MINDEN instrumentum ugyanezt a szabályt kapja. A `gate` is átmegy:
-                # olyan stratégia neve is szerepelhet benne, ami az adott páron nincs
-                # engedélyezve — ez ártalmatlan (a kapu csak a futó stratégiákra hat),
-                # és így a „mindegyikre ugyanaz a szabály" elv nem törik meg.
-                targets = [s for s, p in pairs.items() if isinstance(p, dict)]
-                from tkinter import messagebox
-                if not messagebox.askyesno(
-                        "TF-együttállás — összes instrumentum",
-                        f"Ez a beállítás mind a(z) {len(targets)} instrumentumra "
-                        f"érvényes lesz, és felülírja a saját TF-beállításukat.\n\n"
-                        f"Folytatod?", parent=popup):
-                    return
-                for s in targets:
-                    pairs[s]["tf_align"] = dict(rule)   # páronként külön szótár
-            else:
-                targets = [symbol]
-                pairs.setdefault(symbol, {})["tf_align"] = rule
-            self._save_main_config()
-            # A chart azonnal kövesse az SMA-vonal kapcsolót: egyszeri CLEAR + friss
-            # pillanatkép, különben a levett vonalak a következő paraméter-váltásig
-            # ottmaradnának (a viz-modell nem töröl magától), a felrakottak pedig
-            # csak a throttle leteltével jelennének meg.
-            try:
-                from trading import live_trader as _lt
-                for s in targets:
-                    _lt.request_viz_clear(s)
-            except Exception:
-                pass
-            popup.destroy()
-
-        btns = tk.Frame(popup, bg=BG)
-        btns.pack(pady=12)
-        tk.Button(btns, text="Mentés", bg=BTN_PLAY_BG, fg=BTN_PLAY_FG, relief="flat",
-                  font=self._small_font, command=_save).pack(side="left", padx=6)
-        tk.Button(btns, text="Mégse", bg=BTN_DIS_BG, fg=BTN_DIS_FG, relief="flat",
-                  font=self._small_font, command=popup.destroy).pack(side="left", padx=6)
+        Korábban ez egy külön, kézzel írt dialógus volt — most a közös kapu-vázat
+        használja (`dashboard/gate_dialog.py`), mint a Spread és a Piac. Ugyanaz
+        állítható benne (figyelés be/ki, idősíkok, SMA-periódus, chart-vonalak),
+        a per-stratégia kapuzás viszont már nem csak pipa: a három hatás
+        (akadályoz / kockázatcsökkentés / ki) közül lehet választani."""
+        from core import gates as _g
+        self._open_gate_dialog(symbol, _g.TF_ALIGN)
 
     def _display_state(self, symbol: str) -> str:
         """A soron MEGJELENÍTETT állapot: a kereskedési szándék, az optimalizálási

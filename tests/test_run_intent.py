@@ -217,12 +217,21 @@ if TK_OK:
         check("...es a SAJAT strategiajaval hivja meg",
               opened == [("GOLD", "wpr_sma"), ("GOLD", "ml_ai")], str(opened))
 
-        # A Spread a KOZOS vegrehajtasi parametereket nyitja (barmely strategia
-        # nezeteben ugyanaz az ertek — az elsot hasznaljuk)
+        # A kapu-cellak a KAPU SAJAT ablakat nyitjak (kozos vaz), NEM a strategia
+        # parameter-listajat. Korabban a Spread a teljes wpr_sma-listat nyitotta
+        # meg — a keresett harom szam (`max_spread_atr_ratio`, `min_spread_mult`,
+        # `atr_period`) egy kategoriaban elrejtve.
+        from core import gates as _gk
+        gate_opened = []
+        w._open_gate_dialog = lambda sym, key: gate_opened.append((sym, key))
         opened.clear()
         w._show_spread_params("GOLD")
-        check("a Spread a parameter-ablakot nyitja",
-              opened == [("GOLD", "wpr_sma")], str(opened))
+        w._show_tfalign_settings("GOLD")
+        w._show_market_gate("GOLD")
+        check("a kapu-cellak a SAJAT kapu-ablakukat nyitjak",
+              gate_opened == [("GOLD", _gk.SPREAD), ("GOLD", _gk.TF_ALIGN),
+                              ("GOLD", _gk.MARKET)], str(gate_opened))
+        check("...es NEM a strategia parameter-ablakat", opened == [], str(opened))
     finally:
         if w is not None:
             w.root.destroy()

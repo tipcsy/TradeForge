@@ -128,7 +128,8 @@ def row_data(symbol: str, ds, strategy_names, cfg: dict = None,
              opt_of=None, live_of=None, stage_order_of=None,
              opt_enabled_of=None, opt_state_of=None, enabled_of=None,
              on_toggle=None, on_opt=None, on_stages=None,
-             on_symbol=None, on_align=None, on_spread=None) -> dict:
+             on_symbol=None, on_align=None, on_spread=None,
+             on_market=None) -> dict:
     """Egy instrumentum sorának adata a `live_row.LiveRow` számára.
 
     `ds`          — `live_trader.PairDashboardState` (duck-typed).
@@ -208,7 +209,8 @@ def row_data(symbol: str, ds, strategy_names, cfg: dict = None,
             "on_spread": (lambda: on_spread(symbol)) if on_spread else None,
             "align": {"signs": ctx.get("tf_align_signs") or [],
                       "on_click": (lambda: on_align(symbol)) if on_align else None},
-            "market": {"text": getattr(ds, "market_state_label", "") or "—"},
+            "market": {"text": getattr(ds, "market_state_label", "") or "—",
+                       "on_click": (lambda: on_market(symbol)) if on_market else None},
             "badge": badge,
             "blocking_count": blocking_count,
         },
