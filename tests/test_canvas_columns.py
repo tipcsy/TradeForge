@@ -101,6 +101,24 @@ if TK_OK:
           len([k for k, _x, _w in c10 if k.startswith("strat0|")]) == 6,
           f"oszlop={len(c10)}, szelesseg={cc.total_width(c10)}px")
 
+    # ── A `Piac` oszlop a VALODI kategoria-cimkekhez igazodik ────────────
+    # Eles proban az „Id.Medve" vege levagodott: a mintaszoveg egy bedrotozott
+    # „Sz.Bika" volt (7 betu), a leghosszabb cimke viszont az „Erdektelen" (10).
+    from core import market_strategy as _ms
+    w = lr.widths(fonts, STRATS, {})
+    longest = max(_ms.display_labels(), key=fonts["small"].measure)
+    check("a Piac oszlopba MINDEN kategoria-cimke kifer",
+          w["market"] >= fonts["small"].measure(longest) + 2 * lr.PAD,
+          f"oszlop={w['market']}px, leghosszabb={longest!r}="
+          f"{fonts['small'].measure(longest)}px")
+    for lbl in _ms.display_labels():
+        if fonts["small"].measure(lbl) + 2 * lr.PAD > w["market"]:
+            check(f"...{lbl!r} kifer", False)
+            break
+    else:
+        check("...egyenkent is ellenorizve mind", True,
+              f"{len(_ms.display_labels())} cimke")
+
     root.destroy()
 
 print()

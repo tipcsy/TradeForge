@@ -283,6 +283,32 @@ if TK_OK:
           bool(lines) and bmid.coords(lines[0])[3] >= 3 * tblv._h,
           str(bmid.coords(lines[0]) if lines else None))
 
+    # A K.OSSZ. A KAPU-BLOKK VEGE, nem a kovetkezo strategiae. Eles proban a
+    # kapuk osszesitoje vizualisan a wpr_sma blokkjaba csuszott, mert az
+    # elvalaszto a FELIRAT-csoportokbol (`groups`) szuletett, a badge fole pedig
+    # szandekosan nem kerul felirat -> a vonal a badge ELE kerult. Osszecsukott
+    # kapuknal nem latszott, mert ott nincs kapu-blokk.
+    for coll, ahol in (({}, "kinyitva"), ({"gates": True}, "osszecsukva")):
+        blk = ct.blocks(["wpr_sma", "ml_ai"], coll)
+        gate = next(b for b in blk if "badge" in b)
+        check(f"a K.Ossz. a KAPU-blokkban van ({ahol})",
+              gate[-1] == "badge" and not any("wpr_sma" in k for k in gate),
+              str(gate))
+    strat_blk = [b for b in ct.blocks(["wpr_sma"], {}) if b[0].startswith("wpr_sma")]
+    check("...es a strategia blokkja NEM tartalmazza",
+          strat_blk and "badge" not in strat_blk[0], str(strat_blk))
+
+    # A vonal tenylegesen a badge UTAN fusson (x szerint)
+    tblb = ct.CanvasTable(root, fonts, rows=make_rows(2), collapsed={})
+    tblb.frame.pack(fill="both", expand=True)
+    root.update_idletasks()
+    from dashboard import canvas_columns as _cx
+    bx, bw = _cx.x_of(tblb._cols, "badge")
+    sx, _sw = _cx.x_of(tblb._cols, "wpr_sma|stages")
+    edges = tblb._block_edges()["mid"]
+    check("a kapu-blokk vonala a K.Ossz. UTAN es a jelzes ELOTT fut",
+          any(bx + bw <= e <= sx for e in edges), f"badge veg={bx+bw}, jelzes={sx}, vonalak={edges}")
+
     # ══ 7. EGYETLEN fuggoleges gorgetosav ═══════════════════════════════
     # Az elso eles proban KETTO latszott: a vaszon-tabla sajat gorgetese MELLE a
     # gui.py regi, kulso gorgetheto vaszna is odatette a magaet. A kulsonek nem

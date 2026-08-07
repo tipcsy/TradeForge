@@ -184,6 +184,18 @@ def widths(fonts: dict, strategy_names=(), collapsed: dict = None) -> dict:
     out["ctrl"] = max(out["ctrl"],
                       fonts["small"].measure("■") + 2 * CTRL_PADX + CTRL_GAP
                       + _opt_w + 2 * CTRL_PADX + 2 * PAD)
+    # A `Piac` oszlop a VALÓDI kategória-címkék közül a leghosszabbhoz igazodik.
+    # A `_SAMPLE`-ben szereplő „Sz.Bika" (7 betű) rövidebb volt, mint az
+    # „Érdektelen" (10) vagy az „Oldalazás" (9) — élesben levágódott a végük.
+    # Lusta import: a `market_strategy` a `regime`-et húzza be, és ez a modul
+    # enélkül is használható (a szélesség ilyenkor a mintaszövegé marad).
+    try:
+        from core import market_strategy as _ms
+        out["market"] = max(out["market"],
+                            max(small.measure(t) for t in _ms.display_labels())
+                            + 2 * PAD)
+    except Exception:
+        pass
     if is_collapsed(collapsed) and strategy_names:
         # A felirat a KAPCSOLÓ-NYILAT is tartalmazza (`▸ wpr_sma`) — enélkül a
         # mérés 4 px-szel kevesebbet ad, és a név utolsó betűje levágódik.

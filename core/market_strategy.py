@@ -71,3 +71,13 @@ def code(name: str, category: str) -> int:
 def display(category: str) -> tuple:
     """Kategória → (rövid címke, szemantikus szín-név) a dashboard-cellához."""
     return _DISPLAY.get(category, ("—", "muted"))
+
+
+def display_labels() -> list:
+    """MINDEN lehetséges kategória-címke — az oszlop-szélesség méréséhez.
+
+    A `Piac` oszlop mintaszövege eddig egy bedrótozott „Sz.Bika" volt, holott a
+    leghosszabb címke az „Érdektelen": élesben az „Id.Medve"/„Oldalazás"/
+    „Érdektelen" vége levágódott. Ha új kategória kerül a `_DISPLAY`-be, az
+    oszlop MAGÁTÓL követi — nem kell egy távoli mintaszöveget karbantartani."""
+    return [lbl for lbl, _color in _DISPLAY.values()]

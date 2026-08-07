@@ -79,6 +79,38 @@ def groups(strategies, collapsed: dict = None) -> list:
     return out
 
 
+def blocks(strategies, collapsed: dict = None) -> list:
+    """A blokkok a VONALAKHOZ — `[[oszlopkulcs, …], …]`.
+
+    Eltér a `groups()`-tól EGY dologban: a `K.Össz.` (badge) a KAPU-BLOKK VÉGE,
+    nem a következő stratégiáé. A `groups()` a FELIRATOKAT adja, és a badge fölé
+    szándékosan nem kerül felirat (a kapu-összesítő magától értetődő) — a
+    `groups()`-ra épített elválasztó viszont épp emiatt a badge ELÉ került, így a
+    kapuk összesítője vizuálisan a wpr_sma blokkjába csúszott. Összecsukott
+    kapuknál nem látszott, mert ott nincs kapu-blokk.
+
+    Tanulság: a felirat-csoport és a vizuális blokk NEM ugyanaz a fogalom."""
+    collapsed = collapsed or {}
+    out = [["symbol", "bid", "ask", "change"]]
+    gate = []
+    if not collapsed.get("gates"):
+        gate += ["spread", "align"]
+        if _lr.show_market(collapsed):
+            gate.append("market")
+        if _lr.show_momentum(collapsed):
+            gate.append("momentum")
+    gate.append("badge")            # a kapuk ÖSSZESÍTŐJE — ide tartozik
+    out.append(gate)
+    for n in (strategies or []):
+        if _lr.is_collapsed(collapsed, n):
+            out.append([f"{n}|stages", f"{n}|ctrl"])
+        else:
+            out.append([f"{n}|{k}" for k in
+                        ("stages", "position", "daily", "quality", "ctrl", "opt")])
+    out.append(["total_pos", "total_daily", "close"])
+    return out
+
+
 class _ThinScrollbar(tk.Canvas):
     """Vékony, TÉMÁHOZ ILLŐ gördítősáv — vízszintes ÉS függőleges.
 
@@ -316,7 +348,7 @@ class CanvasTable:
         `create_line` az egész oszlopra. A 10 stratégiás nézetben ez az, ami a
         blokkokat egyáltalán elkülöníthetővé teszi."""
         out = {"left": [], "mid": [], "right": []}
-        for _label, keys, _tkey in groups(self._strategy_names(), self._collapsed):
+        for keys in blocks(self._strategy_names(), self._collapsed):
             cols = [c for c in self._cols if c[0] in keys]
             if not cols:
                 continue
