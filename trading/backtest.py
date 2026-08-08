@@ -638,7 +638,10 @@ def _build_tf_align_evaluator(cfg, symbol, strategy_name, df_m1):
     try:
         import numpy as _np
         from core import tf_align as _tfa
-        en, tfs, sma, gate = _tfa.config_for(cfg, symbol)
+        # ⚠ A STRATÉGIA is számít: az együttállás idősíkjai stratégiánként
+        # eltérhetnek (H1-en döntő stratégiának az M1/M5/M15 zajt mér, nem
+        # kontextust) — `tf_align.per_strategy`.
+        en, tfs, sma, gate = _tfa.config_for(cfg, symbol, strategy_name)
         if not en or strategy_name not in gate or not tfs:
             return None
         if "close" not in df_m1.columns:

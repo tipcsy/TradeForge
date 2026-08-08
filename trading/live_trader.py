@@ -765,7 +765,9 @@ def tf_align_gate_fn(symbol: str, strategy_name: str, params: dict):
     try:
         import numpy as _np
         from core import tf_align as _tfa
-        en, tfs, sma, gate = _tfa.config_for(_run_cfg, symbol)
+        # A stratégia is számít: az idősíkok stratégiánként eltérhetnek
+        # (`tf_align.per_strategy`) — lásd `core/tf_align._merged`.
+        en, tfs, sma, gate = _tfa.config_for(_run_cfg, symbol, strategy_name)
         if not en or strategy_name not in gate or not tfs:
             return None
         span_min = int(params.get("viz_trade_lookback_days", 30) or 30) * 1440
@@ -1986,7 +1988,8 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
     if signal != "NONE" and _gates.active(_gate_eff, _gates.TF_ALIGN):
         try:
             from core import tf_align as _tfa
-            _tf_en, _tf_tfs, _tf_sma, _tf_gate = _tfa.config_for(_run_cfg, symbol)
+            _tf_en, _tf_tfs, _tf_sma, _tf_gate = _tfa.config_for(
+                _run_cfg, symbol, getattr(state.strategy, 'name', None))
             # A régi `tf_align.gate` LISTA a hatás forrása is (legacy öröklés a
             # gates modulban) — itt már csak a figyelés be/ki számít.
             if _tf_en:

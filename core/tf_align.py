@@ -48,25 +48,44 @@ def config(cfg: dict) -> tuple:
     return en, tfs, sma
 
 
-def _merged(cfg: dict, symbol: str) -> dict:
-    """A per-pár `pairs.<sym>.tf_align` a globális `tf_align` fölé olvasztva
-    (kulcsonként), az pedig az alapértékek fölé."""
+def _merged(cfg: dict, symbol: str, strategy: str = None) -> dict:
+    """A beállítás feloldása, a LEGSZŰKEBBTŐL a legtágabbig:
+
+        pár + stratégia  →  pár  →  globális + stratégia  →  globális
+
+    ⚠ MIÉRT KELL A STRATÉGIA-RÉTEG. Az együttállás azt kérdezi, „egyetértenek-e
+    az idősíkok az irányban" — de hogy MELYIK idősíkok, az a stratégiától függ.
+    A `wpr_sma` M15-ös jelet ad, oda az M1/M5/M15 hármas illik; a
+    `bollinger_squeeze_breakout` viszont H1-en dönt, ahol ugyanez a hármas
+    ZAJT mér, nem kontextust. Egy közös lista tehát az egyik stratégiának
+    biztosan rosszul szolgál.
+
+    A `per_strategy` blokk KULCSONKÉNT olvad rá, tehát elég azt megadni, ami
+    eltér (a `sma_period` maradhat közös, ha csak az idősíkok mások)."""
     glob = cfg.get("tf_align") or {}
     pair = ((cfg.get("pairs") or {}).get(symbol) or {}).get("tf_align") or {}
-    return {**glob, **pair}
+
+    def _per(block):
+        if not strategy:
+            return {}
+        return ((block.get("per_strategy") or {}).get(strategy) or {})
+
+    return {**glob, **_per(glob), **pair, **_per(pair)}
 
 
-def config_for(cfg: dict, symbol: str) -> tuple:
-    """(enabled, timeframes, sma_period, gate) az ADOTT instrumentumra: a per-pár
-    `pairs.<sym>.tf_align` FELÜLÍRJA a globális `tf_align`-t (kulcsonként), az pedig
-    az alapértékeket. Így minden instrumentum mást figyelhet (pl. M1/M15/H1, SMA100).
+def config_for(cfg: dict, symbol: str, strategy: str = None) -> tuple:
+    """(enabled, timeframes, sma_period, gate) az adott instrumentumra — és ha
+    megadod, az adott STRATÉGIÁRA is (lásd `_merged` öröklési sorrendjét).
+
+    `strategy=None` → a pár közös beállítása. A meglévő hívók így változatlanul
+    működnek; a stratégia-tudatos helyek (kapu-mérés, viz, kapu-ablak) adják át.
 
     Az `enabled` a FIGYELÉST kapcsolja: az „Együtt" oszlopot és a belépő-kaput.
     A chart-rajzot NEM — arra külön kapcsoló van (`viz_on`)."""
-    return _normalize(_merged(cfg, symbol))
+    return _normalize(_merged(cfg, symbol, strategy))
 
 
-def viz_on(cfg: dict, symbol: str) -> bool:
+def viz_on(cfg: dict, symbol: str, strategy: str = None) -> bool:
     """Látszanak-e a figyelt idősíkok SMA-vonalai a CHARTON.
 
     FÜGGETLEN az `enabled`-től: figyelheted az együttállást chart-rajz nélkül
@@ -75,7 +94,7 @@ def viz_on(cfg: dict, symbol: str) -> bool:
 
     Visszafelé kompatibilis: ha a `viz` kulcs HIÁNYZIK, az `enabled` dönt — a
     régi configok pontosan úgy viselkednek, mint eddig (egy kapcsoló mindkettőre)."""
-    tc = _merged(cfg, symbol)
+    tc = _merged(cfg, symbol, strategy)
     v = tc.get("viz")
     if v is None:
         return bool(tc.get("enabled", True))

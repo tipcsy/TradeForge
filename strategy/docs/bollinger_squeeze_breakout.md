@@ -85,13 +85,36 @@ Az EMA-szűrő **felezi a kötésszámot úgy, hogy a találati arányt nem jav�
 (27,1% vele, 28,7% nélküle) — vagyis nem válogat, csak vág. Az `Együtt` kapu
 viszont mindkét esetben javít.
 
-> Ezért az alapértelmezés `require_trend_alignment: false`, és az irány-vétót az
-> **Együtt (tf_align) kapura** bízzuk. A paraméter megmarad — kutatásra és arra
-> az esetre, ha optimalizálás után máshogy viselkedne —, de alapból nem szól bele.
+> Ezért az alapértelmezés `require_trend_alignment: false`.
 
-⚠ A kapu bekapcsolása **nem automatikus**: a váz szabálya szerint egy kapu-hatás
-alapból `none`, hogy egy frissítés soha ne kezdjen el némán másképp kereskedni.
-A `Együtt` oszlopra kattintva, stratégiánként kell `block`-ra állítani.
+### …de a kapu SEM segít — megmérve
+
+Kézenfekvő volt, hogy az `Együtt (tf_align)` kapu vegye át a vétó szerepét. Egy
+gond viszont van vele: alapból **M1/M5/M15**-öt néz, ami egy **H1-en döntő**
+stratégiának zajt mér, nem kontextust. Ezért a kapu mostantól **stratégiánként
+paraméterezhető** (`tf_align.per_strategy`) — és így is megmértük.
+
+7 pár, három külön 6 hónapos időszak, M60-as bollinger, hangolatlan paraméterek:
+
+| kapu | kötés (3 időszak) | találat | **össz P&L** |
+|---|---|---|---|
+| **KI (nincs vétó)** | 290 / 318 / 319 | 57,9 / 54,1 / 52,0% | **+4884$** |
+| Együtt M1/M5/M15 | 251 / 273 / 254 | 55,0 / 52,4 / 49,6% | +3733$ |
+| Együtt M15/H1/H4 | 142 / 146 / 149 | — | +1995$ |
+| Együtt H1/H4/D1 | 93 / 114 / 109 | 53,8 / 45,6 / 54,1% | **+1483$** |
+
+**Minden kapu-beállítás ront**, és a „helyesebb" magasabb idősíkok rontanak a
+legtöbbet. A kapu harmadára vágja a kötésszámot, a találati arányt pedig nem
+javítja.
+
+> **Hipotézis** (nem bizonyított): a squeeze-kitörés **volatilitás-tágulási**
+> kereskedés, nem trendkövetés. A legjobb kitörések gyakran épp egy oldalazásból
+> fordulnak ki, tehát a pillanatnyi trenddel SZEMBEN indulnak — egy trend-vétó
+> pont ezeket vágja le.
+
+Ezért az `Együtt` kapu hatása a bollingeren **`none`** marad. A szerkezet készen
+áll: ha egy stratégiának mégis kell, `tf_align.per_strategy.<stratégia>` alatt
+kaphat saját idősíkokat és `sma_period`-ot, a pár közös beállítása fölé rétegezve.
 
 ## Paraméterek
 
