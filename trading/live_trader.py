@@ -78,13 +78,38 @@ TRADES_CSV   = ROOT / "trades.csv"
 def load_pair_params(symbol: str, strategy_name: str | None = None) -> Optional[dict]:
     """Per-pár params betöltése: data/optimized_params/<strategy>/<SYMBOL>.json.
     `strategy_name=None` → az aktív stratégia (a run() beállítja); több-stratégia
-    esetén a hívó a konkrét stratégiát adja."""
+    esetén a hívó a konkrét stratégiát adja.
+
+    ⚠ Ez a NYERS mentett tartalom. Amit a stratégia LÁTNI akar, azt a
+    `strategy_params()` állítja elő — ott van a végrehajtási config ráfűzve."""
     f = params_file(symbol, strategy_name)
     if not f.exists():
         return None
     with open(f, encoding="utf-8") as fh:
         data = json.load(fh)
     return data.get("params")
+
+
+def strategy_params(symbol: str, strategy_name: str, cfg: dict,
+                    fallback: dict = None) -> Optional[dict]:
+    """A paraméter-készlet, AHOGY A STRATÉGIA LÁTJA: mentett params + a KÖZÖS
+    végrehajtási config (`core/execution_params`).
+
+    ⚠ EGY HELYEN. A `atr_period` (és a BE/trailing/spread-kapu) 2026-08-03 óta
+    NEM a stratégia mentett json-jában lakik, hanem a közös execution configban.
+    Az él-út ezt ráfűzte, a VIZ-út viszont a nyers json-t használta — ezért a
+    2026-08-03 UTÁN optimalizált párokon (EURCHF, EURJPY, Euro50, GOLD, UsaInd) a
+    `compute_indicators` `KeyError: 'atr_period'`-del elszállt, és a chart NÉMÁN
+    üres maradt. A régebbi párok (Ger40, UsaTec, …) csak azért működtek, mert a
+    json-jukba még bele volt sütve az `atr_period`.
+
+    Két képlet ugyanarra a kérdésre mindig szétcsúszik; ezért van egy."""
+    base = load_pair_params(symbol, strategy_name)
+    if base is None:
+        base = fallback
+    if base is None:
+        return None
+    return {**base, **(execution_params.load_execution_params(symbol, cfg) or {})}
 
 
 # ---------------------------------------------------------------------------
@@ -1002,8 +1027,20 @@ def _write_symbol_viz(symbol, pair_cfg, strats, params_by_strat: dict):
         if st.name not in params_by_strat or st.name not in _viz_names:
             continue
         try:
-            # A LEGFRISSEBB JSON-paraméter (követi az instrumentum-ablak Mentését).
-            vparams = load_pair_params(symbol, st.name) or params_by_strat[st.name]
+            # A LEGFRISSEBB JSON-paraméter (követi az instrumentum-ablak Mentését)
+            # a MÁR ÖSSZEFŰZÖTT pillanatképre RÉTEGZŐDIK — nem helyette áll.
+            #
+            # ⚠ Ez volt a hiba: a `... or params_by_strat[...]` a nyers json-t
+            # RÉSZESÍTETTE ELŐNYBEN, és mivel az `atr_period` 2026-08-03 óta a
+            # közös execution configban lakik (nem a json-ban), a viz
+            # `KeyError: 'atr_period'`-del elszállt — NÉMÁN, üres charttal. Csak a
+            # RÉGEBBEN optimalizált párok működtek, mert azok json-jába még bele
+            # volt sütve. A pillanatkép a `_make_state`-ből jön, tehát a
+            # végrehajtási kulcsokat MÁR tartalmazza; a friss json csak a
+            # stratégia saját számait írja felül.
+            _snap = params_by_strat[st.name]
+            _fresh = load_pair_params(symbol, st.name)
+            vparams = {**_snap, **_fresh} if _fresh else _snap
             lines += pair_visual_lines(symbol, vparams, st, point_size, pair_cfg)
         except Exception as e:
             # ⚠ WARNING, nem debug. Ez eddig `log.debug` volt — vagyis a naplóban
@@ -2499,7 +2536,7 @@ def run(cfg: dict, slot_mgr: SlotManager):
     pair_states: dict = {}
 
     def _make_state(symbol, pair_cfg, strat, is_display):
-        _params = load_pair_params(symbol, strat.name)
+        _params = strategy_params(symbol, strat.name, cfg)
         if _params is None:
             return None
         # ⚠ A `point_size` NÉLKÜL nincs mit méretezni. Egy frissen felvett
@@ -2514,10 +2551,6 @@ def run(cfg: dict, slot_mgr: SlotManager):
                       "Töltsd fel: `python tools/refresh_point_values.py --write`.",
                       symbol, strat.name, ", ".join(_miss))
             return None
-        # BE/trailing/atr_period/spread-kapu MÁR NEM stratégia-paraméter — a
-        # közös, instrumentum-szintű execution config felülírja az esetleges
-        # elavult másolatot a mentett optimalizált json-ban.
-        _params = {**_params, **execution_params.load_execution_params(symbol, cfg)}
         # Pár-azonosító injektálás a stratégia-hookoknak (mint a backtest
         # run_pair-ben): symbol/point_size autoritatív a pair configból, a session
         # default-olható. A wpr_sma ezeket nem olvassa → viselkedése változatlan.

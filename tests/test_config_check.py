@@ -342,8 +342,16 @@ check_("az UsaInd inert Piac-kapuja MEGSZUNT (P2 #1 lezarva)",
        "market_gate_no_classifier" not in real_codes, str(sorted(real_codes)))
 check_("a hazirend beallt -> nincs 'independent' lelet (P2 #3 lezarva)",
        "independent_multi_strategy" not in real_codes, str(sorted(real_codes)))
-check_("nincs elavult strategia-hivatkozas", "stale_strategy_key" not in real_codes,
-       str(sorted(real_codes)))
+# ⚠ A `stale_strategy_key` NEM hiba, es NEM allitunk a hianyara. A modul
+# szandekosan megorzi egy KIKAPCSOLT strategia beallitasait, hogy
+# visszakapcsolaskor ervenyes maradjon a korabbi valasztas — tehat amint a user
+# kivesz egy strategiat egy parbol (2026-08-08: ml_ai mindenhonnan), ez a lelet
+# jogosan megjelenik. Egy ELO configra vonatkozo allitas amugy is torekeny: a
+# user barmikor valtoztathat rajta. Amit ALLITANI erdemes: a szint INFO maradjon
+# (nem figyelmeztetes), tehat ne riogasson egy szandekos beallitas miatt.
+_stale = [f for f in cc.check(real) if f["code"] == "stale_strategy_key"]
+check_("az elavult strategia-hivatkozas INFO szintu (nem WARN)",
+       all(f["level"] == cc.INFO for f in _stale), f"{len(_stale)} lelet")
 
 from core import symbol_policy as _sp
 check_("az eles configban KIFEJEZETTEN ott a hazirend (nem csak alapertelmezes)",
