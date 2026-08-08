@@ -126,6 +126,29 @@ REGISTRY = (
 KEYS = tuple(g["key"] for g in REGISTRY)
 
 
+def doc_path(key: str):
+    """A kapu leírásának útvonala: `core/docs/<kulcs>.md`.
+
+    Ugyanaz a minta, mint a stratégiáknál (`strategy/docs/<név>.md`): a leírás
+    FÁJLBAN él, nem a kódban — szerkeszthető anélkül, hogy hozzányúlnál a
+    logikához, és a beállító ablak „Leírás" lapja mindig a lemezről olvassa."""
+    from pathlib import Path as _P
+    return _P(__file__).resolve().parent / "docs" / f"{key}.md"
+
+
+def doc_text(key: str) -> str:
+    """A kapu leírása. Ha a fájl nincs, az ELVÁRT útvonalat adja vissza — így a
+    hiányzó doksi nem üres lap, hanem felszólítás."""
+    p = doc_path(key)
+    try:
+        return p.read_text(encoding="utf-8")
+    except OSError:
+        _lines = ["# " + label_of(key), "",
+                  "Ehhez a kapuhoz még nincs leírás.", "",
+                  "Várt fájl:", "", "```", str(p), "```"]
+        return chr(10).join(_lines) + chr(10)
+
+
 def label_of(key: str) -> str:
     for g in REGISTRY:
         if g["key"] == key:

@@ -3774,35 +3774,10 @@ class DashboardWindow:
                   font=self._small_font,
                   command=popup.destroy).pack(side="left", padx=6)
 
-        # ── BAL OLDALI FÜLEK ─────────────────────────────────────────────
-        # Nem `ttk.Notebook`: annak a bal oldali fülei Windowson elforgatott
-        # feliratot adnak. Saját gombsáv + tartalom-keret: teljes kontroll,
-        # nulla mellékhatás (ugyanaz a döntés, mint a gördítősávnál).
-        _shell = tk.Frame(popup, bg=BG)
-        _shell.pack(fill="both", expand=True)
-        _tabs = tk.Frame(_shell, bg=BG_HEADER, width=130)
-        _tabs.pack(side="left", fill="y")
-        _tabs.pack_propagate(False)
-        _pages = tk.Frame(_shell, bg=BG)
-        _pages.pack(side="left", fill="both", expand=True)
-
-        _page = {}
-        _btn = {}
-
-        def _show_page(name):
-            for n, pg in _page.items():
-                pg.pack_forget()
-                _btn[n].config(bg=BG_HEADER, fg=FG_GRAY)
-            _page[name].pack(fill="both", expand=True)
-            _btn[name].config(bg=BG, fg=FG_WHITE)
-
-        for _nm in ("Json", "Kapuk", "Stratégiák"):
-            _page[_nm] = tk.Frame(_pages, bg=BG)
-            _btn[_nm] = tk.Label(_tabs, text=_nm, bg=BG_HEADER, fg=FG_GRAY,
-                                 font=self._small_font, anchor="w", padx=12,
-                                 pady=8, cursor="hand2")
-            _btn[_nm].pack(fill="x")
-            _btn[_nm].bind("<Button-1>", lambda _e, n=_nm: _show_page(n))
+        # ── BAL OLDALI FÜLEK (közös váz: `dashboard/tab_shell.py`) ───────
+        from dashboard.tab_shell import TabShell
+        _shell = TabShell(popup, ("Json", "Kapuk", "Stratégiák"))
+        _page = {n: _shell.page(n) for n in _shell.names()}
 
         # ── KAPUK lap ────────────────────────────────────────────────────
         from core import gates as _gts, gate_layout as _glay
@@ -3844,7 +3819,7 @@ class DashboardWindow:
         # törölte az ABLAK helyett: utána bármelyik fülre kattintva
         # „bad window path name" jött. A Toplevel neve marad `popup`.
         json_page = _page["Json"]
-        _show_page("Json")
+        _shell.show("Json")
 
         tk.Label(json_page, text="config.json szerkesztése (mentéskor JSON-validálás):",
                  bg=BG, fg=FG_BLUE, font=self._header_font).pack(anchor="w", padx=10, pady=(10, 2))

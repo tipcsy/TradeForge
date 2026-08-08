@@ -197,8 +197,13 @@ def plain_text(md: str) -> str:
 # Megjelenítő ablak
 # ---------------------------------------------------------------------------
 
-def show(parent, title: str, md: str, source: "str | None" = None):
-    """A leírás megnyitása formázva, GÖRGETHETŐ ablakban.
+def render(parent, md: str, source: "str | None" = None):
+    """A leírás BEÁGYAZVA — egy meglévő keretbe, nem külön ablakba.
+
+    Ez a valódi megjelenítő; a `show()` már csak egy Toplevelt tesz köré. Azért
+    így, mert a leírás a felhasználó kérésére a beállító form EGYIK LAPJA lett
+    (Kapu: „Beállítás · Leírás", Stratégia: „Paraméter · Leírás") — külön
+    ablakban nem lehet a paraméterek mellett olvasni, amit épp állítasz.
 
     Csak tag-eket ragaszt a `parse()` kimenetére — a formázási döntések ott
     vannak, egy helyen. A `source` (fájl-útvonal) a lábban látszik: enélkül nem
@@ -208,16 +213,14 @@ def show(parent, title: str, md: str, source: "str | None" = None):
     from dashboard import theme as _th
 
     F = _th.fonts()
-    popup = tk.Toplevel(parent)
-    popup.title(title)
-    popup.configure(bg=_th.BG)
-    popup.geometry("760x620")
+    holder = tk.Frame(parent, bg=_th.BG)
+    holder.pack(fill="both", expand=True)
 
-    holder = tk.Frame(popup, bg=_th.BG)
-    holder.pack(fill="both", expand=True, padx=10, pady=(10, 4))
-    vsb = tk.Scrollbar(holder)
+    body = tk.Frame(holder, bg=_th.BG)
+    body.pack(fill="both", expand=True, padx=10, pady=(10, 4))
+    vsb = tk.Scrollbar(body)
     vsb.pack(side="right", fill="y")
-    txt = tk.Text(holder, bg=_th.BG, fg=_th.FG_WHITE, relief="flat", wrap="word",
+    txt = tk.Text(body, bg=_th.BG, fg=_th.FG_WHITE, relief="flat", wrap="word",
                   yscrollcommand=vsb.set, padx=8, pady=6,
                   insertbackground=_th.FG_WHITE)
     txt.pack(side="left", fill="both", expand=True)
@@ -240,8 +243,8 @@ def show(parent, title: str, md: str, source: "str | None" = None):
     txt.tag_configure(TABLE, font=F["mono"], foreground=_th.FG_GRAY)
 
     def _ins_inline(segments, base_tag):
-        for tg, s in segments:
-            txt.insert("end", s, (base_tag if tg == TEXT else tg))
+        for tg, s2 in segments:
+            txt.insert("end", s2, (base_tag if tg == TEXT else tg))
         txt.insert("end", "\n")
 
     for tag, val in parse(md):
@@ -261,12 +264,25 @@ def show(parent, title: str, md: str, source: "str | None" = None):
 
     txt.config(state="disabled")      # olvasható, de nem szerkeszthető
 
-    foot = tk.Frame(popup, bg=_th.BG)
-    foot.pack(fill="x", padx=10, pady=(0, 8))
     if source:
-        tk.Label(foot, text=f"Forrás: {source}", bg=_th.BG, fg=_th.FG_GRAY_DIM,
-                 font=F["small"], anchor="w").pack(side="left")
-    tk.Button(foot, text="Bezárás", bg=_th.BTN_DIS_BG, fg=_th.BTN_DIS_FG,
-              relief="flat", font=F["small"],
-              command=popup.destroy).pack(side="right")
+        tk.Label(holder, text=f"Forrás: {source}", bg=_th.BG, fg=_th.FG_GRAY_DIM,
+                 font=F["small"], anchor="w").pack(fill="x", padx=10, pady=(0, 6))
+    return holder
+
+
+def show(parent, title: str, md: str, source: "str | None" = None):
+    """A leírás KÜLÖN ABLAKBAN (a `render` köré tett Toplevel)."""
+    import tkinter as tk
+
+    from dashboard import theme as _th
+
+    popup = tk.Toplevel(parent)
+    popup.title(title)
+    popup.configure(bg=_th.BG)
+    popup.geometry("760x620")
+    tk.Button(popup, text="Bezárás", bg=_th.BTN_DIS_BG, fg=_th.BTN_DIS_FG,
+              relief="flat", font=_th.fonts()["small"],
+              command=popup.destroy).pack(side="bottom", anchor="e",
+                                          padx=10, pady=8)
+    render(popup, md, source)
     return popup

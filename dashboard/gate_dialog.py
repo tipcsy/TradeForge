@@ -213,24 +213,45 @@ class GateDialog:
         self.top = tk.Toplevel(parent)
         self.top.title(f"{symbol} — {_g.label_of(gate_key)}")
         self.top.configure(bg=BG)
-        self.top.resizable(False, False)
+        self.top.resizable(True, True)
+        self.top.geometry("720x620")
         self.top.grab_set()
 
         tk.Label(self.top, text=f"{symbol} — {_g.label_of(gate_key)} kapu",
                  bg=BG, fg=FG_WHITE, font=self._f["header"], anchor="w").pack(
                  anchor="w", padx=12, pady=(12, 0))
 
+        # ⚠ A gombsor foglal ELŐSZÖR (alulról), különben kis ablaknál kiszorul —
+        # a `pack` a hívás sorrendjében oszt helyet (lásd `tab_shell`).
+        self._build_footer()
+
+        # ── Bal oldali fülek: Beállítás · Leírás ─────────────────────────
+        # A leírás a felhasználó kérésére NEM külön ablak: a paraméterek MELLETT
+        # kell tudni, mit is állítunk.
+        from dashboard.tab_shell import TabShell
+        self._shell = TabShell(self.top, ("Beállítás", "Leírás"),
+                               on_show=self._on_tab)
+        self._page = self._shell.page("Beállítás")
+
         self._build_measured()
         self._build_params()
         self._build_effects()
-        self._build_footer()
+
+    def _on_tab(self, name):
+        """LUSTA feltöltés: a leírást csak akkor rendereljük, ha rá is néztek.
+        A lemezről olvassa, tehát szerkesztés után újranyitva azonnal friss."""
+        if name != "Leírás":
+            return
+        from dashboard import md_view
+        md_view.render(self._shell.page("Leírás"), _g.doc_text(self.key),
+                       source=str(_g.doc_path(self.key)))
 
     # ── MOST (mért) ──────────────────────────────────────────────────────
     def _build_measured(self):
         rows = _gp.measured_rows(self.key, self.ctx)
         if not rows:
             return
-        box = _section(self.top, "Most")
+        box = _section(self._page, "Most")
         grid = tk.Frame(box, bg=BG)
         grid.pack(fill="x", pady=(4, 0))
         for i, (label, value) in enumerate(rows):
@@ -246,7 +267,7 @@ class GateDialog:
             return
         load, _save = _STORE.get(self.key, (None, None))
         cur = load(self.cfg, self.symbol) if load else {}
-        box = _section(self.top, "Beállítások")
+        box = _section(self._page, "Beállítások")
         for spec in specs:
             val = cur.get(spec.key, spec.default)
             self._build_one(box, spec, val)
@@ -318,7 +339,7 @@ class GateDialog:
     def _build_effects(self):
         if not self.strategies:
             return
-        box = _section(self.top, "Mi történjen, ha a kapu blokkoló állapotban van")
+        box = _section(self._page, "Mi történjen, ha a kapu blokkoló állapotban van")
         grid = tk.Frame(box, bg=BG)
         grid.pack(fill="x", pady=(4, 0))
         for i, name in enumerate(self.strategies):
@@ -361,18 +382,20 @@ class GateDialog:
     # ── Lábléc: „összes instrumentumra” + gombok ─────────────────────────
     def _build_footer(self):
         self._all_var = tk.BooleanVar(value=False)
-        tk.Checkbutton(self.top,
+        _foot = tk.Frame(self.top, bg=BG)
+        _foot.pack(side="bottom", fill="x")
+        tk.Checkbutton(_foot,
                        text="Az összes instrumentumra vonatkozzon "
                             "(felülírja a többi pár saját beállítását)",
                        variable=self._all_var, bg=BG, fg=FG_WHITE,
                        selectcolor=BG_HEADER, font=self._f["small"],
                        activebackground=BG, activeforeground=FG_WHITE).pack(
                        anchor="w", padx=12, pady=(12, 0))
-        self.lbl_err = tk.Label(self.top, text="", bg=BG, fg=FG_RED,
+        self.lbl_err = tk.Label(_foot, text="", bg=BG, fg=FG_RED,
                                 font=self._f["small"], anchor="w",
                                 justify="left", wraplength=460)
         self.lbl_err.pack(anchor="w", padx=12, pady=(6, 0))
-        bar = tk.Frame(self.top, bg=BG)
+        bar = tk.Frame(_foot, bg=BG)
         bar.pack(fill="x", padx=12, pady=12)
         tk.Button(bar, text="Mentés", command=self._save, bg=BTN_PLAY_BG,
                   fg=BTN_PLAY_FG, font=self._f["small"], bd=0,

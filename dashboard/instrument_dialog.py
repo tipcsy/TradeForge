@@ -359,8 +359,16 @@ class InstrumentParamsDialog:
         footer = tk.Frame(popup, bg=BG)
         footer.pack(side="bottom", fill="x")
 
+        # ── Bal oldali fülek: Paraméter · Leírás ────────────────────────────
+        # A leírás korábban KÜLÖN ABLAKBAN nyílt egy gombról. A felhasználó
+        # kérésére ugyanennek a formnak a lapja lett: a paraméterek MELLETT kell
+        # tudni olvasni, mit is állítunk.
+        from dashboard.tab_shell import TabShell
+        self._shell = TabShell(popup, ("Paraméter", "Leírás"),
+                               on_show=self._on_tab)
+
         # Görgethető törzs — innentől MINDEN tartalom ide (`body`) megy.
-        holder, body, self._body_canvas = _scrollable(popup)
+        holder, body, self._body_canvas = _scrollable(self._shell.page("Paraméter"))
         holder.pack(side="top", fill="both", expand=True)
         self._body = body
 
@@ -754,28 +762,24 @@ class InstrumentParamsDialog:
         self._btn_bt.pack(side="left", padx=6)
         tk.Button(btns, text="Trials CSV", bg=BTN_BT_BG, fg=BTN_BT_FG, relief="flat",
                   font=self._sf, command=self._open_trials).pack(side="left", padx=6)
-        # A stratégia LEÍRÁSA (`strategy/docs/<név>.md`) formázva. Itt a helye: a
-        # paraméterek mellett kell tudni, MIT is állítunk.
-        tk.Button(btns, text="Leírás", bg=BTN_BT_BG, fg=BTN_BT_FG, relief="flat",
-                  font=self._sf, command=self._open_doc).pack(side="left", padx=6)
         tk.Button(btns, text="Mégse", bg=BTN_DIS_BG, fg=BTN_DIS_FG, relief="flat",
                   font=self._sf, command=popup.destroy).pack(side="left", padx=6)
 
         self._fit_to_screen(popup, body, footer)
 
-    def _open_doc(self):
-        """A stratégia leírása formázva (`strategy/docs/<név>.md`).
+    def _on_tab(self, name):
+        """A „Leírás" lap LUSTA feltöltése (`strategy/docs/<név>.md`).
 
         Ha a fájl nincs, a nézet KIÍRJA az elvárt útvonalat — így a hiányzó doksi
-        nem „elromlott gomb", hanem felszólítás. A leírás mindig a lemezről
-        olvasódik, tehát szerkesztés után ÚJRA MEGNYITVA azonnal friss (nincs
-        gyorsítótár, ami elavulhatna)."""
+        nem üres lap, hanem felszólítás. Mindig a lemezről olvas, tehát
+        szerkesztés után újranyitva azonnal friss (nincs gyorsítótár, ami
+        elavulhatna)."""
+        if name != "Leírás":
+            return
         from dashboard import md_view
         try:
-            md_view.show(self.popup,
-                         f"{self.strategy.name} — leírás",
-                         self.strategy.doc_text(),
-                         source=str(self.strategy.doc_path()))
+            md_view.render(self._shell.page("Leírás"), self.strategy.doc_text(),
+                           source=str(self.strategy.doc_path()))
         except Exception as e:
             self.lbl_err.config(text=f"A leírás nem nyitható meg: {e}")
 
