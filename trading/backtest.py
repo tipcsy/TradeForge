@@ -1101,11 +1101,15 @@ def run_pair(
                 trade.pnl_usd, trade.commission_usd, trade.swap_usd = _costs.apply(
                     trade.pnl_usd, trade.lot, trade.direction,
                     trade.open_time.timestamp(), m1_time.timestamp(), pair_cfg)
-                # pnl_points számítás (kozmetikai, a runner mozgásából)
+                # pnl_points (a trades CSV pont-oszlopa) — a runner mozgásából.
+                # ⚠ A spreadet NEM vonjuk le újra: a BUY már ASK-on nyitott, a SELL
+                # pedig ASK-on zár, tehát az árakban BENNE VAN. A korábbi levonás
+                # kétszer fizettette meg, így a CSV pont-oszlopa nem stimmelt a
+                # dollár-P&L-lel (a pénz mindig az árakból számolt, az helyes volt).
                 if trade.direction == "BUY":
-                    trade.pnl_points = (trade.close_price - trade.open_price) / trade.point_size - spread_points
+                    trade.pnl_points = (trade.close_price - trade.open_price) / trade.point_size
                 else:
-                    trade.pnl_points = (trade.open_price - trade.close_price) / trade.point_size - spread_points
+                    trade.pnl_points = (trade.open_price - trade.close_price) / trade.point_size
                 if record_events:
                     trade.events.append(("CLOSE", m1_time,
                                          round(trade.close_price, 6), 0.0, 0.0,
@@ -1744,6 +1748,16 @@ def run_portfolio_backtest(
             row      = m1_df.loc[m1_time]
             point_size = trade.point_size
             sp       = info["pair_cfg"].get("backtest_spread_points", spread_default)
+            # ⚠ A gyertya BID; az ASK = BID + spread. A kilépés a SZEMBENI oldalon
+            # történik (BUY→bid, SELL→ask) — ugyanaz a mechanika, mint a
+            # `run_pair`-ben. Enélkül a SELL bid-en NYITOTT és bid-en ZÁRT, tehát
+            # NULLA spreadet fizetett, míg a BUY egy teljeset: a portfólió-motor
+            # rendszeresen felülbecsülte a short-oldalt.
+            _psp = row.get("avg_spread", float("nan"))
+            if not (_psp > 0):
+                _psp = points_to_price(sp, point_size)
+            _hi_x = float(row["high"]) + _psp     # SELL ezen zár (ask)
+            _lo_x = float(row["low"]) + _psp
             rr_spec  = info.get("rr") or _rr_spec(None, info.get("risky", False), sym)
             _pc      = info["pair_cfg"]
             _minlot  = _pc.get("min_lot", 0.01)
@@ -1756,33 +1770,34 @@ def run_portfolio_backtest(
                     trade.close_price = trade.tp
                     trade.close_time  = m1_time
                     trade.pnl_usd     = calc_pnl(trade, trade.tp)
-                    trade.pnl_points    = (trade.tp - trade.open_price) / point_size - sp
+                    trade.pnl_points    = (trade.tp - trade.open_price) / point_size
                     trade.status      = "tp";  closed = True
                 elif row["low"] <= trade.sl:
                     trade.close_price = trade.sl
                     trade.close_time  = m1_time
                     trade.pnl_usd     = calc_pnl(trade, trade.sl)
-                    trade.pnl_points    = (trade.sl - trade.open_price) / point_size - sp
+                    trade.pnl_points    = (trade.sl - trade.open_price) / point_size
                     trade.status      = "sl";  closed = True
                 else:
                     _manage_position(trade, row["high"], row["low"],
                                      point_size, _minlot, _lotstep, rr_spec)
 
-            else:  # SELL
-                if not trade.built and row["low"] <= trade.tp:
+            else:  # SELL — az ASK-sorozaton (bid + spread)
+                if not trade.built and _lo_x <= trade.tp:
                     trade.close_price = trade.tp
                     trade.close_time  = m1_time
                     trade.pnl_usd     = calc_pnl(trade, trade.tp)
-                    trade.pnl_points    = (trade.open_price - trade.tp) / point_size - sp
+                    trade.pnl_points    = (trade.open_price - trade.tp) / point_size
                     trade.status      = "tp";  closed = True
-                elif row["high"] >= trade.sl:
+                elif _hi_x >= trade.sl:
                     trade.close_price = trade.sl
                     trade.close_time  = m1_time
                     trade.pnl_usd     = calc_pnl(trade, trade.sl)
-                    trade.pnl_points    = (trade.open_price - trade.sl) / point_size - sp
+                    trade.pnl_points    = (trade.open_price - trade.sl) / point_size
                     trade.status      = "sl";  closed = True
                 else:
-                    _manage_position(trade, row["high"], row["low"],
+                    # A BE/trailing is a KILÉPÉSI (ask) oldalon mér
+                    _manage_position(trade, _hi_x, _lo_x,
                                      point_size, _minlot, _lotstep, rr_spec)
 
             # Runner KISZÁLLÁSI JELRE zárása (mint a run_pair-ben): a részleges zárás
@@ -1795,7 +1810,7 @@ def run_portfolio_backtest(
                 trade.pnl_usd     = calc_pnl(trade, trade.close_price)
                 trade.pnl_points    = ((trade.close_price - trade.open_price)
                                      if trade.direction == "BUY"
-                                     else (trade.open_price - trade.close_price)) / point_size - sp
+                                     else (trade.open_price - trade.close_price)) / point_size
                 trade.status      = "exit"
                 closed = True
 
