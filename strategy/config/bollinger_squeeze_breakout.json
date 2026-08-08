@@ -1,0 +1,86 @@
+{
+  "_comment": "Bollinger Squeeze & Breakout — a stratégia SAJÁT beállításai. A közös végrehajtási paraméterek (atr_period, spread-kapu, BE/trailing) NEM itt vannak: core/execution_params.py.",
+
+  "indicators": {
+    "_comment_bb": "Bollinger: periódus és szórás-szorzó.",
+    "bb_period": 20,
+    "bb_std": 2.0,
+
+    "_comment_squeeze": "Az összeszűkülés mérése: a BandWidth az elmúlt bw_lookback gyertya alsó bw_percentile százalékában legyen.",
+    "bw_lookback": 120,
+    "bw_percentile": 20.0,
+
+    "_comment_kc": "Keltner-csatorna — a squeeze másik fele (a BB a KC-n BELÜL). A kc_atr_period a CSATORNA alakja, NEM a végrehajtás ATR-je.",
+    "kc_ema_period": 20,
+    "kc_atr_period": 10,
+    "kc_atr_mult": 1.5,
+
+    "_comment_trend": "Trend-szűrő: EMA-sorrend + az ár helyzete a gyorshoz képest. Kikapcsolva mindkét irány jöhet.",
+    "ema_fast": 50,
+    "ema_slow": 200,
+    "require_trend_alignment": true,
+
+    "_comment_pb": "%B megerősítés: 1.0 = a felső sávon, 0.0 = az alsón.",
+    "pb_long_threshold": 1.0,
+    "pb_short_threshold": 0.0,
+
+    "_comment_window": "Hány gyertyával a feloldás UTÁN fogadunk el kitörést.",
+    "min_bars_since_squeeze": 0,
+    "max_bars_after_squeeze": 5
+  },
+
+  "sltp": {
+    "_comment": "CSAK a TÁV — a lotot a kockázatkezelő számolja. SL = ATR × sl_atr_mult, TP = SL × tp_rr.",
+    "sl_atr_mult": 1.0,
+    "tp_rr": 2.0
+  },
+
+  "quality": {
+    "_comment": "A minősítés küszöbei (core/quality.py). Örökli az alapértelmezést; itt csak felülírni kell, ha eltérő."
+  },
+
+  "param_meta": {
+    "_comment": "A paraméter-ablak kategóriái és súgói.",
+    "params": {
+      "bb_period":   {"category": "Bollinger", "comment": "A sávok periódusa"},
+      "bb_std":      {"category": "Bollinger", "comment": "Szórás-szorzó (2.0 a szokásos)"},
+      "bw_lookback": {"category": "Összeszűkülés", "comment": "Ennyi gyertyához méri a BandWidth-et"},
+      "bw_percentile": {"category": "Összeszűkülés", "comment": "Az alsó X% számít szűknek (kisebb = ritkább, válogatósabb)"},
+      "kc_ema_period": {"category": "Keltner", "comment": "A csatorna középvonala"},
+      "kc_atr_period": {"category": "Keltner", "comment": "A csatorna ATR-je (NEM a végrehajtásé)"},
+      "kc_atr_mult":   {"category": "Keltner", "comment": "A csatorna szélessége"},
+      "ema_fast":      {"category": "Trend-szűrő", "comment": "Gyors EMA"},
+      "ema_slow":      {"category": "Trend-szűrő", "comment": "Lassú EMA"},
+      "require_trend_alignment": {"category": "Trend-szűrő", "comment": "Csak a trend irányába lépjünk be"},
+      "pb_long_threshold":  {"category": "Kitörés", "comment": "%B küszöb LONG-hoz (1.0 = a felső sávon)"},
+      "pb_short_threshold": {"category": "Kitörés", "comment": "%B küszöb SHORT-hoz (0.0 = az alsó sávon)"},
+      "min_bars_since_squeeze": {"category": "Kitörés", "comment": "Ennyi gyertya UTÁN fogadunk el kitörést"},
+      "max_bars_after_squeeze": {"category": "Kitörés", "comment": "Ennyi gyertyáig él a feloldás (utána elévül)"},
+      "sl_atr_mult": {"category": "SL/TP", "comment": "SL = ATR × ez"},
+      "tp_rr":       {"category": "SL/TP", "comment": "TP = SL × ez (kockázat/hozam)"}
+    }
+  },
+
+  "optimizer": {
+    "_comment": "Hangolási tartományok. A végrehajtási kulcsok szándékosan hiányoznak — azok nem a stratégiáé.",
+    "bb_period":      {"min": 14, "max": 40, "step": 2},
+    "bb_std":         {"min": 1.5, "max": 3.0, "step": 0.1},
+    "bw_lookback":    {"min": 60, "max": 240, "step": 20},
+    "bw_percentile":  {"min": 10.0, "max": 40.0, "step": 5.0},
+    "kc_atr_mult":    {"min": 1.0, "max": 2.5, "step": 0.25},
+    "ema_fast":       {"min": 20, "max": 80, "step": 10},
+    "ema_slow":       {"min": 100, "max": 300, "step": 20},
+    "pb_long_threshold":  {"min": 0.9, "max": 1.2, "step": 0.05},
+    "pb_short_threshold": {"min": -0.2, "max": 0.1, "step": 0.05},
+    "max_bars_after_squeeze": {"min": 2, "max": 12, "step": 1},
+    "sl_atr_mult":    {"min": 0.75, "max": 2.5, "step": 0.25},
+    "tp_rr":          {"min": 1.0, "max": 3.0, "step": 0.25},
+
+    "_comment_constraints": "Egyszerű kifejezések (core/param_constraints.py). Az optimalizáló ezekkel szűkíti a teret, tehát nincs elpazarolt trial: a gyors EMA legyen gyorsabb; a LONG %B-küszöb a SHORT fölött (különben a két oldal átfedne); a kitörési ablak ne záruljon a nyitása előtt.",
+    "constraints": [
+      "ema_fast < ema_slow",
+      "pb_long_threshold > pb_short_threshold",
+      "min_bars_since_squeeze <= max_bars_after_squeeze"
+    ]
+  }
+}

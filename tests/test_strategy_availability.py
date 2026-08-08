@@ -43,8 +43,12 @@ check("van legalabb ket regisztralt strategia (a teszt erre epul)",
 
 # ══ 1. available_strategies — TERKEP alak ═════════════════════════════════
 
+# ⚠ MINDEN regisztraltat felsorolunk: ami NEM szerepel a terkepben, az a vaz
+# szabalya szerint ELERHETO — egy uj strategia-modul kulonben elrontana a merest
+# (2026-08-08: a bollinger_squeeze_breakout bevezetesekor pont ez tortent).
 CFG_MAP = {"strategy": {"name": "wpr_sma"},
-           "available_strategies": {"wpr_sma": True, "ml_ai": False}}
+           "available_strategies": {**{n: False for n in REG},
+                                    "wpr_sma": True, "ml_ai": False}}
 check("terkep: a false-ra allitott strategia KIMARAD",
       available_strategy_names(CFG_MAP) == ["wpr_sma"],
       str(available_strategy_names(CFG_MAP)))
@@ -318,7 +322,11 @@ if HAS_TK:
 
     BASE = {
         "strategy": {"name": "wpr_sma"},
-        "available_strategies": {"wpr_sma": True, "ml_ai": True},
+        # ⚠ MINDEN regisztraltat felsorolunk (ami kimarad, az ELERHETO) — igy a
+        # teszt akkor is azt meri, amit akar, ha uj strategia-modul kerul a
+        # projektbe. Az uj modul itt szandekosan `false`.
+        "available_strategies": {**{n: False for n in REG},
+                                 "wpr_sma": True, "ml_ai": True},
         "trading": {"max_open_slots": 4},
         "pairs": {
             # A LELET allapota: a paron CSAK wpr_sma aktiv, de a run_state-ben
@@ -371,8 +379,12 @@ if HAS_TK:
         check("a sor eloall", _g is not None)
         if _g:
             _by = {s["name"]: s for s in _g["strategies"]}
-            check("a sor MINDKET strategiat mutatja (oszlop-egyvonal)",
-                  set(_by) == {"wpr_sma", "ml_ai"}, str(sorted(_by)))
+            # A sor az ELERHETO strategiakat mutatja (oszlop-egyvonal). Egy uj,
+            # `false`-ra allitott modul NEM jelenik meg — ezt is allitjuk.
+            check("a sor a ket elerheto strategiat mutatja (oszlop-egyvonal)",
+                  {"wpr_sma", "ml_ai"} <= set(_by), str(sorted(_by)))
+            check("a `false`-ra allitott uj strategia NEM jelenik meg",
+                  "bollinger_squeeze_breakout" not in _by, str(sorted(_by)))
             check("a sorban az ml_ai blokk 'enabled': False",
                   _by["ml_ai"]["enabled"] is False)
             check("a sorban az ml_ai NEM 'live'", _by["ml_ai"]["live"] is False)

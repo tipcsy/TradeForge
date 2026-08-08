@@ -6,7 +6,8 @@
   },
   "available_strategies": {
     "wpr_sma": true,
-    "ml_ai": true
+    "ml_ai": true,
+    "bollinger_squeeze_breakout": false
   },
   "_comment_available_strategies": "A programban ELÉRHETŐVÉ tett stratégiák — a strategy/ csomag automatikusan felderített moduljainak ki-be kapcsolója. true = a program felkínálja (per-pár választó) és oszlopot képez belőle a dashboardon; false = nem is látszik. A dashboardon a ⚙ Beállítás ablakból állítható, és MINDIG ide íródik vissza a TELJES készlet — a kikapcsoltak is —, hogy a fájlból kiderüljön, mi LÉTEZIK (nem csak az, mi tér el az alapértelmezéstől). Az oszlop-változás újraindítás után látszik. A régi LISTA alak (whitelist) változatlanul olvasható. Kihagyva/üresen = az ÖSSZES regisztrált. Egy frissen hozzáadott, itt még nem szereplő stratégia alapból ELÉRHETŐ — kikapcsolni kifejezetten kell (false).",
   "tf_align": {
@@ -28,7 +29,13 @@
     "watchdog_threshold_sec": 2.0,
     "watchdog_stacks": true,
     "_comment_gate_order": "Mely KAPUK latszanak a tablan es milyen SORRENDBEN — a Beallitasok ⚙ „Kapuk” fulen szerkesztheto (ket lista + fel/le). Ami NINCS a listaban, az KI VAN KAPCSOLVA, es ez KET dolgot jelent egyutt: (1) az oszlopa nem latszik, ES (2) a kapu EGYETLEN instrumentumon sem szol bele a kereskedesbe. A kettot szandekosan nem lehet szetvalasztani: ha csak elrejtenenk az oszlopot, a kapu LATHATATLANUL blokkolhatna tovabb. A kikapcsolas FELFUGGESZT, nem TOROL — a per-par hatasok (pairs.<SYM>.gates.…) a configban maradnak es visszakapcsolaskor ujra elnek; a kapu ablaka pedig kiirja, hogy „a Beallitasokban kikapcsolva”. A kulcs HIANYA = minden kapu bekapcsolva, a beepitett sorrendben. v2.9.0 ota NINCS automatikus elrejtes (korabban a Piac/Lendulet/Koltseg oszlop magatol eltunt, ha egy paron sem volt mert ertek — igy ket oka is lehetett annak, hogy valami nem latszik).",
-    "gate_order": ["spread", "tf_align", "market", "momentum", "cost"],
+    "gate_order": [
+      "spread",
+      "tf_align",
+      "market",
+      "momentum",
+      "cost"
+    ],
     "_comment_layout": "Dashboard-elrendezés: 'canvas' (ALAP — egy sor = egy instrumentum, a stratégiák VÍZSZINTESEN, összecsukható kapu- és stratégia-blokkokkal, fix–görgethető–fix szélességgel; VÁSZONRA rajzolva, nem widgetekből) | 'classic' (a régi, soronkénti tábla). A régi 'live2' érték (ugyanez a tábla, de widgetekből) v2.7.0-ban megszűnt — automatikusan 'canvas'-ra fordul, tehát a meglévő configok nem törnek. Miért: 30 instrumentum × 10 stratégia mellett a widget-változat 6427 widgetből épült, és egy összecsukás 13,3 mp volt; vásznon ugyanez 0,46 mp, egy átméretezési lépés pedig 585 ms helyett 12 ms.",
     "layout": "canvas",
     "_comment_legend": "Látszik-e a felső JELMAGYARÁZAT-sáv (LIVE/STOPPED/Kivezetés színek + a kockázatcsökkentő preset betűkódjai). KIHAGYVA az elrendezés dönt: 'classic'-ban BE (ott érvényes — a szimbólum neve állapot szerint színeződik, és a soron ott a kattintható 'R' preset-gomb), 'live2'-ben KI (ott a szimbólum mindig fehér és nincs preset-cella, tehát mind a 12 elem félrevezetne, miközben elvisz egy sávnyi helyet). true/false-szal felülírható.",
@@ -82,19 +89,33 @@
     "_comment_signal": "A 'csak jelzés' NEM kapu-hatás — az a STRATÉGIÁÉ (pairs.<SYM>.strategy_mode). A kapu sosem küld jelzést kötés helyett; vagy blokkol, vagy méretet csökkent, vagy nem szól bele.",
     "_comment_legacy": "Ha ez a `gates` szekció HIÁNYZIK, a régi `tf_align.gate` LISTA dönt (a benne felsorolt stratégiákat blokkolja) — visszafelé kompatibilis. Ha viszont JELEN VAN, MEGELŐZI a régi listát: a per-pár `tf_align.gate` beállítások ilyenkor hatástalanok. A config-ellenőrző erre is figyelmeztet.",
     "_comment_momentum": "LENDÜLET-kapu (a piac „fordulatszáma” — core/momentum.py): előjeles, ATR-mentesen normált szám. Előjel = irány (fel/le), nagyság = mennyire pörög. KÉTFÉLEKÉPPEN bukhat, és hogy melyik számít, az stratégiánként állítható a `mode` mezővel: 'idle' (a piac áll: |fordulat| < idle_threshold), 'dir' (a fordulat SZEMBEN megy a jellel), 'both'. Ilyenkor a bejegyzés SZÓTÁR: {\"effect\": \"block\", \"mode\": \"dir\"} — a régi, egyszerű string-alak ({\"wpr_sma\": \"block\"}) minden kapunál változatlanul érvényes. MÉRÉSI paraméterek (instrumentum-szintűek, ugyanebben a szótárban, a stratégia-nevek mellett): basis ('sma' = egy idősík 3 SMA-val, 'tf' = három idősík egy SMA-val), timeframe/sma_fast/sma_mid/sma_slow, timeframes/tf_sma, vol_window, idle_threshold. A normáló mérce az utolsó vol_window gyertya ÁTLAGOS ABSZOLÚT záróár-elmozdulása — ettől jelent 0.35 ugyanazt GOLD-on és EURUSD-n. Alapból 'none': egy frissítés sosem kezd némán másképp kereskedni.",
-    "spread": { "default": "block" },
-    "tf_align": { "default": "none" },
-    "market": { "default": "none", "adverse": ["dead", "uncertain"] },
+    "spread": {
+      "default": "block"
+    },
+    "tf_align": {
+      "default": "none"
+    },
+    "market": {
+      "default": "none",
+      "adverse": [
+        "dead",
+        "uncertain"
+      ]
+    },
     "_comment_cost": "KOLTSEG/KOCKAZAT kapu (core/cost_gate.py): nem a spread NAGYSAGAT meri, hanem hogy mennyire rontja el az uzletet. tenyleges_RR = (TP + spread) / (SL - spread). A spread a stopot KOZELEBB, a celt TAVOLABB teszi, tehat mindket oldalon fizetsz. max_rr_distortion (alap 0.25) = a tervezett RR-t ennyivel ronthatja. Merve 2026-08-07-en: EURCHF +64%, EURGBP +68%, EURJPY +26%, EURUSD +18%, GOLD +6%, UsaTec +4% — a 0.25 az elso harmat zarja ki. MIERT KELL, HA MAR VAN SPREAD-KAPU: annak relativ PADLOJA (min_spread_mult x normal_spread) konstrukcio szerint nagyobb a par normal spreadjenel, tehat a par a sajat szokasos spreadjen SOHA nem akad fenn rajta — a spread-kapu a KITAGULO spreadet fogja, a KRONIKUSAN draga instrumentumot nem. MIERT KAPU ES NEM SZINT-MODOSITO: merve a stop szelesitese nem menti meg a draga part (a 2x szelesebb TP elerhetetlenne valik), es ha egy kapu atirhatna az SL-t, az „1 R” elveszitene a jelenteset az egesz R-alapu elszamolasban.",
-    "momentum": { "default": "none" },
-    "cost": { "default": "none" }
+    "momentum": {
+      "default": "none"
+    },
+    "cost": {
+      "default": "none"
+    }
   },
   "execution": {
     "_comment": "Közös, STRATÉGIA-FÜGGETLEN VÉGREHAJTÁSI alapértékek — MINDEN stratégia ugyanazt az instrumentum-szintű értéket használja. Per-szimbólum felülírás: data/execution_params/<SYMBOL>.json (a Stratégia Paraméterek ablak 'Végrehajtás' kategóriája menti oda).",
     "_comment_moved": "A BE + trailing (breakeven_pct, trail_activation_atr, trail_distance_atr) v1.96.0 óta NEM ITT van: a KOCKÁZATCSÖKKENTŐ modulba került (core/risk_reduction.py; per-pár érték a data/risk_mode.json-ban, a kockázatcsökkentő blokkban szerkeszthető). Indok: a preset dönti el, hogy egyáltalán hatnak-e — Fibo/Harmados preseten például SEMMIT nem csináltak. Egyszeri átköltöztetés: python tools/migrate_be_trail.py --apply",
     "atr_period": 14,
     "_comment_spread": "Spread-kapu (core/spread_gate.py): max_spread_atr_ratio — a megengedett spread az ATR hányada. min_spread_mult — az alsó küszöb az instrumentum normál spreadjének ennyiszerese.",
-    "max_spread_atr_ratio": 0.20,
+    "max_spread_atr_ratio": 0.2,
     "min_spread_mult": 1.5
   },
   "optimizer": {
@@ -112,7 +133,9 @@
     "_comment_split": "train_start_date: ettől dolgozik az optimizer | test_start_date: végső out-of-sample teszt",
     "train_start_date": "2025-01-01",
     "_comment_training": "ML-tanitas (`ml_ai`). min_calibration_signals: a kuszob elfogadasahoz MINIMALISAN szukseges jel-darabszam a kalibracios szeleten (alap 40). Ez maximum-torzitas elleni vedelem: a kalibracio 51 kuszob-jeloltet probal vegig es a legjobb talalati aranyut valasztja, tehat nehany mintabol a magas win-rate a kereses mellekterméke, nem kepesseg. A 2026-08-06-i Ger40-modell 12 jel alapjan lett elesitve „75% talalattal” — eles OOS-on 0 kotest adott. min_model_win_rate (0.4) es max_signal_coverage (0.08) a masik ket kapu.",
-    "training": { "min_calibration_signals": 40 },
+    "training": {
+      "min_calibration_signals": 40
+    },
     "test_start_date": "2025-10-01",
     "_comment_rr": "A KOCKÁZATCSÖKKENTÉS is optimalizált dimenzió legyen-e (preset + runner + kalibráció + BE/trailing)? Alap: false — a stratégia belépő-jelzését és a kimenet-menedzsmentet érdemes KÉT FÁZISBAN hangolni (előbb a jelzés fix rr-rel, aztán az rr a befagyasztott jelzésre): olcsóbb, és látszik, mennyit tesz hozzá maga a kockázatcsökkentés. A keresési tér FELTÉTELES: minden dimenzió CSAK azon a preseten sorsolódik, ahol tényleg hat (v1.96.0) — pl. a halving_fraction nem létezik Pajzs preseten, a BE/trailing pedig Fibo/Harmados preseten sehol. Felülírható: rr_presets (mely presetek közül válasszon), rr_runners, rr_space (tartományok).",
     "optimize_rr": false,
