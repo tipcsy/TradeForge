@@ -132,6 +132,61 @@ check("min_auc=0 mellett a padlo nem szol bele",
 check("az alapertelmezett padlo 0,52", abs(mt.MIN_MODEL_AUC - 0.52) < 1e-9,
       str(mt.MIN_MODEL_AUC))
 
+# ---------------------------------------------------------------------------
+print("== A kuszob VARHATO ERTEKRE kalibral, nem talalati aranyra ==")
+
+check("expected_r: RR 2-nel a nullszaldo 1/3",
+      abs(mt.expected_r(1 / 3, 2.0)) < 1e-9, f"{mt.expected_r(1/3, 2.0):.6f}")
+check("expected_r: RR 1-nel a nullszaldo 1/2",
+      abs(mt.expected_r(0.5, 1.0)) < 1e-9)
+check("expected_r: 50% RR 2-nel +0,5R", abs(mt.expected_r(0.5, 2.0) - 0.5) < 1e-9)
+
+# Wilson: kis mintan tavol, nagy mintan kozel az arany
+lb_small = mt.wilson_lower(10, 20, 1.96)
+lb_big = mt.wilson_lower(500, 1000, 1.96)
+print(f"     10/20 -> {lb_small:.3f}   |   500/1000 -> {lb_big:.3f}   (mindketto 50%)")
+check("kis mintan az also korlat messze van", lb_small < 0.35, f"{lb_small:.3f}")
+check("nagy mintan tapad", lb_big > 0.45, f"{lb_big:.3f}")
+check("a korlat SOSEM nagyobb a nyers aranynal", lb_big <= 0.5 and lb_small <= 0.5)
+check("nulla mintara 0", mt.wilson_lower(0, 0) == 0.0)
+check("szigorubb z -> alacsonyabb korlat",
+      mt.wilson_lower(60, 100, 1.96) < mt.wilson_lower(60, 100, 1.28))
+
+# A LENYEG: sok jel kozepes aranyon tobbet er, mint keves jel magas aranyon.
+# Ket szigetet epitunk a valoszinusegbe: a legfelso 1% 60%-os, a felso 30% 42%-os.
+rng2 = np.random.default_rng(11)
+N2 = 4000
+p2 = rng2.uniform(0.0, 0.94, size=N2)
+y2 = np.zeros(N2, dtype=int)
+top = p2 >= 0.90                      # ~1% — nagyon jo arany, keves jel
+mid = (p2 >= 0.60) & (p2 < 0.90)      # ~36% — nullszaldo folott, sok jel
+y2[top] = (rng2.random(top.sum()) < 0.60).astype(int)
+y2[mid] = (rng2.random(mid.sum()) < 0.42).astype(int)
+y2[~(top | mid)] = (rng2.random((~(top | mid)).sum()) < 0.20).astype(int)
+
+thr_e, st_e = mt._calibrate_threshold(p2, y2, 0.0, 0.5, 40, rr=2.0, z=1.28)
+print(f"     valasztott kuszob={thr_e:.2f}  jelek={st_e['signals']}  "
+      f"WR={100*st_e['win_rate']:.1f}%  E[R]alsó={st_e['expected_r_lb']:+.3f}")
+check("a szeles, kozepes aranyu savot valasztja (nem a szuk farkat)",
+      st_e["signals"] > 400, f"{st_e['signals']} jel")
+check("...es a kuszob a sav aljan van", thr_e < 0.85, f"{thr_e:.2f}")
+check("pozitiv a konzervativ varhato ertek", st_e["expected_r_lb"] > 0,
+      f"{st_e['expected_r_lb']:+.3f}")
+check("a stat kozli az RR-t es a z-t", st_e.get("rr") == 2.0 and st_e.get("calib_z") == 1.28)
+
+# Nullszaldo ALATTI arany: barmennyi jellel is el kell utasitani
+y_bad = (rng2.random(N2) < 0.30).astype(int)      # 30% < 33,3%
+_, st_bad = mt._calibrate_threshold(p2, y_bad, 0.0, 1.0, 40, rr=2.0, z=1.28)
+check("nullszaldo alatti aranyt sok jellel sem fogad el",
+      not st_bad.get("enabled"), f"kuszob={st_bad.get('threshold')}")
+check("...es megmondja, mennyi kellene",
+      "nullszaldó" in (st_bad.get("reason") or ""), (st_bad.get("reason") or "")[:60])
+
+# Ugyanaz az arany MAGASABB RR-nel mar elfogadhato (a kriterium RR-tudatos)
+_, st_rr = mt._calibrate_threshold(p2, y_bad, 0.0, 1.0, 40, rr=5.0, z=1.28)
+check("magasabb RR-nel ugyanaz az arany mar atmegy", bool(st_rr.get("enabled")),
+      f"E[R]alsó={st_rr.get('expected_r_lb'):+.3f}")
+
 print()
 if _fail:
     print("HIBA: " + ", ".join(_fail))

@@ -126,3 +126,33 @@ Az őszinte kalibráció **22 irányból 17-et magától kikapcsolt**. Friss OOS
 
 > A javítás **nem teremt élt** — nem is teremthet. Azt szünteti meg, hogy a
 > stratégia zajra élesedjen: a kár a negyedére esett, de az előjel nem fordult.
+
+## v2.15.0: a küszöb VÁRHATÓ ÉRTÉKRE kalibrál
+
+A régi pontszám (`wr² × lefedettség^0,15`) a **találati arányt** hajszolta, ezért
+mindig a legszűkebb, legmagasabb-arányú farkat választotta — az aktív irányok
+rendre 42–100 jelen álltak, épp a minimumon. Csakhogy nem a találati arány fizet:
+
+> **E[R] = wr × (RR+1) − 1** — RR 2-nél a nullszaldó 33,3%.
+
+Egy 35%-os, sok jelet adó küszöb (+0,05R × 500 kötés) többet ér, mint egy 50%-os,
+ami húszszor ritkábban szól. A mintaszám a **Wilson-alsókorláttal** épül be
+(10/20 → 0,299; 500/1000 → 0,469), a pontszám pedig a konzervatív várható érték
+× darabszám. Így a `min_signals` már csak durva padló, nem a fő védelem.
+
+`optimizer.training.calibration_z` (alap **1,28** = 80% egyoldali). Ez
+kockázatvállalási döntés, nem statisztikai közlés: 95%-on (z=1,96) 8 irányból 2
+maradt 108 jellel, 80%-on 3 irány 1815 jellel.
+
+### OOS-menet (2026-05-01 … 08-07)
+
+| lépés | kötés | P&L |
+|---|---|---|
+| kiindulás (régi kalibráció, régi címke) | 340 | −827$ |
+| fold-on kívüli kalibráció (v2.13.0) | 164 | −208$ |
+| őszinte címke + idő-jellemzők (v2.14.0) | 14 | +0$ |
+| várható-érték kalibráció (v2.15.0) | 21 | **+6$** |
+
+> ⚠ **21 kötés három hónap alatt.** A veszteség forrása megszűnt; nyereségesség
+> NINCS bizonyítva. Ehhez lényegesen több kötés kell — vagy több páron kell
+> érvényes küszöböt találni, vagy erősebb jellemzők kellenek.

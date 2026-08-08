@@ -185,6 +185,15 @@ MIN_CALIB_SIGNALS = 40
 # Configból: `optimizer.training.min_model_auc`.
 MIN_MODEL_AUC = 0.52
 
+# A küszöb elfogadásához használt EGYOLDALI konfidencia (z-érték) a találati
+# arány alsó korlátjához. Nem statisztikai közlést teszünk, hanem fogadást
+# méretezünk: a 95% (z=1,96) minden küszöböt elutasít, amíg a minta nagyon
+# nagy nem lesz — 2026-08-08-án 8 irányból 2 maradt, 108 jellel. A 80%
+# (z=1,28) megtartja a kis-mintás maximum-torzítás elleni védelmet (ez volt
+# az eredeti betegség), de már enged valódi lefedettségű küszöböt is:
+# ugyanott 3 irány, 1815 jel. Configból: `optimizer.training.calibration_z`.
+CALIB_Z = 1.28
+
 
 def oof_proba(X: np.ndarray, y: np.ndarray, ratio: float,
               n_splits: int = 5, purge: int = 32):
@@ -228,17 +237,53 @@ def oof_proba(X: np.ndarray, y: np.ndarray, ratio: float,
     return proba, engine
 
 
+def wilson_lower(wins: int, n: int, z: float = CALIB_Z) -> float:
+    """A találati arány ALSÓ konfidencia-korlátja (Wilson, ~95%).
+
+    Ez váltja ki a „legyen legalább N jel" külön szabályt: kevés mintán a korlát
+    magától lecsúszik (10/20 → 0,299), sok mintán viszont szorosan tapad
+    (500/1000 → 0,469). A küszöb-keresés így nem tudja néhány szerencsés mintából
+    kinyerni a „legjobb" arányt — a maximum-torzítás ára beépül."""
+    if n <= 0:
+        return 0.0
+    p = wins / n
+    z2 = z * z
+    denom = 1.0 + z2 / n
+    centre = p + z2 / (2.0 * n)
+    margin = z * np.sqrt(p * (1.0 - p) / n + z2 / (4.0 * n * n))
+    return max(0.0, (centre - margin) / denom)
+
+
+def expected_r(win_rate: float, rr: float) -> float:
+    """Kötésenkénti várható eredmény R-ben: nyerőnél +rr, vesztesnél −1."""
+    return win_rate * (rr + 1.0) - 1.0
+
+
 def _calibrate_threshold(proba: np.ndarray, y: np.ndarray,
                          min_wr: float, max_coverage: float,
-                         min_signals: int = MIN_CALIB_SIGNALS) -> tuple[float, dict]:
-    """Küszöb-választás a kalibrációs szeleten (a forrás két-menetes logikája):
-    max win-rate, lefedettség-sapkával; ha a szoros sapka alatt nincs érvényes
-    küszöb, lazítunk (2×, majd korlátlan). Nincs érvényes küszöb (WR < min_wr
-    VAGY túl kevés jel) → 1.01 (az irány de facto kikapcsolva).
+                         min_signals: int = MIN_CALIB_SIGNALS,
+                         rr: float = 2.0,
+                         z: float = CALIB_Z) -> tuple[float, dict]:
+    """Küszöb-választás a fold-on kívüli valószínűségeken.
 
-    A `min_signals` a MAXIMUM-TORZÍTÁS elleni védelem — lásd a konstans fölött."""
+    ⚠ A CÉLFÜGGVÉNY a VÁRHATÓ EREDMÉNY, nem a találati arány. A régi pontszám
+    (`wr² × lefedettség^0,15`) heurisztika volt: a találati arányt hajszolta, és
+    ezért a legszűkebb, legmagasabb-arányú farkat választotta — az aktív irányok
+    rendre 42–100 jelen álltak, épp a minimumon. Csakhogy nem a találati arány
+    fizet, hanem a `wr × (RR+1) − 1`: RR 2-nél egy 35%-os, sok jelet adó küszöb
+    (+0,05R × 500 kötés) többet ér, mint egy 50%-os, ami húszszor ritkábban szól.
+
+    A mintaszámot a Wilson-alsókorlát kezeli (lásd `wilson_lower`): a pontszám a
+    KONZERVATÍV várható érték × darabszám, tehát egy szerencsés kis minta nem
+    tud nyerni. Így a `min_signals` már csak durva padló, nem a fő védelem.
+
+    Nincs pozitív várható értékű küszöb → 1.01 (az irány de facto kikapcsolva)."""
     best_t, best_score = 1.01, 0.0
     too_few = 0
+    # Hany jelolt jutott el az ERTEKELESIG (elég jel + a sapka alatt)? Enélkül
+    # az indoklás mindig „kevés jel"-t mondana: az elutasított küszöb 1.01,
+    # ott pedig per definitionem nulla a jel.
+    evaluated = 0
     for cap in (max_coverage, max_coverage * 2, 1.0):
         for t in np.arange(0.44, 0.95, 0.01):
             mask = proba >= t
@@ -249,26 +294,44 @@ def _calibrate_threshold(proba: np.ndarray, y: np.ndarray,
             coverage = n / len(proba)
             if coverage > cap:
                 continue
-            wr = float((y[mask] == 1).mean())
-            score = wr ** 2 * coverage ** 0.15
-            if score > best_score and wr >= min_wr:
+            evaluated += 1
+            wins = int((y[mask] == 1).sum())
+            wr = wins / n
+            # KONZERVATÍV várható érték: a találati arány alsó korlátjával
+            e_lb = expected_r(wilson_lower(wins, n, z), rr)
+            score = e_lb * n            # összes várható R (nem kötésenkénti)
+            if e_lb > 0.0 and score > best_score and wr >= min_wr:
                 best_t, best_score = float(t), score
         if best_score > 0.0:
             break
     mask = proba >= best_t
     n = int(mask.sum())
+    wins = int((y[mask] == 1).sum()) if n else 0
+    wr = wins / n if n else 0.0
+    wr_lb = wilson_lower(wins, n, z) if n else 0.0
     stats = {
         "threshold":  best_t,
         "signals":    n,
         "coverage":   n / len(proba) if len(proba) else 0.0,
-        "win_rate":   float((y[mask] == 1).mean()) if n else 0.0,
+        "win_rate":   wr,
+        # A DÖNTÉS alapja — enélkül a felület a találati arányt látná, ami RR-től
+        # függően bármit jelenthet (RR 2-nél a 33,3% már nullszaldó).
+        "win_rate_lb":  wr_lb,
+        "expected_r":   expected_r(wr, rr),
+        "expected_r_lb": expected_r(wr_lb, rr),
+        "total_r_lb":   best_score,
+        "rr":           float(rr),
+        "calib_z":      float(z),
         "enabled":    best_score > 0.0,
         "min_signals": int(min_signals),
     }
-    if best_score <= 0.0 and too_few:
-        stats["reason"] = (f"nincs küszöb legalább {min_signals} jellel "
-                           f"(a kevesebb mintán a magas találati arány a keresés "
-                           f"mellékterméke lenne)")
+    if best_score <= 0.0:
+        stats["reason"] = (
+            f"nincs küszöb legalább {min_signals} jellel"
+            if evaluated == 0 else
+            f"egyetlen küszöbnél sem pozitív a várható eredmény "
+            f"(RR {rr:.1f} → a nullszaldóhoz {100/(rr+1):.1f}% kell, "
+            f"konfidencia-korláttal)")
     return best_t, stats
 
 
@@ -276,7 +339,9 @@ def _train_direction(train_all: pd.DataFrame, label_col: str, features: list,
                      min_wr: float, max_coverage: float,
                      min_signals: int = MIN_CALIB_SIGNALS,
                      purge: int = 32, n_splits: int = 5,
-                     min_auc: float = MIN_MODEL_AUC) -> tuple[dict | None, dict]:
+                     min_auc: float = MIN_MODEL_AUC,
+                     rr: float = 2.0,
+                     z: float = CALIB_Z) -> tuple[dict | None, dict]:
     """Egy irány (long/short) tanítása.
 
     A küszöb és az AUC a TELJES train-re vett FOLD-ON KÍVÜLI valószínűségekből
@@ -322,7 +387,8 @@ def _train_direction(train_all: pd.DataFrame, label_col: str, features: list,
                                  f"különbözteti meg a kimeneteket, a küszöb "
                                  f"találati aránya szelekciós zaj lenne")}
 
-    thr, stats = _calibrate_threshold(p_ok, y_ok, min_wr, max_coverage, min_signals)
+    thr, stats = _calibrate_threshold(p_ok, y_ok, min_wr, max_coverage,
+                                      min_signals, rr=rr, z=z)
 
     # ── A mentett modell: a TELJES train-en ────────────────────────────────
     model, engine2 = _make_classifier(ratio)
@@ -377,6 +443,7 @@ def train_symbol(symbol: str, df_m15: pd.DataFrame, cfg: dict, pair_cfg: dict,
     # arányosan lassabb (fold-onként egy tanítás). 5 a szokásos kompromisszum.
     n_splits     = max(2, int(tr_cfg.get("calibration_folds", 5)))
     min_auc      = float(tr_cfg.get("min_model_auc", MIN_MODEL_AUC))
+    calib_z      = float(tr_cfg.get("calibration_z", CALIB_Z))
     lookback_yrs = float(tr_cfg.get("lookback_years", 3))
 
     from strategy import get_strategy_by_name
@@ -443,7 +510,9 @@ def train_symbol(symbol: str, df_m15: pd.DataFrame, cfg: dict, pair_cfg: dict,
         d, stats = _train_direction(train_all, label_col, features,
                                     min_wr, max_coverage, min_signals,
                                     purge=lookahead, n_splits=n_splits,
-                                    min_auc=min_auc)
+                                    min_auc=min_auc,
+                                    rr=float(params.get('tp_rr_ratio', 2.0)),
+                                    z=calib_z)
         if d is None:
             d = {"model": None, "scaler": None, "threshold": 1.01}
         bundle[direction] = d

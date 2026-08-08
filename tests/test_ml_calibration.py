@@ -37,9 +37,15 @@ rng = np.random.default_rng(3)
 proba = np.concatenate([rng.uniform(0.0, 0.60, 4988), rng.uniform(0.86, 0.94, 12)])
 y = np.concatenate([rng.integers(0, 2, 4988), np.array([1] * 9 + [0] * 3)])
 
+# ⚠ v2.15.0 ota a `min_signals` mar csak durva padlo: a fo vedelem a
+# CELFUGGVENY. A pontszam a konfidencia-also-korlattal szamolt varhato ertek
+# SZOROZVA a darabszammal, tehat egy 12 mintas, szerencsesen 75%-os sav nem tud
+# nyerni egy szeles, megalapozott sav ellen. Ezert a regi hibat MEG akkor sem
+# lehet eloallitani, ha a padlot 6-ra engedjuk vissza — es ez erosebb garancia,
+# mint a regi (ott csak a padlo vedett).
 t_old, s_old = _calibrate_threshold(proba, y, 0.4, 0.08, min_signals=6)
-check("a REGI korlat a 12 mintas savra ELESIT (ez volt a hiba)",
-      s_old["signals"] < 30 and s_old["win_rate"] > 0.7 and s_old["enabled"],
+check("a 12 mintas sav MEG 6-os padlonal SEM nyer (a celfuggveny ved)",
+      (not s_old["enabled"]) or s_old["signals"] >= 30,
       f"jel={s_old['signals']}, wr={s_old['win_rate']:.2f}, kuszob={t_old:.2f}")
 
 t_new, s_new = _calibrate_threshold(proba, y, 0.4, 0.08)
@@ -49,8 +55,8 @@ check("az UJ korlat NEM elesit ilyen keves jelre",
 check("...hanem erdemi mintaju kuszobot valaszt (vagy kikapcsol)",
       (not s_new["enabled"]) or s_new["signals"] >= MIN_CALIB_SIGNALS,
       f"jel={s_new['signals']}")
-check("a kuszob emiatt ALACSONYABB lett (szelesebb, megalapozottabb sav)",
-      t_new < t_old, f"{t_new:.2f} < {t_old:.2f}")
+check("a padlo lazitasa NEM valtoztat az eredmenyen (nem az a fo vedelem)",
+      t_new == t_old, f"{t_new:.2f} == {t_old:.2f}")
 
 # ══ Ha SEMMI nem eri el a minimumot -> az irany KIKAPCSOL, indoklassal ════
 tiny = np.concatenate([rng.uniform(0.0, 0.30, 900), rng.uniform(0.90, 0.95, 8)])
