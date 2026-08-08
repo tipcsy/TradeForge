@@ -138,7 +138,8 @@ if TK_OK:
             "available_strategies": {"wpr_sma": True, "ml_ai": True},
             "trading": {"account_risk_pct": 0.01, "max_open_slots": 4,
                         "daily_loss_limit_pct": 0.015, "daily_loss_limit_usd": 0},
-            "dashboard": {"layout": "canvas"},
+            "dashboard": {"layout": "canvas",
+                          "gate_order": ["spread", "momentum", "cost", "tf_align"]},
             "pairs": {"GOLD": {"enabled": True, "point_size": 0.01,
                                "pv1_point": 0.88, "min_lot": 0.01,
                                "lot_step": 0.01, "strategies": ["wpr_sma"]}}}
@@ -198,6 +199,27 @@ if TK_OK:
         check("a fülváltás hiba nélkül megy (oda-vissza is)", _err is None, str(_err))
         check("a Json lap NEM semmisült meg",
               all(l.winfo_exists() for l in _tabs))
+
+        # (c) A kapu KIVETELE AZONNAL latszodjon. Eles hiba: a user kivette a
+        # Lenduletet, mentett — es az oszlop MARADT. A lista a tabla
+        # felepitesekor kerul a `collapsed`-be, es a mentes utan senki nem szolt
+        # a tablanak; csak ujraindulaskor tunt volna el.
+        _tbl = getattr(_w, "_live2", None)
+        if _tbl is not None and hasattr(_tbl, "set_gate_columns"):
+            check("indulaskor ott a Lendulet oszlop", (0, "momentum") in _tbl._items)
+            _w.cfg["dashboard"]["gate_order"] = ["spread", "cost", "tf_align"]
+            _w._apply_gate_columns(); _w.root.update()
+            check("kivetel utan AZONNAL eltunik (nem kell ujraindulas)",
+                  (0, "momentum") not in _tbl._items)
+            check("...a tobbi oszlop viszont megmarad", (0, "spread") in _tbl._items)
+            _w.cfg["dashboard"]["gate_order"] = ["spread", "momentum", "cost", "tf_align"]
+            _w._apply_gate_columns(); _w.root.update()
+            check("visszatetel utan ujra megjelenik", (0, "momentum") in _tbl._items)
+            # ⚠ A tabla OSZLOP-kulcsokat tarol (`align`), nem kapu-kulcsokat
+            # (`tf_align`) — a kettо egy helyen ter el (lasd `gate_layout`).
+            check("valtozatlan listara NEM epit ujra (nincs felesleges villanas)",
+                  _tbl.set_gate_columns(gl.enabled_columns(_w.cfg)) is False,
+                  str(gl.enabled_columns(_w.cfg)))
 
         # A Mentés az ABLAKOT zárja (nem a lapot)
         _save_btn.invoke(); _w.root.update()

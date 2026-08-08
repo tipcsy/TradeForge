@@ -3732,6 +3732,23 @@ class DashboardWindow:
         popup.protocol("WM_DELETE_WINDOW", _cancel)
 
     # ── Beállítás-szerkesztő (config.json) ───────────────────────────────
+    def _apply_gate_columns(self):
+        """A ⚙ → Kapuk fül eredményének átvezetése a FUTÓ táblára.
+
+        A kapu KIKAPCSOLÁSA két dolgot jelent: az oszlop eltűnik (ez itt), és a
+        kapu sehol nem szól bele a kereskedésbe (az a `gates.effect_with_source`
+        mester-kapcsolója, ami a configból olvas — tehát az AZONNAL él, külön
+        teendő nélkül)."""
+        tbl = getattr(self, "_live2", None)
+        if tbl is None or not hasattr(tbl, "set_gate_columns"):
+            return
+        try:
+            tbl.set_gate_columns(_gate_layout.enabled_columns(self.cfg))
+        except Exception:
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "A kapu-oszlopok frissítése elbukott.", exc_info=True)
+
     def _show_settings(self):
         popup = tk.Toplevel(self.root)
         popup.title("Beállítások — config.json")
@@ -3908,6 +3925,9 @@ class DashboardWindow:
             self.cfg.clear()
             self.cfg.update(new)
             apply_strategy_config(self.cfg)
+            # A kapu-oszlopok AZONNAL kövessék a beállítást (a stratégia-lista
+            # változása továbbra is újraindítást kíván — az mélyebben ül).
+            self._apply_gate_columns()
             popup.destroy()
 
         # A gombsor FENT készült el (hogy kis ablaknál se szoruljon ki); a

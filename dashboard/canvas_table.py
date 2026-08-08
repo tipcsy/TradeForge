@@ -597,6 +597,22 @@ class CanvasTable:
                 tuple(_gate_columns(self._collapsed)),
                 _lr.pnl_mode(self._collapsed))
 
+    def set_gate_columns(self, columns) -> bool:
+        """A megjelenő kapu-oszlopok cseréje MENET KÖZBEN (⚙ → Kapuk fül).
+
+        Enélkül a beállítás csak ÚJRAINDÍTÁS után látszott: a lista a tábla
+        felépítésekor kerül a `collapsed`-be, és a mentés után senki nem szólt a
+        táblának. A felhasználó jogosan hitte, hogy a kikapcsolás nem működik.
+
+        Visszaad: kellett-e újraépítés (ha semmi nem változott, nem nyúlunk a
+        táblához — a fölösleges újraépítés látható villanás)."""
+        new = list(columns or [])
+        if new == list(self._collapsed.get("gate_columns") or []):
+            return False
+        self._collapsed["gate_columns"] = new
+        self._build()
+        return True
+
     def rebuild(self):
         """Újraépítés VÁLTOZATLAN adattal — betűváltás után kell."""
         self._h = _lr.row_height(self._f)
