@@ -288,17 +288,43 @@ def measured_rows(key: str, ctx: dict) -> list:
         from core import momentum as _m
         val = ctx.get("momentum")
         thr = ctx.get("momentum_idle_threshold")
+        v = val if val is not None else float("nan")
         rows = [("Fordulat most", _m.cell_text(val))]
-        d = _m.direction(val if val is not None else float("nan"))
+        d = _m.direction(v)
         rows.append(("Irány", {"BUY": "felfelé", "SELL": "lefelé"}.get(d, "—")))
         if thr is not None:
             rows.append(("Alapjárat-küszöb", f"{float(thr):.2f}"))
-            rows.append(("Állapot", "ALAPJÁRAT (a kapu bukik)"
-                         if _m.is_idle(val if val is not None else float("nan"),
-                                       {"idle_threshold": thr})
-                         else "pörög"))
+            rows.append(("Állapot", momentum_state_text(v, thr)))
+            # ⚠ A szótár KIÍRVA: a mért érték önmagában nem árulja el, hogy
+            # mihez képest sok vagy kevés, és melyik szó milyen állapotot jelöl.
+            # (Enélkül a felhasználó olyan állapotra vár, ami nem is létezik.)
+            rows.append(("Lehetséges állapotok", MOMENTUM_STATES))
         return rows
     return []
+
+
+# ---------------------------------------------------------------------------
+# A Lendület-kapu ÁLLAPOT-SZÓTÁRA
+# ---------------------------------------------------------------------------
+# A kapunak PONTOSAN két állapota van: a küszöb alatt („alapjárat”) vagy fölötte.
+# A korábbi „pörög” szó többet ígért ennél — azt sugallta, hogy a piac kimondottan
+# élénk, holott a mérés csak annyit mond, hogy nem áll. A semleges „fut” pont ezt
+# fedi le. Harmadik állapot az adathiány: a kapu ilyenkor NEM szűr (fail-open,
+# mint a spread-kapu), ezért nem szabad „fut”-ként mutatni.
+
+MOMENTUM_STATES = "alapjárat (küszöb alatt) · fut (küszöb fölött)"
+
+
+def momentum_state_text(value, threshold) -> str:
+    """Az állapot a MÉRÉSSEL EGYÜTT — a puszta szó nem mondja meg, mihez képest."""
+    import math as _math
+    from core import momentum as _m
+    if value is None or _math.isnan(float(value)):
+        return "nincs adat (a kapu átenged)"
+    mag, thr = abs(float(value)), float(threshold)
+    if _m.is_idle(value, {"idle_threshold": thr}):
+        return f"ALAPJÁRAT — {mag:.2f} < {thr:.2f} (a kapu bukik)"
+    return f"fut — {mag:.2f} ≥ {thr:.2f}"
 
 
 def extra_errors_momentum(values: dict) -> list:

@@ -14,6 +14,20 @@ Mindkettő UGYANAZZAL a mércével oszt: az utolsó `vol_window` gyertya átlago
 abszolút záróár-elmozdulása. Ettől jelent **0,35 ugyanazt** GOLD-on és EURUSD-n,
 és ettől hordozható a küszöb a két alap között.
 
+## Az állapot-szótár
+
+A mutatónak **pontosan két állapota** van, plusz az adathiány — nincs több
+fokozat, tehát nem érdemes „élénkülő” vagy „lassuló” kiírásra várni:
+
+| állapot | mikor | mit tesz a kapu |
+|---|---|---|
+| **alapjárat** | \|fordulat\| < küszöb | bukik (a beállított hatás szerint) |
+| **fut** | \|fordulat\| ≥ küszöb | átenged |
+| nincs adat | még nincs elég gyertya | átenged (fail-open) |
+
+A „fut” szándékosan semleges: azt jelenti, hogy **a piac nem áll** — nem azt,
+hogy kimondottan élénk. A mértéket a szám adja meg, nem a szó.
+
 ## Mit figyeljen (stratégiánként)
 
 - **Alapjárat** — a piac áll (|fordulat| < küszöb) → ne kössünk bele.

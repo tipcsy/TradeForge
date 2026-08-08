@@ -28,6 +28,7 @@ import tkinter as tk
 from core import gate_params as _gp
 from core import gates as _g
 from dashboard import theme as _theme
+from dashboard.scroll_area import scrollable as _scrollable
 from dashboard.theme import (BG, BG_HEADER, FG_WHITE, FG_GRAY, FG_GRAY_DIM,
                              FG_BLUE, FG_RED, FG_GREEN,
                              BTN_PLAY_BG, BTN_PLAY_FG, BTN_DIS_BG, BTN_DIS_FG)
@@ -231,7 +232,14 @@ class GateDialog:
         from dashboard.tab_shell import TabShell
         self._shell = TabShell(self.top, ("Beállítás", "Leírás"),
                                on_show=self._on_tab)
-        self._page = self._shell.page("Beállítás")
+
+        # A Beállítás lap GÖRGETHETŐ: a Lendületnek nyolc paramétere van, és
+        # alatta még a stratégiánkénti hatás-blokk is jön — ez kis ablaknál
+        # levágódott, gördítősáv nélkül pedig NÉMÁN (semmi nem jelezte, hogy van
+        # még lejjebb). A Leírás lap nem kap külön görgetőt: a Markdown-nézet
+        # Text-widgetje magától görget, két sáv egymás mellett zavaró lenne.
+        _holder, self._page, _ = _scrollable(self._shell.page("Beállítás"))
+        _holder.pack(fill="both", expand=True)
 
         self._build_measured()
         self._build_params()

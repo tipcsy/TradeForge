@@ -179,37 +179,9 @@ def _attach_tooltip(widget, text):
     widget.bind("<Leave>", hide, add="+")
 
 
-def _scrollable(parent):
-    """Görgethető tartalom-terület: (külső holder, belső frame, canvas).
-
-    Kis képernyőn a sok paraméter miatt az ablak alja (Mentés/Backtest/Mégse)
-    lelógna — ezért a TARTALOM görgethető, a gombsor pedig az ablak alján
-    rögzítve marad. Az egérgörgőt a TOPLEVEL-re kötjük (a Tk bindtags miatt a
-    gyerek-widgetek fölött is működik), így a paraméter-mezők fölött is görget.
-    """
-    holder = tk.Frame(parent, bg=BG)
-    canvas = tk.Canvas(holder, bg=BG, highlightthickness=0)
-    vsb = tk.Scrollbar(holder, orient="vertical", command=canvas.yview)
-    canvas.configure(yscrollcommand=vsb.set)
-    vsb.pack(side="right", fill="y")
-    canvas.pack(side="left", fill="both", expand=True)
-
-    inner = tk.Frame(canvas, bg=BG)
-    win_id = canvas.create_window((0, 0), window=inner, anchor="nw")
-    inner.bind("<Configure>",
-               lambda _e: canvas.configure(scrollregion=canvas.bbox("all")))
-    # A tartalom szélessége kövesse az ablakot (különben nem nyúlnak a mezők)
-    canvas.bind("<Configure>",
-                lambda e: canvas.itemconfigure(win_id, width=e.width))
-
-    def _wheel(e):
-        # Csak ha van mit görgetni (különben „ugrik" a rövid tartalom)
-        lo, hi = canvas.yview()
-        if lo > 0.0 or hi < 1.0:
-            canvas.yview_scroll(int(-e.delta / 120), "units")
-
-    parent.winfo_toplevel().bind("<MouseWheel>", _wheel, add="+")
-    return holder, inner, canvas
+# A görgethető terület KÖZÖS lett (`dashboard/scroll_area.py`), hogy a kapu-ablak
+# is megkapja — itt csak a régi név marad meg, hogy a hívások ne változzanak.
+from dashboard.scroll_area import scrollable as _scrollable
 
 
 class InstrumentParamsDialog:
