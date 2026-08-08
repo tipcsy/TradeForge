@@ -335,28 +335,55 @@ def daily_limit_usd(trading_cfg: dict, balance: float) -> float:
 
 
 def _rr_spec(rr: "dict | None", risky: bool, symbol: str = "") -> dict:
-    """A run_pair kockázatcsökkentő specje. rr=None → a régi viselkedés a `risky`
-    flagből (preset off/risky), így a meglévő hívók BITAZONOSAK maradnak.
+    """A run_pair kockázatcsökkentő specje, ha a hívó nem adott sajátot.
 
     ⚠ A BE/trailing értékeket a PÁR SAJÁT kalibrációjából vesszük (v1.96.0).
     Enélkül az átköltöztetés NÉMA VISELKEDÉS-VÁLTOZÁS lett volna: korábban ezek a
     `params`-ban utaztak (a per-szimbólum execution-overlay-jel), most az rr-ben
     laknak — az `rr=None` hívók (optimalizáló, `run_backtest`) tehát a modul
-    ALAPÉRTÉKÉRE estek volna vissza (0,5/0,5/0,4), a pár hangolt értéke helyett
-    (pl. Ger40: 0,7/0,1/0,9). A hangolás így más világban történt volna, mint az él."""
+    ALAPÉRTÉKÉRE estek volna vissza (0,5/0,5/0,4), a pár hangolt értéke helyett.
+
+    ⚠⚠ A PRESET IS a páré (v2.23.0). Korábban az `rr=None` út a presetet
+    HARDKÓDOLTAN `off`-ra állította, és csak a numerikus kalibrációt húzta a
+    párról. Így az optimalizáló Ger40-en `off`-fal (BE + trailing AKTÍV) hangolt,
+    miközben az él `none`-on futott (a stop meg sem mozdul) — a mentett
+    paraméterek egy olyan világhoz tartoztak, ami élesben nem létezik. Mérve
+    (1080 kötés, 22 hónap): `none` −512$ / 44,7% találat vs `off` −414$ / 39,3%
+    — MÁS eloszlás, más optimum. Ugyanaz a hibaosztály, mint az `exec_gates`
+    v1.95.0 előtt.
+
+    Ezért: `rr=None` → a pár **ÉLES** specje (`rr_state.spec_for`), presettel,
+    runnerrel, `cautious`/`cost_cut` kapcsolóval együtt. Ismeretlen szimbólumnál
+    a `spec_for` maga is `off`-ot ad → a régi viselkedés megmarad.
+
+    Kivétel a `risky=True`: azt a hívó KIFEJEZETTEN kéri (a portfólió-motor
+    auto-risky ága a gyenge minősítésű párnál), tehát felülírja a pár presetjét.
+
+    A régi viselkedés bármikor visszakérhető: adj át EXPLICIT `rr` specet."""
     if rr:
         return rr
     from core import risk_reduction as _rrm
-    spec = _rrm.default_config()
-    spec["preset"] = _rrm.PRESET_RISKY if risky else _rrm.PRESET_OFF
+    if risky:
+        spec = _rrm.default_config()
+        spec["preset"] = _rrm.PRESET_RISKY
+        if symbol:
+            try:
+                from core import rr_state as _rrs
+                _rrs.ensure_loaded()
+                spec.update({k: v for k, v in _rrs.get_calibration(symbol).items()
+                             if k in _rrm.BE_TRAIL_KEYS})
+            except Exception:
+                pass
+        return spec
     if symbol:
         try:
             from core import rr_state as _rrs
             _rrs.ensure_loaded()
-            spec.update({k: v for k, v in _rrs.get_calibration(symbol).items()
-                         if k in _rrm.BE_TRAIL_KEYS})
+            return dict(_rrs.spec_for(symbol))     # ÉL-PARITÁS: preset is a páré
         except Exception:
             pass
+    spec = _rrm.default_config()
+    spec["preset"] = _rrm.PRESET_OFF
     return spec
 
 

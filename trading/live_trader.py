@@ -1175,7 +1175,14 @@ def _apply_be_and_trailing(symbol, pos, ticket, pstate, is_rf, risky,
         log.info("✦ %s #%d — SL már a költség-tudatos BE-n (kézi/külső húzás) → BE kész",
                  symbol, ticket)
     # ── Költség-tudatos breakeven ──
-    be_pct = rr.get("breakeven_pct", 0.5)
+    # ⚠ A `none` preset kapuja: a fő ágban ott volt (`0.0 if _is_none else …`), ITT
+    # NEM — pedig ezt a függvényt a no-trade órák ága preset-ellenőrzés NÉLKÜL hívja.
+    # Egy `none`-ra állított pár tehát a szürke órákban NÉMÁN BE-zett és trailelt
+    # volna, a többi órában viszont nem: ugyanaz a pár, két különböző viselkedés,
+    # attól függően, hány óra maradt engedélyezve az optimalizálás után.
+    from core import risk_reduction as _rr_mod
+    _is_none = rr.get("preset") == _rr_mod.PRESET_NONE
+    be_pct = 0.0 if _is_none else rr.get("breakeven_pct", 0.5)
     if (risky or be_pct > 0) and not is_rf:
         if pos.type == mt5.ORDER_TYPE_BUY:
             be_price = (pos.price_open if risky
@@ -1192,8 +1199,10 @@ def _apply_be_and_trailing(symbol, pos, ticket, pstate, is_rf, risky,
                      " (risky)" if risky else "")
             pos = _refresh_position(ticket) or pos   # elavult SL a pillanatképben
     # ── Trailing (kockázatmentes után, ha kézzel nincs kikapcsolva) ──
+    # `not _is_none`: a fő ág `_do_trailing` feltételében ott van — a kézi SL-húzás
+    # ugyanis is_rf-et adhat `none` presetnél is, és onnantól trailelnénk.
     is_rf = slot_mgr.is_risk_free(ticket)
-    if is_rf and pstate.get("trailing_enabled", True):
+    if is_rf and not _is_none and pstate.get("trailing_enabled", True):
         point  = sym_info.point if (sym_info and sym_info.point > 0) else point_size
         digits = sym_info.digits if sym_info else 5
         override_points = pstate.get("trail_points")
