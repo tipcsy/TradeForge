@@ -11,6 +11,7 @@ Ha csak elrejtenenk az oszlopot, a kapu LATHATATLANUL blokkolhatna tovabb.
 
 ...es a per-par beallitasok kozben NEM vesznek el: felfuggesztjuk oket.
 """
+import pathlib
 import sys
 from pathlib import Path
 
@@ -105,6 +106,108 @@ check("iraskor is szurunk (ismeretlen/ismetlodo kulcs)",
       c["dashboard"]["gate_order"] == ["spread"])
 check("a kiirt lista visszaolvasva ugyanaz",
       gl.enabled_gates(c) == ["spread"])
+
+# ══ 5. A BEALLITAS ABLAK — ket eles hiba orzese ═══════════════════════════
+try:
+    import tkinter as _tk
+    _p = _tk.Tk(); _p.destroy()
+    TK_OK = True
+except Exception as e:
+    TK_OK = False
+    print(f"KIHAGYVA (Tk resz): {type(e).__name__}: {e}")
+
+if TK_OK:
+    import dashboard.gui as _G
+    from dashboard import theme as _th
+    from trading.live_trader import PairDashboardState as _PDS
+    _th._FONTS.clear()
+    _G.DashboardWindow._start_bg_poller = lambda self: None
+    _G.DashboardWindow._poll_mt5 = lambda self: None
+    _G.OptimizerController._ensure_pool = lambda self: None
+    _G.DashboardWindow._save_main_config = lambda self: True
+    # ⚠ A ⚙ mentes-aga a VALODI `ROOT/config.json`-ba ir (`write_config_file`) —
+    # a `_save_main_config` stubolasa NEM eleg, az egy MASIK ut. Egy korabbi
+    # valtozat ezt nem teritette el, es a teszt LETAROLTA a felhasznalo eles
+    # configjat, broker-adatokkal egyutt. A ROOT-ot teritjuk el, ahogy a
+    # `test_strategy_availability.py` is teszi.
+    import tempfile as _tf
+    _tmp = pathlib.Path(_tf.mkdtemp(prefix="tf_gatelayout_"))
+    _root_orig = _G.ROOT
+    _G.ROOT = _tmp
+    _cfg = {"strategy": {"name": "wpr_sma"},
+            "available_strategies": {"wpr_sma": True, "ml_ai": True},
+            "trading": {"account_risk_pct": 0.01, "max_open_slots": 4,
+                        "daily_loss_limit_pct": 0.015, "daily_loss_limit_usd": 0},
+            "dashboard": {"layout": "canvas"},
+            "pairs": {"GOLD": {"enabled": True, "point_size": 0.01,
+                               "pv1_point": 0.88, "min_lot": 0.01,
+                               "lot_step": 0.01, "strategies": ["wpr_sma"]}}}
+    _ds = _PDS(symbol="GOLD", trained=True, enabled=True)
+    _ds.digits = 2
+    _w = None
+    try:
+        _w = _G.DashboardWindow(_cfg, {"GOLD": _ds}, {"GOLD": "LIVE"}, {},
+                                on_play_pair=None, on_stop_pair=None)
+        _w.root.geometry("300x200"); _w.root.update()
+        _w._show_settings(); _w.root.update()
+        _top = [x for x in _w.root.winfo_children()
+                if isinstance(x, _tk.Toplevel)][0]
+
+        def _walk(x, out=None):
+            out = [] if out is None else out
+            out.append(x)
+            for c in x.winfo_children():
+                _walk(c, out)
+            return out
+
+        # (a) A GOMBSOR az ABLAK alja, a tartalom ELOTT csomagolva. A `pack` a
+        # hivas sorrendjeben oszt helyet: ha a tartalom kapna meg eloszor a
+        # teruletet `expand=True`-val, a gombok kis ablaknal KISZORULNANAK — ezt
+        # panaszolta a felhasznalo ("csak akkor latszik, ha szelesebbre nyitom").
+        _sides = [sl.pack_info().get("side") for sl in _top.pack_slaves()]
+        check("a gombsor az ablak ALJARA, a tartalom ELE van csomagolva",
+              _sides[:2] == ["bottom", "bottom"] and _sides[-1] == "top",
+              str(_sides))
+        _save_btn = next(b for b in _walk(_top)
+                         if isinstance(b, _tk.Button) and b.cget("text") == "Mentés")
+        _cancel_btn = next(b for b in _walk(_top)
+                           if isinstance(b, _tk.Button) and b.cget("text") == "Mégse")
+        _bad = []
+        for _geo in ("900x700", "520x300", "420x220"):
+            _top.geometry(_geo); _top.update()
+            _y = _save_btn.winfo_rooty() - _top.winfo_rooty()
+            if not _save_btn.winfo_ismapped() or not (0 <= _y < _top.winfo_height()):
+                _bad.append(f"{_geo}: mapped={_save_btn.winfo_ismapped()} y={_y}")
+        check("a Mentés/Mégse KIS ablaknál is látszik", not _bad, "; ".join(_bad))
+        check("a Mégse is ott van", _cancel_btn.winfo_ismapped())
+
+        # (b) A FULVALTAS nem dobhat "bad window path name"-t. A hiba oka egy
+        # `popup = _page["Json"]` ujrakotes volt: a mentes vegi `popup.destroy()`
+        # emiatt a LAPOT torolte az ABLAK helyett.
+        _tabs = [l for l in _walk(_top) if isinstance(l, _tk.Label)
+                 and l.cget("text") in ("Json", "Kapuk", "Stratégiák")]
+        check("mindharom bal ful letezik", len(_tabs) == 3,
+              str([l.cget("text") for l in _tabs]))
+        _err = None
+        try:
+            for _l in _tabs + list(reversed(_tabs)):
+                _l.event_generate("<Button-1>", when="now")
+                _top.update()
+        except Exception as _e:
+            _err = f"{type(_e).__name__}: {_e}"
+        check("a fülváltás hiba nélkül megy (oda-vissza is)", _err is None, str(_err))
+        check("a Json lap NEM semmisült meg",
+              all(l.winfo_exists() for l in _tabs))
+
+        # A Mentés az ABLAKOT zárja (nem a lapot)
+        _save_btn.invoke(); _w.root.update()
+        check("a Mentés az ABLAKOT zárja be", not _top.winfo_exists())
+        check("a mentes a TEMP mappaba irt, nem a valodi config.json-ba",
+              (_tmp / "config.json").exists(), str(_tmp))
+    finally:
+        _G.ROOT = _root_orig
+        if _w is not None:
+            _w.root.destroy()
 
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")

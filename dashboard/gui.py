@@ -3738,6 +3738,25 @@ class DashboardWindow:
         popup.configure(bg=BG)
         popup.geometry("720x640")
         popup.grab_set()
+
+        # ── ABLAK-SZINTŰ gombsor: MINDEN fül alatt ugyanaz ───────────────
+        # ⚠ A CSOMAGOLÁSI SORREND itt működés, nem stílus. A `pack` a hívás
+        # sorrendjében oszt helyet: ha előbb a tartalom kapná meg a területet
+        # `expand=True`-val, a gombok kis ablaknál egyszerűen KISZORULNÁNAK — épp
+        # ezt panaszolta a felhasználó („csak akkor jelenik meg, ha szélesebbre
+        # nyitom"). Ezért a gombsor és a hibasor FOGLAL ELŐSZÖR, alulról.
+        btns = tk.Frame(popup, bg=BG)
+        btns.pack(side="bottom", fill="x", pady=8)
+        lbl_err = tk.Label(popup, text="", bg=BG, fg=FG_RED, font=self._small_font,
+                           anchor="w", justify="left", wraplength=660)
+        lbl_err.pack(side="bottom", fill="x", padx=10)
+        _btn_save = tk.Button(btns, text="Mentés", bg=BTN_PLAY_BG, fg=BTN_PLAY_FG,
+                              relief="flat", font=self._small_font)
+        _btn_save.pack(side="left", padx=(10, 6))
+        tk.Button(btns, text="Mégse", bg=BTN_DIS_BG, fg=BTN_DIS_FG, relief="flat",
+                  font=self._small_font,
+                  command=popup.destroy).pack(side="left", padx=6)
+
         # ── BAL OLDALI FÜLEK ─────────────────────────────────────────────
         # Nem `ttk.Notebook`: annak a bal oldali fülei Windowson elforgatott
         # feliratot adnak. Saját gombsáv + tartalom-keret: teljes kontroll,
@@ -3803,18 +3822,22 @@ class DashboardWindow:
         _strat_ed.frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
         # ── JSON lap (a korábbi tartalom) ────────────────────────────────
-        popup = _page["Json"]          # a lenti kód VÁLTOZATLANUL ide épül
+        # ⚠ A Json lap tartalma ide épül. Régen itt egy `popup = _page["Json"]`
+        # újrakötés állt — és a mentés végi `popup.destroy()` emiatt a LAPOT
+        # törölte az ABLAK helyett: utána bármelyik fülre kattintva
+        # „bad window path name" jött. A Toplevel neve marad `popup`.
+        json_page = _page["Json"]
         _show_page("Json")
 
-        tk.Label(popup, text="config.json szerkesztése (mentéskor JSON-validálás):",
+        tk.Label(json_page, text="config.json szerkesztése (mentéskor JSON-validálás):",
                  bg=BG, fg=FG_BLUE, font=self._header_font).pack(anchor="w", padx=10, pady=(10, 2))
-        tk.Label(popup, text="Megjegyzés: itt csak a VÁZ-config szerkeszthető. A stratégia "
+        tk.Label(json_page, text="Megjegyzés: itt csak a VÁZ-config szerkeszthető. A stratégia "
                  "beállításai (indicators, sltp, position_mgmt, quality, optimizer-tér) a "
                  "stratégia saját fájljában élnek: strategy/config/<name>.json.",
                  bg=BG, fg=FG_GRAY, font=self._small_font, justify="left",
                  wraplength=680).pack(anchor="w", padx=10)
 
-        txt_frame = tk.Frame(popup, bg=BG)
+        txt_frame = tk.Frame(json_page, bg=BG)
         txt_frame.pack(fill="both", expand=True, padx=10, pady=4)
         sb = tk.Scrollbar(txt_frame)
         sb.pack(side="right", fill="y")
@@ -3843,8 +3866,6 @@ class DashboardWindow:
             self._hl_after_id = popup.after(200, lambda: self._highlight_json(text))
         text.bind("<KeyRelease>", _schedule_hl)
 
-        lbl_err = tk.Label(popup, text="", bg=BG, fg=FG_RED, font=self._small_font)
-        lbl_err.pack(anchor="w", padx=10)
 
         def save():
             try:
@@ -3889,12 +3910,9 @@ class DashboardWindow:
             apply_strategy_config(self.cfg)
             popup.destroy()
 
-        btns = tk.Frame(popup, bg=BG)
-        btns.pack(pady=10)
-        tk.Button(btns, text="Mentés", bg=BTN_PLAY_BG, fg=BTN_PLAY_FG, relief="flat",
-                  font=self._small_font, command=save).pack(side="left", padx=6)
-        tk.Button(btns, text="Mégse", bg=BTN_DIS_BG, fg=BTN_DIS_FG, relief="flat",
-                  font=self._small_font, command=popup.destroy).pack(side="left", padx=6)
+        # A gombsor FENT készült el (hogy kis ablaknál se szoruljon ki); a
+        # mentés-függvény csak most áll rendelkezésre, ezért itt kötjük rá.
+        _btn_save.config(command=save)
 
     # ── Stratégia Paraméterek (a KÖRRE kattintva — az adott stratégiáé) ──
     def _show_strategy_params(self, symbol: str, strategy_name: str = ""):
