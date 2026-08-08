@@ -23,6 +23,7 @@ from __future__ import annotations
 import logging
 import logging.handlers
 import sys
+import threading
 from pathlib import Path
 
 LOG_DIR  = Path(__file__).resolve().parents[1] / "data"
@@ -91,7 +92,39 @@ def setup(level: int = logging.INFO) -> "Path | None":
             "%(asctime)s  %(levelname)-8s %(message)s", datefmt=DATEFMT))
         root.addHandler(console)
 
+    install_thread_excepthook()
+
     logging.getLogger(__name__).info(
         "Futásnapló: %s (max %d MB × %d példány)",
         LOG_PATH, MAX_BYTES // (1024 * 1024), BACKUP_COUNT + 1)
     return LOG_PATH
+
+
+def install_thread_excepthook() -> None:
+    """Elkapott NÉLKÜLI szál-kivétel → a NAPLÓBA is, ne csak a konzolra.
+
+    ⚠ VALÓS KÁR (2026-08-08). A `LiveTrader` szál egy `KeyError: 'point_size'`-zal
+    elhalt induláskor, tehát EGYETLEN pár sem kereskedett és a viz-fájlok sem
+    íródtak. A traceback a Python alapértelmezett szál-hook-jával a STDERR-re ment
+    — a `tradeforge.log`-ban NYOMA SEM VOLT. A napló utolsó sora egy ártatlan
+    „CSAK JELZÉS mód" figyelmeztetés volt, a program pedig kívülről úgy nézett ki,
+    mint ami fut. A hiba hetekig észrevétlen maradt.
+
+    Idempotens: többszöri hívásnál nem láncol újra."""
+    if getattr(threading.excepthook, _MARKER, False):
+        return
+    _prev = threading.excepthook
+
+    def _hook(args):
+        try:
+            logging.getLogger("thread").critical(
+                "⛔ A(z) %r szál ELHALT elkapatlan kivétellel — az általa végzett "
+                "munka MEGÁLLT. A program látszólag fut tovább.",
+                getattr(args.thread, "name", "?"),
+                exc_info=(args.exc_type, args.exc_value, args.exc_traceback))
+        except Exception:
+            pass
+        _prev(args)                        # a konzolos traceback maradjon meg
+
+    setattr(_hook, _MARKER, True)
+    threading.excepthook = _hook

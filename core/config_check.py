@@ -154,6 +154,46 @@ def _check_costs(cfg: dict, out: list) -> None:
 
 
 # ---------------------------------------------------------------------------
+# 3b. HIÁNYZÓ MÉRETEZÉSI KULCS — ez nem kényelmi kérdés, ez leállás
+# ---------------------------------------------------------------------------
+
+# A pár nélkülözhetetlen számai. Ezek nélkül a motor nem tud lotot számolni,
+# tehát a pár nem kereskedhet.
+_SIZING_KEYS = ("point_size", "pv1_point")
+
+
+def missing_sizing_keys(pair_cfg: dict) -> list:
+    """A pár hiányzó méretezési kulcsai. A MOTOR és az ellenőrzés is EZT
+    hívja — így nem fordulhat elő, hogy a config-vizsgálat rendben találja,
+    amit az indulás elutasít (vagy fordítva)."""
+    if not isinstance(pair_cfg, dict):
+        return list(_SIZING_KEYS)
+    return [k for k in _SIZING_KEYS if not pair_cfg.get(k)]
+
+
+def _check_sizing(cfg: dict, out: list) -> None:
+    """Hiányzó `point_size`/`pv1_point` → a pár NEM tud kereskedni.
+
+    Ez a lista legsúlyosabb lelete, és valós kárt okozott: 2026-08-08-án egy
+    frissen felvett instrumentumnál hiányzott a `point_size`, a `pair_cfg[...]`
+    KeyError-je pedig MEGÖLTE a teljes LiveTrader szálat — onnantól EGYETLEN pár
+    sem kereskedett, és a viz-fájlok sem íródtak. A tünet (üres sávok a charton)
+    hetekkel később derült ki. A motor azóta izolálja a hibás párt; ez az
+    ellenőrzés pedig INDULÁS ELŐTT megmondja, hogy melyikről van szó."""
+    for sym, pc in (cfg.get("pairs") or {}).items():
+        if not isinstance(pc, dict):
+            continue
+        missing = missing_sizing_keys(pc)
+        if missing:
+            out.append(_finding(
+                WARN, "missing_sizing",
+                f"{sym}: hiányzik a méretezéshez KÖTELEZŐ kulcs "
+                f"({', '.join(missing)}) → ez a pár NEM fog kereskedni "
+                f"(kimarad az indításnál). Töltsd fel: "
+                f"`python tools/refresh_point_values.py --write`.", sym))
+
+
+# ---------------------------------------------------------------------------
 # 4. Holt kulcs: a napi limit két forrása
 # ---------------------------------------------------------------------------
 
@@ -290,6 +330,7 @@ _CHECKS = (
     _check_gate_preconditions,
     _check_stale_strategy_keys,
     _check_costs,
+    _check_sizing,
     _check_daily_limit,
     _check_gate_config_shadowing,
     _check_same_symbol_policy,

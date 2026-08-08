@@ -34,6 +34,7 @@ from core import mt5_visual
 from core import risky_mode
 from core import correlation
 from core import run_state
+from core import config_check as _cfgchk
 from core import exit_signal
 from core import position_build as _position_build
 from core import viz_prefs as _vp
@@ -2486,6 +2487,18 @@ def run(cfg: dict, slot_mgr: SlotManager):
         _params = load_pair_params(symbol, strat.name)
         if _params is None:
             return None
+        # ⚠ A `point_size` NÉLKÜL nincs mit méretezni. Egy frissen felvett
+        # instrumentumnál ez hiányozhat — és a `pair_cfg["point_size"]` KeyError-je
+        # 2026-08-08-án MEGÖLTE a teljes LiveTrader szálat: onnantól EGYETLEN pár
+        # sem kereskedett és a viz sem íródott. A tünet (üres TFBANDS a charton)
+        # hetekkel később derült ki. Egy hiányos pár SOSEM viheti el a többit.
+        _miss = _cfgchk.missing_sizing_keys(pair_cfg)
+        if _miss:
+            log.error("%s/%s — KIHAGYVA: hiányzik a méretezéshez KÖTELEZŐ kulcs "
+                      "(%s) a pár configjából. Enélkül nincs lot-számítás. "
+                      "Töltsd fel: `python tools/refresh_point_values.py --write`.",
+                      symbol, strat.name, ", ".join(_miss))
+            return None
         # BE/trailing/atr_period/spread-kapu MÁR NEM stratégia-paraméter — a
         # közös, instrumentum-szintű execution config felülírja az esetleges
         # elavult másolatot a mentett optimalizált json-ban.
@@ -2503,7 +2516,13 @@ def run(cfg: dict, slot_mgr: SlotManager):
             strategy=strat, is_display=is_display)
 
     # Dashboard + instrument_state inicializálás minden párhoz
+    #
+    # ⚠ PÁRONKÉNT IZOLÁLVA. A cikluson belüli bármelyik hiba eddig a TELJES
+    # LiveTrader szálat megölte — egy hiányos `point_size` miatt 11 pár állt le
+    # némán (a hibát csak a chart üres sávjáról vettük észre, hetekkel később).
+    # A hibás pár KIMARAD és MEGMONDJUK, miért; a többi fut tovább.
     for symbol, pair_cfg in all_pairs.items():
+      try:
         strats = strats_by_symbol[symbol]
         trained = any(load_pair_params(symbol, st.name) is not None for st in strats)
         dashboard[symbol] = PairDashboardState(
@@ -2532,6 +2551,13 @@ def run(cfg: dict, slot_mgr: SlotManager):
             instrument_state[symbol] = "STOPPED"
             if not trained:
                 log.info("%s — STOPPED (nincs params, futtatsd az optimalizálást)", symbol)
+      except Exception:
+        instrument_state[symbol] = "STOPPED"
+        dashboard.setdefault(symbol, PairDashboardState(
+            symbol=symbol, enabled=False, trained=False, enabled_strategies=[]))
+        log.exception("%s — KIHAGYVA az indításnál (hibás pár-config). A TÖBBI pár "
+                      "fut tovább; javítsd a config.json `pairs.%s` szekcióját.",
+                      symbol, symbol)
 
     # ── Induló helyreállítás (újraindítás után) ──────────────────────────
     # A bot a MAGIC szám alapján megtalálja a saját, már nyitott pozícióit:

@@ -33,9 +33,13 @@ from core import config_check as cc
 COSTS = {"commission_per_lot": 0.0, "swap_long_per_lot": -1.0,
          "swap_short_per_lot": 0.5}
 
+# Ugyanezert kell a MERETEZESI kulcskeszlet is (v2.17.0 ota lelet a hianyuk):
+# enelkul minden teszt-par kapna egy `missing_sizing`-ot.
+SIZING = {"point_size": 0.0001, "pv1_point": 1.0}
+
 
 def pair(**kw):
-    return {**COSTS, "enabled": True, **kw}
+    return {**COSTS, **SIZING, "enabled": True, **kw}
 
 
 def codes(cfg, code=None):
@@ -319,7 +323,8 @@ check_("log_findings: a WARN szintu figyelmeztetesbe megy",
        any("költség" in x for x in cap.w), str(cap.w)[:120])
 check_("log_findings: az INFO szintu info-ba megy",
        any("HOLT" in x for x in cap.i), str(cap.i)[:120])
-check_("log_findings: visszaadja a leleteket is", len(out) == 2, str(len(out)))
+# 3 lelet: koltseg + MERETEZES (a par itt szandekosan csupasz) + a holt pct.
+check_("log_findings: visszaadja a leleteket is", len(out) == 3, str(len(out)))
 check_("lelet nelkul NEM zajong",
        cc.log_findings(dict(BASE, pairs={"X": pair(strategies=["wpr_sma"])}),
                        logger=_Cap()) == [])
