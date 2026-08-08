@@ -26,6 +26,7 @@ from strategy.base import (
 from strategy import visual as viz
 from core.indicator_engine import compute_indicators
 from core.signal_detector import PairState, check_m15_signal, check_m1_entry
+from core import vol_baseline as _volb
 from core.risk_manager import calc_sl_tp_points, calc_swing_sl_tp_points
 from core import spread_gate
 
@@ -542,7 +543,10 @@ class WprSmaStrategy(Strategy):
                 # ── VÉGREHAJTÁSI szűrők (UGYANAZ, mint a backtest/él) ──────────
                 # Volatilitás-szűrő: a bt_entry hook (None → a motor SEM lépne be,
                 # tehát a jelölő se jelenjen meg). Ugyanaz az atr_min/max_pct logika.
-                if self.bt_entry({"atr": float(atr_v), "atr_avg": _atr_avg},
+                # A mérce a p. M15 báré (gördülő mércénél bar-onként változik) —
+                # a `bt_indicators`-szal AZONOS képlet, közös modulból.
+                _base = _volb.value_at(atr15, p, md.params, _atr_avg)
+                if self.bt_entry({"atr": float(atr_v), "atr_avg": _base},
                                  md.params, pip) is None:
                     continue
                 # Spread-kapu (ha van spread-adat a bárokon): a közös core.spread_gate.
@@ -660,7 +664,9 @@ class WprSmaStrategy(Strategy):
         # (a motor NEM ismeri az 'atr'-t). Mindkét backtest-motor ugyanezt látja.
         if "atr" in m15.columns and len(m15) > 0:
             m15 = m15.copy()
-            m15["atr_avg"] = float(m15["atr"].mean())
+            # A mércét a KÖZÖS `core.vol_baseline` adja (fix `atr_avg_ref` vagy
+            # gördülő ablak) — így a backtest, a viz és az él ugyanazt számolja.
+            m15["atr_avg"] = _volb.series(m15["atr"], params)
         return m15, m1
 
     def bt_warmup(self, params: dict, timeframe_label: str) -> int:
@@ -709,12 +715,14 @@ class WprSmaStrategy(Strategy):
         # ablak ATR-átlaga (atr_avg oszlop, a bt_indicators teszi rá), ha nincs mentve
         # (régi params). 0 = a szűrő kikapcsolva. A backtest ÉS a live belépés-kapuja is
         # (v1.31.0 óta a live_trader is ezt a hookot hívja).
-        atr_avg = params.get("atr_avg_ref") or hi_row.get("atr_avg", 0)
+        # ⚠ Ha `atr_baseline_bars > 0`, a GÖRDÜLŐ mérce (a sor `atr_avg`-ja) nyer a
+        # befagyasztott `atr_avg_ref` fölött — különben a kettő versengene, és a
+        # beállítás némán hatástalan maradna. A precedenciát egy helyen döntjük el.
+        atr_avg = _volb.effective(params, hi_row.get("atr_avg", 0))
         if atr_avg and atr_avg > 0:
-            atr_min_pct = float(params.get("atr_min_pct", 0.0))
-            atr_max_pct = float(params.get("atr_max_pct", 0.0))
-            if atr_min_pct > 0 and atr_v < atr_avg * atr_min_pct:
+            lo, hi = _volb.band(params, atr_avg)
+            if lo > 0 and atr_v < lo:
                 return None
-            if atr_max_pct > 0 and atr_v > atr_avg * atr_max_pct:
+            if hi > 0 and atr_v > hi:
                 return None
         return self.sl_tp_points(hi_row, params, point_size)

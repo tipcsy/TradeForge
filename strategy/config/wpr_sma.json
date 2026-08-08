@@ -106,6 +106,10 @@
       "atr_max_pct": {
         "category": "Piac-szűrő",
         "comment": "Max. ATR — kaotikus piac kizárása"
+      },
+      "atr_baseline_bars": {
+        "category": "Piac-szűrő",
+        "comment": "A min/max ATR MÉRCÉJE: 0 = a mentett atr_avg_ref (befagyasztott), >0 = gördülő ablak ennyi M15 gyertyára (96 = 1 nap, 8640 = 90 nap). Rezsimváltásnál a befagyasztott mérce némán lekapcsolhatja a párt."
       }
     }
   },
