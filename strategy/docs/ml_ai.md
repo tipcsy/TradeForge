@@ -91,9 +91,10 @@ ugyanaz a küszöb már csak érmét dob.
 
 - **Az ml_ai backtestje csak a tanítási ablakon KÍVÜL értelmes.** A Backtest-ablak
   ezt mostantól kiírja (`core/training_overlap.py`).
-- A `threshold = 1.01` a „soha ne tüzelj" jelölő. Jelenleg **4 páron mindkét irány
-  1.01** (Ger40, UK100, UsaInd, Euro50 → ott soha nem köt), és **3 pár csak long**
-  (EURUSD, UsaTec, GOLD). Ez a `min 40 kalibrációs jel` védelem műve.
+- A `threshold = 1.01` a „soha ne tüzelj" jelölő. Egy irány ezt kapja, ha a
+  kalibráció nem talál elfogadható küszöböt — a felületen ez **némán** annyit
+  jelent, hogy az a pár/irány soha nem köt. (A v2.13.0 utáni állapotot lásd
+  alább.)
 - Az AUC ~0,5 azt jelenti, hogy **a jellemzőkben nincs jel** — ezen sem küszöb, sem
   újratanítás nem segít. Vagy más jellemzők kellenek, vagy más célváltozó.
 
