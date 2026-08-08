@@ -15,10 +15,10 @@
     "kc_atr_period": 10,
     "kc_atr_mult": 1.5,
 
-    "_comment_trend": "Trend-szűrő: EMA-sorrend + az ár helyzete a gyorshoz képest. Kikapcsolva mindkét irány jöhet.",
+    "_comment_trend": "Trend-szűrő (EMA-sorrend + az ár helyzete). ALAPBÓL KI: mérve nem válogat, csak vág — felezi a kötésszámot ÚGY, hogy a találati arányt nem javítja (27,1% BE / 28,7% KI). Az IRÁNY-VÉTÓ a kapuké: az Együtt (tf_align) ugyanezt jobban csinálja. A paraméter megmarad kutatásra.",
     "ema_fast": 50,
     "ema_slow": 200,
-    "require_trend_alignment": true,
+    "require_trend_alignment": false,
 
     "_comment_pb": "%B megerősítés: 1.0 = a felső sávon, 0.0 = az alsón.",
     "pb_long_threshold": 1.0,

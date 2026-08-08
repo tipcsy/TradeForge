@@ -82,6 +82,15 @@ check("...es a %B kuszobok sorrendje",
       not s.constraints_ok({**base, "pb_long_threshold": 0.0,
                             "pb_short_threshold": 1.0}))
 
+# ⚠ Az IRANY-VETO a KAPUKE. Merve (5 par, hangolatlan): az EMA-szuro felezi a
+# kotesszamot ugy, hogy a talalati aranyt NEM javitja (27,1% vele / 28,7% nelkule),
+# az Egyutt-kapu viszont mindket esetben javit. Ezert az alap KI — ha valaki
+# visszaallitja `true`-ra, ez a teszt szol.
+check("a trend-szuro alapbol KI (az irany-veto a kapuke)",
+      base.get("require_trend_alignment") is False,
+      str(base.get("require_trend_alignment")))
+check("...de a parameter MEGMARAD (kutatasra allithato)",
+      "require_trend_alignment" in base)
 check("van leirasa (docs/<nev>.md)", s.doc_path().exists(), s.doc_path().name)
 check("a leiras nem ures", len((s.doc_text() or "").strip()) > 200)
 
@@ -134,6 +143,17 @@ else:
     # EGY jel EGY feloldasi ablakbol (a kitores tobbi gyertyaja ne tuzeljen ujra)
     check("kevesebb jel, mint feloldas", total <= int(ind["squeeze_off"].sum()),
           f"{total} jel / {int(ind['squeeze_off'].sum())} feloldas")
+
+    # A trend-szuro BEKAPCSOLVA tenyleg kevesebb jelet ad (nem holt kapcsolo)
+    st2 = s.bt_new_state(SYM)
+    prm2 = {**prm, "require_trend_alignment": True}
+    n2 = 0
+    for i in range(len(ind) - 1):
+        st2 = s.bt_on_high_close(st2, ind.iloc[i], prm2)
+        if s.bt_on_low_close(st2, None, None, prm2) in ("BUY", "SELL"):
+            n2 += 1
+    print(f"     trend-szuroval: {n2} jel  (nelkule {total})")
+    check("a trend-szuro BEKAPCSOLVA kevesebb jelet ad", n2 < total, f"{n2} < {total}")
 
     # SL/TP PONTBAN
     row = ind.iloc[-2]

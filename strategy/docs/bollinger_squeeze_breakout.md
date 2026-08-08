@@ -32,6 +32,34 @@ másodikkal egy tartósan szűk instrumentum végig jelezne.
 > stílus kérdése: a teljes mintás percentilis a JÖVŐT is látná, és a backtest
 > némán felfelé torzulna.
 
+## Az IRÁNY-VÉTÓ a kapuké, nem a stratégiáé
+
+A stratégia iránya abból jön, **melyik sávot törte át** az ár — a felsőt (long)
+vagy az alsót (short). Az EMA-trendszűrő ezen felül egy **vétó**: „csak akkor
+lépj be, ha a trend is egyetért". Ez nem jel, hanem szűrő — és a szűrés a
+**kapuk** dolga (per pár és stratégia állítható, minden stratégián egyformán).
+
+Megmérve (5 pár, 2026-02-01…08-07, hangolatlan paraméterekkel):
+
+| EMA-szűrő | Együtt-kapu | kötés | találat | P&L |
+|---|---|---|---|---|
+| BE | KI | 399 | 27,1% | −342$ |
+| BE | BE | 367 | 28,1% | −247$ |
+| **KI** | KI | 766 | 28,7% | −142$ |
+| **KI** | **BE** | 700 | **29,4%** | **−31$** |
+
+Az EMA-szűrő **felezi a kötésszámot úgy, hogy a találati arányt nem javítja**
+(27,1% vele, 28,7% nélküle) — vagyis nem válogat, csak vág. Az `Együtt` kapu
+viszont mindkét esetben javít.
+
+> Ezért az alapértelmezés `require_trend_alignment: false`, és az irány-vétót az
+> **Együtt (tf_align) kapura** bízzuk. A paraméter megmarad — kutatásra és arra
+> az esetre, ha optimalizálás után máshogy viselkedne —, de alapból nem szól bele.
+
+⚠ A kapu bekapcsolása **nem automatikus**: a váz szabálya szerint egy kapu-hatás
+alapból `none`, hogy egy frissítés soha ne kezdjen el némán másképp kereskedni.
+A `Együtt` oszlopra kattintva, stratégiánként kell `block`-ra állítani.
+
 ## Paraméterek
 
 `strategy/config/bollinger_squeeze_breakout.json`, a paraméter-ablakban
