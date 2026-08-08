@@ -162,10 +162,20 @@ def parse(md: str) -> list:
         m = _LIST.match(line)
         if m:
             _flush()
-            out.append((LIST, ("inline", _inline(m.group(2)))))
+            para_tag = LIST
+            para.append(m.group(2))
             continue
 
         # ── Sima szöveg: a bekezdés-pufferbe (NEM külön blokk) ────────────
+        # ⚠ Ha listaelem BEHÚZOTT folytatása, akkor a LISTAELEMHEZ tartozik, nem
+        # új bekezdés. A bekezdéseknél már megvolt ez a felismerés (lásd fent), a
+        # listáknál nem — így egy két sorra tördelt `**félkövér**` a listaelemen
+        # NYERSEN, csillagokkal jelent meg. (A `1.01**` alakot a teszt fogta meg.)
+        if para and para_tag == LIST and not raw[:1].strip():
+            para.append(stripped)
+            continue
+        if not para:
+            para_tag = TEXT
         para.append(stripped)
 
     # A CIKLUS VÉGI zárás nélkül az UTOLSÓ bekezdés eltűnne (a puffer benne

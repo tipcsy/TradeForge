@@ -356,6 +356,20 @@ class Strategy(ABC):
                 f"Hozd létre ezt a fájlt, és a tartalma itt fog megjelenni "
                 f"formázva:\n\n```\n{p}\n```\n")
 
+    def training_window(self, symbol: str, cfg: dict):
+        """`(kezdet, vég)` pandas Timestamp-párként: MELYIK időszakot LÁTTA a
+        stratégia tanulás közben. Nincs tanulás → `None` (ez az alapeset).
+
+        MIÉRT KELL EZ A KERETRENDSZERNEK. Egy tanult modell a saját tanító
+        időszakán nem előrejelez, hanem EMLÉKEZIK — ott a backtest a modell
+        memóriáját méri, nem a képességét. Mérve: a mentett `ml_ai` modellek
+        AUC-ja a tanítóadaton 0,87–0,92, friss adaton 0,48–0,56 (érmefeldobás),
+        és a találati arány 70%-ról 26%-ra esik pontosan a tanítási határon.
+
+        Ezt a felület nem tudta megmutatni, mert nem volt hol megkérdeznie. A
+        `wpr_sma` (szabály-alapú) `None`-t ad — ott nincs mit jelezni."""
+        return None
+
     def sl_tp_points(self, hi_row, params, point_size):
         """A pozíció SL/TP mérete PIPBEN a magasabb tf aktuális ZÁRT sorából
         (hi_row): `(sl_points, tp_points)` VAGY `None` (nincs érvényes méret).

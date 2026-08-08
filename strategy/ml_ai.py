@@ -535,6 +535,21 @@ class MlAiStrategy(Strategy):
         return {**cfg.get("indicators", {}), **cfg.get("sltp", {}),
                 **cfg.get("position_mgmt", {})}
 
+    def training_window(self, symbol: str, cfg: dict):
+        """A modell-csomag `meta.train_from` / `meta.train_to`-ja.
+
+        A lemezről olvassa a betöltő gyorsítótárán keresztül, tehát újratanítás
+        után magától friss. Nincs modell → `None` (nincs mit jelezni)."""
+        b = load_bundle(symbol)
+        meta = (b or {}).get("meta") or {}
+        a, z = meta.get("train_from"), meta.get("train_to")
+        if not a or not z:
+            return None
+        try:
+            return pd.Timestamp(str(a)), pd.Timestamp(str(z))
+        except (ValueError, TypeError):
+            return None
+
     def param_space(self, cfg: dict, base_params: dict, method: str,
                     max_trials: int) -> list[dict]:
         """Az ML-stratégiánál nincs INDIKÁTOR-rács: az „optimalizálás" a modell

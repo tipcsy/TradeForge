@@ -293,6 +293,19 @@ class BacktestDialog:
                                   fg=FG_GRAY_DIM, font=self._sf)
         self._span_lbl.pack(anchor="w", padx=12, pady=(1, 4))
 
+        # ── Tanítási ablak figyelmeztetés ───────────────────────────────────
+        # Tanult modellnél a saját tanító időszakán a backtest a MEMÓRIÁT méri,
+        # nem a képességet (`core/training_overlap.py` — ott a számok is). Ez
+        # eddig sehol nem látszott: egy 1000$ → 14 398$ eredmény ugyanúgy nézett
+        # ki, mint egy valódi. A sor a dátumok MINDEN változásánál frissül, tehát
+        # a figyelmeztetés a választás közben jön, nem a futtatás után.
+        self._train_lbl = tk.Label(body, text="", bg=BG, fg=FG_RED,
+                                   font=self._sf, anchor="w", justify="left",
+                                   wraplength=680)
+        self._train_lbl.pack(anchor="w", padx=12, pady=(0, 4))
+        for _v in (self._start_var, self._end_var):
+            _v.trace_add("write", lambda *_a: self._update_training_warning())
+
         # ── Óra-kapu (kereskedési órák szűrése) ─────────────────────────────
         # Ha bekapcsolod, a backtest CSAK a stratégia kereskedési óráiban (trade_hours,
         # mint a live) nyit — a többi óra kimarad, és ha a `no_trade_resets_signal`
@@ -857,7 +870,32 @@ class BacktestDialog:
                 self._end_var.set(self._prefs.get("end", hi))
         except Exception:
             self._span_lbl.config(text="Adat betöltve.", fg=FG_GRAY_DIM)
+        # A figyelmeztetés csak MOST számolható: üres mezőknél az adat széleit
+        # használja határnak, azok pedig eddig nem voltak meg.
+        self._update_training_warning()
         self._btn_start.config(state="normal")
+
+    def _update_training_warning(self):
+        """A tanítási ablakkal való átfedés kiírása (üres, ha nincs mit mondani).
+
+        Üres dátummezőnél a backtest a TELJES elérhető adaton fut — a hiányzó
+        határt tehát az adat széleivel kell pótolni, különben a leggyakoribb
+        eset (mindkét mező üres = minden adat) éppen NEM figyelmeztetne."""
+        lbl = getattr(self, "_train_lbl", None)
+        if lbl is None:
+            return
+        from core import training_overlap as _to
+        start = self._start_var.get().strip() or None
+        end = self._end_var.get().strip() or None
+        df = getattr(self, "_df15", None)
+        if df is not None and len(df):
+            start = start or str(df.index[0])
+            end = end or str(df.index[-1])
+        ov = _to.for_strategy(self.strategy, self.symbol, self.cfg, start, end)
+        msg = _to.message(ov)
+        lbl.config(text=msg,
+                   fg=FG_RED if _to.severity(ov.get("pct", 0.0)) == "full"
+                   else FG_YELLOW)
 
     def _open_calendar(self, var, anchor):
         """Naptár-popup a `var` (kezdő/záró) dátumhoz, a letöltött history-hoz
