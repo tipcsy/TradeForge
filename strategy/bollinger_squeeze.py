@@ -6,7 +6,8 @@ A sávok összeszűkülését (squeeze) és az azt követő kitörést fogja meg
   1. SQUEEZE     BB a Keltner-csatornán BELÜL  ÉS  a BandWidth az alsó
                  percentilisben (TTM-szerű kettős feltétel)
   2. FELOLDÁS    a squeeze megszűnik → a volatilitás éled
-  3. IRÁNY       EMA-trend (gyors/lassú + ár a gyorshoz képest)
+  3. IRÁNY       a MEGTÖRT SÁV adja (az EMA-trendszűrő csak opcionális vétó,
+                 alapból KI — az irány-vétó a kapuké)
   4. KITÖRÉS     záróár a sávon kívül ÉS a %B megerősíti
 
 A leírás: `strategy/docs/bollinger_squeeze_breakout.md`.
@@ -27,13 +28,13 @@ csatorna alakját szabja meg, nem a végrehajtást. A kettő szándékosan kül�
 JELZÉS-ARCHITEKTÚRA (miért két idősík)
 
 A motor magasabb tf-en tartja az állapotot, alsó tf-en tüzel
-(`bt_on_high_close` → `bt_on_low_close`). Itt a döntés MIND az M15-é — a
-doksi szemantikája szerint a KITÖRŐ M15 gyertya adja a jelet —, az M1 pusztán
-kézbesíti: az M15 jelzése után az ELSŐ M1 gyertyán tüzel, EGYSZER.
+(`bt_on_high_close` → `bt_on_low_close`). A döntés a JEL-IDŐSÍKÉ
+(`signal_tf_min`, alapból H1 — lásd fentebb), az M1 pusztán kézbesíti: a jelzés
+után az ELSŐ M1 gyertyán tüzel, EGYSZER.
 
 Ez tudatosan konzervatív: nem találunk ki M1-es finomítást olyan stratégiához,
-amit a felhasználó M15-ös kitörésként fogalmazott meg. (Egy későbbi, M1-en
-finomított belépő külön mérendő — lásd a doksi „Továbbfejlesztés" pontját.)
+amit kitörésként fogalmaztak meg. (Egy későbbi, M1-en finomított belépő külön
+mérendő — lásd a doksi „Továbbfejlesztés" pontját.)
 """
 
 from __future__ import annotations
@@ -57,6 +58,68 @@ from strategy import visual as viz
 # A stratégia MT5 magic-eltolása. MINDEN stratégia EGYEDI eltolást kap, hogy a
 # nyitott pozíciók broker-szinten szétválaszthatók legyenek (wpr_sma: 0, ml_ai: 1).
 MAGIC_OFFSET = 2
+
+# ── A SQUEEZE IDŐSÍKJA ─────────────────────────────────────────────────────
+# A tananyag (Obsidian: „Bollinger Squeeze & Breakout Stratégia") méri fel:
+#
+#     1–5 perc   ⭐      skalp, nagyon sok zaj
+#     15 perc    ⭐⭐     „sok hamis jel"
+#     1 óra      ⭐⭐⭐    „jó egyensúly"
+#     4 óra      ⭐⭐⭐⭐   „sok tapasztalt trader ezt preferálja"
+#     D1         ⭐⭐⭐⭐⭐  ritka, de a legerősebb
+#
+# Az ok szerkezeti: M15-ön a squeeze gyakran 1-2 gyertyáig tart, tehát „nincs
+# ideje feltöltődni" — a kitörés utána nem hordoz energiát. Ezért a jel idősíkja
+# PARAMÉTER, nem beégetett érték.
+#
+# ⚠ A LETÖLTÖTT adat marad M15 + M1 (`timeframes()`): a durvább gyertyát ebből
+# mintázzuk át. Így nem kell új adatforrás, és a resample UGYANAZ a képlet, amit
+# az `ml_ai` és a `core.tf_align` is használ (bal-zárt, bal-címkés — mint az MT5).
+DEFAULT_TF_MIN = 60
+ALLOWED_TF_MIN = (15, 30, 60, 120, 240)
+_tf_cache: dict = {}
+
+
+def signal_tf_min() -> int:
+    """A squeeze idősíkja PERCBEN, a stratégia SAJÁT configjából.
+
+    Közvetlenül a fájlból (nem a futásidejű cfg-ből): a `timeframes()` és a
+    warmup hívóinak nincs cfg-jük. Az mtime-cache miatt ez körönként egy `stat()`.
+    (Ugyanaz a minta, mint az `ml_ai.signal_tf_min`.)"""
+    from strategy.settings import strategy_config_path
+    p = strategy_config_path("bollinger_squeeze_breakout")
+    try:
+        mtime = p.stat().st_mtime
+    except OSError:
+        return DEFAULT_TF_MIN
+    if _tf_cache.get("mtime") == mtime:
+        return _tf_cache["v"]
+    val = DEFAULT_TF_MIN
+    try:
+        import json as _json
+        with open(p, encoding="utf-8") as f:
+            raw = (_json.load(f).get("indicators") or {}).get("signal_tf_min")
+        if raw is not None:
+            v = int(raw)
+            if v in ALLOWED_TF_MIN:
+                val = v
+            else:
+                log.warning("bollinger — signal_tf_min=%s nem megengedett (%s) "
+                            "→ %d perc", raw, ALLOWED_TF_MIN, DEFAULT_TF_MIN)
+    except Exception as ex:
+        log.warning("bollinger — signal_tf_min olvasási hiba: %s", ex)
+    _tf_cache.update({"mtime": mtime, "v": val})
+    return val
+
+
+def _to_signal_tf(df: pd.DataFrame, params: dict = None) -> pd.DataFrame:
+    """Az M15 frame átmintázása a beállított jel-idősíkra (15 → változatlan)."""
+    tf = int((params or {}).get("signal_tf_min") or signal_tf_min())
+    if tf <= 15 or df is None or len(df) < 2:
+        return df
+    from strategy.ml_ai import resample_ohlc
+    return resample_ohlc(df, tf)
+
 
 _CIRCLE = "●"
 
@@ -88,7 +151,9 @@ def compute_indicators(df: pd.DataFrame, params: dict) -> pd.DataFrame:
     """A stratégia MINDEN oszlopa egy M15 frame-re. Tiszta függvény: a live, a
     backtest és a viz UGYANEZT hívja — így a három nem csúszhat szét."""
     p = params
-    out = df.copy()
+    # ⚠ ELŐSZÖR az idősík: a squeeze a beállított (durvább) gyertyán él, nem az
+    # M15-ön. A letöltött adat M15 marad — innen mintázunk fel.
+    out = _to_signal_tf(df, p).copy()
     close = out["close"]
 
     # ── Bollinger ─────────────────────────────────────────────────────────
@@ -231,13 +296,27 @@ class BollingerSqueezeStrategy(Strategy):
     def columns(self) -> list[Column]:
         return [MarkerColumn("marks", self.name, stages=_STAGES)]
 
+    def _signal_bars_needed(self, params: dict) -> int:
+        """Hány JEL-IDŐSÍKÚ gyertya kell az indikátorokhoz."""
+        return max(int(params.get("bb_period", 20)),
+                   int(params.get("bw_lookback", 120)),
+                   int(params.get("ema_slow", 200)),
+                   int(params.get("kc_ema_period", 20)),
+                   int(params.get("atr_period", 14))) + 20
+
+    def _tf_ratio(self, params: dict) -> int:
+        """Hány M15 gyertyából áll egy jel-idősíkú gyertya (H1 → 4)."""
+        tf = int((params or {}).get("signal_tf_min") or signal_tf_min())
+        return max(1, tf // 15)
+
     def warmup_bars(self, params: dict, timeframe_label: str) -> int:
+        """⚠ A LETÖLTÖTT idősík M15, az indikátorok viszont a JEL-idősíkon
+        élnek — a szükséges M15-gyertyaszámot tehát FEL KELL SZOROZNI. Enélkül
+        H1-en négyszer kevesebb adat jutna az indikátoroknak, és a leghosszabb
+        ablak (`ema_slow`, `bw_lookback`) végig NaN maradna: a stratégia némán
+        egyetlen jelet sem adna."""
         if timeframe_label == "M15":
-            return max(int(params.get("bb_period", 20)),
-                       int(params.get("bw_lookback", 120)),
-                       int(params.get("ema_slow", 200)),
-                       int(params.get("kc_ema_period", 20)),
-                       int(params.get("atr_period", 14))) + 20
+            return self._signal_bars_needed(params) * self._tf_ratio(params)
         return 5
 
     def signal_warmup_bars(self, params: dict, timeframe_label: str) -> int:
@@ -245,7 +324,8 @@ class BollingerSqueezeStrategy(Strategy):
         feloldás-számláló is előzményfüggő — sekély ablakon a jel MÁS lenne,
         mint a vizben. (A `wpr_sma`-nál pont ez okozott kimaradó belépőket.)"""
         if timeframe_label == "M15":
-            return self.warmup_bars(params, "M15") + int(params.get("bw_lookback", 120))
+            return (self.warmup_bars(params, "M15")
+                    + int(params.get("bw_lookback", 120)) * self._tf_ratio(params))
         return 10
 
     def visual_lookback_bars(self, params: dict, timeframe_label: str) -> int:

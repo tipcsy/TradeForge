@@ -9,7 +9,8 @@ irányt vesz — a stratégia ezt az átmenetet várja.
 1. **Squeeze aktív** — a BB a Keltner-csatornán BELÜL van **ÉS** a BandWidth az
    elmúlt `bw_lookback` gyertya alsó `bw_percentile` százalékában
 2. **A squeeze feloldódik** (az előző gyertyán még állt, ezen már nem)
-3. **Trend**: `ema_fast > ema_slow` és az ár az `ema_fast` fölött
+3. **Trend** *(alapból KI — lásd „Az IRÁNY-VÉTÓ a kapuké")*:
+   `ema_fast > ema_slow` és az ár az `ema_fast` fölött
 4. **Kitörés**: záróár a felső BB fölött **ÉS** `%B ≥ pb_long_threshold`
 
 ## Mikor short?
@@ -31,6 +32,38 @@ másodikkal egy tartósan szűk instrumentum végig jelezne.
 > A `bw_percentile` **gördülő** ablakból számol, nem a teljes mintából. Ez nem
 > stílus kérdése: a teljes mintás percentilis a JÖVŐT is látná, és a backtest
 > némán felfelé torzulna.
+
+## Az IDŐSÍK — a legfontosabb egyetlen beállítás
+
+`signal_tf_min` (15 | 30 | 60 | 120 | 240 perc), alapértelmezés **60**.
+
+A **letöltött** adat M15 marad; a stratégia ebből mintázza fel a jel-gyertyát
+(ugyanaz a resample, amit az `ml_ai` és a `tf_align` is használ). Nem kell tehát
+új adatforrás, és a váltás egyetlen szám átírása.
+
+A tananyag szerint M15-ön a squeeze gyakran csak 1–2 gyertyáig tart, tehát
+„nincs ideje feltöltődni" — a kitörés utána nem hordoz energiát. Megmérve
+(7 pár, **három külön** 6 hónapos időszak, hangolatlan paraméterekkel):
+
+| idősík | 2025-02…08 | 2025-08…2026-02 | 2026-02…08 |
+|---|---|---|---|
+| M15 | 28,6% · **−133$** | 23,0% · **−691$** | 25,1% · **−487$** |
+| M30 | 43,6% · +1470$ | 36,9% · +486$ | 44,6% · +2096$ |
+| **M60** | **57,9% · +1709$** | **54,1% · +1438$** | **52,0% · +1737$** |
+| M240 | 67,9% · +1148$ | 53,5% · +758$ | 65,6% · +1804$ |
+
+**M15 mind a három időszakban veszteséges; M60 mind a háromban nyereséges.** A
+találati arány monoton nő az idősíkkal, a kötésszám monoton csökken — a 60 perc
+ott van, ahol még van elég kötés (7 páron ~300 / 6 hónap), de a zaj már kezelhető.
+
+> ⚠ Ezek **hangolatlan** alapértékek — épp ezért érdemesek figyelemre: nincs mit
+> túlilleszteni rajtuk. De egyetlen paraméter sincs optimalizálva, és a
+> `bw_lookback`/`ema_slow` az új idősíkon mást jelent. **Idősík-váltás után
+> újraoptimalizálás kell.**
+
+⚠ A warmup a letöltött **M15**-ben értendő, az indikátorok viszont a jel-idősíkon
+élnek — a gyertyaszám ezért felszorzódik (H1 → 4×). Enélkül a leghosszabb ablak
+végig NaN maradna, és a stratégia némán egyetlen jelet sem adna.
 
 ## Az IRÁNY-VÉTÓ a kapuké, nem a stratégiáé
 
@@ -81,12 +114,12 @@ a lotot és a stop későbbi mozgatását a keretrendszer intézi.
 
 ## Jelzés-architektúra
 
-A döntés **mind az M15-é** — a kitörő M15 gyertya adja a jelet, ahogy a fenti
-szabályok mondják. Az M1 pusztán kézbesíti: az M15 jelzése után az **első M1
-gyertyán** tüzel, egyszer. Egy feloldási ablakból **egy** belépő születik (a
-kitörés további gyertyái nem tüzelnek újra).
+A döntés a **jel-idősíké** (`signal_tf_min`, alapból H1) — a kitörő gyertya adja
+a jelet, ahogy a fenti szabályok mondják. Az **M1 pusztán kézbesíti**: a jelzés
+után az első M1 gyertyán tüzel, egyszer. Egy feloldási ablakból **egy** belépő
+születik (a kitörés további gyertyái nem tüzelnek újra).
 
-## Mérés (2026-08-08, ALAPÉRTELMEZETT paraméterekkel)
+## Korábbi mérés (M15-ös idősíkon — MEGHALADVA, lásd fent)
 
 Backtest 2026-02-01 … 08-07, páronként 1000$:
 

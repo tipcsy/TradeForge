@@ -91,6 +91,30 @@ check("a trend-szuro alapbol KI (az irany-veto a kapuke)",
       str(base.get("require_trend_alignment")))
 check("...de a parameter MEGMARAD (kutatasra allithato)",
       "require_trend_alignment" in base)
+# ── A JEL IDOSIKJA ────────────────────────────────────────────────────────
+# A tananyag (Obsidian) szerint M15-on a squeeze "nem er ra feltoltodni", ezert
+# ott sok a hamis kitores. Merve (7 par, HAROM kulon 6 honapos idoszak,
+# hangolatlan parameterekkel): M15 mindharomban VESZTESEG (-133/-691/-487$,
+# 23-29% talalat), M60 mindharomban NYERESEG (+1709/+1438/+1737$, 52-58%).
+# Ezert az alap 60 perc — ha valaki 15-re allitja, ez a teszt szol.
+from strategy import bollinger_squeeze as _bsq                          # noqa: E402
+check("a jel idosikja PARAMETER (nem beegetve)", "signal_tf_min" in base)
+check("az alapertelmezes 60 perc (a meres szerint)",
+      int(base["signal_tf_min"]) == 60, str(base.get("signal_tf_min")))
+check("a modul alapja is 60", _bsq.DEFAULT_TF_MIN == 60)
+check("csak ertelmes idosikok engedettek",
+      set(_bsq.ALLOWED_TF_MIN) == {15, 30, 60, 120, 240}, str(_bsq.ALLOWED_TF_MIN))
+
+# ⚠ A warmup a LETOLTOTT M15-ben ertendo, az indikatorok viszont a JEL-idosikon
+# elnek: a gyertyaszamot fel kell szorozni. Enelkul H1-en negyszer kevesebb adat
+# jutna, a leghosszabb ablak vegig NaN maradna, es a strategia NEMAN hallgatna.
+_w15 = s.warmup_bars({**base, "signal_tf_min": 15}, "M15")
+_w60 = s.warmup_bars({**base, "signal_tf_min": 60}, "M15")
+check("a warmup az idosikkal aranyosan no", _w60 == _w15 * 4, f"{_w15} -> {_w60}")
+check("a jel-warmup is skalazodik",
+      s.signal_warmup_bars({**base, "signal_tf_min": 60}, "M15")
+      > s.signal_warmup_bars({**base, "signal_tf_min": 15}, "M15"))
+
 check("van leirasa (docs/<nev>.md)", s.doc_path().exists(), s.doc_path().name)
 check("a leiras nem ures", len((s.doc_text() or "").strip()) > 200)
 

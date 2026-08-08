@@ -2,6 +2,9 @@
   "_comment": "Bollinger Squeeze & Breakout — a stratégia SAJÁT beállításai. A közös végrehajtási paraméterek (atr_period, spread-kapu, BE/trailing) NEM itt vannak: core/execution_params.py.",
 
   "indicators": {
+    "_comment_tf": "A SQUEEZE IDŐSÍKJA percben (15|30|60|120|240). A letöltött adat M15 marad — ebből mintázunk át. A tananyag szerint M15-ön a squeeze gyakran 1-2 gyertyáig tart („nincs ideje feltöltődni\"), ezért ott sok a hamis kitörés; az 1-4 óra az „édes pont\".",
+    "signal_tf_min": 60,
+
     "_comment_bb": "Bollinger: periódus és szórás-szorzó.",
     "bb_period": 20,
     "bb_std": 2.0,
@@ -42,6 +45,7 @@
   "param_meta": {
     "_comment": "A paraméter-ablak kategóriái és súgói.",
     "params": {
+      "signal_tf_min": {"category": "Idősík", "comment": "A squeeze idősíkja percben: 15 | 30 | 60 | 120 | 240. Váltás után ÚJRAOPTIMALIZÁLÁS kell."},
       "bb_period":   {"category": "Bollinger", "comment": "A sávok periódusa"},
       "bb_std":      {"category": "Bollinger", "comment": "Szórás-szorzó (2.0 a szokásos)"},
       "bw_lookback": {"category": "Összeszűkülés", "comment": "Ennyi gyertyához méri a BandWidth-et"},
