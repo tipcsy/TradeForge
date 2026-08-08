@@ -284,6 +284,30 @@ def measured_rows(key: str, ctx: dict) -> list:
         if cap is not None:
             rows.append(("Határ", f"{float(cap) * 100:+.0f}%"))
         return rows
+    if key == _g.VOLATILITY:
+        from core import vol_baseline as _vb
+        atr = ctx.get("atr_price")
+        base = ctx.get("atr_baseline")
+        prm = ctx.get("vol_params") or {}
+        pt = ctx.get("point_size")
+
+        def _pts(v):
+            return f"{v / pt:,.0f} pont".replace(",", " ") if (v and pt) else "—"
+
+        rows = [("Mostani ATR", _pts(atr)),
+                ("Mérce (kalibrált átlag)", _pts(base))]
+        if atr and base:
+            st = _vb.status(float(atr), prm, float(base))
+            rows.append(("Arány", f"{st['ratio']:.2f}×"))
+            rows.append(("Engedett sáv",
+                         f"{_pts(st['lo'])} … {_pts(st['hi'])}"
+                         if (st["lo"] or st["hi"]) else "nincs korlát"))
+            rows.append(("Állapot", "RENDBEN" if st["ok"] else f"⛔ {st['why']}"))
+        nb = _vb.baseline_bars(prm)
+        rows.append(("A mérce fajtája",
+                     f"gördülő, {nb} gyertya (≈{nb // 96} nap)" if nb > 0 else
+                     "befagyasztott (atr_avg_ref, az optimalizálásból)"))
+        return rows
     if key == _g.MOMENTUM:
         from core import momentum as _m
         val = ctx.get("momentum")

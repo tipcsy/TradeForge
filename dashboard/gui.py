@@ -3004,7 +3004,8 @@ class DashboardWindow:
                 on_spread=self._show_spread_params,
                 on_market=self._show_market_gate,
                 on_momentum=self._show_momentum_gate,
-                on_cost=self._show_cost_gate))
+                on_cost=self._show_cost_gate,
+                on_volatility=self._show_volatility_gate))
         return rows
 
     def _strategy_enabled(self, symbol: str, name: str) -> bool:
@@ -3129,6 +3130,11 @@ class DashboardWindow:
         """A `Költség` cellára kattintva a KÖLTSÉG/KOCKÁZAT kapu ablaka nyílik."""
         from core import gates as _g
         self._open_gate_dialog(symbol, _g.COST)
+
+    def _show_volatility_gate(self, symbol: str):
+        """A Volatilitás-oszlop CSAK KIJELZÉS: az ablak megmutatja a mostani
+        ATR-t, a kalibrált mércét és az engedett sávot — hatást nem állít."""
+        self._open_gate_dialog(symbol, _g.VOLATILITY)
 
     def _show_market_gate(self, symbol: str):
         """A `Piac` cellára kattintva a PIAC-KAPU ablaka nyílik (osztályozó
@@ -5697,12 +5703,14 @@ class DashboardWindow:
         # (ugyanazzal az `indicator_engine.atr`-rel és `atr_period`-dal, amit a
         # motor is használ), és MINDKÉT néven ráírjuk az utolsó ZÁRT sorra.
         ds.plan_sl_points = ds.plan_tp_points = None
+        ds.atr_price = ds.atr_baseline = None
         try:
             from core.indicator_engine import atr as _atr_fn
             _pf = bars.get(primary)
             if _pf is not None and len(_pf) > 2:
-                _a = _atr_fn(_pf["high"], _pf["low"], _pf["close"],
-                             params.get("atr_period", 14)).iloc[-2]
+                _atr_s = _atr_fn(_pf["high"], _pf["low"], _pf["close"],
+                                 params.get("atr_period", 14))
+                _a = _atr_s.iloc[-2]
                 if _a == _a and _a > 0:                     # not NaN
                     _row = _pf.iloc[-2].copy()
                     _row["atr"] = _row["atr14"] = float(_a)
@@ -5710,6 +5718,16 @@ class DashboardWindow:
                         _row, params, _pcfg.get("point_size", 0.0001))
                     if _plan:
                         ds.plan_sl_points, ds.plan_tp_points = _plan
+                    # VOLATILITÁS-oszlop: a mostani ATR és a kalibrált MÉRCE.
+                    # A `vol_baseline` dönti el, hogy a befagyasztott
+                    # `atr_avg_ref` vagy a gördülő ablak a mérce — UGYANAZ a
+                    # képlet, mint a backtestben és a vizben (`core/vol_baseline`).
+                    from core import vol_baseline as _vb
+                    ds.atr_price = float(_a)
+                    ds.atr_baseline = _vb.effective(
+                        params,
+                        _vb.value_at(_atr_s.to_numpy(), len(_pf) - 2,
+                                     params, float(_a)))
         except Exception:
             pass
 

@@ -41,7 +41,8 @@ cfg = {"dashboard": {"gate_order": ["cost", "spread"]}}
 check("csak a listaban szereplok engedelyezettek",
       gl.enabled_gates(cfg) == ["cost", "spread"], str(gl.enabled_gates(cfg)))
 check("a tobbi KIKAPCSOLT",
-      set(gl.disabled_gates(cfg)) == {g.TF_ALIGN, g.MARKET, g.MOMENTUM},
+      set(gl.disabled_gates(cfg)) == {g.TF_ALIGN, g.MARKET, g.MOMENTUM,
+                                      g.VOLATILITY},
       str(gl.disabled_gates(cfg)))
 check("a SORREND a listat koveti (nem a REGISTRY-t)",
       gl.enabled_gates(cfg)[0] == "cost")

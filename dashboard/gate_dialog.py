@@ -347,6 +347,22 @@ class GateDialog:
     def _build_effects(self):
         if not self.strategies:
             return
+        # ⚠ CSAK KIJELZÉS kapu: NINCS állítható hatás. A szűrés máshol (a
+        # stratégia `bt_entry`-jében) történik. Egy hatás-választó itt vagy
+        # duplán szűrne, vagy `none`-ra állítva azt ígérné, hogy kikapcsoltad a
+        # szűrést — a némán hatástalan beállítás pont az, amit ez a projekt a
+        # legrosszabbnak tart. Ezért a választó helyett MEGMONDJUK, hol lakik.
+        if _g.is_display_only(self.key):
+            box = _section(self._page, "Hatás")
+            tk.Label(box, text=(
+                "Ez az oszlop MUTAT, nem dönt — nincs állítható hatása.\n"
+                "A szűrés a stratégia belépő-kapujában történik "
+                "(atr_min_pct / atr_max_pct, a Piac-szűrő kategóriában).\n"
+                "Ott állítsd, ne itt: így a backtest, a viz és az él ugyanazt "
+                "a szűrést végzi."),
+                bg=BG, fg=FG_GRAY, font=self._f["small"], anchor="w",
+                justify="left", wraplength=560).pack(anchor="w", pady=(4, 0))
+            return
         box = _section(self._page, "Mi történjen, ha a kapu blokkoló állapotban van")
         grid = tk.Frame(box, bg=BG)
         grid.pack(fill="x", pady=(4, 0))

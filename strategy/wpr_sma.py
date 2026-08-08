@@ -425,8 +425,14 @@ class WprSmaStrategy(Strategy):
             return []
         try:
             m15, m1 = compute_indicators(df_m15, df_m1, md.params)
-        except Exception:
-            return []
+        except Exception as e:
+            # ⚠ NEM néma. Egy rossz paraméter-kombináció (hiányzó kulcs, 0 periódus)
+            # eddig üres rajzot adott, és a hívó CLEAR-je le is törölte a régit —
+            # a chart kiürült, a naplóban meg egy sor sem volt róla. A hívó ebből
+            # a kivételből tudja meg, hogy ez HIBA, nem „nincs mit rajzolni".
+            raise RuntimeError(
+                f"{md.symbol}: az indikátorok nem számolhatók a jelenlegi "
+                f"paraméterekkel ({type(e).__name__}: {e})") from e
 
         closes = m15["close"].values
         smas   = m15["sma"].values

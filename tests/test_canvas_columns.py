@@ -45,13 +45,14 @@ if TK_OK:
     keys = cc.column_keys(STRATS, {})
     check("a fix oszlopok elol allnak, a megszokott sorrendben",
           keys[:4] == ["symbol", "bid", "ask", "change"], str(keys[:4]))
-    check("a kapu-blokk: Spread · Egyutt · Piac · Lendulet · Koltseg, majd K.Ossz.",
-          keys[4:10] == ["spread", "align", "market", "momentum", "cost", "badge"],
-          str(keys[4:10]))
+    check("a kapu-blokk a REGISTRY sorrendjeben, majd K.Ossz.",
+          keys[4:11] == ["spread", "align", "market", "momentum", "cost",
+                         "volatility", "badge"],
+          str(keys[4:11]))
     check("a strategia-oszlopok kulcsa '<nev>|<mezo>' (a rendezes blokkra hat)",
-          keys[10:16] == ["wpr_sma|stages", "wpr_sma|position", "wpr_sma|daily",
+          keys[11:17] == ["wpr_sma|stages", "wpr_sma|position", "wpr_sma|daily",
                           "wpr_sma|quality", "wpr_sma|ctrl", "wpr_sma|opt"],
-          str(keys[10:16]))
+          str(keys[11:17]))
     check("a vegen az osszesito + a torles",
           keys[-3:] == ["total_pos", "total_daily", "close"], str(keys[-3:]))
 
@@ -81,7 +82,8 @@ if TK_OK:
     check("ures lista -> csak a K.Ossz.",
           cc.column_keys(STRATS, {"gate_columns": []})[4] == "badge")
     check("hianyzo config -> MINDEN kapu, a REGISTRY sorrendjeben",
-          gl.enabled_columns(None) == ["spread", "align", "market", "momentum", "cost"],
+          gl.enabled_columns(None) == ["spread", "align", "market", "momentum",
+                                       "cost", "volatility"],
           str(gl.enabled_columns(None)))
 
     # ── A SZELESSEGEK a meglevo live_row.widths()-bol jonnek ──────────────

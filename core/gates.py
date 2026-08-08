@@ -59,6 +59,7 @@ TF_ALIGN = "tf_align"
 MARKET = "market"
 MOMENTUM = "momentum"
 COST = "cost"
+VOLATILITY = "volatility"
 
 # ── A LENDÜLET-kapu MÓDJA: MIT figyeljen ───────────────────────────────────
 # A többi kapunál egyértelmű, mi a „bukás" (túl tág spread, nincs együttállás,
@@ -121,9 +122,31 @@ REGISTRY = (
     # Költség/kockázat: a spread mennyire torzítja a TERVEZETT RR-t. Alapból
     # `none` — a meglévő párok viselkedése nem változhat egy frissítéstől.
     {"key": COST,     "label": "Költség/kockázat",   "default_effect": EFFECT_NONE},
+    # ⚠ CSAK KIJELZÉS. A volatilitás-szűrés NEM itt történik, hanem a stratégia
+    # `bt_entry` hookjában (atr_min_pct/atr_max_pct) — ott van a backtest, a viz
+    # és az él KÖZÖS belépő-kapuja. Ha ez a kapu is kapna állítható hatást, az
+    # vagy DUPLÁN szűrne, vagy — `none`-ra állítva — azt ígérné, hogy kikapcsolta
+    # a szűrést, holott a stratégia tovább szűrne. Az oszlop tehát MUTAT, nem dönt.
+    #
+    # Miért kell mégis oszlop: 2026-08-08-ig ez volt az EGYETLEN blokkoló ok, ami
+    # nem látszott sehol. A BTCUSD hetekig némán nem kereskedett, mert az ATR a
+    # kalibrált sáv alá csúszott (0,51×) — a chart üres maradt, és semmi nem
+    # árulta el, miért. Minden más ok (spread, együttállás, piac, lendület,
+    # költség) látható kapu volt; ez az aszimmetria került a felhasználónak hetekbe.
+    {"key": VOLATILITY, "label": "Volatilitás", "default_effect": EFFECT_NONE,
+     "display_only": True},
 )
 
 KEYS = tuple(g["key"] for g in REGISTRY)
+
+
+def is_display_only(key: str) -> bool:
+    """CSAK KIJELZÉS kapu-e? Ilyennek NINCS állítható hatása: a szűrés
+    máshol (a stratégiában) történik, az oszlop csak láthatóvá teszi."""
+    for g in REGISTRY:
+        if g["key"] == key:
+            return bool(g.get("display_only"))
+    return False
 
 
 def doc_path(key: str):
@@ -426,8 +449,25 @@ def _eval_momentum(ctx: dict):
     return (BLOCKING if abs(val) < float(thr) else PASS), txt
 
 
+def _eval_volatility(ctx: dict):
+    """Az ATR a stratégia kalibrált sávjában van-e (`core.vol_baseline`).
+
+    ⚠ CSAK KIJELZÉS: a `decide` ezt a kaput átugorja, tehát a MÉRÉS nem dönt.
+    Mégis fontos, hogy BLOCKING-ot adjon, ha a sávon kívül vagyunk: a `K.Össz.`
+    számláló ebből tudja, hogy a motor MOST nem lépne be — pontosan ez hiányzott,
+    amikor a BTCUSD hetekig némán nem kereskedett (0,51× a mércének)."""
+    from core import vol_baseline as _vb
+    atr, base = ctx.get("atr_price"), ctx.get("atr_baseline")
+    if not atr or not base:
+        return UNKNOWN, "nincs ATR vagy mérce (a bemelegítés még tart)"
+    st = _vb.status(float(atr), ctx.get("vol_params") or {}, float(base))
+    txt = f"ATR {st['ratio']:.2f}× a kalibrált mércének"
+    return (PASS, txt) if st["ok"] else (BLOCKING, st["why"])
+
+
 _EVAL = {SPREAD: _eval_spread, TF_ALIGN: _eval_tf_align, MARKET: _eval_market,
-         MOMENTUM: _eval_momentum, COST: _eval_cost}
+         MOMENTUM: _eval_momentum, COST: _eval_cost,
+         VOLATILITY: _eval_volatility}
 
 
 def evaluate(ctx: dict, effects: dict = None) -> list:
@@ -514,6 +554,10 @@ def decide(failed: dict, effects: dict) -> dict:
     for key in KEYS:
         if not (failed or {}).get(key):
             continue
+        # A CSAK KIJELZÉS kapuk sosem döntenek — a hatásuk máshol lakik. Enélkül
+        # egy configba tévedt `block` némán duplán szűrne.
+        if is_display_only(key):
+            continue
         eff = (effects or {}).get(key) or default_effect_of(key)
         if eff == EFFECT_BLOCK:
             blocked.append(key)
@@ -596,6 +640,11 @@ def ctx_from_state(ds, params: dict, pair_cfg: dict) -> dict:
         # (`core/gate_params.measured_rows`). Külön kiszámolva „kb. ugyanaz”
         # lenne, ami épp a legrosszabb fajta eltérés: némán szétcsúszna.
         "atr_price": getattr(ds, "atr_price", None),
+        # VOLATILITÁS (csak kijelzés): a kalibrált mérce és a szűrő számai. A
+        # mércét a `vol_baseline` állítja elő a kijelzés-úton (dashboard/gui) —
+        # ITT nem számoljuk újra, mert két képlet némán szétcsúszna.
+        "atr_baseline": getattr(ds, "atr_baseline", None),
+        "vol_params": params or {},
         "point_size": point_size,
         "normal_spread_points": (pair_cfg or {}).get("backtest_spread_points"),
         "tf_align_signs": list(getattr(ds, "tf_align_signs", []) or []),

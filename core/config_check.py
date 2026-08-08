@@ -194,6 +194,33 @@ def _check_sizing(cfg: dict, out: list) -> None:
 
 
 # ---------------------------------------------------------------------------
+# 3c. Hatás egy CSAK KIJELZÉS kapun — némán hatástalan
+# ---------------------------------------------------------------------------
+
+def _check_display_only_gate_effect(cfg: dict, out: list) -> None:
+    """A „csak kijelzés" kapukra állított hatás SOHA nem fut le.
+
+    Az ilyen kapunak (ma: `volatility`) nincs döntési szerepe — a szűrés a
+    stratégia `bt_entry` hookjában történik. Ha valaki configban mégis `block`-ot
+    ír rá, az pontosan az a fajta beállítás, amiért ez a modul létezik: létezik,
+    látszik, és semmit nem csinál."""
+    from core import gates as _g
+    for sym, pc in (cfg.get("pairs") or {}).items():
+        if not isinstance(pc, dict):
+            continue
+        for key, per in (pc.get("gates") or {}).items():
+            if not _g.is_display_only(key):
+                continue
+            names = list(per) if isinstance(per, dict) else ["(mind)"]
+            out.append(_finding(
+                WARN, "display_only_gate_effect",
+                f"{sym}: a(z) {_g.label_of(key)!r} kapura hatás van állítva "
+                f"({', '.join(names)}), de ez CSAK KIJELZÉS oszlop → a beállítás "
+                f"SOSEM fut le. A volatilitás-szűrés a stratégia paramétereiben "
+                f"van (atr_min_pct / atr_max_pct).", sym))
+
+
+# ---------------------------------------------------------------------------
 # 4. Holt kulcs: a napi limit két forrása
 # ---------------------------------------------------------------------------
 
@@ -331,6 +358,7 @@ _CHECKS = (
     _check_stale_strategy_keys,
     _check_costs,
     _check_sizing,
+    _check_display_only_gate_effect,
     _check_daily_limit,
     _check_gate_config_shadowing,
     _check_same_symbol_policy,

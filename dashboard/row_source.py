@@ -75,6 +75,30 @@ def _momentum_cell(ctx: dict, on_click=None, symbol: str = None) -> dict:
             "on_click": click}
 
 
+def _volatility_cell(ctx: dict, on_click=None, symbol: str = None) -> dict:
+    """`0.51×` — a mostani ATR a kalibrált mércéhez képest.
+
+    A `blocking` azt jelenti, hogy az ATR a stratégia engedett sávján KÍVÜL van,
+    tehát a motor NEM lépne be — akkor sem, ha minden más stimmel. Ez az egyetlen
+    blokkoló ok, ami eddig sehol nem látszott: a BTCUSD hetekig némán nem
+    kereskedett 0,51×-es aránnyal (lásd `core/vol_baseline.py`).
+
+    ⚠ Ez az oszlop MUTAT, nem dönt: a szűrés a stratégia `bt_entry`-jében van."""
+    import math
+    from core import vol_baseline as _vb
+    atr = ctx.get("atr_price")
+    base = ctx.get("atr_baseline")
+    click = (lambda: on_click(symbol)) if (on_click and symbol) else None
+    if not atr or not base or (isinstance(atr, float) and math.isnan(atr)):
+        return {"text": "—", "blocking": False, "value": None, "on_click": click}
+    st = _vb.status(float(atr), ctx.get("vol_params") or {}, float(base))
+    r = st["ratio"]
+    if r != r:
+        return {"text": "—", "blocking": False, "value": None, "on_click": click}
+    return {"text": f"{r:.2f}×", "blocking": not st["ok"], "value": float(r),
+            "on_click": click}
+
+
 def _cost_cell(ctx: dict, on_click=None, symbol: str = None) -> dict:
     """`3.4:1 +70%` — a megteendő ÚT aránya és a hátrány a kifizetéshez képest.
 
@@ -170,7 +194,8 @@ def row_data(symbol: str, ds, strategy_names, cfg: dict = None,
              opt_enabled_of=None, opt_state_of=None, enabled_of=None,
              on_toggle=None, on_opt=None, on_stages=None,
              on_symbol=None, on_align=None, on_spread=None,
-             on_market=None, on_momentum=None, on_cost=None) -> dict:
+             on_market=None, on_momentum=None, on_cost=None,
+             on_volatility=None) -> dict:
     """Egy instrumentum sorának adata a `live_row.LiveRow` számára.
 
     `ds`          — `live_trader.PairDashboardState` (duck-typed).
@@ -254,6 +279,7 @@ def row_data(symbol: str, ds, strategy_names, cfg: dict = None,
                        "on_click": (lambda: on_market(symbol)) if on_market else None},
             "momentum": _momentum_cell(ctx, on_momentum, symbol),
             "cost": _cost_cell(ctx, on_cost, symbol),
+            "volatility": _volatility_cell(ctx, on_volatility, symbol),
             "badge": badge,
             "blocking_count": blocking_count,
         },

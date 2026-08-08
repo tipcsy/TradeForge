@@ -997,6 +997,7 @@ def _write_symbol_viz(symbol, pair_cfg, strats, params_by_strat: dict):
     if not point_size:
         return
     lines = []
+    _viz_failed = False
     for st in strats:
         if st.name not in params_by_strat or st.name not in _viz_names:
             continue
@@ -1005,7 +1006,11 @@ def _write_symbol_viz(symbol, pair_cfg, strats, params_by_strat: dict):
             vparams = load_pair_params(symbol, st.name) or params_by_strat[st.name]
             lines += pair_visual_lines(symbol, vparams, st, point_size, pair_cfg)
         except Exception as e:
-            log.debug("%s/%s — viz sor hiba: %s", symbol, st.name, e)
+            # ⚠ WARNING, nem debug. Ez eddig `log.debug` volt — vagyis a naplóban
+            # (INFO szint) NYOMA SEM VOLT, miközben a chart kiürült. Egy üres rajz
+            # oka mindig érdekli a felhasználót; ha nem érdekelné, nem nézné.
+            _viz_failed = True
+            log.warning("%s/%s — a viz nem rajzolható: %s", symbol, st.name, e)
     # A függő riasztások MINDEN pillanatképbe belekerülnek (az MQL5 az alert-id
     # alapján dedupál, így pontosan egyszer szól). Szándékosan NEM töröljük őket
     # itt: ha a chart épp nem olvasott (zárva volt, indikátor újraindult), a
@@ -1016,10 +1021,20 @@ def _write_symbol_viz(symbol, pair_cfg, strats, params_by_strat: dict):
     # Paraméter-váltás után egyszeri CLEAR a snapshot elé → a régi (elavult) belépő-
     # jelzések garantáltan eltűnnek, majd az új paraméterekkel frissen rajzol.
     clear_first = _viz_pending_clear.pop(symbol, False)
+    # ⚠ HIBÁS pillanatképet SOHA nem írunk ki CLEAR-rel. A CLEAR + üres tartalom
+    # LETÖRLI a chartot: a felhasználó ezt látja „a TradeForgeViz eldobta magát"
+    # néven, pedig csak egy rossz paraméter miatt nem született rajz. A régi
+    # (elavult) rajz ilyenkor TÖBBET ér, mint az üres chart — legalább látszik,
+    # hogy volt valami, és a napló megmondja, mi a baj.
+    if _viz_failed and not lines:
+        _viz_pending_clear[symbol] = clear_first      # a CLEAR-t megőrizzük későbbre
+        log.warning("%s — a viz-pillanatkép ÜRES egy hiba miatt → a chart régi "
+                    "rajza MEGMARAD (nem töröljük). Javítsd a fenti hibát.", symbol)
+        return
     try:
         mt5_visual.write_lines(symbol, lines, clear_first=clear_first)
     except Exception as e:
-        log.debug("%s — viz írás hiba: %s", symbol, e)
+        log.warning("%s — viz írás hiba: %s", symbol, e)
 
 
 # ---------------------------------------------------------------------------
