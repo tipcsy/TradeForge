@@ -3575,6 +3575,37 @@ class DashboardWindow:
         threading.Thread(target=_reader, daemon=True,
                          name=f"History-{symbol}").start()
 
+    def _start_startup_gap_fill(self):
+        """INDÍTÁSKOR pótolja a hiányzó előzmény-adatot (gap) minden aktív páron.
+
+        Enélkül a leállás alatt keletkezett rés csak akkor tűnt fel, amikor egy
+        Backtest/Opt már beleütközött — a `wpr_sma` M15-ablaka viszont MÉLY
+        warmupot kér, tehát a hiányzó gyertyák némán MÁS jelzést adnak, mint az
+        él. A pótlás ugyanazon a közös úton fut, mint az új instrumentum
+        felvétele (`_start_history_download` → külön processz, fájl-zár).
+
+        Miért SOROSAN? Minden letöltés saját processzt és MT5-sessiont nyit;
+        11 pár egyszerre fölöslegesen terhelné a brókerszervert és a gépet, és a
+        sor-státusz is olvashatatlanná válna. Így egyszerre legfeljebb egy fut.
+
+        A per-szimbólum fájl-zár miatt ez biztonságosan együtt él egy közben
+        induló Opt/Backtest letöltéssel: a második a kész fájlt találja."""
+        import logging as _logging
+        _log = _logging.getLogger(__name__)
+        pending = [s for s, p in (self.cfg.get("pairs") or {}).items()
+                   if isinstance(p, dict) and p.get("enabled", False)]
+        if not pending:
+            return
+        _log.info("Indítási gap-letöltés: %d pár sorba állítva.", len(pending))
+
+        def _next(ok: bool = True, msg: str = ""):
+            if not pending:
+                _log.info("Indítási gap-letöltés: kész.")
+                return
+            self._start_history_download(pending.pop(0), on_done=_next)
+
+        _next()
+
     # ── JSON szintaxis-színezés (Text widgethez) ─────────────────────────
     @staticmethod
     def _highlight_json(text):
@@ -6064,6 +6095,11 @@ class DashboardWindow:
         threading.Thread(target=_loop, daemon=True, name="UIWatchdog").start()
 
     def run(self):
+        # Indítási gap-letöltés: a leállás alatt keletkezett rés pótlása, sorosan,
+        # háttérben. A 2 mp késleltetés csak annyi, hogy az ablak előbb kirajzolódjon
+        # — a letöltés külön processzben fut, a GUI nem akad meg tőle.
+        if self.cfg.get("data", {}).get("gap_fill_on_start", True):
+            self.root.after(2000, self._start_startup_gap_fill)
         # Auto-folytatás: a megszakadt optimalizálások újraindítása INDÍTÁSKOR.
         # Késleltetve, hogy a live_trader induló LIVE-jelölése (magic-recovery +
         # run_state) már beálljon → a kereskedő szimbólumokat NE optimalizáljuk.
