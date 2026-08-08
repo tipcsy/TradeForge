@@ -145,6 +145,57 @@ def _make_classifier(pos_ratio: float):
 # `optimizer.training.min_calibration_signals`.
 MIN_CALIB_SIGNALS = 40
 
+# A modell MINIMÁLIS megkülönböztető ereje (AUC a fold-on kívüli
+# valószínűségeken). 0,50 = érmefeldobás; 0,52 alatt a küszöb „találati
+# aránya" nem képességet mér, hanem azt, hogy 51 jelöltből a legjobbat
+# választottuk. Mérve (2026-08-08, 11 pár × 2 irány): az AUC 0,490–0,562
+# között szórt, tehát a készlet ÉRDEMBEN nem hordoz irányjelet — a padló
+# ezért nem profit-szűrő, hanem a NULLA-jelre élesedés tiltása.
+# Configból: `optimizer.training.min_model_auc`.
+MIN_MODEL_AUC = 0.52
+
+
+def oof_proba(X: np.ndarray, y: np.ndarray, ratio: float,
+              n_splits: int = 5, purge: int = 32):
+    """FOLD-ON KÍVÜLI valószínűségek: minden sorhoz olyan modell adja, amelyik
+    azt a sort NEM látta. `(proba, engine)`.
+
+    MIÉRT KELL. A küszöb csak akkor jelent bármit, ha a modell, amire vonatkozik,
+    ugyanúgy „idegenként” nézi az adatot, mint majd élesben. A korábbi megoldás
+    a train utolsó 20%-án kalibrált egy 80%-on tanított modellel, majd a mentett
+    csomagba a TELJES train-en ÚJRATANÍTOTT modellt tette — a küszöb így más
+    eloszlásra vonatkozott, mint amire alkalmaztuk. A végső modell a saját
+    tanítóadatán már közel tökéletes (AUC 0,87–0,92), tehát ott a 0,81-es küszöb
+    a TÉNYLEGES nyerőket válogatta ki; friss adaton (AUC ~0,50) ugyanaz a küszöb
+    már csak érmét dob. Innen a 70% → 26% szakadék.
+
+    ⚠ TISZTÍTÁS (purge). A címke `lookahead` gyertyát néz előre, tehát egy sor
+    kimenete átfed a következő ~32 soréval. Tisztítás nélkül a fold határán a
+    tanító rész a teszt-rész JÖVŐJÉT is látná — a szivárgás pont azt a torzítást
+    hozná vissza, ami ellen az egész eljárás szól. Ezért a fold köré `purge`
+    sornyi sávot kivágunk a tanító részből."""
+    n = len(X)
+    proba = np.full(n, np.nan)
+    engine = ""
+    bounds = np.linspace(0, n, n_splits + 1, dtype=int)
+    for k in range(n_splits):
+        lo, hi = bounds[k], bounds[k + 1]
+        if hi <= lo:
+            continue
+        mask = np.ones(n, dtype=bool)
+        mask[max(0, lo - purge):min(n, hi + purge)] = False   # fold + tisztító sáv
+        if mask.sum() < 200:
+            continue
+        y_tr = y[mask]
+        if len(set(y_tr.tolist())) < 2:
+            continue
+        m, engine = _make_classifier(ratio)
+        m.fit(X[mask], y_tr)
+        if len(getattr(m, "classes_", [0, 1])) < 2:
+            continue
+        proba[lo:hi] = m.predict_proba(X[lo:hi])[:, 1]
+    return proba, engine
+
 
 def _calibrate_threshold(proba: np.ndarray, y: np.ndarray,
                          min_wr: float, max_coverage: float,
@@ -192,50 +243,65 @@ def _calibrate_threshold(proba: np.ndarray, y: np.ndarray,
 
 def _train_direction(train_all: pd.DataFrame, label_col: str, features: list,
                      min_wr: float, max_coverage: float,
-                     min_signals: int = MIN_CALIB_SIGNALS) -> tuple[dict | None, dict]:
-    """Egy irány (long/short) tanítása: scaler a TELJES train-en, modell a
-    kalibrációs farok NÉLKÜL, küszöb a farkon, majd VÉGSŐ újratanítás a teljes
-    train-en (retrain-mód — a mentett modell minden friss adatot lát).
+                     min_signals: int = MIN_CALIB_SIGNALS,
+                     purge: int = 32, n_splits: int = 5,
+                     min_auc: float = MIN_MODEL_AUC) -> tuple[dict | None, dict]:
+    """Egy irány (long/short) tanítása.
+
+    A küszöb és az AUC a TELJES train-re vett FOLD-ON KÍVÜLI valószínűségekből
+    jön (`oof_proba`) — tehát mindkettő olyan előrejelzéseken alapul, amiket a
+    modell „idegenként" adott. A mentett modell utána a teljes train-en tanul, de
+    a küszöb már ugyanarra az eloszlásra vonatkozik, amit élesben látni fog.
+
     Visszaad: (bundle_irány | None, statisztika)."""
     from sklearn.preprocessing import StandardScaler
     from sklearn.metrics import roc_auc_score
 
-    cal_n = max(50, len(train_all) // 5)          # utolsó 20% kalibrációra
-    train = train_all.iloc[:-cal_n]
-    cal   = train_all.iloc[-cal_n:]
-
-    y_tr = train[label_col].to_numpy()
-    pos, neg = int((y_tr == 1).sum()), int((y_tr == 0).sum())
+    y_all = train_all[label_col].to_numpy()
+    pos, neg = int((y_all == 1).sum()), int((y_all == 0).sum())
     if pos < 10 or neg < 10:
         return None, {"enabled": False, "reason": f"kevés minta (pos={pos}, neg={neg})"}
     ratio = min(neg / max(pos, 1), 5)
 
     scaler = StandardScaler().fit(train_all[features].to_numpy(dtype=float))
-    X_tr = scaler.transform(train[features].to_numpy(dtype=float))
+    X_all = scaler.transform(train_all[features].to_numpy(dtype=float))
 
-    model, engine = _make_classifier(ratio)
-    model.fit(X_tr, y_tr)
-    if len(getattr(model, "classes_", [0, 1])) < 2:
-        return None, {"enabled": False, "reason": "csak egy osztály a train-ben"}
-
-    X_cal = scaler.transform(cal[features].to_numpy(dtype=float))
-    y_cal = cal[label_col].to_numpy()
-    proba_cal = model.predict_proba(X_cal)[:, 1]
+    # ── Becsületes valószínűségek a TELJES train-re ────────────────────────
+    proba, engine = oof_proba(X_all, y_all, ratio, n_splits=n_splits, purge=purge)
+    ok = ~np.isnan(proba)
+    if ok.sum() < max(200, min_signals * 5):
+        return None, {"enabled": False,
+                      "reason": f"kevés fold-on kívüli minta ({int(ok.sum())})"}
+    p_ok, y_ok = proba[ok], y_all[ok]
     try:
-        auc = float(roc_auc_score(y_cal, proba_cal))
+        auc = float(roc_auc_score(y_ok, p_ok))
     except ValueError:
         auc = float("nan")
 
-    thr, stats = _calibrate_threshold(proba_cal, y_cal, min_wr, max_coverage,
-                                      min_signals)
+    # ── AUC-PADLÓ: ne élesedjünk olyan modellre, ami nem tud megkülönböztetni ──
+    # Ha az AUC ~0,5, akkor a valószínűség NEM hordoz információt, tehát bármely
+    # küszöb „jó" találati aránya kizárólag a keresés mellékterméke (51 jelöltből
+    # a legjobb). A `min_signals` a MINTASZÁM felől véd, ez a JELFORRÁS felől — a
+    # kettő külön hiba, és 2026-08-08-án mindkettő elő is fordult.
+    if auc == auc and auc < min_auc:
+        return None, {"enabled": False, "auc": auc, "engine": engine,
+                      "train_rows": len(train_all), "oof_rows": int(ok.sum()),
+                      "threshold": 1.01, "signals": 0, "win_rate": 0.0,
+                      "reason": (f"AUC {auc:.3f} < {min_auc:.2f} — a modell nem "
+                                 f"különbözteti meg a kimeneteket, a küszöb "
+                                 f"találati aránya szelekciós zaj lenne")}
 
-    # Végső modell: a TELJES train-en (kalibrációs farokkal együtt) újratanítva
-    X_all = scaler.transform(train_all[features].to_numpy(dtype=float))
-    y_all = train_all[label_col].to_numpy()
+    thr, stats = _calibrate_threshold(p_ok, y_ok, min_wr, max_coverage, min_signals)
+
+    # ── A mentett modell: a TELJES train-en ────────────────────────────────
+    model, engine2 = _make_classifier(ratio)
     model.fit(X_all, y_all)
+    if len(getattr(model, "classes_", [0, 1])) < 2:
+        return None, {"enabled": False, "reason": "csak egy osztály a train-ben"}
 
-    stats.update({"auc": auc, "engine": engine,
-                  "train_rows": len(train_all), "tp_rate": float(y_all.mean())})
+    stats.update({"auc": auc, "engine": engine or engine2,
+                  "train_rows": len(train_all), "oof_rows": int(ok.sum()),
+                  "tp_rate": float(y_all.mean())})
     return {"model": model, "scaler": scaler, "threshold": thr}, stats
 
 
@@ -276,6 +342,10 @@ def train_symbol(symbol: str, df_m15: pd.DataFrame, cfg: dict, pair_cfg: dict,
     min_wr       = float(tr_cfg.get("min_model_win_rate", 0.4))
     max_coverage = float(tr_cfg.get("max_signal_coverage", 0.08))
     min_signals  = int(tr_cfg.get("min_calibration_signals", MIN_CALIB_SIGNALS))
+    # A fold-on kívüli kalibráció szeletszáma. Több fold = becsületesebb, de
+    # arányosan lassabb (fold-onként egy tanítás). 5 a szokásos kompromisszum.
+    n_splits     = max(2, int(tr_cfg.get("calibration_folds", 5)))
+    min_auc      = float(tr_cfg.get("min_model_auc", MIN_MODEL_AUC))
     lookback_yrs = float(tr_cfg.get("lookback_years", 3))
 
     from strategy import get_strategy_by_name
@@ -337,8 +407,12 @@ def train_symbol(symbol: str, df_m15: pd.DataFrame, cfg: dict, pair_cfg: dict,
     bundle: dict = {"symbol": symbol, "features": features}
     dir_stats: dict = {}
     for direction, label_col in (("long", "label_long"), ("short", "label_short")):
+        # A tisztító sáv PONTOSAN a címke horizontja: ennyi soron át fed át két
+        # szomszédos minta kimenete (lásd `oof_proba`).
         d, stats = _train_direction(train_all, label_col, features,
-                                    min_wr, max_coverage, min_signals)
+                                    min_wr, max_coverage, min_signals,
+                                    purge=lookahead, n_splits=n_splits,
+                                    min_auc=min_auc)
         if d is None:
             d = {"model": None, "scaler": None, "threshold": 1.01}
         bundle[direction] = d

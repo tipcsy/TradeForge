@@ -96,3 +96,32 @@ ugyanaz a küszöb már csak érmét dob.
   (EURUSD, UsaTec, GOLD). Ez a `min 40 kalibrációs jel` védelem műve.
 - Az AUC ~0,5 azt jelenti, hogy **a jellemzőkben nincs jel** — ezen sem küszöb, sem
   újratanítás nem segít. Vagy más jellemzők kellenek, vagy más célváltozó.
+
+## JAVÍTVA (v2.13.0): a küszöb ahhoz a modellhez tartozik, amelyik kiszolgálja
+
+A küszöb és az AUC mostantól a **teljes train-re vett fold-on kívüli**
+valószínűségekből jön (`oof_proba`), **tisztító sávval**: a címke `lookahead`
+gyertyát néz előre, tehát a szomszédos sorok kimenete átfed — a fold köré vágott
+sáv nélkül a tanító rész a teszt-rész jövőjét is látná.
+
+A mentett modell továbbra is a teljes train-en tanul (a friss adat számít), de a
+küszöb már arra az eloszlásra vonatkozik, amit élesben látni fog.
+
+Új védelem: **AUC-padló** (`optimizer.training.min_model_auc`, alap 0,52). Ha a
+modell nem tud megkülönböztetni, bármely küszöb „jó" találati aránya kizárólag a
+keresés mellékterméke — a `min_calibration_signals` a mintaszám felől véd, ez a
+jelforrás felől.
+
+### Mit hozott (2026-08-08, újratanítás 11 páron)
+
+Az őszinte kalibráció **22 irányból 17-et magától kikapcsolt**. Friss OOS-on
+(2026-05-01 … 08-07):
+
+| | kötés | P&L |
+|---|---|---|
+| ml_ai, régi kalibráció | 340 | **−827$** |
+| ml_ai, őszinte kalibráció | 164 | **−208$** |
+| `wpr_sma` ugyanott | 1314 | **+2394$** |
+
+> A javítás **nem teremt élt** — nem is teremthet. Azt szünteti meg, hogy a
+> stratégia zajra élesedjen: a kár a negyedére esett, de az előjel nem fordult.
