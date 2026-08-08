@@ -297,7 +297,32 @@ FEATURES = [
     "close_lag1", "close_lag2", "close_lag3", "close_lag4", "close_lag8",
     # DLO
     "dlo_val", "dlo_bull", "dlo_bear",
+    # Idő (v2.14.0) — lásd TIME_FEATURES
+    "hour_sin", "hour_cos", "hour", "dow",
 ]
+
+# ---------------------------------------------------------------------------
+# IDŐ-JELLEMZŐK — MIÉRT KERÜLTEK BE
+# ---------------------------------------------------------------------------
+# A készletben eddig NEM volt idő: a modell nem tudta, hány óra van. Közben a
+# címke elérhetősége órákként 2-2,5× szórást mutat (2026-08-08-i mérés):
+#
+#   Ger40   legjobb óra 39%  ↔ legrosszabb 14%   (átlag 27%)
+#   GOLD    legjobb óra 36%  ↔ legrosszabb 17%   (átlag 27%)
+#
+# És ez NEM zaj: a két félidő közti óra-rangsor Spearman-korrelációja 0,41–0,87,
+# és az ELSŐ félidőben legjobb 6 óra a MÁSODIK félidőben is emel (Ger40
+# 27,4% → 33,3%, UsaTec 26,8% → 32,7%) — mintán kívül, +3–6 százalékpont. Pont
+# az a nagyságrend, ami a nullszaldóhoz hiányzott (RR 2 → 33,3%).
+#
+# A `sess_start`/`sess_end` session-szűrő ezt NEM váltja ki: az egy durva be/ki
+# kapu, itt viszont a modell súlyozhat órák között.
+#
+# CIKLIKUS + NYERS EGYÜTT. A sin/cos azt kezeli, hogy a 23h és a 0h SZOMSZÉD (a
+# nyers számon ezek maximálisan távol esnének). A nyers órát viszont egy fa EGY
+# vágással ki tudja emelni („hour <= 7,5"), a ciklikus párból ugyanahhoz kettő
+# kellene — a kettő tehát nem redundáns, más-más vágást tesz olcsóvá.
+TIME_FEATURES = ["hour_sin", "hour_cos", "hour", "dow"]
 
 # Az indikátor-bemelegítéshez szükséges M15 sorok száma: a leghosszabb ablakos
 # indikátor (WPR55+WMA100=155, DLO mean_lb=100+DMI, H1 EMA50≈50 vödör = 200 M15)
@@ -392,5 +417,14 @@ def build_feature_frame(df_m15: pd.DataFrame, point_size: float) -> pd.DataFrame
     df["h1_trend_strong"] = h1_ctx["h1_trend_strong"].reindex(df.index, method="ffill").fillna(0)
     df["mtf_align_long"]  = ((df["trend_up"] == 1) & (df["h1_trend"] == 1)).astype(int)
     df["mtf_align_short"] = ((df["trend_up"] == 0) & (df["h1_trend"] == 0)).astype(int)
+
+    # ── Idő (lásd TIME_FEATURES) ──────────────────────────────────────────
+    # A gyertya SAJÁT nyitó-időbélyegéből — nincs benne semmi jövőbeli.
+    idx = df.index
+    _h = idx.hour + idx.minute / 60.0
+    df["hour_sin"] = np.sin(2 * np.pi * _h / 24.0)
+    df["hour_cos"] = np.cos(2 * np.pi * _h / 24.0)
+    df["hour"] = idx.hour.astype(float)
+    df["dow"] = idx.dayofweek.astype(float)
 
     return df

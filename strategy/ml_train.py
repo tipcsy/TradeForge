@@ -67,6 +67,23 @@ def label_outcomes(feats: pd.DataFrame, params: dict, point_size: float,
     fix_tp  = fix_sl * rr
     spread  = max(0.0, float(spread_points or 0.0)) * point_size
 
+    # ⚠ GYERTYÁNKÉNTI SPREAD, ha van. Egyetlen MEDIÁN spread azokban az órákban
+    # becsüli alá a költséget, ahol a valóság a legrosszabb — és pont ezeket az
+    # órákat kedveli meg a modell, amint idő-jellemzőt kap. Mérve (EURCHF, M1):
+    #
+    #   09h   17,5 pont spread / 13 pont gyertya-tartomány  =  1,3×
+    #   22h   20,1 / 6                                      =  3,4×
+    #   23h  103,0 / 7                                      = 14,7×   (rollover)
+    #
+    # A medián 15,4. A 23h-s címke tehát 6,7×-es kedvezményt kapott, és az így
+    # „megtanult" 22–23h-s belépő élesben biztos veszteség. A jelenség NEM az
+    # idő-jellemző hibája: az csak MEGTALÁLTA a címke hibáját.
+    sp_arr = None
+    if "avg_spread" in feats.columns:
+        _s = feats["avg_spread"].to_numpy(dtype=float)
+        _s = np.where(np.isfinite(_s) & (_s > 0), _s, spread)
+        sp_arr = _s
+
     label_long  = np.zeros(n, dtype=np.int8)
     label_short = np.zeros(n, dtype=np.int8)
 
@@ -82,11 +99,24 @@ def label_outcomes(feats: pd.DataFrame, params: dict, point_size: float,
             if sl <= 0:
                 continue
 
-        entry = closes[i]
-        # A szinteket a BID-gyertyákhoz igazítjuk (azokon mérünk `highs`/`lows`-t),
-        # de a VÉGREHAJTÁS oldalával: mindkét irányban a spreaddel rosszabb.
-        tp_l, sl_l = entry + tp + spread, entry - sl + spread
-        tp_s, sl_s = entry - tp - spread, entry + sl - spread
+        sp_i = spread if sp_arr is None else sp_arr[i]
+
+        # ⚠ A BELÉPŐ és az ÚT spreadje KÜLÖN. A gyertyák BID árak.
+        #   LONG:  ASK-on nyit (close + spread_i), BID-en zár → az úton NINCS spread.
+        #   SHORT: BID-en nyit (close),            ASK-on zár → az úton MINDEN
+        #          bárnál az ADOTT bár spreadje számít.
+        # A korábbi változat a BELÉPŐ bár spreadjét fagyasztotta rá az egész útra.
+        # Ez pont ott hazudik, ahol a spread a legjobban ingadozik: egy EURCHF
+        # short 22:30-kor „nyerőnek" számított, holott a 23h-s rollover (103 pont
+        # spread!) a stopot azonnal kiütötte — a bid elmozdulása nélkül is. Mérve:
+        # a címke 55,2%-ot mondott ugyanazokon a kötéseken, amiken a backtest
+        # 17,8%-ot; az eltérések 41%-a mind a 21:45–22:30 sávból jött. A modell
+        # tehát ELÉRHETETLEN kimenetre tanult, és az idő-jellemzővel pontosan ezt
+        # az órát tanulta meg „jónak".
+        entry_l = closes[i] + sp_i          # LONG: ask
+        entry_s = closes[i]                 # SHORT: bid
+        tp_l, sl_l = entry_l + tp, entry_l - sl
+        tp_s, sl_s = entry_s - tp, entry_s + sl
 
         for j in range(i + 1, i + lookahead + 1):
             if lows[j] <= sl_l:
@@ -95,9 +125,10 @@ def label_outcomes(feats: pd.DataFrame, params: dict, point_size: float,
                 label_long[i] = 1
                 break
         for j in range(i + 1, i + lookahead + 1):
-            if highs[j] >= sl_s:
+            sp_j = spread if sp_arr is None else sp_arr[j]
+            if highs[j] + sp_j >= sl_s:
                 break
-            if lows[j] <= tp_s:
+            if lows[j] + sp_j <= tp_s:
                 label_short[i] = 1
                 break
 
