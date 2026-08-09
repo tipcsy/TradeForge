@@ -37,6 +37,11 @@ input string InpFileSuffix    = "";     // Fajl-utotag (pl. _BT)
 input string InpStrategy      = "";     // Melyik strategia STATE sorai (ures = MIND)
 input int    InpStateTFMin    = 15;     // A STATE sorok idosikja percben
 input bool   InpUseClosedOnly = true;   // CSAK lezart M15 allapot (look-ahead ellen)
+// A fejlec helye/merete: vilagos charton a szurke olvashatatlan volt, ezert
+// sotet az alapszin; az eltolas azert input, mert mas indikator is odaerhet.
+input int    InpStatusX       = 6;      // Fejlec vizszintes eltolas (px)
+input int    InpStatusY       = 2;      // Fejlec FUGGOLEGES eltolas (px)
+input int    InpStatusFont    = 8;      // Betumeret
 
 #define PFX "TFV_"
 #define LBL "TFB_status"
@@ -61,9 +66,9 @@ void Status(string txt, color c)
    if(ObjectFind(0, LBL) < 0)
       ObjectCreate(0, LBL, OBJ_LABEL, win, 0, 0);
    ObjectSetInteger(0, LBL, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-   ObjectSetInteger(0, LBL, OBJPROP_XDISTANCE, 6);
-   ObjectSetInteger(0, LBL, OBJPROP_YDISTANCE, 2);
-   ObjectSetInteger(0, LBL, OBJPROP_FONTSIZE, 8);
+   ObjectSetInteger(0, LBL, OBJPROP_XDISTANCE, InpStatusX);
+   ObjectSetInteger(0, LBL, OBJPROP_YDISTANCE, InpStatusY);
+   ObjectSetInteger(0, LBL, OBJPROP_FONTSIZE, InpStatusFont);
    ObjectSetInteger(0, LBL, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, LBL, OBJPROP_COLOR, c);
    ObjectSetString (0, LBL, OBJPROP_FONT, "Consolas");
@@ -175,7 +180,7 @@ int OnInit()
    bool ok = ReadStates();
    IndicatorShortName("TF Bands");
    IndicatorDigits(2);
-   Status("TFBands: " + g_msg, ok ? clrSilver : clrOrangeRed);
+   Status("TFBands: " + g_msg, ok ? clrNavy : clrRed);
    return(INIT_SUCCEEDED);
 }
 
@@ -196,7 +201,7 @@ int OnCalculate(const int rates_total,
                 const long &volume[],
                 const int &spread[])
 {
-   Status("TFBands: " + g_msg, (g_ns > 0) ? clrSilver : clrOrangeRed);
+   Status("TFBands: " + g_msg, (g_ns > 0) ? clrNavy : clrRed);
    if(g_ns == 0) return(rates_total);
 
    int limit = rates_total - prev_calculated;
@@ -227,7 +232,7 @@ int OnCalculate(const int rates_total,
    }
    if(hit == 0)
       Status("TFBands: " + g_msg + "  ⚠ a chart idotartomanya NEM fedi a STATE ablakot",
-             clrOrangeRed);
+             clrRed);
    return(rates_total);
 }
 //+------------------------------------------------------------------+

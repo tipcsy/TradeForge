@@ -28,7 +28,15 @@ input string InpFileSuffix    = "";     // Fajl-utotag (pl. _BT a visszajatszash
 input string InpStrategy      = "";     // Melyik STRATEGIAT mutassa (ures = MIND)
 input bool   InpReplayGate    = true;   // Look-ahead kapu (tesztelohoz KELL)
 input int    InpTimerSeconds  = 1;      // Ujraolvasas elo charton (mp)
-input bool   InpShowStatus    = true;   // Allapotsor a bal felso sarokban
+input bool   InpShowStatus    = true;   // Allapotsor megjelenitese
+// ⚠ A viz-fajl SAJAT tabla-feliratai (SMA Period / WPR M15 / WPR M1) is a bal
+// felso sarokban ulnek, y=20..68 kozott — ezert az allapotsor alapbol ALATTUK
+// kezdodik. Ha nalad mas is ott van (FxSmartHand, masik indikator), told lejjebb.
+input int    InpStatusCorner  = 0;      // Sarok: 0=bal-fent 1=bal-lent 2=jobb-fent 3=jobb-lent
+input int    InpStatusX       = 10;     // Vizszintes eltolas (px)
+input int    InpStatusY       = 90;     // FUGGOLEGES eltolas (px) — ezt told, ha takar
+input int    InpStatusFont    = 9;      // Betumeret
+input color  InpStatusColor   = clrNavy;// Alapszin (VILAGOS hatterhez sotet kell!)
 // ⚠ SPOILER: megmondja, MENNYI IDO mulva jon a kovetkezo belepo. Kenyelmes, de
 // elrontja a merest: ha tudod, hogy 3 oran belul nincs jel, nem tudod oszinten
 // megiteni, hogy TE beszalltal-e volna kozben. Alapbol KI.
@@ -358,18 +366,27 @@ void UpsertLabel(string name, string &f[])
 //+------------------------------------------------------------------+
 //| Allapotsor — a teszteloben ebbol latszik, hogy a kapu dolgozik.   |
 //+------------------------------------------------------------------+
-void PutLabel(string name, int y, color c, string txt)
+//| `row`: hanyadik sor (0,1,2) — a sortavolsag a betumeretbol jon, hogy nagyobb
+//| fontnal se csusszanak egymasra.
+void PutLabel(string name, int row, color c, string txt)
 {
    if(ObjectFind(0, name) < 0)
    {
       ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
-      ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-      ObjectSetInteger(0, name, OBJPROP_XDISTANCE, 10);
-      ObjectSetInteger(0, name, OBJPROP_FONTSIZE, 8);
       ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
       ObjectSetString (0, name, OBJPROP_FONT, "Consolas");
    }
-   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
+   int corner = InpStatusCorner;
+   if(corner < 0 || corner > 3) corner = 0;
+   int step = InpStatusFont + 6;
+   // Also sarkoknal FELFELE noveljuk a tavolsagot, kulonben a sorok kilognanak.
+   bool lower = (corner == 1 || corner == 3);
+   ObjectSetInteger(0, name, OBJPROP_CORNER, corner);
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, InpStatusX);
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE,
+                    lower ? (InpStatusY + (2 - row) * step)
+                          : (InpStatusY + row * step));
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, InpStatusFont);
    ObjectSetInteger(0, name, OBJPROP_COLOR, c);
    ObjectSetString (0, name, OBJPROP_TEXT, txt);
 }
@@ -391,7 +408,9 @@ void Status(datetime now)
    }
    int left = g_sigTotal - seen;
 
-   PutLabel(STATUSNM, 18, (InpReplayGate ? clrLimeGreen : clrOrangeRed),
+   // ⚠ SZINEK: a chart hattere VILAGOS, ezert sotet arnyalatok kellenek. A fehér
+   // gyakorlatilag olvashatatlan volt rajta.
+   PutLabel(STATUSNM, 0, (InpReplayGate ? clrDarkGreen : clrRed),
       StringFormat("TFViz %s | %s | kapu:%s | %s",
                    g_file, (g_isTester ? "TESZTELO" : "ELO"),
                    (InpReplayGate ? "BE" : "KI  ⚠LATSZIK A JOVO"),
@@ -401,19 +420,19 @@ void Status(datetime now)
                             seen, g_sigTotal, seenB, seenS, left);
    if(g_sigLast > 0)
       s2 = s2 + "   |   utolso jel: " + TimeToString(g_sigLast, TIME_DATE | TIME_MINUTES);
-   PutLabel(STATUSNM + "2", 33, (left > 0 ? clrWhite : clrGold), s2);
+   PutLabel(STATUSNM + "2", 1, (left > 0 ? InpStatusColor : clrSaddleBrown), s2);
 
    // Spoiler-sor: csak kifejezett keresre.
    if(InpShowNextTime && next > 0)
    {
       long mins = (long)(next - now) / 60;
-      PutLabel(STATUSNM + "3", 48, clrOrange,
+      PutLabel(STATUSNM + "3", 2, clrDarkOrange,
          StringFormat("kovetkezo jel: %s  (%d ora %d perc mulva)  ⚠spoiler",
                       TimeToString(next, TIME_DATE | TIME_MINUTES),
                       (int)(mins / 60), (int)(mins % 60)));
    }
    else if(left == 0 && g_sigTotal > 0)
-      PutLabel(STATUSNM + "3", 48, clrGold, "Nincs tobb belepo ebben az ablakban.");
+      PutLabel(STATUSNM + "3", 2, clrSaddleBrown, "Nincs tobb belepo ebben az ablakban.");
 }
 
 

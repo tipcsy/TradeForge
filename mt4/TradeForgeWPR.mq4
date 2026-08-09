@@ -13,9 +13,11 @@
 //|     - vekony kek : a chart sajat idosikjanak WPR-je               |
 //|     - vastag naracs : az M15 WPR LEPCSOSEN kiteritve (a fo kapu)  |
 //|                                                                  |
-//|  ⚠ Look-ahead: az iWPR a teszteloben csak a szimulalt idoig lat,  |
-//|  tehat itt nem kell kulon kapu — az MT4 intezi.                   |
-//|  ⚠ Az M15-os vonalhoz az MT4-nek M15 elozmeny is kell.            |
+//|  ⚠ A KAPU-VONAL a chart SAJAT M1-gyertyaibol keszul (vodrozve), NEM|
+//|  az MT4 magasabb-idosiku sorozatabol: az a teszteloben res utan    |
+//|  lefagyhat, es akkor HAMIS, vizszintes vonalat adna. Igy viszont   |
+//|  nem kell kulon M15 elozmeny sem. Look-ahead nincs: a formalodo    |
+//|  vodor csak az AKTUALIS gyertyaig latszik.                        |
 //+------------------------------------------------------------------+
 #property copyright "TradeForge"
 #property version   "1.10"
@@ -28,6 +30,10 @@
 input string InpFileSuffix = "";        // Fajl-utotag (pl. _BT)
 input string InpStrategy   = "";        // Melyik strategia IND-jei (ures = MIND)
 input int    InpGateTFMin  = 15;        // A FO KAPU idosikja percben (M15)
+// A fejlec helye/merete: vilagos charton a szurke olvashatatlan volt.
+input int    InpStatusX    = 6;         // Fejlec vizszintes eltolas (px)
+input int    InpStatusY    = 2;         // Fejlec FUGGOLEGES eltolas (px)
+input int    InpStatusFont = 8;         // Betumeret
 
 #define PFX "TFV_"
 #define LBL "TFW_status"
@@ -50,9 +56,9 @@ void Status(string txt, color c)
    if(ObjectFind(0, LBL) < 0)
       ObjectCreate(0, LBL, OBJ_LABEL, win, 0, 0);
    ObjectSetInteger(0, LBL, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-   ObjectSetInteger(0, LBL, OBJPROP_XDISTANCE, 6);
-   ObjectSetInteger(0, LBL, OBJPROP_YDISTANCE, 2);
-   ObjectSetInteger(0, LBL, OBJPROP_FONTSIZE, 8);
+   ObjectSetInteger(0, LBL, OBJPROP_XDISTANCE, InpStatusX);
+   ObjectSetInteger(0, LBL, OBJPROP_YDISTANCE, InpStatusY);
+   ObjectSetInteger(0, LBL, OBJPROP_FONTSIZE, InpStatusFont);
    ObjectSetInteger(0, LBL, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, LBL, OBJPROP_COLOR, c);
    ObjectSetString (0, LBL, OBJPROP_FONT, "Consolas");
@@ -188,7 +194,7 @@ int OnInit()
 
    IndicatorShortName("TF WPR");
    IndicatorDigits(2);
-   Status("TFWPR: " + g_msg, ok ? clrSilver : clrOrangeRed);
+   Status("TFWPR: " + g_msg, ok ? clrNavy : clrRed);
    return(INIT_SUCCEEDED);
 }
 
@@ -280,7 +286,7 @@ int OnCalculate(const int rates_total,
 {
    if(rates_total < 2) return(0);
    Status("TFWPR: " + g_msg,
-          (g_perFast > 0 || g_perGate > 0) ? clrSilver : clrOrangeRed);
+          (g_perFast > 0 || g_perGate > 0) ? clrNavy : clrRed);
 
    int limit = rates_total - prev_calculated;
    if(prev_calculated > 0) limit++;
