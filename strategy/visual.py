@@ -201,6 +201,20 @@ class BarState:
     notrade=1 ÉS dir=0, window=0 (így a Viz csak a szürkét mutatja). A stratégia
     az órákról nem tud → mindig notrade=0-t ad, a keret írja felül.
 
+    `gate`: MIÉRT nem lépne be a motor ezen a gyertyán — a `core.gates` kulcsainak
+    kódja (0 = nyitva, semmi nem zár). A KERET tölti (`live_trader.apply_gate_state`),
+    a stratégia mindig 0-t ad.
+
+    Miért kell: eddig a sáv azt mutatta, hogy a trend és az M15-ablak KÉSZEN áll —
+    a chart tehát „belépőt ígért", miközben egy kapu némán zárt. (Mérve: UsaInd
+    2026-06-12 délelőtt 6 M1-jelölt tüzelt, mind kiesett, mert az ATR 0,67–0,89×
+    volt a mércének; a charton semmi nem árulta el.) Ugyanaz az aszimmetria, ami a
+    BTCUSD-nél hetekbe került — lásd `core.gates` VOLATILITY megjegyzését.
+
+    ⚠ Csak az ÉRVÉNYES kapuk kaphatnak kódot: a `none` hatású kapu SOSEM zár, tehát
+    nem is villoghat (`gates.evaluate` konvenciója). A `display_only` (Volatilitás)
+    viszont MINDIG érvényes, mert a szűrés a stratégia `bt_entry`-jében történik.
+
     `market_state`: GENERIKUS piac-állapot kód. **-1 = NINCS piac-sáv** (a piac-viz
     kikapcsolva vagy nincs kiválasztott piac-stratégia) → a TradeForgeBands NEM
     rajzol piac-sávot, és 3-sávos elrendezésre vált. **0..8 = besorolás-kód** (0 =
@@ -212,12 +226,14 @@ class BarState:
     dir: int = 0
     window: int = 0
     market_state: int = -1
+    gate: int = 0
 
     def line(self) -> str:
         return ";".join([
             "STATE", str(int(self.t)), str(int(self.notrade)),
             str(int(self.dir)), str(int(self.window)),
             str(int(self.market_state)),
+            str(int(self.gate)),
         ])
 
 

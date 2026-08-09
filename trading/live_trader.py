@@ -730,6 +730,104 @@ def apply_market_state(objects: list, df15, pair_cfg: dict = None) -> list:
     return objects
 
 
+# A `BarState.gate` kódjai — a `core.gates` REGISTRY sorrendjében, hogy a kód
+# stabil maradjon, ha új kapu kerül a végére.
+GATE_CODE = {"spread": 1, "tf_align": 2, "market": 3,
+             "momentum": 4, "cost": 5, "volatility": 6}
+
+
+def _g_code(key: str) -> int:
+    return GATE_CODE.get(key, 0)
+
+
+def apply_gate_state(objects: list, bars: dict, symbol: str, strategy_name: str,
+                     params: dict, pair_cfg: dict = None) -> list:
+    """KERETRENDSZER-szintű KAPU overlay: minden per-gyertya `BarState`-hez beírja,
+    MELYIK kapu zárna azon a gyertyán (0 = egyik sem).
+
+    Miért kell: a sáv eddig azt mutatta, hogy a trend + az M15-ablak KÉSZEN áll —
+    a chart tehát belépőt ígért, miközben egy kapu NÉMÁN zárt. Mérve (UsaInd,
+    2026-06-12 délelőtt): 6 M1-jelölt tüzelt, egy sem lett belépő, mert az ATR
+    0,67–0,89× volt a kalibrált mércének. A charton semmi nem árulta el. Ugyanaz
+    az aszimmetria, ami a BTCUSD-nél hetekbe került (lásd `core.gates` VOLATILITY).
+
+    ⚠ CSAK az ÉRVÉNYES kapuk kaphatnak kódot:
+      • `EFFECT_NONE` hatású kapu SOSEM zár → nem is villoghat (`gates.evaluate`
+        konvenciója: az ilyen kapu állapota mindig OFF),
+      • a `display_only` (Volatilitás) viszont MINDIG érvényes, mert a szűrés nem
+        a kapu-keretben, hanem a stratégia `bt_entry`-jében történik.
+    Így a „nincs kód" egyértelmű: nem azért, mert nem mértük, hanem mert nyitva van.
+
+    Több egyidejű zárásnál a REGISTRY-sorrendben ELSŐ kód kerül ki (determinisztikus).
+    """
+    df15 = (bars or {}).get("M15")
+    if df15 is None or len(df15) < 3:
+        return objects
+    try:
+        from strategy import visual as viz
+        from core import gates as _g, vol_baseline as _vb, spread_gate as _sg
+
+        eff = _g.effects_for(_run_cfg, symbol, strategy_name)
+        active = {k for k in _g.KEYS
+                  if _g.is_display_only(k) or eff.get(k) != _g.EFFECT_NONE}
+        if not active:
+            return objects
+
+        atr = df15["atr"] if "atr" in df15.columns else None
+        if atr is None:
+            from core.indicator_engine import atr as _atr_fn
+            atr = _atr_fn(df15["high"], df15["low"], df15["close"],
+                          int(params.get("atr_period", 14)))
+        spread = df15["spread"] if "spread" in df15.columns else None
+
+        point_size = float(params.get("point_size") or 0.0)
+        normal_sp = (pair_cfg or {}).get("backtest_spread_points")
+        gate_fn = (tf_align_gate_fn(symbol, strategy_name, params)
+                   if "tf_align" in active else None)
+        base = _vb.effective(params, 0.0)
+        lo, hi = _vb.band(params, base)
+
+        # Bar-adatok epoch szerint — a BarState-ek a MÁSIK irányból jönnek.
+        idx = [int(t.timestamp()) for t in df15.index]
+        a_by = {idx[i]: float(atr.iloc[i] or 0.0) for i in range(len(idx))}
+        c_by = {idx[i]: float(df15["close"].iloc[i]) for i in range(len(idx))}
+        s_by = ({idx[i]: float(spread.iloc[i] or 0.0) for i in range(len(idx))}
+                if spread is not None else {})
+        step = int((df15.index[1] - df15.index[0]).total_seconds()) if len(idx) > 1 else 0
+
+        for o in objects:
+            if not isinstance(o, viz.BarState):
+                continue
+            # A STATE sorok +1 M15 gyertyával el vannak tolva (a jelzés a ZÁRÁS
+            # után él) → a kapu-kód ahhoz a gyertyához tartozik, amelyikből a sáv
+            # többi mezője is származik. Enélkül a magyarázat elcsúszna a jeltől.
+            t = int(o.t) - step
+            a = a_by.get(t, 0.0)
+            code = 0
+            # 1) Spread
+            if "spread" in active and t in s_by and a > 0 and point_size > 0:
+                ok, _cap = _sg.spread_ok(s_by[t] / point_size, a, point_size,
+                                         params, normal_sp)
+                if not ok:
+                    code = _g_code("spread")
+            # 2) Idősík-együttállás — a sáv IRÁNYÁBA állt-e minden figyelt idősík?
+            if code == 0 and gate_fn is not None and o.dir:
+                d = "BUY" if o.dir > 0 else "SELL"
+                try:
+                    if not gate_fn(t, c_by.get(t, 0.0), d):
+                        code = _g_code("tf_align")
+                except Exception:
+                    pass
+            # 6) Volatilitás — display_only, tehát MINDIG érvényes
+            if code == 0 and "volatility" in active and a > 0 and base > 0:
+                if (lo > 0 and a < lo) or (hi > 0 and a > hi):
+                    code = _g_code("volatility")
+            o.gate = code
+    except Exception as e:
+        log.debug("kapu-overlay hiba: %s", e)
+    return objects
+
+
 def tf_align_visual_objects(symbol: str) -> list:
     """A TF-együttállás figyelő SMA-vonalai a charton: a figyelt idősíkokra egy-egy
     MA(sma_period), a fő ablakba (az MQL5 iMA-val rajzolja az adott idősíkon). Az
@@ -984,6 +1082,10 @@ def pair_visual_lines(symbol: str, params: dict, strategy, point_size: float,
     # + a GENERIKUS piac-állapot kód a per-gyertya BarState-ekhez (a per-pár
     #   kiválasztott piac-stratégiából; csak ha kérve van a charton).
     objects = apply_market_state(objects, bars.get("M15"), pair_cfg)
+    # + MIÉRT nem lépne be a motor: a kapu-kód a per-gyertya sáv-állapotba. Enélkül
+    #   a chart „belépőt ígért" (trend + M15-ablak kész), miközben egy kapu némán zárt.
+    objects = apply_gate_state(objects, bars, symbol, strategy.name,
+                               {**params, "point_size": point_size}, pair_cfg)
     # + a VALÓS kötések nyilai ugyanarra az M1-ablakra (a maszkolás UTÁN). Ezek MINDIG
     #   látszanak (a „K" gomb a jel-replay-t kapcsolja, nem a tényleges kötéseket).
     m1 = bars.get("M1")

@@ -3,12 +3,22 @@
 //|  A TradeForge allapot-SAVJA (TBAND) MT4-re.                       |
 //|                                                                  |
 //|  Adat: a Common\Files\TFV_<Symbol>[suffix].csv STATE sorai:       |
-//|     STATE;<strategia>;<epoch>;<notrade>;<dir>;<window>;<market>   |
+//|     STATE;<strat>;<epoch>;<notrade>;<dir>;<window>;<market>;<kapu>|
 //|                                                                  |
-//|  Harom sav, fentrol lefele:                                       |
-//|     1) szurke : no-trade ora (a motor ilyenkor nem lep be)        |
-//|     2) zold/piros : SMA-irany (a fo trend-kapu)                   |
-//|     3) kek   : aktiv M15 jelzesi ablak                            |
+//|  Savok, fentrol lefele (csak amelyikben VAN adat):                 |
+//|     1) KEK        : aktiv M15 jelzesi ablak                        |
+//|     2) ALLAPOT    : szurke no-trade VAGY zold/piros SMA-irany       |
+//|                     (kizarjak egymast -> egy sav)                  |
+//|     3) KAPU       : MIERT nem lepne be a motor (ures = nyitva)     |
+//|          sarga=volatilitas  lila=spread  narancs=egyuttallas       |
+//|          barna=piac/lendulet/koltseg                               |
+//|                                                                  |
+//|  ⚠ A KAPU-sav a hianyzo indoklas. Eddig a sav azt mutatta, hogy a  |
+//|  trend + az ablak KESZEN all — a chart tehat belepot igert, mikozben|
+//|  egy kapu NEMAN zart. Merve (UsaInd 2026-06-12 delelott): 6 M1-jelolt|
+//|  tuzelt, egy sem lett belepo, mert az ATR 0,67-0,89x volt a mercenek.|
+//|  CSAK az ERVENYES kapuk kapnak szint: a `none` hatasu kapu sosem zar,|
+//|  tehat nem is villoghat (a Volatilitas `display_only` -> mindig el).|
 //|                                                                  |
 //|  ⚠ MIERT KELL EZ M1-EN: a Strategy Testerben NEM tudsz idosikot   |
 //|  valtani. A dontes viszont M15-on szuletik. A STATE sorok M15-hoz |
@@ -33,7 +43,7 @@
 #property indicator_separate_window
 #property indicator_minimum 0.0
 #property indicator_maximum 1.0
-#property indicator_buffers 4
+#property indicator_buffers 8
 
 input string InpFileSuffix    = "";     // Fajl-utotag (pl. _BT)
 input string InpStrategy      = "";     // Melyik strategia STATE sorai (ures = MIND)
@@ -68,18 +78,26 @@ input int    InpBandHeightPx  = 24;     // EGY sav magassaga px (0 = kezi merete
 // sav a LEGMAGASABB es azt rajzoljuk ELOSZOR; a kesobbi (rovidebb) histogramok
 // rafestenek az also reszre. A buffer-sorrend tehat a sav-sorrend.
 double Window[];     // 0 -> a legmagasabb  (a KEK sav lesz lathato felul)
-double TrBuy[];      // 1
-double TrSell[];     // 2
-double NoTrade[];    // 3 -> a legrovidebb  (SZURKE, alul)
+// Allapot-sav (kizarjak egymast: a no-trade gyertyan a dir mindig 0)
+double TrBuy[];      // 1  zold
+double TrSell[];     // 2  piros
+double NoTrade[];    // 3  szurke
+// KAPU-sav (a legalso): MIERT nem lepne be a motor ezen a gyertyan.
+// Kulon buffer szinenkent, mert MQL4-ben egy ploton belul nincs szinindex.
+double GVol[];       // 4  volatilitas   (a leggyakoribb)
+double GSpread[];    // 5  spread
+double GAlign[];     // 6  idosik-egyuttallas
+double GOther[];     // 7  piac / lendulet / koltseg
 
 // Csak azok a savok kapnak helyet, amelyekben VAN adat. Ha pl. minden ora
 // engedelyezett (a no-trade vegig 0), a szurke sav elhagyasa a maradek kettonek
 // KETSZER akkora helyet ad — a merteknel ez a kulonbseg dont.
-double h_win = 0.0, h_trend = 0.0, h_nt = 0.0;
+double h_win = 0.0, h_trend = 0.0, h_nt = 0.0, h_gate = 0.0;
 int    g_nbands = 0;
 
 datetime g_t[];
-int      g_nt[], g_dir[], g_win[];
+int      g_nt[], g_dir[], g_win[], g_gate[];
+int      g_cVol = 0, g_cSpr = 0, g_cAli = 0, g_cOth = 0, g_cOpen = 0;
 int      g_ns  = 0;
 string   g_msg = "";
 
@@ -135,8 +153,9 @@ bool ReadStates()
    }
 
    ArrayResize(g_t, 0); ArrayResize(g_nt, 0);
-   ArrayResize(g_dir, 0); ArrayResize(g_win, 0);
+   ArrayResize(g_dir, 0); ArrayResize(g_win, 0); ArrayResize(g_gate, 0);
    g_ns = 0;
+   g_cVol = 0; g_cSpr = 0; g_cAli = 0; g_cOth = 0; g_cOpen = 0;
    int skippedStrat = 0;
 
    while(!FileIsEnding(h))
@@ -152,6 +171,15 @@ bool ReadStates()
       ArrayResize(g_nt,  g_ns + 1); g_nt[g_ns]  = (int)StringToInteger(f[3]);
       ArrayResize(g_dir, g_ns + 1); g_dir[g_ns] = (int)StringToInteger(f[4]);
       ArrayResize(g_win, g_ns + 1); g_win[g_ns] = (int)StringToInteger(f[5]);
+      // STATE;<strat>;t;notrade;dir;window;market;GATE  — a kapu-kod a 8. mezo.
+      // Regi fajlban nincs -> 0 (= nyitva), tehat visszafele kompatibilis.
+      int gc = (n >= 8) ? (int)StringToInteger(f[7]) : 0;
+      ArrayResize(g_gate, g_ns + 1); g_gate[g_ns] = gc;
+      if(gc == 1)      g_cSpr++;
+      else if(gc == 2) g_cAli++;
+      else if(gc == 6) g_cVol++;
+      else if(gc != 0) g_cOth++;
+      else             g_cOpen++;
       g_ns++;
    }
    FileClose(h);
@@ -163,9 +191,16 @@ bool ReadStates()
       Print("[TFBands] ", g_msg);
       return(false);
    }
-   g_msg = StringFormat("%s | STATE=%d | %s -> %s", file, g_ns,
+   // A KAPU-osszegzes: melyik kapu hanyszor zart. Enelkul a szines sav "valami
+   // blokkol" maradna; igy szammal is olvashato, mi tartja vissza a motort.
+   string gsum = "nyitva " + IntegerToString(g_cOpen);
+   if(g_cVol > 0) gsum = gsum + " | volatilitas " + IntegerToString(g_cVol);
+   if(g_cSpr > 0) gsum = gsum + " | spread "      + IntegerToString(g_cSpr);
+   if(g_cAli > 0) gsum = gsum + " | egyuttallas " + IntegerToString(g_cAli);
+   if(g_cOth > 0) gsum = gsum + " | egyeb "       + IntegerToString(g_cOth);
+   g_msg = StringFormat("%s | STATE=%d | %s -> %s | KAPU: %s", file, g_ns,
                         TimeToString(g_t[0], TIME_DATE | TIME_MINUTES),
-                        TimeToString(g_t[g_ns - 1], TIME_DATE | TIME_MINUTES));
+                        TimeToString(g_t[g_ns - 1], TIME_DATE | TIME_MINUTES), gsum);
    Print("[TFBands] ", g_msg);
    return(true);
 }
@@ -191,18 +226,26 @@ int FindState(datetime at)
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   IndicatorBuffers(4);
+   IndicatorBuffers(8);
    // A buffer-sorrend = a sav-sorrend fentrol lefele (lasd fent).
    SetIndexBuffer(0, Window);  SetIndexStyle(0, DRAW_HISTOGRAM, STYLE_SOLID, 3, C'0,120,255');
    SetIndexBuffer(1, TrBuy);   SetIndexStyle(1, DRAW_HISTOGRAM, STYLE_SOLID, 3, C'0,170,0');
    SetIndexBuffer(2, TrSell);  SetIndexStyle(2, DRAW_HISTOGRAM, STYLE_SOLID, 3, C'220,0,0');
    SetIndexBuffer(3, NoTrade); SetIndexStyle(3, DRAW_HISTOGRAM, STYLE_SOLID, 3, C'150,150,150');
+   SetIndexBuffer(4, GVol);    SetIndexStyle(4, DRAW_HISTOGRAM, STYLE_SOLID, 3, C'180,140,0');
+   SetIndexBuffer(5, GSpread); SetIndexStyle(5, DRAW_HISTOGRAM, STYLE_SOLID, 3, C'200,0,200');
+   SetIndexBuffer(6, GAlign);  SetIndexStyle(6, DRAW_HISTOGRAM, STYLE_SOLID, 3, C'255,120,0');
+   SetIndexBuffer(7, GOther);  SetIndexStyle(7, DRAW_HISTOGRAM, STYLE_SOLID, 3, C'120,60,20');
 
    SetIndexLabel(0, "M15 ablak");
    SetIndexLabel(1, "Trend BUY");
    SetIndexLabel(2, "Trend SELL");
    SetIndexLabel(3, "No-trade");
-   for(int b = 0; b < 4; b++) SetIndexEmptyValue(b, 0.0);
+   SetIndexLabel(4, "KAPU: volatilitas");
+   SetIndexLabel(5, "KAPU: spread");
+   SetIndexLabel(6, "KAPU: egyuttallas");
+   SetIndexLabel(7, "KAPU: egyeb");
+   for(int b = 0; b < 8; b++) SetIndexEmptyValue(b, 0.0);
 
    bool ok = ReadStates();
 
@@ -210,16 +253,17 @@ int OnInit()
    // KIZARJA egymast. A Python `apply_no_trade` a no-trade gyertyan `dir=0`-t is
    // beallit, tehat ha szurke van, trend-szin SOSEM lehet — es forditva. Ket kulon
    // sor egyiket mindig uresen hagyta, feleslegesen fogyasztva a magassagot.
-   bool useWin = false, useState = false;
+   bool useWin = false, useState = false, useGate = false;
    for(int i = 0; i < g_ns; i++)
    {
       if(g_win[i] != 0) useWin = true;
       if(g_dir[i] != 0 || g_nt[i] != 0) useState = true;
+      if(g_gate[i] != 0) useGate = true;
    }
-   g_nbands = (useWin ? 1 : 0) + (useState ? 1 : 0);
+   g_nbands = (useWin ? 1 : 0) + (useState ? 1 : 0) + (useGate ? 1 : 0);
    if(g_nbands == 0) g_nbands = 1;
 
-   // Fentrol lefele: kek (M15-ablak) -> allapot (szurke VAGY zold/piros).
+   // Fentrol lefele: kek (M15-ablak) -> allapot -> KAPU (miert nem lep be).
    int k = 0;
    if(useWin)   { h_win = (double)(g_nbands - k) / g_nbands; k++; }
    if(useState)
@@ -228,6 +272,7 @@ int OnInit()
       h_trend = h; h_nt = h;                 // KOZOS sor — kizarjak egymast
       k++;
    }
+   if(useGate)  { h_gate = (double)(g_nbands - k) / g_nbands; k++; }
 
    // Az al-ablak magassaga a savszamhoz igazodik — kulonben harom sav egy 20 px-es
    // csikban osszemosodik (pontosan ez tette olvashatatlanna az elso valtozatot).
@@ -272,6 +317,7 @@ int OnCalculate(const int rates_total,
    for(int i = 0; i < limit; i++)
    {
       NoTrade[i] = 0.0; TrBuy[i] = 0.0; TrSell[i] = 0.0; Window[i] = 0.0;
+      GVol[i] = 0.0; GSpread[i] = 0.0; GAlign[i] = 0.0; GOther[i] = 0.0;
 
       // Look-ahead ellen: az M15 gyertya allapota csak a ZARASAKOR ismert.
       datetime at = Time[i];
@@ -289,6 +335,12 @@ int OnCalculate(const int rates_total,
       if(g_dir[k] > 0)      TrBuy[i]   = h_trend;
       else if(g_dir[k] < 0) TrSell[i]  = h_trend;
       if(g_nt[k]  != 0)     NoTrade[i] = h_nt;
+      // KAPU-sav: 1=spread 2=egyuttallas 6=volatilitas, egyeb=piac/lendulet/koltseg.
+      // 0 (nyitva) -> ures: ott a motor tenylegesen belephetne.
+      if(g_gate[k] == 6)      GVol[i]    = h_gate;
+      else if(g_gate[k] == 1) GSpread[i] = h_gate;
+      else if(g_gate[k] == 2) GAlign[i]  = h_gate;
+      else if(g_gate[k] != 0) GOther[i]  = h_gate;
    }
    if(hit == 0)
       Status("TFBands: " + g_msg + "  ⚠ a chart idotartomanya NEM fedi a STATE ablakot",
