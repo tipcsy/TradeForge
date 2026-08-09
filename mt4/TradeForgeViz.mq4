@@ -1,0 +1,400 @@
+//+------------------------------------------------------------------+
+//|                                              TradeForgeViz.mq4    |
+//|  A TradeForge chart-vizualizacio MT4-es valtozata: felolvassa a    |
+//|  Python altal irt Common\Files\TFV_<Symbol>[suffix].csv fajlt es   |
+//|  kirajzolja az objektumokat.                                      |
+//|                                                                  |
+//|  ⚠ AMIBEN ELTER AZ MT5-OSTOL — es ez a lenyeg:                    |
+//|                                                                  |
+//|  LOOK-AHEAD KAPU. A fajl a TELJES pillanatkep, a JOVOBELI jelekkel|
+//|  egyutt. Ha a Strategy Testerben mindet kirajzolnank, latnad a    |
+//|  holnapi belepot ma — a manualis teszt ertelmet vesztene. Ezert az|
+//|  objektumok CSAK a chart aktualis idejeig (Time[0]) fedodnek fel, |
+//|  a szakaszok (TREND: SL/TP, szalag) pedig EGYUTT NONEK az idovel. |
+//|                                                                  |
+//|  Telepites: masold az MQL4\Indicators mappaba, forditsd (F7),     |
+//|  majd huzd a chartra (elo VAGY vizualis tesztelo).                |
+//|                                                                  |
+//|  A fajl a KOZOS (Common) mappaban van — merve: az MT4 tesztelo    |
+//|  olvassa, es PORTABLE modban sem koltozik.                        |
+//+------------------------------------------------------------------+
+#property copyright "TradeForge"
+#property version   "1.00"
+#property strict
+#property indicator_chart_window
+#property indicator_buffers 0
+
+input string InpFileSuffix   = "";      // Fajl-utotag (pl. _BT a visszajatszashoz)
+input string InpStrategy     = "";      // Melyik STRATEGIAT mutassa (ures = MIND)
+input bool   InpReplayGate   = true;    // Look-ahead kapu (tesztelohoz KELL)
+input int    InpTimerSeconds = 1;       // Ujraolvasas elo charton (mp)
+input bool   InpShowStatus   = true;    // Allapotsor a bal felso sarokban
+
+#define PFX      "TFV_"
+#define STATUSNM "TFV_zz_status"
+
+string g_file;        // TFV_<Symbol><suffix>.csv
+string g_objpref;     // szuro-prefix: TFV_  VAGY  TFV_<InpStrategy>@
+
+// A beolvasott rekordok. A tesztelo miatt CACHE-eljuk: a fajl ott nem valtozik,
+// viszont bar-onkent ujra kell donteni, mi lathato mar.
+string   g_ln[];      // a nyers sor
+datetime g_t[];       // a rekord horgony-ideje (0 = mindig lathato, pl. LABEL)
+datetime g_t2[];      // szakasz-vegpont (TREND); 0 ha nem szakasz
+bool     g_done[];    // mar veglegesen kirakva (nem no tovabb)
+int      g_n = 0;
+string   g_names[];   // a felrakott objektumok nevei (sopreshez)
+int      g_nnames = 0;
+datetime g_lastReveal = 0;
+bool     g_isTester   = false;
+
+
+//+------------------------------------------------------------------+
+//| "r,g,b" -> color. Sajat parser: az MQL4 StringToColor viselkedese |
+//| buildenkent elter, ez viszont mindig ugyanaz.                     |
+//+------------------------------------------------------------------+
+color RgbFromStr(string s)
+{
+   string p[];
+   if(StringSplit(s, ',', p) < 3)
+      return(clrGray);
+   int r = (int)StringToInteger(p[0]);
+   int g = (int)StringToInteger(p[1]);
+   int b = (int)StringToInteger(p[2]);
+   return((color)(r + (g << 8) + (b << 16)));
+}
+
+
+//+------------------------------------------------------------------+
+//| Az elem neve mar szerepel-e a felrakottak kozt                    |
+//+------------------------------------------------------------------+
+void RememberName(string nm)
+{
+   for(int i = 0; i < g_nnames; i++)
+      if(g_names[i] == nm) return;
+   ArrayResize(g_names, g_nnames + 1);
+   g_names[g_nnames] = nm;
+   g_nnames++;
+}
+
+
+//+------------------------------------------------------------------+
+//| A fajl beolvasasa a cache-be (rajzolas NELKUL)                    |
+//+------------------------------------------------------------------+
+bool LoadFile()
+{
+   int h = FileOpen(g_file, FILE_READ | FILE_TXT | FILE_ANSI | FILE_COMMON);
+   if(h == INVALID_HANDLE)
+      return(false);
+
+   ArrayResize(g_ln, 0); ArrayResize(g_t, 0);
+   ArrayResize(g_t2, 0); ArrayResize(g_done, 0);
+   g_n = 0;
+
+   while(!FileIsEnding(h))
+   {
+      string ln = FileReadString(h);
+      if(StringLen(ln) == 0) continue;
+
+      if(StringFind(ln, "CLEAR") == 0)
+      {
+         ObjectsDeleteAll(0, g_objpref);
+         continue;
+      }
+      // ALERT / IND / STATE / RECT: nem ennek az indikatornak szolnak.
+      //  - STATE + RECT -> TradeForgeBands (al-ablak)
+      //  - IND          -> TradeForgeWPR   (al-ablak, sajat parameterekkel)
+      //  - ALERT        -> a teszteloben ertelmetlen (nincs valos ido)
+      if(StringFind(ln, "ALERT;") == 0) continue;
+      if(StringFind(ln, "IND;")   == 0) continue;
+      if(StringFind(ln, "STATE;") == 0) continue;
+      if(StringFind(ln, "RECT;")  == 0) continue;
+
+      string f[];
+      int nf = StringSplit(ln, ';', f);
+      if(nf < 2) continue;
+
+      string type = f[0];
+      string name = f[1];
+      if(StringFind(name, g_objpref) != 0)   // masik strategia
+         continue;
+
+      datetime t1 = 0, t2 = 0;
+      if(type == "VLINE" && nf >= 5)      { t1 = (datetime)StringToInteger(f[2]); }
+      else if(type == "TREND" && nf >= 8) { t1 = (datetime)StringToInteger(f[2]);
+                                            t2 = (datetime)StringToInteger(f[4]); }
+      else if(type == "ARROW" && nf >= 7) { t1 = (datetime)StringToInteger(f[2]); }
+      else if(type == "TEXT"  && nf >= 7) { t1 = (datetime)StringToInteger(f[2]); }
+      else if(type == "LABEL" && nf >= 8) { t1 = 0; }   // sarokhoz kotott: mindig lathato
+      else continue;
+
+      ArrayResize(g_ln, g_n + 1);   g_ln[g_n]   = ln;
+      ArrayResize(g_t,  g_n + 1);   g_t[g_n]    = t1;
+      ArrayResize(g_t2, g_n + 1);   g_t2[g_n]   = t2;
+      ArrayResize(g_done, g_n + 1); g_done[g_n] = false;
+      g_n++;
+   }
+   FileClose(h);
+   return(true);
+}
+
+
+//+------------------------------------------------------------------+
+//| A LOOK-AHEAD KAPU: a `now`-ig felfedjuk a rekordokat.             |
+//|                                                                  |
+//| - t1 > now            -> meg NEM latszik (ez a lenyeg)            |
+//| - szakasz (TREND):    -> a vegpontot `now`-ra vagjuk, es a kesobbi|
+//|                          korokben UJRA rajzoljuk -> EGYUTT NO az  |
+//|                          idovel, mint elesben.                    |
+//+------------------------------------------------------------------+
+void Reveal(datetime now)
+{
+   bool gate = InpReplayGate;
+   for(int i = 0; i < g_n; i++)
+   {
+      if(g_done[i]) continue;
+      if(gate && g_t[i] > now) continue;          // meg a jovoben van
+
+      string f[];
+      StringSplit(g_ln[i], ';', f);
+      string type = f[0];
+      string name = f[1];
+
+      if(type == "VLINE")      UpsertVLine(name, f);
+      else if(type == "TREND")
+      {
+         datetime tEnd = g_t2[i];
+         bool growing = false;
+         if(gate && tEnd > now) { tEnd = now; growing = true; }
+         UpsertTrend(name, f, tEnd);
+         if(growing) { RememberName(name); continue; }   // marad "elo", meg no
+      }
+      else if(type == "ARROW") UpsertArrow(name, f);
+      else if(type == "TEXT")  UpsertText(name, f);
+      else if(type == "LABEL") UpsertLabel(name, f);
+
+      g_done[i] = true;
+      RememberName(name);
+   }
+}
+
+
+//+------------------------------------------------------------------+
+//| VLINE;name;t1;r,g,b;width                                        |
+//+------------------------------------------------------------------+
+void UpsertVLine(string name, string &f[])
+{
+   datetime t1 = (datetime)StringToInteger(f[2]);
+   if(ObjectFind(0, name) < 0)
+   {
+      ObjectCreate(0, name, OBJ_VLINE, 0, t1, 0);
+      ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+      ObjectSetInteger(0, name, OBJPROP_BACK, true);
+   }
+   else ObjectMove(0, name, 0, t1, 0);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, RgbFromStr(f[3]));
+   ObjectSetInteger(0, name, OBJPROP_WIDTH, (int)StringToInteger(f[4]));
+}
+
+
+//+------------------------------------------------------------------+
+//| TREND;name;t1;p1;t2;p2;r,g,b;width[;style]                        |
+//| A `tEnd` a KAPUZOTT vegpont (a hivo vagja `now`-ra).              |
+//+------------------------------------------------------------------+
+void UpsertTrend(string name, string &f[], datetime tEnd)
+{
+   datetime t1 = (datetime)StringToInteger(f[2]);
+   double   p1 = StringToDouble(f[3]);
+   double   p2 = StringToDouble(f[5]);
+   int      st = (ArraySize(f) >= 9) ? (int)StringToInteger(f[8]) : 0;
+   if(tEnd < t1) tEnd = t1;
+
+   if(ObjectFind(0, name) < 0)
+   {
+      ObjectCreate(0, name, OBJ_TREND, 0, t1, p1, tEnd, p2);
+      ObjectSetInteger(0, name, OBJPROP_RAY_RIGHT, false);
+      ObjectSetInteger(0, name, OBJPROP_RAY, false);
+      ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+      ObjectSetInteger(0, name, OBJPROP_BACK, true);
+   }
+   else
+   {
+      ObjectMove(0, name, 0, t1,   p1);
+      ObjectMove(0, name, 1, tEnd, p2);
+   }
+   ObjectSetInteger(0, name, OBJPROP_COLOR, RgbFromStr(f[6]));
+   ObjectSetInteger(0, name, OBJPROP_WIDTH, (int)StringToInteger(f[7]));
+   ObjectSetInteger(0, name, OBJPROP_STYLE, st);
+}
+
+
+//+------------------------------------------------------------------+
+//| ARROW;name;t1;p1;code;r,g,b;width                                |
+//+------------------------------------------------------------------+
+void UpsertArrow(string name, string &f[])
+{
+   datetime t1   = (datetime)StringToInteger(f[2]);
+   double   p1   = StringToDouble(f[3]);
+   int      code = (int)StringToInteger(f[4]);
+   if(ObjectFind(0, name) < 0)
+   {
+      ObjectCreate(0, name, OBJ_ARROW, 0, t1, p1);
+      ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+   }
+   else ObjectMove(0, name, 0, t1, p1);
+   ObjectSetInteger(0, name, OBJPROP_ARROWCODE, code);
+   ObjectSetInteger(0, name, OBJPROP_ANCHOR, (code == 234) ? ANCHOR_BOTTOM : ANCHOR_TOP);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, RgbFromStr(f[5]));
+   ObjectSetInteger(0, name, OBJPROP_WIDTH, (int)StringToInteger(f[6]));
+}
+
+
+//+------------------------------------------------------------------+
+//| TEXT;name;t1;p1;r,g,b;fontsize;szoveg                            |
+//+------------------------------------------------------------------+
+void UpsertText(string name, string &f[])
+{
+   datetime t1 = (datetime)StringToInteger(f[2]);
+   double   p1 = StringToDouble(f[3]);
+   if(ObjectFind(0, name) < 0)
+   {
+      ObjectCreate(0, name, OBJ_TEXT, 0, t1, p1);
+      ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+   }
+   else ObjectMove(0, name, 0, t1, p1);
+   ObjectSetString (0, name, OBJPROP_TEXT, f[6]);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, RgbFromStr(f[4]));
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, (int)StringToInteger(f[5]));
+}
+
+
+//+------------------------------------------------------------------+
+//| LABEL;name;corner;x;y;r,g,b;fontsize;szoveg                       |
+//+------------------------------------------------------------------+
+void UpsertLabel(string name, string &f[])
+{
+   if(ObjectFind(0, name) < 0)
+   {
+      ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
+      ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+   }
+   ObjectSetInteger(0, name, OBJPROP_CORNER,    (int)StringToInteger(f[2]));
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, (int)StringToInteger(f[3]));
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, (int)StringToInteger(f[4]));
+   ObjectSetString (0, name, OBJPROP_TEXT,      f[7]);
+   ObjectSetInteger(0, name, OBJPROP_COLOR,     RgbFromStr(f[5]));
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE,  (int)StringToInteger(f[6]));
+}
+
+
+//+------------------------------------------------------------------+
+//| Allapotsor — a teszteloben ebbol latszik, hogy a kapu dolgozik.   |
+//+------------------------------------------------------------------+
+void Status(datetime now)
+{
+   if(!InpShowStatus) return;
+   int shown = 0;
+   for(int i = 0; i < g_n; i++) if(g_done[i]) shown++;
+   if(ObjectFind(0, STATUSNM) < 0)
+   {
+      ObjectCreate(0, STATUSNM, OBJ_LABEL, 0, 0, 0);
+      ObjectSetInteger(0, STATUSNM, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetInteger(0, STATUSNM, OBJPROP_XDISTANCE, 10);
+      ObjectSetInteger(0, STATUSNM, OBJPROP_YDISTANCE, 18);
+      ObjectSetInteger(0, STATUSNM, OBJPROP_FONTSIZE, 8);
+      ObjectSetInteger(0, STATUSNM, OBJPROP_SELECTABLE, false);
+      ObjectSetString (0, STATUSNM, OBJPROP_FONT, "Consolas");
+   }
+   ObjectSetInteger(0, STATUSNM, OBJPROP_COLOR, InpReplayGate ? clrLimeGreen : clrOrangeRed);
+   ObjectSetString (0, STATUSNM, OBJPROP_TEXT,
+      StringFormat("TFViz %s | %s | kapu:%s | %d/%d objektum | %s",
+                   g_file, (g_isTester ? "TESZTELO" : "ELO"),
+                   (InpReplayGate ? "BE" : "KI  ⚠LATSZIK A JOVO"),
+                   shown, g_n, TimeToString(now, TIME_DATE | TIME_MINUTES)));
+}
+
+
+//+------------------------------------------------------------------+
+int OnInit()
+{
+   g_isTester = IsTesting();
+   g_file     = PFX + Symbol() + InpFileSuffix + ".csv";
+   g_objpref  = (InpStrategy == "") ? PFX : (PFX + InpStrategy + "@");
+   g_nnames   = 0;
+   ArrayResize(g_names, 0);
+
+   if(!LoadFile())
+      Print("[TFViz] NEM talalom: ", g_file, "  (Common\\Files)");
+   else
+      Print("[TFViz] betoltve: ", g_file, "  rekordok=", g_n,
+            "  kontextus=", (g_isTester ? "tesztelo" : "elo"),
+            "  kapu=", (InpReplayGate ? "BE" : "KI"));
+
+   // Elo charton a fajl VALTOZIK -> idozitett ujraolvasas. A teszteloben NEM
+   // valtozik (fix export), es ott az OnTimer sem megbizhato -> csak OnCalculate.
+   if(!g_isTester && InpTimerSeconds > 0)
+      EventSetTimer(InpTimerSeconds);
+   return(INIT_SUCCEEDED);
+}
+
+
+//+------------------------------------------------------------------+
+void OnDeinit(const int reason)
+{
+   if(!g_isTester) EventKillTimer();
+   ObjectsDeleteAll(0, g_objpref);
+   ObjectDelete(0, STATUSNM);
+}
+
+
+//+------------------------------------------------------------------+
+//| Elo chart: a fajl valtozhat -> ujraolvasas, majd teljes felfedes. |
+//+------------------------------------------------------------------+
+void OnTimer()
+{
+   if(LoadFile())
+   {
+      g_nnames = 0; ArrayResize(g_names, 0);
+      datetime now = InpReplayGate ? TimeCurrent() : D'2038.01.01';
+      Reveal(now);
+      Status(TimeCurrent());
+      ChartRedraw();
+   }
+}
+
+
+//+------------------------------------------------------------------+
+//| A tesztelo IDEJE itt halad. Minden uj gyertyanal (es a tesztelo   |
+//| oraval) ujra donthetunk: mi lathato MAR.                          |
+//+------------------------------------------------------------------+
+int OnCalculate(const int rates_total,
+                const int prev_calculated,
+                const datetime &time[],
+                const double &open[],
+                const double &high[],
+                const double &low[],
+                const double &close[],
+                const long &tick_volume[],
+                const long &volume[],
+                const int &spread[])
+{
+   // A chart JELEN ideje: a legutolso bar nyitasa. A teszteloben ez a szimulalt
+   // ido — pontosan ehhez kell igazitani a felfedest.
+   datetime now = (rates_total > 0) ? time[rates_total - 1] : TimeCurrent();
+   if(!InpReplayGate)
+      now = D'2038.01.01';
+
+   if(now != g_lastReveal)
+   {
+      g_lastReveal = now;
+      Reveal(now);
+      Status(now);
+   }
+   return(rates_total);
+}
+//+------------------------------------------------------------------+
