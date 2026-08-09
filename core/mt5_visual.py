@@ -28,15 +28,28 @@ from strategy.visual import PREFIX
 
 
 def files_dir() -> Optional[Path]:
-    """Az MT5 Common\\Files mappa (FILE_COMMON). None, ha nincs kapcsolat."""
+    """Az MT5 Common\\Files mappa (FILE_COMMON).
+
+    Elsődlegesen az MT5-öt kérdezzük. Ha nincs kapcsolat, a SZABVÁNYOS MetaQuotes
+    Common útra esünk vissza — így az offline export (MT4-es visszajátszás) MT5
+    futtatása NÉLKÜL is működik.
+
+    ⚠ Mérve (MT4-szonda, 2026-08-09): a Common mappa **közös** az MT4 és az MT5
+    között, és **PORTABLE módban sem költözik** (a terminál adatmappája
+    `C:\\Metatrades\\…` volt, a Common mégis az AppData alatt). Ezért írhat ide a
+    Python egyszer, és olvashatja mindkét terminál."""
     with MT5_LOCK:
         info = mt5.terminal_info()
-    if info is None:
-        return None
-    return Path(info.commondata_path) / "Files"
+    if info is not None:
+        return Path(info.commondata_path) / "Files"
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        return Path(appdata) / "MetaQuotes" / "Terminal" / "Common" / "Files"
+    return None
 
 
-def write_lines(symbol: str, lines: list, clear_first: bool = False) -> Optional[Path]:
+def write_lines(symbol: str, lines: list, clear_first: bool = False,
+                name_suffix: str = "") -> Optional[Path]:
     """A `symbol` teljes pillanatképét kiírja `TFV_<symbol>.csv`-be ELŐRE
     sorosított sorokból (több-stratégiás viz: a hívó stratégiánként `tag_line`-nal
     megjelölt sorokat ad). Atomikus (temp → replace).
@@ -50,7 +63,9 @@ def write_lines(symbol: str, lines: list, clear_first: bool = False) -> Optional
     if d is None:
         return None
     d.mkdir(parents=True, exist_ok=True)
-    path = d / f"{PREFIX}{symbol}.csv"
+    # `name_suffix`: a visszajátszás-export SAJÁT fájlba mehet (pl. `TFV_Ger40_BT.csv`),
+    # így az élő motor pillanatképe nem írja felül, és fordítva.
+    path = d / f"{PREFIX}{symbol}{name_suffix}.csv"
     tmp  = path.with_suffix(".csv.tmp")
 
     payload = "\n".join((["CLEAR"] if clear_first else []) + list(lines))

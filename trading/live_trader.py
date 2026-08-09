@@ -928,20 +928,33 @@ def actual_trade_objects(symbol: str, since_ts: int,
 
 
 def pair_visual_lines(symbol: str, params: dict, strategy, point_size: float,
-                      pair_cfg: dict = None) -> list:
+                      pair_cfg: dict = None, bars: dict = None,
+                      actual_trades: bool = True) -> list:
     """Egy stratégia + keretrendszer rajz-objektumainak TAGELT sorai (a stratégia
     nevével — `strategy.visual.tag_line`), hogy több stratégia UGYANABBA a
     szimbólum-fájlba írhasson, az MQL5 indikátor pedig `InpStrategy` szerint szűrjön.
-    MÉLY adatablakot tölt (visual_lookback_bars). Üres lista, ha nincs adat."""
-    bars = {}
-    for tf in strategy.timeframes():
-        n = strategy.visual_lookback_bars(params, tf.label)
-        if n <= 0:
-            continue
-        df = get_candles(symbol, mt5_timeframe(tf.minutes), n)
-        if df is None or len(df) < 3:
-            return []
-        bars[tf.label] = df
+    MÉLY adatablakot tölt (visual_lookback_bars). Üres lista, ha nincs adat.
+
+    `bars`: HA meg van adva (`{"M15": df, "M1": df}`), abból dolgozunk a friss
+    MT5-lekérés HELYETT. Ez a seam az MT4-es manuális visszajátszáshoz kell: ott
+    nem az „utolsó N gyertya" kell, hanem egy MEGADOTT tól-ig ablak. A számítás
+    így bitre ugyanaz marad, mint élesben — csak az adat forrása más. (Enélkül az
+    export kényszerűen MÁSOLNÁ ezt a függvényt, és a másolat elcsúszna az
+    eredetitől; pontosan az a néma eltérés-osztály, amit a projekt irt.)
+
+    `actual_trades`: rákerüljenek-e a VALÓS kötések nyilai. Manuális teszthez
+    **False** a helyes: a bot tényleges belépői ott a MEGFEJTÉS — ha látszanak,
+    nem azt méred, hogy TE beszállnál-e."""
+    if bars is None:
+        bars = {}
+        for tf in strategy.timeframes():
+            n = strategy.visual_lookback_bars(params, tf.label)
+            if n <= 0:
+                continue
+            df = get_candles(symbol, mt5_timeframe(tf.minutes), n)
+            if df is None or len(df) < 3:
+                return []
+            bars[tf.label] = df
     if not bars:
         return []
     # A stratégia per-gyertya BarState-jeire a keret RÁMASZKOLJA a no-trade órákat
@@ -974,7 +987,7 @@ def pair_visual_lines(symbol: str, params: dict, strategy, point_size: float,
     # + a VALÓS kötések nyilai ugyanarra az M1-ablakra (a maszkolás UTÁN). Ezek MINDIG
     #   látszanak (a „K" gomb a jel-replay-t kapcsolja, nem a tényleges kötéseket).
     m1 = bars.get("M1")
-    if m1 is not None and len(m1):
+    if actual_trades and m1 is not None and len(m1):
         objects = objects + actual_trade_objects(
             symbol, int(m1.index[0].timestamp()), strategy.name)
     # + a TF-együttállás figyelő SMA-vonalai (a bekapcsolt idősíkokra) — #4.
