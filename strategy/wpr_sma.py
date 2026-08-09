@@ -558,8 +558,14 @@ class WprSmaStrategy(Strategy):
                 # Spread-kapu (ha van spread-adat a bárokon): a közös core.spread_gate.
                 if _sp_arr is not None:
                     _spv = _sp_arr[j]
+                    # ⚠ A `backtest_spread_points` ÁTADÁSA kötelező: abból jön a kapu
+                    # RELATÍV padlója (normál spread × min_spread_mult). Nélküle a
+                    # viz a régi fix alapértékre esett vissza, tehát MÁS küszöbbel
+                    # szűrt, mint a backtest — a chart jelölői és a motor kötései
+                    # ezért csúsztak szét.
                     if _spv > 0 and not spread_gate.spread_ok(
-                            float(_spv) / pip, float(atr_v), pip, md.params)[0]:
+                            float(_spv) / pip, float(atr_v), pip, md.params,
+                            md.params.get("backtest_spread_points"))[0]:
                         continue
                 entry = float(m1_close[j])
                 # SL-módszer: `swing20` → az utolsó N M1 gyertya swingjéből (a live/

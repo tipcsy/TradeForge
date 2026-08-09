@@ -129,8 +129,11 @@ def export_window(symbol: str, t_from: str, t_to: str, strategy_name: str = None
         bars[tf.label] = w
         _say(f"{tf.label}: {len(w)} gyertya (warmup {len(w[w.index < ts_from])})")
 
+    # ⚠ A `cfg` ÁTADÁSA KÖTELEZŐ. A `live_trader._run_cfg` modul-globálist csak az
+    # élő motor tölti fel; itt (önálló processz) üres marad, és akkor a
+    # TF-együttállás kapu NÉMÁN kimaradna a jel-replayből.
     lines = pair_visual_lines(symbol, params, strategy, point_size, pair_cfg,
-                              bars=bars, actual_trades=show_trades)
+                              bars=bars, actual_trades=show_trades, cfg=cfg)
     if not lines:
         return False, f"{symbol} — a viz üres lett (a stratégia nem adott objektumot)."
 

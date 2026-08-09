@@ -741,7 +741,7 @@ def _g_code(key: str) -> int:
 
 
 def apply_gate_state(objects: list, bars: dict, symbol: str, strategy_name: str,
-                     params: dict, pair_cfg: dict = None) -> list:
+                     params: dict, pair_cfg: dict = None, cfg: dict = None) -> list:
     """KERETRENDSZER-szintű KAPU overlay: minden per-gyertya `BarState`-hez beírja,
     MELYIK kapu zárna azon a gyertyán (0 = egyik sem).
 
@@ -767,7 +767,10 @@ def apply_gate_state(objects: list, bars: dict, symbol: str, strategy_name: str,
         from strategy import visual as viz
         from core import gates as _g, vol_baseline as _vb, spread_gate as _sg
 
-        eff = _g.effects_for(_run_cfg, symbol, strategy_name)
+        # ⚠ `cfg` kell: a `_run_cfg` csak az élő motorban van feltöltve — export-úton
+        # üres, és akkor a kapu-hatások az ALAPÉRTELMEZÉSRE esnének vissza (a
+        # tf_align pl. `none`-ra), tehát a kapu-sáv MÁST mutatna, mint a valóság.
+        eff = _g.effects_for(cfg if cfg is not None else _run_cfg, symbol, strategy_name)
         active = {k for k in _g.KEYS
                   if _g.is_display_only(k) or eff.get(k) != _g.EFFECT_NONE}
         if not active:
@@ -782,8 +785,15 @@ def apply_gate_state(objects: list, bars: dict, symbol: str, strategy_name: str,
 
         point_size = float(params.get("point_size") or 0.0)
         normal_sp = (pair_cfg or {}).get("backtest_spread_points")
-        gate_fn = (tf_align_gate_fn(symbol, strategy_name, params)
-                   if "tf_align" in active else None)
+        gate_fn = None
+        if "tf_align" in active:
+            _c = cfg if cfg is not None else _run_cfg
+            if bars is not None and _c:
+                from trading.backtest import _build_tf_align_evaluator
+                gate_fn = _build_tf_align_evaluator(_c, symbol, strategy_name,
+                                                    bars.get("M1"))
+            else:
+                gate_fn = tf_align_gate_fn(symbol, strategy_name, params)
         base = _vb.effective(params, 0.0)
         lo, hi = _vb.band(params, base)
 
@@ -1027,7 +1037,7 @@ def actual_trade_objects(symbol: str, since_ts: int,
 
 def pair_visual_lines(symbol: str, params: dict, strategy, point_size: float,
                       pair_cfg: dict = None, bars: dict = None,
-                      actual_trades: bool = True) -> list:
+                      actual_trades: bool = True, cfg: dict = None) -> list:
     """Egy stratégia + keretrendszer rajz-objektumainak TAGELT sorai (a stratégia
     nevével — `strategy.visual.tag_line`), hogy több stratégia UGYANABBA a
     szimbólum-fájlba írhasson, az MQL5 indikátor pedig `InpStrategy` szerint szűrjön.
@@ -1042,7 +1052,14 @@ def pair_visual_lines(symbol: str, params: dict, strategy, point_size: float,
 
     `actual_trades`: rákerüljenek-e a VALÓS kötések nyilai. Manuális teszthez
     **False** a helyes: a bot tényleges belépői ott a MEGFEJTÉS — ha látszanak,
-    nem azt méred, hogy TE beszállnál-e."""
+    nem azt méred, hogy TE beszállnál-e.
+
+    `cfg`: a TELJES config. ⚠ MUSZÁJ megadni az export-úton! A modul-globális
+    `_run_cfg`-t CSAK az élő motor `run()`-ja tölti fel; egy önálló processzben
+    (viz_export) üres marad, és akkor a TF-együttállás kapu NÉMÁN kimarad. Mérve
+    (UsaInd, 2026-06-08..12): a chartra 48 jelölő került, miközben a motor 19-et
+    kötött volna — a különbség PONTOSAN a kapuk nélküli futás (62→62→48 vs
+    62→24→19). Egy manuális teszt ilyenkor nem a motort méri."""
     if bars is None:
         bars = {}
         for tf in strategy.timeframes():
@@ -1077,7 +1094,17 @@ def pair_visual_lines(symbol: str, params: dict, strategy, point_size: float,
                     bars=bars, no_trade_hours=no_trade_set, show_signals=_show_signals)
     # TF-együttállás kapu: ha AKTÍV erre a stratégiára, a jel-replay belépőit a
     # történelmi együttállással szűrjük (a blokkoltak nem jelennek meg — BUG-fix).
-    md.entry_gate = tf_align_gate_fn(symbol, strategy.name, params)
+    # A TF-együttállás kapu. KÉT út, mert a forrásuk más:
+    #  • élő chart → `tf_align_gate_fn` (friss MT5-gyertyákból),
+    #  • export (bars megadva) → a BACKTEST kiértékelője a MEGADOTT M1-ből, mert
+    #    ott nincs MT5-kapcsolat (a get_candles None-t adna → néma kapu-kimaradás).
+    _cfg = cfg if cfg is not None else _run_cfg
+    if bars is not None and _cfg:
+        from trading.backtest import _build_tf_align_evaluator
+        md.entry_gate = _build_tf_align_evaluator(_cfg, symbol, strategy.name,
+                                                  bars.get("M1"))
+    else:
+        md.entry_gate = tf_align_gate_fn(symbol, strategy.name, params)
     objects = apply_no_trade(strategy.visual_objects(md), pair_cfg or {}, th)
     # + a GENERIKUS piac-állapot kód a per-gyertya BarState-ekhez (a per-pár
     #   kiválasztott piac-stratégiából; csak ha kérve van a charton).
@@ -1085,7 +1112,8 @@ def pair_visual_lines(symbol: str, params: dict, strategy, point_size: float,
     # + MIÉRT nem lépne be a motor: a kapu-kód a per-gyertya sáv-állapotba. Enélkül
     #   a chart „belépőt ígért" (trend + M15-ablak kész), miközben egy kapu némán zárt.
     objects = apply_gate_state(objects, bars, symbol, strategy.name,
-                               {**params, "point_size": point_size}, pair_cfg)
+                               {**params, "point_size": point_size}, pair_cfg,
+                               cfg=_cfg)
     # + a VALÓS kötések nyilai ugyanarra az M1-ablakra (a maszkolás UTÁN). Ezek MINDIG
     #   látszanak (a „K" gomb a jel-replay-t kapcsolja, nem a tényleges kötéseket).
     m1 = bars.get("M1")
