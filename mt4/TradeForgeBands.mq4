@@ -14,9 +14,11 @@
 //|  valtani. A dontes viszont M15-on szuletik. A STATE sorok M15-hoz |
 //|  vannak horgonyozva, ezert itt teritjuk ki oket a chart gyertyaira|
 //|                                                                  |
-//|  ⚠ LOOK-AHEAD: egy 10:00-as M15 gyertya allapota csak 10:15-kor   |
-//|  ISMERT (akkor zar). Ezert egy M1 gyertyahoz alapbol az UTOLSO MAR|
-//|  LEZART M15 gyertya allapotat vesszuk (InpUseClosedOnly).         |
+//|  ⚠ LOOK-AHEAD — ES HOL TORTENIK: egy 10:30-as M15 gyertya allapota|
+//|  csak 10:45-kor ISMERT (akkor zar). Ezt az eltolast a PYTHON EXPORT|
+//|  MAR ELVEGZI (`t = tl_t[k] + m15_sec`), tehat a fajlban levo T     |
+//|  idopontu STATE mar look-ahead-mentes. Itt NEM szabad ujra eltolni |
+//|  — az duplan kesleltetne (lasd InpUseClosedOnly).                  |
 //|                                                                  |
 //|  ⚠ MQL4-SPECIFIKUS: itt NINCS DRAW_FILLING es nincs per-gyertya   |
 //|  szinindex (DRAW_COLOR_HISTOGRAM2) — azok MQL5-osek. Helyette      |
@@ -36,7 +38,14 @@
 input string InpFileSuffix    = "";     // Fajl-utotag (pl. _BT)
 input string InpStrategy      = "";     // Melyik strategia STATE sorai (ures = MIND)
 input int    InpStateTFMin    = 15;     // A STATE sorok idosikja percben
-input bool   InpUseClosedOnly = true;   // CSAK lezart M15 allapot (look-ahead ellen)
+// ⚠ ALAPBOL KI — es ez FONTOS. A Python export MAR ELTOLTA a STATE sorokat egy
+// M15 gyertyaval (`wpr_sma.visual_objects`: `t = tl_t[k] + m15_sec`, "a jelzes az
+// M15 gyertya ZARASA UTAN el"). A fajlban levo T idopontu allapot tehat MAR a
+// T-15p gyertya zarasabol szamolt, look-ahead-mentes ertek.
+// Ha itt MEG EGYSZER visszalepunk 15 percet, a sav DUPLAN kesik: merve a kek
+// ablak-sav 15 perccel tovabb maradt bekapcsolva, mint ahogy a motor latta.
+// Csak akkor kapcsold BE, ha egy strategia NEM tolja el a sajat STATE sorait.
+input bool   InpUseClosedOnly = false;  // EXTRA visszalepes egy idosikkal (duplan kesleltet!)
 // A fejlec helye/merete: vilagos charton a szurke olvashatatlan volt, ezert
 // sotet az alapszin; az eltolas azert input, mert mas indikator is odaerhet.
 input int    InpStatusX       = 6;      // Fejlec vizszintes eltolas (px)
