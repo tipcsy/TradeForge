@@ -10,49 +10,56 @@
 //|     IND;<strategia>;WPR;<TF>;<periodus>;<szin>;<szint1>;<szint2>… |
 //|                                                                  |
 //|  KET vonalat rajzol, mert M1-en tesztelunk, de a FO KAPU M15:     |
-//|     - vekony  : a chart sajat idosikjanak WPR-je (a sok kis belepo)|
-//|     - vastag  : az M15 WPR LEPCSOSEN kiteritve (a fo kapu)        |
-//|  Igy egyetlen al-ablakban ott a teljes dontesi kontextus, anelkul |
-//|  hogy idosikot kellene valtani (a teszteloben nem is lehetne).    |
+//|     - vekony kek : a chart sajat idosikjanak WPR-je               |
+//|     - vastag naracs : az M15 WPR LEPCSOSEN kiteritve (a fo kapu)  |
 //|                                                                  |
 //|  ⚠ Look-ahead: az iWPR a teszteloben csak a szimulalt idoig lat,  |
 //|  tehat itt nem kell kulon kapu — az MT4 intezi.                   |
+//|  ⚠ Az M15-os vonalhoz az MT4-nek M15 elozmeny is kell.            |
 //+------------------------------------------------------------------+
 #property copyright "TradeForge"
-#property version   "1.00"
+#property version   "1.10"
 #property strict
 #property indicator_separate_window
 #property indicator_minimum -100
 #property indicator_maximum 0
 #property indicator_buffers 2
 
-#property indicator_color1  DodgerBlue
-#property indicator_width1  1
-#property indicator_label1  "WPR (chart TF)"
-
-#property indicator_color2  Orange
-#property indicator_width2  2
-#property indicator_label2  "WPR M15 (fo kapu)"
-
 input string InpFileSuffix = "";        // Fajl-utotag (pl. _BT)
-input string InpStrategy   = "";        // Melyik strategia IND-jei (ures = az elso)
+input string InpStrategy   = "";        // Melyik strategia IND-jei (ures = MIND)
 input int    InpGateTFMin  = 15;        // A FO KAPU idosikja percben (M15)
-input bool   InpShowStatus = true;      // Fejlec az al-ablakban
 
 #define PFX "TFV_"
+#define LBL "TFW_status"
 
 double BufFast[];       // a chart sajat idosikjanak WPR-je
 double BufGate[];       // a fo kapu (M15) WPR-je, lepcsosen
 
-int    g_perFast = 0;   // a chart TF-jehez talalt periodus
-int    g_perGate = 0;   // az M15-hoz talalt periodus
+int    g_perFast = 0;
+int    g_perGate = 0;
 double g_levels[];
 int    g_nlev = 0;
-string g_src  = "";     // mit talaltunk (a fejlechez)
+string g_msg  = "";
 
 
 //+------------------------------------------------------------------+
-//| "M1"/"M5"/"M15"… -> perc                                          |
+void Status(string txt, color c)
+{
+   int win = ChartWindowFind();
+   if(win < 0) win = 0;
+   if(ObjectFind(0, LBL) < 0)
+      ObjectCreate(0, LBL, OBJ_LABEL, win, 0, 0);
+   ObjectSetInteger(0, LBL, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, LBL, OBJPROP_XDISTANCE, 6);
+   ObjectSetInteger(0, LBL, OBJPROP_YDISTANCE, 2);
+   ObjectSetInteger(0, LBL, OBJPROP_FONTSIZE, 8);
+   ObjectSetInteger(0, LBL, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, LBL, OBJPROP_COLOR, c);
+   ObjectSetString (0, LBL, OBJPROP_FONT, "Consolas");
+   ObjectSetString (0, LBL, OBJPROP_TEXT, txt);
+}
+
+
 //+------------------------------------------------------------------+
 int TfMinFromStr(string s)
 {
@@ -68,43 +75,42 @@ int TfMinFromStr(string s)
 
 
 //+------------------------------------------------------------------+
-//| Az IND;…;WPR;… rekordok kiolvasasa a motor fajljabol              |
-//+------------------------------------------------------------------+
 bool ReadIndRecords()
 {
    string file = PFX + Symbol() + InpFileSuffix + ".csv";
    int h = FileOpen(file, FILE_READ | FILE_TXT | FILE_ANSI | FILE_COMMON);
    if(h == INVALID_HANDLE)
    {
-      Print("[TFWPR] NEM talalom: ", file);
+      g_msg = "NINCS FAJL: " + file + "  (hiba=" + IntegerToString(GetLastError()) + ")";
+      Print("[TFWPR] ", g_msg);
       return(false);
    }
 
    int chartTf = Period();
+   int nWpr = 0;
+   string found = "";
    ArrayResize(g_levels, 0); g_nlev = 0;
 
    while(!FileIsEnding(h))
    {
       string ln = FileReadString(h);
       if(StringFind(ln, "IND;") != 0) continue;
-
       string f[];
       int n = StringSplit(ln, ';', f);
-      // IND;<strat>;<kind>;<tf>;<period>;<color>;<levels...>
-      if(n < 6) continue;
+      if(n < 6) continue;                                  // IND;strat;kind;tf;per;szin
       if(InpStrategy != "" && f[1] != InpStrategy) continue;
       if(f[2] != "WPR") continue;
 
+      nWpr++;
       int tf  = TfMinFromStr(f[3]);
       int per = (int)StringToInteger(f[4]);
       if(per <= 0) continue;
+      found = found + (found == "" ? "" : ",") + f[3] + "(" + f[4] + ")";
 
       if(tf == chartTf)
       {
          g_perFast = per;
-         // A SZINTEKET a chart sajat idosikjanak rekordjabol vesszuk — az a
-         // relevans annak, amit epp nezel.
-         for(int i = 6; i < n; i++)
+         for(int i = 6; i < n; i++)                        // a szintek a chart TF-jerol
          {
             double lv = StringToDouble(f[i]);
             if(lv >= -100.0 && lv <= 0.0)
@@ -114,41 +120,61 @@ bool ReadIndRecords()
             }
          }
       }
-      if(tf == InpGateTFMin)
-         g_perGate = per;
+      if(tf == InpGateTFMin) g_perGate = per;
    }
    FileClose(h);
 
-   g_src = StringFormat("chartTF=%d per=%d | M%d per=%d | szintek=%d",
-                        chartTf, g_perFast, InpGateTFMin, g_perGate, g_nlev);
-   Print("[TFWPR] ", file, "  ", g_src);
-   return(g_perFast > 0 || g_perGate > 0);
+   if(nWpr == 0)
+   {
+      g_msg = "0 WPR rekord (" + file + ")";
+      Print("[TFWPR] ", g_msg);
+      return(false);
+   }
+   if(g_perFast == 0 && g_perGate == 0)
+   {
+      g_msg = "van WPR rekord [" + found + "], de EGYIK SEM illik a charthoz (M" +
+              IntegerToString(chartTf) + ") vagy a kapuhoz (M" +
+              IntegerToString(InpGateTFMin) + ")";
+      Print("[TFWPR] ", g_msg);
+      return(false);
+   }
+   g_msg = StringFormat("chart M%d per=%d | kapu M%d per=%d | szintek=%d | rekordok:[%s]",
+                        chartTf, g_perFast, InpGateTFMin, g_perGate, g_nlev, found);
+   Print("[TFWPR] ", file, "  ", g_msg);
+   return(true);
 }
 
 
 //+------------------------------------------------------------------+
 int OnInit()
 {
+   IndicatorBuffers(2);
    SetIndexBuffer(0, BufFast);
-   SetIndexStyle(0, DRAW_LINE);
+   SetIndexStyle(0, DRAW_LINE, STYLE_SOLID, 1, C'30,144,255');
+   SetIndexLabel(0, "WPR chart TF");
+   SetIndexEmptyValue(0, EMPTY_VALUE);
+
    SetIndexBuffer(1, BufGate);
-   SetIndexStyle(1, DRAW_LINE);
+   SetIndexStyle(1, DRAW_LINE, STYLE_SOLID, 2, C'255,140,0');
+   SetIndexLabel(1, "WPR M15 (fo kapu)");
+   SetIndexEmptyValue(1, EMPTY_VALUE);
 
-   if(!ReadIndRecords())
-      Print("[TFWPR] nincs hasznalhato IND rekord — a WPR ures marad.");
-
-   // A szintek a MOTOR ertekei (extrem / trigger) — nem kezzel allitottak.
+   bool ok = ReadIndRecords();
    for(int i = 0; i < g_nlev && i < 8; i++)
    {
       SetLevelValue(i, g_levels[i]);
-      SetLevelStyle(STYLE_DOT, 1, clrSilver);
+      SetLevelStyle(STYLE_DOT, 1, C'160,160,160');
    }
 
-   IndicatorShortName(StringFormat("TF WPR  %s(%d) + M%d(%d)",
-                                   Symbol(), g_perFast, InpGateTFMin, g_perGate));
+   IndicatorShortName("TF WPR");
    IndicatorDigits(2);
+   Status("TFWPR: " + g_msg, ok ? clrSilver : clrOrangeRed);
    return(INIT_SUCCEEDED);
 }
+
+
+//+------------------------------------------------------------------+
+void OnDeinit(const int reason) { ObjectDelete(0, LBL); }
 
 
 //+------------------------------------------------------------------+
@@ -164,6 +190,8 @@ int OnCalculate(const int rates_total,
                 const int &spread[])
 {
    if(rates_total < 2) return(0);
+   Status("TFWPR: " + g_msg,
+          (g_perFast > 0 || g_perGate > 0) ? clrSilver : clrOrangeRed);
 
    int limit = rates_total - prev_calculated;
    if(prev_calculated > 0) limit++;
@@ -171,20 +199,16 @@ int OnCalculate(const int rates_total,
 
    for(int i = 0; i < limit; i++)
    {
-      // 1) A chart sajat idosikjanak WPR-je
-      BufFast[i] = (g_perFast > 0)
-                   ? iWPR(Symbol(), Period(), g_perFast, i)
-                   : EMPTY_VALUE;
+      BufFast[i] = (g_perFast > 0) ? iWPR(Symbol(), Period(), g_perFast, i)
+                                   : EMPTY_VALUE;
 
-      // 2) A FO KAPU (M15) WPR-je LEPCSOSEN kiteritve a chart gyertyaira.
-      //    Ez a lenyeg M1-en: a teszteloben nem tudsz idosikot valtani, tehat a
-      //    magasabb idosik allapotat IDE kell hozni. Minden M1 gyertyahoz azt az
-      //    M15 gyertyat vesszuk, amelyikbe beleesik (iBarShift).
+      // A FO KAPU (M15) WPR-je LEPCSOSEN a chart gyertyaira: minden M1 gyertyahoz
+      // az az M15 gyertya, amelyikbe beleesik. A teszteloben az iWPR maga sem lat
+      // a szimulalt idon tul, tehat ez nem look-ahead.
       if(g_perGate > 0)
       {
-         int sh = iBarShift(Symbol(), (ENUM_TIMEFRAMES)InpGateTFMin, Time[i], false);
-         BufGate[i] = (sh >= 0) ? iWPR(Symbol(), (ENUM_TIMEFRAMES)InpGateTFMin,
-                                       g_perGate, sh)
+         int sh = iBarShift(Symbol(), InpGateTFMin, Time[i], false);
+         BufGate[i] = (sh >= 0) ? iWPR(Symbol(), InpGateTFMin, g_perGate, sh)
                                 : EMPTY_VALUE;
       }
       else BufGate[i] = EMPTY_VALUE;
