@@ -74,6 +74,76 @@ def _window_bars(df: pd.DataFrame, tf_min: int, warmup: int,
     return out[keep]
 
 
+def export_window(symbol: str, t_from: str, t_to: str, strategy_name: str = None,
+                  suffix: str = "_BT", show_trades: bool = False,
+                  cfg: dict = None, status=None) -> tuple:
+    """Egy tól-ig ablak kiírása a viz-fájlba. `(ok, üzenet)`.
+
+    A CLI és a dashboard-gomb IS ezt hívja — így a kettő nem csúszhat szét.
+    `status`: opcionális fn(str) haladásjelző (a GUI a sor-státuszba teszi)."""
+    def _say(m):
+        log.info("%s", m)
+        if status is not None:
+            try:
+                status(m)
+            except Exception:
+                pass
+
+    cfg = cfg or load_config(ROOT / "config.json")
+    pair_cfg = (cfg.get("pairs") or {}).get(symbol)
+    if not isinstance(pair_cfg, dict):
+        return False, f"{symbol} — nincs ilyen pár a config.json-ban."
+    point_size = pair_cfg.get("point_size")
+    if not point_size:
+        return False, f"{symbol} — hiányzó point_size."
+
+    strat_name = strategy_name or default_strategy_name(cfg)
+    try:
+        strategy = get_strategy_by_name(strat_name)
+    except Exception as ex:
+        return False, f"Ismeretlen stratégia: {strat_name} ({ex})"
+    params = _params_for(symbol, strat_name, strategy, cfg)
+
+    try:
+        ts_from = pd.Timestamp(t_from, tz="UTC")
+        ts_to = pd.Timestamp(t_to, tz="UTC") + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+    except Exception:
+        return False, "Hibás dátum (várt formátum: ÉÉÉÉ-HH-NN)."
+    if ts_to <= ts_from:
+        return False, "A „-ig” nem lehet a „-tól” előtt."
+
+    df15, df1 = load_data(symbol)
+    if df15 is None or df1 is None:
+        return False, f"{symbol} — nincs letöltött adat (data/m15, data/m1)."
+
+    bars, src = {}, {"M15": (df15, 15), "M1": (df1, 1)}
+    for tf in strategy.timeframes():
+        if tf.label not in src:
+            continue
+        df, tf_min = src[tf.label]
+        warmup = strategy.visual_lookback_bars(params, tf.label)
+        w = _window_bars(df, tf_min, warmup, ts_from, ts_to)
+        if w is None or len(w) < 3:
+            return False, (f"{symbol} {tf.label} — túl kevés gyertya ebben az "
+                           f"ablakban ({0 if w is None else len(w)}).")
+        bars[tf.label] = w
+        _say(f"{tf.label}: {len(w)} gyertya (warmup {len(w[w.index < ts_from])})")
+
+    lines = pair_visual_lines(symbol, params, strategy, point_size, pair_cfg,
+                              bars=bars, actual_trades=show_trades)
+    if not lines:
+        return False, f"{symbol} — a viz üres lett (a stratégia nem adott objektumot)."
+
+    path = mt5_visual.write_lines(symbol, lines, clear_first=True, name_suffix=suffix)
+    if path is None:
+        return False, "Nem sikerült írni a Common\\Files mappába."
+
+    n_sig = sum(1 for ln in lines if ln.startswith("VLINE;"))
+    return True, (f"{symbol} / {strat_name}: {n_sig} belépő jelzés kiírva "
+                  f"({t_from} → {t_to}) → {path.name}"
+                  + ("" if show_trades else "  ·  valós kötések nélkül"))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -87,67 +157,11 @@ def main():
                     help="a VALÓS kötések nyilai is kerüljenek rá (manuális teszthez NE)")
     args = ap.parse_args()
 
-    cfg = load_config(ROOT / "config.json")
-    symbol = args.symbol
-    pair_cfg = (cfg.get("pairs") or {}).get(symbol)
-    if not isinstance(pair_cfg, dict):
-        log.error("%s — nincs ilyen pár a config.json-ban.", symbol)
-        sys.exit(1)
-    point_size = pair_cfg.get("point_size")
-    if not point_size:
-        log.error("%s — hiányzó point_size.", symbol)
-        sys.exit(1)
-
-    strat_name = args.strategy or default_strategy_name(cfg)
-    strategy = get_strategy_by_name(strat_name)
-    params = _params_for(symbol, strat_name, strategy, cfg)
-
-    t_from = pd.Timestamp(args.t_from, tz="UTC")
-    t_to = pd.Timestamp(args.t_to, tz="UTC") + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
-    if t_to <= t_from:
-        log.error("A --to nem lehet a --from előtt.")
-        sys.exit(1)
-
-    df15, df1 = load_data(symbol)
-    if df15 is None or df1 is None:
-        log.error("%s — nincs letöltött adat (data/m15, data/m1).", symbol)
-        sys.exit(1)
-
-    bars, src = {}, {"M15": (df15, 15), "M1": (df1, 1)}
-    for tf in strategy.timeframes():
-        if tf.label not in src:
-            continue
-        df, tf_min = src[tf.label]
-        warmup = strategy.visual_lookback_bars(params, tf.label)
-        w = _window_bars(df, tf_min, warmup, t_from, t_to)
-        if w is None or len(w) < 3:
-            log.error("%s %s — túl kevés gyertya ebben az ablakban (%s).",
-                      symbol, tf.label, 0 if w is None else len(w))
-            sys.exit(1)
-        bars[tf.label] = w
-        log.info("  %-3s  %6d gyertya  [%s → %s]  (ebből warmup: %d)",
-                 tf.label, len(w), str(w.index[0])[:16], str(w.index[-1])[:16],
-                 max(0, len(w[w.index < t_from])))
-
-    lines = pair_visual_lines(symbol, params, strategy, point_size, pair_cfg,
-                              bars=bars, actual_trades=args.show_trades)
-    if not lines:
-        log.error("%s — a viz üres lett (a stratégia nem adott objektumot).", symbol)
-        sys.exit(1)
-
-    path = mt5_visual.write_lines(symbol, lines, clear_first=True,
-                                  name_suffix=args.suffix)
-    if path is None:
-        log.error("Nem sikerült írni a Common\\Files mappába.")
-        sys.exit(1)
-
-    kinds = {}
-    for ln in lines:
-        kinds[ln.split(";", 1)[0]] = kinds.get(ln.split(";", 1)[0], 0) + 1
-    log.info("✅ %s / %s — %d sor kiírva: %s", symbol, strat_name, len(lines), path)
-    log.info("   rekordok: %s", "  ".join(f"{k}={v}" for k, v in sorted(kinds.items())))
-    log.info("   ablak: %s → %s%s", args.t_from, args.t_to,
-             "" if args.show_trades else "   (valós kötések NÉLKÜL — manuális teszthez)")
+    ok, msg = export_window(args.symbol, args.t_from, args.t_to,
+                            strategy_name=args.strategy, suffix=args.suffix,
+                            show_trades=args.show_trades)
+    log.info("%s %s", "✅" if ok else "❌", msg)
+    sys.exit(0 if ok else 1)
 
 
 if __name__ == "__main__":

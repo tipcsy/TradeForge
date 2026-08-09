@@ -261,7 +261,11 @@ void RefreshFromFile()
    g_market_on = false;
    for(int i = 0; i < cnt; i++)
       if(g_st_mstate[i] >= 0) { g_market_on = true; break; }
-   g_nbands = g_market_on ? 4 : 3;
+   // ⚠ A no-trade (szürke) és az SMA-trend (zöld/piros) EGY sávban van (v2.24.6):
+   // a kettő KIZÁRJA egymást — a Python `apply_no_trade` a no-trade gyertyán
+   // `dir=0`-t is beállít, tehát szürkénél trend-szín SOSEM lehet, és fordítva.
+   // Külön sorban az egyik mindig üresen állt, feleslegesen fogyasztva a helyet.
+   g_nbands = g_market_on ? 3 : 2;
 
    // Lépésköz a legkisebb pozitív szomszéd-különbségből (M15 = 900 mp; hézagoknál
    // a nagyobb rés kimarad → az ottani gyertyák üresek maradnak).
@@ -284,19 +288,19 @@ void RefreshFromFile()
 void FillBuffers()
 {
    // A sávok függőleges helye az AKTÍV sávszámból (parametrikus). Fentről lefelé:
-   //   0=kék M15-ablak, 1=SMA-trend, [2=piac-állapot ha BE], utolsó=szürke no-trade.
+   //   0 = kék M15-ablak
+   //   1 = ÁLLAPOT: szürke no-trade VAGY zöld/piros SMA-trend (KÖZÖS sáv, mert
+   //       kizárják egymást — lásd a `g_nbands` melletti indoklást)
+   //   2 = piac-állapot (csak ha BE)
    double wTop, wBot, tTop, tBot, mTop, mBot, nTop, nBot;
    BandPos(0, g_nbands, wTop, wBot);                 // M15-ablak (kék)
    BandPos(1, g_nbands, tTop, tBot);                 // SMA-trend
+   nTop = tTop; nBot = tBot;                         // a no-trade UGYANOTT
    if(g_market_on)
-   {
       BandPos(2, g_nbands, mTop, mBot);              // piac-állapot
-      BandPos(3, g_nbands, nTop, nBot);              // no-trade (a piac ALATT)
-   }
    else
    {
       mTop = 0.0; mBot = 0.0;                        // nincs piac-sáv
-      BandPos(2, g_nbands, nTop, nBot);              // no-trade a 3. helyen
    }
 
    for(int i = 0; i < g_rates; i++)

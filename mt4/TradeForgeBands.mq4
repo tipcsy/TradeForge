@@ -42,15 +42,32 @@ input bool   InpUseClosedOnly = true;   // CSAK lezart M15 allapot (look-ahead e
 input int    InpStatusX       = 6;      // Fejlec vizszintes eltolas (px)
 input int    InpStatusY       = 2;      // Fejlec FUGGOLEGES eltolas (px)
 input int    InpStatusFont    = 8;      // Betumeret
+input int    InpBandHeightPx  = 24;     // EGY sav magassaga px (0 = kezi meretezes)
 
 #define PFX "TFV_"
 #define LBL "TFB_status"
 
-// Egymasra rajzolt histogramok. A SORREND SZAMIT: a magasabb elobb.
-double NoTrade[];    // 0 -> 1.00 magas  (a legfelso sav lesz lathato)
-double TrBuy[];      // 1 -> 0.67
-double TrSell[];     // 2 -> 0.67
-double Window[];     // 3 -> 0.33        (a legalso sav)
+// ── SAV-SORREND (fentrol lefele) — AZONOS az MT5-os TradeForgeBands-szel ──────
+//     1) KEK    : aktiv M15 jelzesi ablak
+//     2) ZOLD/PIROS : SMA-irany (a fo trend-kapu)
+//     3) SZURKE : no-trade ora
+//
+// ⚠ Az elso MQL4-portom ezt FORDITVA rakta le (szurke felul, kek alul) — a
+// megszokott kep feje tetejere allt.
+//
+// Technika: egymasra rajzolt DRAW_HISTOGRAM. Mind 0-tol indul, ezert a LEGFELSO
+// sav a LEGMAGASABB es azt rajzoljuk ELOSZOR; a kesobbi (rovidebb) histogramok
+// rafestenek az also reszre. A buffer-sorrend tehat a sav-sorrend.
+double Window[];     // 0 -> a legmagasabb  (a KEK sav lesz lathato felul)
+double TrBuy[];      // 1
+double TrSell[];     // 2
+double NoTrade[];    // 3 -> a legrovidebb  (SZURKE, alul)
+
+// Csak azok a savok kapnak helyet, amelyekben VAN adat. Ha pl. minden ora
+// engedelyezett (a no-trade vegig 0), a szurke sav elhagyasa a maradek kettonek
+// KETSZER akkora helyet ad — a merteknel ez a kulonbseg dont.
+double h_win = 0.0, h_trend = 0.0, h_nt = 0.0;
+int    g_nbands = 0;
 
 datetime g_t[];
 int      g_nt[], g_dir[], g_win[];
@@ -166,18 +183,51 @@ int FindState(datetime at)
 int OnInit()
 {
    IndicatorBuffers(4);
-   SetIndexBuffer(0, NoTrade); SetIndexStyle(0, DRAW_HISTOGRAM, STYLE_SOLID, 3, C'150,150,150');
+   // A buffer-sorrend = a sav-sorrend fentrol lefele (lasd fent).
+   SetIndexBuffer(0, Window);  SetIndexStyle(0, DRAW_HISTOGRAM, STYLE_SOLID, 3, C'0,120,255');
    SetIndexBuffer(1, TrBuy);   SetIndexStyle(1, DRAW_HISTOGRAM, STYLE_SOLID, 3, C'0,170,0');
    SetIndexBuffer(2, TrSell);  SetIndexStyle(2, DRAW_HISTOGRAM, STYLE_SOLID, 3, C'220,0,0');
-   SetIndexBuffer(3, Window);  SetIndexStyle(3, DRAW_HISTOGRAM, STYLE_SOLID, 3, C'0,120,255');
+   SetIndexBuffer(3, NoTrade); SetIndexStyle(3, DRAW_HISTOGRAM, STYLE_SOLID, 3, C'150,150,150');
 
-   SetIndexLabel(0, "No-trade");
+   SetIndexLabel(0, "M15 ablak");
    SetIndexLabel(1, "Trend BUY");
    SetIndexLabel(2, "Trend SELL");
-   SetIndexLabel(3, "M15 ablak");
+   SetIndexLabel(3, "No-trade");
    for(int b = 0; b < 4; b++) SetIndexEmptyValue(b, 0.0);
 
    bool ok = ReadStates();
+
+   // ⚠ A SZURKE es a ZOLD/PIROS EGY sorba kerul (v2.24.6). Nem tomorites: a ketto
+   // KIZARJA egymast. A Python `apply_no_trade` a no-trade gyertyan `dir=0`-t is
+   // beallit, tehat ha szurke van, trend-szin SOSEM lehet — es forditva. Ket kulon
+   // sor egyiket mindig uresen hagyta, feleslegesen fogyasztva a magassagot.
+   bool useWin = false, useState = false;
+   for(int i = 0; i < g_ns; i++)
+   {
+      if(g_win[i] != 0) useWin = true;
+      if(g_dir[i] != 0 || g_nt[i] != 0) useState = true;
+   }
+   g_nbands = (useWin ? 1 : 0) + (useState ? 1 : 0);
+   if(g_nbands == 0) g_nbands = 1;
+
+   // Fentrol lefele: kek (M15-ablak) -> allapot (szurke VAGY zold/piros).
+   int k = 0;
+   if(useWin)   { h_win = (double)(g_nbands - k) / g_nbands; k++; }
+   if(useState)
+   {
+      double h = (double)(g_nbands - k) / g_nbands;
+      h_trend = h; h_nt = h;                 // KOZOS sor — kizarjak egymast
+      k++;
+   }
+
+   // Az al-ablak magassaga a savszamhoz igazodik — kulonben harom sav egy 20 px-es
+   // csikban osszemosodik (pontosan ez tette olvashatatlanna az elso valtozatot).
+   if(InpBandHeightPx > 0)
+   {
+      int w = ChartWindowFind();
+      if(w > 0) ChartSetInteger(0, CHART_HEIGHT_IN_PIXELS, w, g_nbands * InpBandHeightPx);
+   }
+
    IndicatorShortName("TF Bands");
    IndicatorDigits(2);
    Status("TFBands: " + g_msg, ok ? clrNavy : clrRed);
@@ -225,10 +275,11 @@ int OnCalculate(const int rates_total,
 
       // A MAGASABB histogramot elobb rajzoljuk (kisebb buffer-index), a rovidebbet
       // kesobb RA -> igy allnak ossze a vizszintes savok.
-      if(g_nt[k]  != 0) NoTrade[i] = 1.00;
-      if(g_dir[k] > 0)  TrBuy[i]   = 0.67;
-      else if(g_dir[k] < 0) TrSell[i] = 0.67;
-      if(g_win[k] != 0) Window[i]  = 0.33;
+      // A magassagok az OnInit-ben dolnek el (csak a HASZNALT savok kapnak helyet).
+      if(g_win[k] != 0)     Window[i]  = h_win;
+      if(g_dir[k] > 0)      TrBuy[i]   = h_trend;
+      else if(g_dir[k] < 0) TrSell[i]  = h_trend;
+      if(g_nt[k]  != 0)     NoTrade[i] = h_nt;
    }
    if(hit == 0)
       Status("TFBands: " + g_msg + "  ⚠ a chart idotartomanya NEM fedi a STATE ablakot",
