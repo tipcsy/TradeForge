@@ -502,9 +502,16 @@ int OnCalculate(const int rates_total,
                 const long &volume[],
                 const int &spread[])
 {
-   // A chart JELEN ideje: a legutolso bar nyitasa. A teszteloben ez a szimulalt
-   // ido — pontosan ehhez kell igazitani a felfedest.
-   datetime now = (rates_total > 0) ? time[rates_total - 1] : TimeCurrent();
+   // A chart JELEN ideje: a LEGUTOLSO bar. A teszteloben ez a szimulalt ido —
+   // ehhez igazodik a felfedes.
+   //
+   // ⚠ NEM `time[rates_total-1]`: az OnCalculate-nek atadott tomb indexelesi
+   // IRANYA MQL4-ben nem garantalt (a predefinialt Time[]-tol elteroen), es a
+   // gyakorlatban SORONKENT (series) jott — vagyis a `rates_total-1` a LEGREGEBBI
+   // gyertyat adta. A kapu emiatt a chart ELEJEN allt: a tesztelo mar 06-09-nel
+   // jart, a felfedes viszont 06-05-nel — a kozbenso belepok NEM latszottak.
+   // A predefinialt Time[0] MQL4-ben MINDIG a legfrissebb bar.
+   datetime now = (rates_total > 0) ? Time[0] : TimeCurrent();
    if(!InpReplayGate)
       now = D'2038.01.01';
 
