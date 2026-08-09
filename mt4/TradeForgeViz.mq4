@@ -24,11 +24,15 @@
 #property indicator_chart_window
 #property indicator_buffers 0
 
-input string InpFileSuffix   = "";      // Fajl-utotag (pl. _BT a visszajatszashoz)
-input string InpStrategy     = "";      // Melyik STRATEGIAT mutassa (ures = MIND)
-input bool   InpReplayGate   = true;    // Look-ahead kapu (tesztelohoz KELL)
-input int    InpTimerSeconds = 1;       // Ujraolvasas elo charton (mp)
-input bool   InpShowStatus   = true;    // Allapotsor a bal felso sarokban
+input string InpFileSuffix    = "";     // Fajl-utotag (pl. _BT a visszajatszashoz)
+input string InpStrategy      = "";     // Melyik STRATEGIAT mutassa (ures = MIND)
+input bool   InpReplayGate    = true;   // Look-ahead kapu (tesztelohoz KELL)
+input int    InpTimerSeconds  = 1;      // Ujraolvasas elo charton (mp)
+input bool   InpShowStatus    = true;   // Allapotsor a bal felso sarokban
+// ⚠ SPOILER: megmondja, MENNYI IDO mulva jon a kovetkezo belepo. Kenyelmes, de
+// elrontja a merest: ha tudod, hogy 3 oran belul nincs jel, nem tudod oszinten
+// megiteni, hogy TE beszalltal-e volna kozben. Alapbol KI.
+input bool   InpShowNextTime  = false;  // Kovetkezo jel IDEJE is (spoiler!)
 
 #define PFX      "TFV_"
 #define STATUSNM "TFV_zz_status"
@@ -47,6 +51,15 @@ string   g_names[];   // a felrakott objektumok nevei (sopreshez)
 int      g_nnames = 0;
 datetime g_lastReveal = 0;
 bool     g_isTester   = false;
+
+// ── Belepo-jelzes szamlalo ────────────────────────────────────────────────────
+// Kerdes volt: "hany kotes van meg hatra? Nem a vegtelenbe tekerem a chartot?"
+// A VLINE a belepo-jelzes fuggoleges vonala (strategiatol fuggetlenul), a szine
+// adja az iranyt: zold = BUY, piros = SELL.
+bool     g_isSig[];      // a rekord belepo-jelzes-e
+int      g_sigDir[];     // +1 BUY, -1 SELL
+int      g_sigTotal = 0, g_sigBuy = 0, g_sigSell = 0;
+datetime g_sigLast  = 0; // az UTOLSO jel ideje (meddig van ertelme tekerni)
 
 
 //+------------------------------------------------------------------+
@@ -122,7 +135,9 @@ bool LoadFile()
 
    ArrayResize(g_ln, 0); ArrayResize(g_t, 0);
    ArrayResize(g_t2, 0); ArrayResize(g_done, 0);
+   ArrayResize(g_isSig, 0); ArrayResize(g_sigDir, 0);
    g_n = 0;
+   g_sigTotal = 0; g_sigBuy = 0; g_sigSell = 0; g_sigLast = 0;
 
    while(!FileIsEnding(h))
    {
@@ -161,10 +176,25 @@ bool LoadFile()
       else if(type == "LABEL" && nf >= 8) { t1 = 0; }   // sarokhoz kotott: mindig lathato
       else continue;
 
+      // Belepo-jelzes? A VLINE a jel fuggoleges vonala; a szinbol jon az irany.
+      bool  isSig = (type == "VLINE");
+      int   dir   = 0;
+      if(isSig)
+      {
+         color c = RgbFromStr(f[3]);
+         int r = (int)(c & 0xFF), g = (int)((c >> 8) & 0xFF);
+         dir = (g > r) ? 1 : -1;
+         g_sigTotal++;
+         if(dir > 0) g_sigBuy++; else g_sigSell++;
+         if(t1 > g_sigLast) g_sigLast = t1;
+      }
+
       ArrayResize(g_ln, g_n + 1);   g_ln[g_n]   = ln;
       ArrayResize(g_t,  g_n + 1);   g_t[g_n]    = t1;
       ArrayResize(g_t2, g_n + 1);   g_t2[g_n]   = t2;
       ArrayResize(g_done, g_n + 1); g_done[g_n] = false;
+      ArrayResize(g_isSig, g_n + 1);  g_isSig[g_n]  = isSig;
+      ArrayResize(g_sigDir, g_n + 1); g_sigDir[g_n] = dir;
       g_n++;
    }
    FileClose(h);
@@ -328,27 +358,62 @@ void UpsertLabel(string name, string &f[])
 //+------------------------------------------------------------------+
 //| Allapotsor — a teszteloben ebbol latszik, hogy a kapu dolgozik.   |
 //+------------------------------------------------------------------+
+void PutLabel(string name, int y, color c, string txt)
+{
+   if(ObjectFind(0, name) < 0)
+   {
+      ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
+      ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetInteger(0, name, OBJPROP_XDISTANCE, 10);
+      ObjectSetInteger(0, name, OBJPROP_FONTSIZE, 8);
+      ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+      ObjectSetString (0, name, OBJPROP_FONT, "Consolas");
+   }
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, c);
+   ObjectSetString (0, name, OBJPROP_TEXT, txt);
+}
+
+
 void Status(datetime now)
 {
    if(!InpShowStatus) return;
-   int shown = 0;
-   for(int i = 0; i < g_n; i++) if(g_done[i]) shown++;
-   if(ObjectFind(0, STATUSNM) < 0)
+
+   // Belepo-jelzesek: mennyi volt eddig, mennyi van MEG. Enelkul nem tudod, hogy
+   // erdemes-e meg tekerni, vagy mar csak ures ora jon.
+   int seen = 0, seenB = 0, seenS = 0;
+   datetime next = 0;
+   for(int i = 0; i < g_n; i++)
    {
-      ObjectCreate(0, STATUSNM, OBJ_LABEL, 0, 0, 0);
-      ObjectSetInteger(0, STATUSNM, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-      ObjectSetInteger(0, STATUSNM, OBJPROP_XDISTANCE, 10);
-      ObjectSetInteger(0, STATUSNM, OBJPROP_YDISTANCE, 18);
-      ObjectSetInteger(0, STATUSNM, OBJPROP_FONTSIZE, 8);
-      ObjectSetInteger(0, STATUSNM, OBJPROP_SELECTABLE, false);
-      ObjectSetString (0, STATUSNM, OBJPROP_FONT, "Consolas");
+      if(!g_isSig[i]) continue;
+      if(g_done[i]) { seen++; if(g_sigDir[i] > 0) seenB++; else seenS++; }
+      else if(next == 0 || g_t[i] < next) next = g_t[i];
    }
-   ObjectSetInteger(0, STATUSNM, OBJPROP_COLOR, InpReplayGate ? clrLimeGreen : clrOrangeRed);
-   ObjectSetString (0, STATUSNM, OBJPROP_TEXT,
-      StringFormat("TFViz %s | %s | kapu:%s | %d/%d objektum | %s",
+   int left = g_sigTotal - seen;
+
+   PutLabel(STATUSNM, 18, (InpReplayGate ? clrLimeGreen : clrOrangeRed),
+      StringFormat("TFViz %s | %s | kapu:%s | %s",
                    g_file, (g_isTester ? "TESZTELO" : "ELO"),
                    (InpReplayGate ? "BE" : "KI  ⚠LATSZIK A JOVO"),
-                   shown, g_n, TimeToString(now, TIME_DATE | TIME_MINUTES)));
+                   TimeToString(now, TIME_DATE | TIME_MINUTES)));
+
+   string s2 = StringFormat("BELEPO: %d / %d volt  (%d BUY, %d SELL)   |   HATRA: %d",
+                            seen, g_sigTotal, seenB, seenS, left);
+   if(g_sigLast > 0)
+      s2 = s2 + "   |   utolso jel: " + TimeToString(g_sigLast, TIME_DATE | TIME_MINUTES);
+   PutLabel(STATUSNM + "2", 33, (left > 0 ? clrWhite : clrGold), s2);
+
+   // Spoiler-sor: csak kifejezett keresre.
+   if(InpShowNextTime && next > 0)
+   {
+      long mins = (long)(next - now) / 60;
+      PutLabel(STATUSNM + "3", 48, clrOrange,
+         StringFormat("kovetkezo jel: %s  (%d ora %d perc mulva)  ⚠spoiler",
+                      TimeToString(next, TIME_DATE | TIME_MINUTES),
+                      (int)(mins / 60), (int)(mins % 60)));
+   }
+   else if(left == 0 && g_sigTotal > 0)
+      PutLabel(STATUSNM + "3", 48, clrGold, "Nincs tobb belepo ebben az ablakban.");
 }
 
 
@@ -382,6 +447,8 @@ void OnDeinit(const int reason)
    if(!g_isTester) EventKillTimer();
    ObjectsDeleteAll(0, g_objpref);
    ObjectDelete(0, STATUSNM);
+   ObjectDelete(0, STATUSNM + "2");
+   ObjectDelete(0, STATUSNM + "3");
 }
 
 
