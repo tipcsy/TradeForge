@@ -50,6 +50,39 @@ bool     g_isTester   = false;
 
 
 //+------------------------------------------------------------------+
+//| A HASZNALANDO fajl neve.                                          |
+//|                                                                  |
+//| ⚠ SABLON-CSAPDA: a Strategy Tester indulaskor RAHUZZA a           |
+//| `tester.tpl`-t, es azzal FELULIRJA az inputokat azokra, amik a    |
+//| sablon mentesekor voltak. A kezzel beallitott `_BT` utotag ott    |
+//| tehat NEMAN elveszik — a mert eset: mindharom indikator a `_BT`   |
+//| helyett az ELO fajlt olvasta, es ures maradt.                     |
+//|                                                                  |
+//| Ezert: ha nincs EXPLICIT utotag ES teszteloben vagyunk, ELOSZOR a |
+//| `_BT` fajlt probaljuk (az a visszajatszas-export). Igy nem kell   |
+//| sablont menteni ahhoz, hogy a teszt a helyes adatot lassa.        |
+//|                                                                  |
+//| (Ugyanez a fuggveny megvan a TradeForgeWPR/Bands-ben is. Az MQL4  |
+//| include kulon mappaba (MQL4\Include) telepulne — egy hianyzo      |
+//| include-tol EGYIK indikator sem fordulna le, ezert itt a rovid    |
+//| duplikacio a kisebb kockazat.)                                    |
+//+------------------------------------------------------------------+
+string ResolveFile(string suffix)
+{
+   string base = PFX + Symbol();
+   if(suffix != "")
+      return(base + suffix + ".csv");
+   if(IsTesting())
+   {
+      string bt = base + "_BT.csv";
+      int h = FileOpen(bt, FILE_READ | FILE_TXT | FILE_ANSI | FILE_COMMON);
+      if(h != INVALID_HANDLE) { FileClose(h); return(bt); }
+   }
+   return(base + ".csv");
+}
+
+
+//+------------------------------------------------------------------+
 //| "r,g,b" -> color. Sajat parser: az MQL4 StringToColor viselkedese |
 //| buildenkent elter, ez viszont mindig ugyanaz.                     |
 //+------------------------------------------------------------------+
@@ -323,7 +356,7 @@ void Status(datetime now)
 int OnInit()
 {
    g_isTester = IsTesting();
-   g_file     = PFX + Symbol() + InpFileSuffix + ".csv";
+   g_file     = ResolveFile(InpFileSuffix);
    g_objpref  = (InpStrategy == "") ? PFX : (PFX + InpStrategy + "@");
    g_nnames   = 0;
    ArrayResize(g_names, 0);

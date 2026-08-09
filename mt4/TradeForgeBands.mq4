@@ -72,9 +72,29 @@ void Status(string txt, color c)
 
 
 //+------------------------------------------------------------------+
+//| A HASZNALANDO fajl neve — lasd a TradeForgeViz reszletes indoklasat|
+//| (SABLON-CSAPDA: a tester.tpl felulirja az inputokat, igy a kezzel  |
+//| beallitott `_BT` utotag a teszteloben nemam elveszne).            |
+//+------------------------------------------------------------------+
+string ResolveFile(string suffix)
+{
+   string base = PFX + Symbol();
+   if(suffix != "")
+      return(base + suffix + ".csv");
+   if(IsTesting())
+   {
+      string bt = base + "_BT.csv";
+      int h = FileOpen(bt, FILE_READ | FILE_TXT | FILE_ANSI | FILE_COMMON);
+      if(h != INVALID_HANDLE) { FileClose(h); return(bt); }
+   }
+   return(base + ".csv");
+}
+
+
+//+------------------------------------------------------------------+
 bool ReadStates()
 {
-   string file = PFX + Symbol() + InpFileSuffix + ".csv";
+   string file = ResolveFile(InpFileSuffix);
    int h = FileOpen(file, FILE_READ | FILE_TXT | FILE_ANSI | FILE_COMMON);
    if(h == INVALID_HANDLE)
    {
