@@ -198,6 +198,75 @@ void OnDeinit(const int reason) { ObjectDelete(0, LBL); }
 
 
 //+------------------------------------------------------------------+
+//| A FO KAPU (M15) WPR-je a chart SAJAT M1-gyertyaibol, vodrozve.    |
+//|                                                                  |
+//| ⚠ MIERT NEM iWPR(…,PERIOD_M15,…): a Strategy Tester a magasabb    |
+//| idosikok sorozatat MENET KOZBEN epiti az M1-bol, es hetvegi res   |
+//| utan ez a sorozat LEFAGYHAT. Az iBarShift ilyenkor a legutolso    |
+//| (elavult) gyertyara mutat, az iWPR pedig EGYETLEN, valtozatlan     |
+//| erteket ad — pontosan az a vizszintes vonal, ami a merest         |
+//| hasznalhatatlanna tette (mert nem HIBAT mutat, hanem HAMIS erteket|
+//| — a legrosszabb fajta nema hiba).                                 |
+//|                                                                  |
+//| Itt tehat az M1-bol magunk kepezzuk a kapu-idosik gyertyait:      |
+//|   vodor kezdete = t - (t % gateSec)                               |
+//| es a WPR-t a lezart vodrok + a MOST FORMALODO vodor eddigi        |
+//| High/Low-jabol szamoljuk. Ez pontosan az, amit egy elo M15 charton|
+//| latnal — es SEMMI jovobeli adatot nem hasznal.                    |
+//+------------------------------------------------------------------+
+void ComputeGateWPR(const int rates_total)
+{
+   int N = g_perGate;
+   if(N <= 0) return;
+   int gateSec = InpGateTFMin * 60;
+   if(gateSec <= 0) return;
+
+   // Lezart vodrok gyuru-puffere (csak az utolso N kell)
+   double bh[], bl[];
+   ArrayResize(bh, N); ArrayResize(bl, N);
+   int pos = 0, cnt = 0;
+
+   datetime curStart = 0;
+   double   curH = 0.0, curL = 0.0;
+
+   // REGITOL UJ fele: a soros indexeles miatt a legregebbi a rates_total-1.
+   for(int i = rates_total - 1; i >= 0; i--)
+   {
+      datetime bs = (datetime)(Time[i] - (Time[i] % gateSec));
+      if(bs != curStart)
+      {
+         if(curStart != 0)                    // az elozo vodor LEZART
+         {
+            bh[pos] = curH; bl[pos] = curL;
+            pos = (pos + 1) % N;
+            if(cnt < N) cnt++;
+         }
+         curStart = bs; curH = High[i]; curL = Low[i];
+      }
+      else
+      {
+         if(High[i] > curH) curH = High[i];
+         if(Low[i]  < curL) curL = Low[i];
+      }
+
+      // HH/LL az utolso (N-1) LEZART vodorre + a MOST formalodora
+      double hh = curH, ll = curL;
+      int take = (cnt < N - 1) ? cnt : N - 1;
+      for(int k = 1; k <= take; k++)
+      {
+         int idx = (pos - k + N) % N;
+         if(bh[idx] > hh) hh = bh[idx];
+         if(bl[idx] < ll) ll = bl[idx];
+      }
+      // Kevés vodor meg (a teszt eleje) -> NE rajzoljunk hamis erteket.
+      BufGate[i] = (cnt >= N - 1 && hh > ll)
+                   ? (hh - Close[i]) / (hh - ll) * -100.0
+                   : EMPTY_VALUE;
+   }
+}
+
+
+//+------------------------------------------------------------------+
 int OnCalculate(const int rates_total,
                 const int prev_calculated,
                 const datetime &time[],
@@ -218,21 +287,14 @@ int OnCalculate(const int rates_total,
    if(limit > rates_total) limit = rates_total;
 
    for(int i = 0; i < limit; i++)
-   {
       BufFast[i] = (g_perFast > 0) ? iWPR(Symbol(), Period(), g_perFast, i)
                                    : EMPTY_VALUE;
 
-      // A FO KAPU (M15) WPR-je LEPCSOSEN a chart gyertyaira: minden M1 gyertyahoz
-      // az az M15 gyertya, amelyikbe beleesik. A teszteloben az iWPR maga sem lat
-      // a szimulalt idon tul, tehat ez nem look-ahead.
-      if(g_perGate > 0)
-      {
-         int sh = iBarShift(Symbol(), InpGateTFMin, Time[i], false);
-         BufGate[i] = (sh >= 0) ? iWPR(Symbol(), InpGateTFMin, g_perGate, sh)
-                                : EMPTY_VALUE;
-      }
-      else BufGate[i] = EMPTY_VALUE;
-   }
+   // A kapu-vonal a vodor-allapottol fugg, ezert EGY menetben szamoljuk. A
+   // teszteloben ez gyertyankent egyszer fut le (a formalodo gyertyan tickenkent
+   // ujra) — 35 ezer gyertyara ez ezredmasodperces nagysagrend.
+   if(g_perGate > 0) ComputeGateWPR(rates_total);
+   else for(int j = 0; j < limit; j++) BufGate[j] = EMPTY_VALUE;
    return(rates_total);
 }
 //+------------------------------------------------------------------+
