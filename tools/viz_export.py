@@ -76,7 +76,7 @@ def _window_bars(df: pd.DataFrame, tf_min: int, warmup: int,
 
 def export_window(symbol: str, t_from: str, t_to: str, strategy_name: str = None,
                   suffix: str = "_BT", show_trades: bool = False,
-                  cfg: dict = None, status=None) -> tuple:
+                  cfg: dict = None, status=None, exec_gates: bool = True) -> tuple:
     """Egy tól-ig ablak kiírása a viz-fájlba. `(ok, üzenet)`.
 
     A CLI és a dashboard-gomb IS ezt hívja — így a kettő nem csúszhat szét.
@@ -133,7 +133,8 @@ def export_window(symbol: str, t_from: str, t_to: str, strategy_name: str = None
     # élő motor tölti fel; itt (önálló processz) üres marad, és akkor a
     # TF-együttállás kapu NÉMÁN kimaradna a jel-replayből.
     lines = pair_visual_lines(symbol, params, strategy, point_size, pair_cfg,
-                              bars=bars, actual_trades=show_trades, cfg=cfg)
+                              bars=bars, actual_trades=show_trades, cfg=cfg,
+                              exec_gates=exec_gates)
     if not lines:
         return False, f"{symbol} — a viz üres lett (a stratégia nem adott objektumot)."
 
@@ -144,7 +145,8 @@ def export_window(symbol: str, t_from: str, t_to: str, strategy_name: str = None
     n_sig = sum(1 for ln in lines if ln.startswith("VLINE;"))
     return True, (f"{symbol} / {strat_name}: {n_sig} belépő jelzés kiírva "
                   f"({t_from} → {t_to}) → {path.name}"
-                  + ("" if show_trades else "  ·  valós kötések nélkül"))
+                  + ("" if show_trades else "  ·  valós kötések nélkül")
+                  + ("" if exec_gates else "  ·  ⚠ KAPUK NÉLKÜL (nyers jelzések)"))
 
 
 def main():
@@ -158,11 +160,16 @@ def main():
                     help="külön fájlnév, pl. _BT → TFV_<SYM>_BT.csv (alap: az élővel közös)")
     ap.add_argument("--show-trades", action="store_true",
                     help="a VALÓS kötések nyilai is kerüljenek rá (manuális teszthez NE)")
+    ap.add_argument("--no-gates", action="store_true",
+                    help="NYERS jelzések: se spread-, se együttállás-kapu, se "
+                         "volatilitás-szűrő. A chart ilyenkor TÖBBET mutat, mint "
+                         "amennyit az él megkötne — kísérlethez, nem paritáshoz.")
     args = ap.parse_args()
 
     ok, msg = export_window(args.symbol, args.t_from, args.t_to,
                             strategy_name=args.strategy, suffix=args.suffix,
-                            show_trades=args.show_trades)
+                            show_trades=args.show_trades,
+                            exec_gates=not args.no_gates)
     log.info("%s %s", "✅" if ok else "❌", msg)
     sys.exit(0 if ok else 1)
 

@@ -551,12 +551,13 @@ class WprSmaStrategy(Strategy):
                 # tehát a jelölő se jelenjen meg). Ugyanaz az atr_min/max_pct logika.
                 # A mérce a p. M15 báré (gördülő mércénél bar-onként változik) —
                 # a `bt_indicators`-szal AZONOS képlet, közös modulból.
-                _base = _volb.value_at(atr15, p, md.params, _atr_avg)
-                if self.bt_entry({"atr": float(atr_v), "atr_avg": _base},
-                                 md.params, pip) is None:
-                    continue
+                if getattr(md, "exec_gates", True):
+                    _base = _volb.value_at(atr15, p, md.params, _atr_avg)
+                    if self.bt_entry({"atr": float(atr_v), "atr_avg": _base},
+                                     md.params, pip) is None:
+                        continue
                 # Spread-kapu (ha van spread-adat a bárokon): a közös core.spread_gate.
-                if _sp_arr is not None:
+                if _sp_arr is not None and getattr(md, "exec_gates", True):
                     _spv = _sp_arr[j]
                     # ⚠ A `backtest_spread_points` ÁTADÁSA kötelező: abból jön a kapu
                     # RELATÍV padlója (normál spread × min_spread_mult). Nélküle a

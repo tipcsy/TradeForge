@@ -149,6 +149,15 @@ class MarketData:
     # jel látszik). Így a charton csak az a belépő-jelölő jelenik meg, ami élesben is
     # végrehajtódott volna — nem a kapu által blokkolt.
     entry_gate: "callable | None" = None
+    # VÉGREHAJTÁSI SZŰRŐK a jel-replayben (spread-kapu + volatilitás-szűrő).
+    # True (alap) = a chart csak azt mutatja, amit a motor ténylegesen megkötne.
+    # False = NYERS jelzések: minden, amit a stratégia jelez, kapuk nélkül.
+    #
+    # Miért kell a kikapcsolás: egy manuális visszajátszásnál eldönthető kísérlet,
+    # hogy a kapuk segítenek-e. Ha a chart csak a kapuzott jeleket mutatja, a
+    # kérdést nem lehet feltenni — a kimaradt belépőkről semmit nem tudnál.
+    # ⚠ Kikapcsolva a chart TÖBBET mutat, mint amennyit az él megkötne.
+    exec_gates: bool = True
 
     def closed(self, label: str) -> Optional[pd.Series]:
         df = self.bars.get(label)

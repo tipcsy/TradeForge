@@ -1037,7 +1037,8 @@ def actual_trade_objects(symbol: str, since_ts: int,
 
 def pair_visual_lines(symbol: str, params: dict, strategy, point_size: float,
                       pair_cfg: dict = None, bars: dict = None,
-                      actual_trades: bool = True, cfg: dict = None) -> list:
+                      actual_trades: bool = True, cfg: dict = None,
+                      exec_gates: bool = True) -> list:
     """Egy stratégia + keretrendszer rajz-objektumainak TAGELT sorai (a stratégia
     nevével — `strategy.visual.tag_line`), hogy több stratégia UGYANABBA a
     szimbólum-fájlba írhasson, az MQL5 indikátor pedig `InpStrategy` szerint szűrjön.
@@ -1088,7 +1089,7 @@ def pair_visual_lines(symbol: str, params: dict, strategy, point_size: float,
     # legacy `show_trades` visszaesés EGY helyen dől el.
     _show_signals = _vp.trades_on({"pairs": {symbol: (pair_cfg or {})}},
                                   symbol, strategy.name)
-    md = MarketData(symbol=symbol,
+    md = MarketData(exec_gates=exec_gates, symbol=symbol,
                     params={**params, "point_size": point_size,
                             "backtest_spread_points": (pair_cfg or {}).get("backtest_spread_points", 1.5)},
                     bars=bars, no_trade_hours=no_trade_set, show_signals=_show_signals)
@@ -1099,7 +1100,9 @@ def pair_visual_lines(symbol: str, params: dict, strategy, point_size: float,
     #  • export (bars megadva) → a BACKTEST kiértékelője a MEGADOTT M1-ből, mert
     #    ott nincs MT5-kapcsolat (a get_candles None-t adna → néma kapu-kimaradás).
     _cfg = cfg if cfg is not None else _run_cfg
-    if bars is not None and _cfg:
+    if not exec_gates:
+        md.entry_gate = None            # NYERS jelzesek: a TF-egyuttallas sem szur
+    elif bars is not None and _cfg:
         from trading.backtest import _build_tf_align_evaluator
         md.entry_gate = _build_tf_align_evaluator(_cfg, symbol, strategy.name,
                                                   bars.get("M1"))

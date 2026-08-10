@@ -3538,9 +3538,17 @@ class DashboardWindow:
             cmd = [sys.executable, "-u",
                    str(ROOT / "tools" / "download_history.py"),
                    "--symbol", symbol, "--tfs", ",".join(tfs)]
+            # ⚠ A gyerek is UTF-8-ban ÍRJON, mert mi úgy OLVASSUK.
+            # Windowson a Python a CSŐRE írva a területi kódolást használja
+            # (`locale.getpreferredencoding`, magyar rendszeren cp1250) — a szülő
+            # viszont `encoding="utf-8"`-cal olvas, így minden ékezet és nyíl
+            # `?`-re romlott a naplóban. A `PYTHONIOENCODING` a gyerek stdout-ját
+            # állítja át; enélkül a két oldal némán MÁS kódolást használ.
+            _env = dict(os.environ, PYTHONIOENCODING="utf-8")
             kwargs = dict(cwd=str(ROOT), stdout=subprocess.PIPE,
                           stderr=subprocess.STDOUT, text=True,
-                          encoding="utf-8", errors="replace", bufsize=1)
+                          encoding="utf-8", errors="replace", bufsize=1,
+                          env=_env)
             if os.name == "nt":
                 kwargs["creationflags"] = 0x08000000   # CREATE_NO_WINDOW
             try:
