@@ -188,7 +188,13 @@ def compute_indicators(df: pd.DataFrame, params: dict) -> pd.DataFrame:
     out["bw_threshold"] = thr
     out["squeeze"] = (inside & (out["bb_bw"] <= thr)).fillna(False)
     # Feloldás: az ELŐZŐ gyertyán még squeeze volt, ezen már nincs
-    out["squeeze_off"] = out["squeeze"].shift(1).fillna(False) & (~out["squeeze"])
+    # ⚠ `shift(1, fill_value=False)` és NEM `shift(1).fillna(False)`: az utóbbi a
+    # bool sorozatot az első sor NaN-ja miatt `object` dtype-ra váltja, majd a
+    # `fillna` NÉMÁN visszaalakítja bool-lá — ezt a pandas elavulttá tette
+    # (FutureWarning), és egy jövőbeli verzióban a dtype `object` MARADNA. Az
+    # `&` operátor object dtype-on más eredményt adhat, tehát ez nem kozmetika.
+    # A `fill_value` eleve nem enged NaN-t, így a dtype végig bool marad.
+    out["squeeze_off"] = out["squeeze"].shift(1, fill_value=False) & (~out["squeeze"])
     # Hány gyertya óta tart a mostani squeeze (a kijelzéshez)
     out["squeeze_bars"] = (out["squeeze"]
                            .groupby((~out["squeeze"]).cumsum()).cumsum().astype(int))
