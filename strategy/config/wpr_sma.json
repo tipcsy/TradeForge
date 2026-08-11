@@ -123,9 +123,9 @@
         "comment": "Max. ATR — kaotikus piac kizárása"
       },
       "atr_baseline_bars": {
-        "recompute": "execution",
+        "recompute": "signal",
         "category": "Piac-szűrő",
-        "comment": "A min/max ATR MÉRCÉJE: 0 = a mentett atr_avg_ref (befagyasztott), >0 = gördülő ablak ennyi M15 gyertyára (96 = 1 nap, 8640 = 90 nap). Rezsimváltásnál a befagyasztott mérce némán lekapcsolhatja a párt."
+        "comment": "A min/max ATR MÉRCÉJE: 0 = a mentett atr_avg_ref (befagyasztott), >0 = gördülő ablak ennyi M15 gyertyára (96 = 1 nap, 8640 = 90 nap). Rezsimváltásnál a befagyasztott mérce némán lekapcsolhatja a párt. | ⚠ JEL-osztály: a bt_indicators SZÁMOLJA az atr_avg oszlopot belőle, tehát a gyorsítótárazott indikátor-táblát is megváltoztatja — végrehajtásinak minősítve a söprés némán hamis eredményt adna. (Az optimalizáló nem hangolja, így ez nem kerül sebességet.)"
       }
     }
   },

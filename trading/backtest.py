@@ -709,6 +709,148 @@ def _build_tf_align_evaluator(cfg, symbol, strategy_name, df_m1):
 
 
 # ---------------------------------------------------------------------------
+# A JELÖLT-LISTA — a drága fél, ami VÉGREHAJTÁSI söprésnél újrahasznosítható
+# ---------------------------------------------------------------------------
+# Mérve (UsaInd, 8 hónapos WF-ablak, 237 572 M1 gyertya):
+#     indikátorok + M15/M1 állapotgépek : 7,5 mp   ← ez itt épül, EGYSZER
+#     a teljes run_pair                 : 11,1 mp
+# Egy végrehajtási söprés (sl_atr_mult × tp_rr_ratio …) tehát a munka ~2/3-át
+# újrahasználhatja. A besorolást a `strategy/config/<név>.json` `param_meta`
+# adja (lásd `strategy.settings.param_class`).
+#
+# ⚠ A GYORSÍTÓTÁR ÁLLÍTÁSA erősebb, mint a jelölt-listáé: itt az INDIKÁTOR-TÁBLÁK
+# is tárolva vannak. Egy paraméter tehát akkor lehet „execution", ha sem az
+# állapotgépek kimenetét, sem a `bt_indicators` OSZLOPAIT nem változtatja. Ez nem
+# elméleti finomság: az `atr_baseline_bars` végrehajtásinak volt minősítve, holott
+# a `bt_indicators` abból számolja az `atr_avg` oszlopot — söprésnél némán hamis
+# eredményt adott volna. (Ezért a `tests/test_signal_series.py` MINDEN stratégia
+# MINDEN végrehajtási paraméterét végigméri a táblákon is.)
+#
+# A hibairányok itt sem egyenrangúak: fölöslegesen újraszámolni = lassú, tévesen
+# újrahasználni = HAMIS. Ezért az ismeretlen kulcs „signal", és a `for_params`
+# eltérésnél NEM használ újra — hanem hangosan nemet mond.
+
+@dataclass
+class SignalSeries:
+    """Egy pár jelölt-listája adott JEL-paraméterekkel (végrehajtás nélkül)."""
+    m15: pd.DataFrame
+    m1: pd.DataFrame
+    signals: dict          # m1 pozíció-index → "BUY" / "SELL"
+    strategy_name: str
+    fingerprint: dict      # a jel-osztályú paraméterek, érték szerint
+    allowed_hours: "frozenset | None"
+    span: tuple            # (test_start, test_end) — amire épült
+
+    def for_params(self, params: dict, allowed_hours=None) -> bool:
+        """Használható-e EZEKKEL a paraméterekkel? (Kétely esetén: nem.)"""
+        ah = frozenset(allowed_hours) if allowed_hours is not None else None
+        return (ah == self.allowed_hours
+                and _signal_fingerprint(self.strategy_name, params) == self.fingerprint)
+
+
+def _signal_fingerprint(strategy_name: str, params: dict) -> dict:
+    """A jel-osztályú paraméterek érték szerint. Ismeretlen kulcs → BENNE VAN
+    (a drága, biztonságos ág): egy új paraméter inkább lassítson, mint hamisítson."""
+    from strategy.settings import load_strategy_config, param_class, SIGNAL_PARAM
+    try:
+        scfg = load_strategy_config(strategy_name)
+    except Exception:
+        scfg = {}
+    return {k: v for k, v in sorted(params.items())
+            if param_class(scfg, k) == SIGNAL_PARAM}
+
+
+def _prepare_params(symbol: str, params: dict, pair_cfg: dict) -> dict:
+    params = {**params, "symbol": symbol, "point_size": pair_cfg["point_size"]}
+    params.setdefault("sess_start", pair_cfg.get("sess_start", 0))
+    params.setdefault("sess_end",   pair_cfg.get("sess_end", 24))
+    return params
+
+
+def _prepare_frames(df_m15, df_m1, params, strategy, test_start, test_end):
+    """Indikátorok → warmup-vágás → test_start/test_end szűkítés."""
+    m15, m1 = strategy.bt_indicators(df_m15, df_m1, params)
+    m15 = m15.iloc[strategy.bt_warmup(params, strategy.timeframes()[0].label):].copy()
+    m1  = m1.iloc[strategy.bt_warmup(params, strategy.timeframes()[1].label):].copy()
+    if test_start:
+        ts = pd.Timestamp(test_start)
+        if m15.index.tzinfo is not None:
+            ts = ts.tz_localize("UTC")
+        m15 = m15[m15.index >= ts]
+        m1  = m1[m1.index >= ts]
+    if test_end:
+        te = pd.Timestamp(test_end)
+        if m15.index.tzinfo is not None:
+            te = te.tz_localize("UTC")
+        m15 = m15[m15.index <= te]
+        m1  = m1[m1.index <= te]
+    return m15, m1
+
+
+def build_signal_series(
+    symbol: str,
+    df_m15: pd.DataFrame,
+    df_m1: pd.DataFrame,
+    params: dict,
+    pair_cfg: dict,
+    strategy=None,
+    test_start: Optional[str] = None,
+    test_end: Optional[str] = None,
+    allowed_hours: Optional[set] = None,
+) -> SignalSeries:
+    """A jelölt-lista: MIT jelezne a stratégia, végrehajtás nélkül.
+
+    Csak az állapotgépeket futtatja (`bt_on_high_close` / `bt_on_low_close`) —
+    se slot, se kapu, se pozíció, se `bt_entry`. Pontosan azt, amit a
+    `run_pair` M1-ciklusa is számolna, ugyanabban a sorrendben.
+    """
+    if strategy is None:
+        strategy = get_strategy({})
+    params = _prepare_params(symbol, params, pair_cfg)
+    m15, m1 = _prepare_frames(df_m15, df_m1, params, strategy, test_start, test_end)
+
+    state = strategy.bt_new_state(symbol)
+    m15_times = m15.index.to_list()
+    m15_ptr = 0
+    _m15_delta = pd.Timedelta(minutes=strategy.timeframes()[0].minutes)
+    _reset_on_off = bool(params.get("no_trade_resets_signal", False))
+
+    _cols = list(m1.columns)
+    _arr = {c: m1[c].to_numpy() for c in _cols}
+    _index = list(m1.index)
+
+    signals: dict = {}
+    prev_row = None
+    for i in range(len(_index)):
+        m1_time = _index[i]
+        row = _Row()
+        row.name = m1_time
+        for _c in _cols:
+            row[_c] = _arr[_c][i]
+        # Óra-szűrő: a no-trade óra CSAK akkor nullázza az állapotot, ha a param
+        # be van kapcsolva — ugyanaz a feltétel, mint a run_pair-ben. Ezért része a
+        # gyorsítótár azonosságának is (`allowed_hours`).
+        if (allowed_hours is not None and m1_time.hour not in allowed_hours
+                and _reset_on_off):
+            state = strategy.bt_new_state(symbol)
+        while (m15_ptr + 1 < len(m15_times)
+               and m15_times[m15_ptr + 1] + _m15_delta <= m1_time):
+            m15_ptr += 1
+            state = strategy.bt_on_high_close(state, m15.iloc[m15_ptr], params)
+        if prev_row is not None:
+            sig = strategy.bt_on_low_close(state, prev_row, row, params)
+            if sig != "NONE":
+                signals[i] = sig
+        prev_row = row
+
+    return SignalSeries(
+        m15=m15, m1=m1, signals=signals, strategy_name=strategy.name,
+        fingerprint=_signal_fingerprint(strategy.name, params),
+        allowed_hours=(frozenset(allowed_hours) if allowed_hours is not None else None),
+        span=(test_start, test_end))
+
+
+# ---------------------------------------------------------------------------
 # Fő szimuláció egy párra
 # ---------------------------------------------------------------------------
 
@@ -733,6 +875,7 @@ def run_pair(
     cfg: "dict | None" = None,
     exec_gates: bool = False,
     tf_eval=_TF_EVAL_AUTO,
+    signal_series: "SignalSeries | None" = None,
 ) -> BacktestResult:
     # A jelzést/indikátorokat a STRATÉGIA adja (seam); a végrehajtás (SL/TP/
     # breakeven/trailing, slot, lot) a motoré. strategy=None → config szerinti.
@@ -748,9 +891,19 @@ def run_pair(
     # A symbol/point_size a pair config-ból AUTORITATÍV; a session default-olható
     # (a per-pár optimalizált params felülírhatja). A wpr_sma ezeket nem olvassa
     # → a meglévő viselkedés bitazonos.
-    params = {**params, "symbol": symbol, "point_size": pair_cfg["point_size"]}
-    params.setdefault("sess_start", pair_cfg.get("sess_start", 0))
-    params.setdefault("sess_end",   pair_cfg.get("sess_end", 24))
+    params = _prepare_params(symbol, params, pair_cfg)
+    # ── Előre megépített jelölt-lista (végrehajtási söprés) ─────────────────
+    # A hívó beadhatja a `build_signal_series` kimenetét: akkor az indikátorok és
+    # a két állapotgép NEM futnak újra. ⚠ Csak akkor fogadjuk el, ha a JEL-osztályú
+    # paraméterek ÉS az óra-szűrő is egyeznek — eltérésnél nem csendben építünk
+    # újra, hanem hibát dobunk: a csendes újraépítés elrejtené a hívó hibáját
+    # (a söprés lassulna, és senki nem tudná meg, miért).
+    _cached = signal_series is not None
+    if _cached and not signal_series.for_params(params, allowed_hours):
+        raise ValueError(
+            f"{symbol}: a beadott jelölt-lista MÁS jel-paraméterekkel épült "
+            f"(vagy más óra-szűrővel) — használd a build_signal_series-t újra. "
+            f"A csendes újrahasznosítás hamis eredményt adna.")
     from core import risk_reduction as _rrm
     rr_spec    = _rr_spec(rr, risky, symbol)
     # Óvatos (felezett) méret? A spec `cautious` felülbírálja, különben a preset
@@ -764,29 +917,13 @@ def run_pair(
 
     result = BacktestResult(symbol=symbol)
 
-    # Indikátorok számítása (a stratégia dönti el, mely indikátorok)
-    m15, m1 = strategy.bt_indicators(df_m15, df_m1, params)
-
-    # Warmup sor — az első érvényes indikátor sor
-    m15 = m15.iloc[strategy.bt_warmup(params, tf_hi):].copy()
-    m1  = m1.iloc[strategy.bt_warmup(params, tf_lo):].copy()
-
-    # Test/train szétválasztás
-    if test_start:
-        ts = pd.Timestamp(test_start)
-        # Ha az index UTC-aware, a Timestamp-ot is UTC-ra kell állítani
-        if m15.index.tzinfo is not None:
-            ts = ts.tz_localize("UTC")
-        m15 = m15[m15.index >= ts]
-        m1  = m1[m1.index >= ts]
-
-    # Záró dátum (a B3 Backtest-ablak állítható időszakához; None → a hist. vége)
-    if test_end:
-        te = pd.Timestamp(test_end)
-        if m15.index.tzinfo is not None:
-            te = te.tz_localize("UTC")
-        m15 = m15[m15.index <= te]
-        m1  = m1[m1.index <= te]
+    # Indikátorok + warmup-vágás + test/train szétválasztás. Előre megépített
+    # jelölt-listánál ez már megvan (ott ugyanez a `_prepare_frames` futott).
+    if _cached:
+        m15, m1 = signal_series.m15, signal_series.m1
+    else:
+        m15, m1 = _prepare_frames(df_m15, df_m1, params, strategy,
+                                  test_start, test_end)
 
     # Óra-szűrő: alapból MINDEN órát kereskedünk (az optimalizáló így teljes
     # óránkénti bontást ad, amiből a trade_hours kézzel dönthető el). Az
@@ -952,13 +1089,27 @@ def run_pair(
     _m1_col_arr = {c: m1[c].to_numpy() for c in _m1_cols}
     _m1_index = list(m1.index)          # pandas Timestamp — kell a .hour/.date()
     _m1_n = len(_m1_index)
+    _sig_at = signal_series.signals if _cached else {}
+
+    _h_arr, _l_arr, _c_arr = (_m1_col_arr["high"], _m1_col_arr["low"],
+                              _m1_col_arr["close"])
 
     for i in range(_m1_n):
         m1_time = _m1_index[i]
-        m1_row = _Row()
-        m1_row.name = m1_time
-        for _c in _m1_cols:
-            m1_row[_c] = _m1_col_arr[_c][i]
+        # A bar három ára — a végrehajtás (SL/TP/BE/trailing, belépő-ár) CSAK
+        # ezeket olvassa, ezért közvetlenül a tömbökből vesszük.
+        _bar_h, _bar_l, _bar_c = _h_arr[i], _l_arr[i], _c_arr[i]
+        # A teljes SOR csak a jelzés-állapotgépnek kell (`bt_on_low_close` egy
+        # Series-szerű sort vár). Előre megépített jelölt-listánál az a hook nem
+        # fut → a soronkénti dict-építést teljesen megspóroljuk. Ez a söprő-ág
+        # legnagyobb megmaradt tétele volt.
+        if _cached:
+            m1_row = None
+        else:
+            m1_row = _Row()
+            m1_row.name = m1_time
+            for _c in _m1_cols:
+                m1_row[_c] = _m1_col_arr[_c][i]
         if i % _PROG_EVERY == 0:
             # Megszakítás (a Backtest-ablak „Megszakítás" gombja / ablak bezárása):
             # a részeredménnyel visszatérünk (a hívó eldobja). Ritkán ellenőrzünk
@@ -1008,7 +1159,11 @@ def run_pair(
         while (m15_ptr + 1 < len(m15_times)
                and m15_times[m15_ptr + 1] + _m15_delta <= m1_time):
             m15_ptr += 1
-            state = strategy.bt_on_high_close(state, m15.iloc[m15_ptr], params)
+            # A mutató léptetése tiszta időbélyeg-összehasonlítás (olcsó, és a
+            # kiszállási jel/építés is használja) → az MINDIG fut. Az állapotgép
+            # csak akkor, ha nincs előre megépített jelölt-lista.
+            if not _cached:
+                state = strategy.bt_on_high_close(state, m15.iloc[m15_ptr], params)
 
         # Nyitott pozíciók kezelése (SL/TP/breakeven/trailing) — BID/ASK modellel
         _sp = _spread_arr[i] if _spread_arr is not None else float("nan")
@@ -1017,8 +1172,8 @@ def run_pair(
         spread_points = _sp / point_size            # a pnl_points + swing-SL számításhoz
         # A gyertya BID; az ASK-sorozat = BID + spread. A kilépés mindig a
         # SZEMBENI oldalon történik (BUY→bid, SELL→ask).
-        bid_hi, bid_lo = m1_row["high"], m1_row["low"]            # BUY ezen zár
-        ask_hi, ask_lo = m1_row["high"] + _sp, m1_row["low"] + _sp  # SELL ezen zár
+        bid_hi, bid_lo = _bar_h, _bar_l                  # BUY ezen zár
+        ask_hi, ask_lo = _bar_h + _sp, _bar_l + _sp      # SELL ezen zár
 
         for trade in list(open_trades):
             closed = False
@@ -1096,8 +1251,8 @@ def run_pair(
                     and trade.runner_mode == _rrm.RUNNER_EXIT
                     and _exit_at(m15_ptr, trade.direction)):
                 # piaci zárás a SZEMBENI oldalon (BUY→bid=close, SELL→ask=close+s)
-                trade.close_price = (m1_row["close"] if trade.direction == "BUY"
-                                     else m1_row["close"] + _sp)
+                trade.close_price = (_bar_c if trade.direction == "BUY"
+                                     else _bar_c + _sp)
                 trade.close_time  = m1_time
                 trade.pnl_usd     = calc_pnl(trade, trade.close_price)
                 trade.status      = "exit"
@@ -1108,8 +1263,8 @@ def run_pair(
             if (not closed and _cc_on
                     and (m1_time - trade.open_time) >= _cc_delta):
                 # piaci zárás a SZEMBENI oldalon (BUY→bid, SELL→ask)
-                _px = float(m1_row["close"] if trade.direction == "BUY"
-                            else m1_row["close"] + _sp)
+                _px = float(_bar_c if trade.direction == "BUY"
+                            else _bar_c + _sp)
                 if (_px < trade.open_price if trade.direction == "BUY"
                         else _px > trade.open_price):
                     trade.close_price = _px
@@ -1145,8 +1300,8 @@ def run_pair(
                                                min_lot, lot_step)
                     if _add > 0:
                         # ráépítés piaci áron a BELÉPŐ oldalon (BUY→ask, SELL→bid)
-                        _add_px = float(m1_row["close"] + _sp
-                                        if trade.direction == "BUY" else m1_row["close"])
+                        _add_px = float(_bar_c + _sp
+                                        if trade.direction == "BUY" else _bar_c)
                         trade.legs.append((_add_px, _add))
                         trade.lot = round(sum(l[1] for l in trade.legs), 8)
                         # A stop a NETTÓ null pont: az átlagár + költség (jutalék,
@@ -1164,7 +1319,7 @@ def run_pair(
                             # Ráépítés: új láb (piaci áron) + az SL az új NETTÓ null
                             # pontra, és a csomag TP nélkül fut (minden láb TP-je törölve).
                             trade.events.append(("BUILD_ADD", m1_time,
-                                                 round(float(m1_row["close"]), 6),
+                                                 round(float(_bar_c), 6),
                                                  round(trade.sl, 6), 0.0,
                                                  round(_add, 8), "build"))
                             trade.events.append(("TP_MODIFY", m1_time, 0.0, 0.0,
@@ -1210,8 +1365,9 @@ def run_pair(
         # maradnának ki (pl. a délutáni trend). A tényleges BELÉPŐ-nyitást a szabad slot
         # ÉS az óra-szűrő kapuzza — élesben is így: a M1-figyelés folyamatos, csak a
         # végrehajtás gátolt.
-        if prev_m1_row is not None:
-            signal = strategy.bt_on_low_close(state, prev_m1_row, m1_row, params)
+        if _cached or prev_m1_row is not None:
+            signal = (_sig_at.get(i, "NONE") if _cached
+                      else strategy.bt_on_low_close(state, prev_m1_row, m1_row, params))
 
             if (signal != "NONE" and free_slots > 0 and not _off_hour
                     and not _limit_hit and m15_ptr < len(m15_times)):
@@ -1238,7 +1394,7 @@ def run_pair(
                         # (ennek az M1-gyertyának a záróára) — a formálódó TF-gyertya
                         # záróára ez, nem a (még ismeretlen) végleges close.
                         _failed[_gt.TF_ALIGN] = not _tf_eval(
-                            int(m1_time.timestamp()), float(m1_row["close"]), signal)
+                            int(m1_time.timestamp()), float(_bar_c), signal)
                     if _mkt_series is not None:
                         _cat = _mkt_series.get(m15_times[m15_ptr])
                         _failed[_gt.MARKET] = bool(_cat) and _cat in _mkt_adverse
@@ -1266,7 +1422,7 @@ def run_pair(
                         _nb = int(params.get("sl_swing_bars", 20) or 20)
                         _lo = m1["low"].iloc[max(0, i - _nb + 1):i + 1].to_numpy()
                         _hi = m1["high"].iloc[max(0, i - _nb + 1):i + 1].to_numpy()
-                        _sw = calc_swing_sl_tp_points(float(m1_row["close"]), signal,
+                        _sw = calc_swing_sl_tp_points(float(_bar_c), signal,
                                                     _lo, _hi, params, point_size, spread_points)
                         if _sw is None:
                             prev_m1_row = m1_row
@@ -1305,7 +1461,7 @@ def run_pair(
                     _esp = _cspread_arr[i] if _cspread_arr is not None else float("nan")
                     if not (_esp > 0):
                         _esp = _sp
-                    open_price = m1_row["close"]
+                    open_price = _bar_c
                     if signal == "BUY":
                         open_price += _esp          # BUY → ASK-on lép be
                         sl_price = open_price - points_to_price(sl_points, point_size)
