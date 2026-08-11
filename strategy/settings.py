@@ -26,6 +26,56 @@ log = logging.getLogger(__name__)
 # A stratégiához tartozó, teljes egészében átmozgatott top-level szekciók.
 STRATEGY_SECTIONS = ("quality", "indicators", "sltp", "position_mgmt", "param_meta")
 
+
+# ---------------------------------------------------------------------------
+# Paraméter-osztály: kell-e ÚJRASZÁMOLNI a belépő-listát?
+# ---------------------------------------------------------------------------
+# Két osztály, a `param_meta.params.<kulcs>.recompute` mezőben:
+#
+#   "signal"    — a paraméter megváltoztatása MÁS belépő-listát ad: az indikátorok
+#                 és/vagy a jelzés-állapotgépek újrafuttatása KELL. (SMA/WPR
+#                 periódusok, extrém/trigger szintek, a squeeze paraméterei…)
+#   "execution" — a belépő-lista VÁLTOZATLAN; a paraméter csak szűr vagy méretez
+#                 (SL/TP távolság, volatilitás-sáv, kockázatcsökkentés).
+#
+# Miért fontos: mérve (UsaInd, 8 hónapos ablak) a jel-oldal 7,5 mp a 11,1-ből.
+# Egy VÉGREHAJTÁSI söprésnél tehát a drága rész EGYSZER számolható és
+# újrahasználható — ez a Fázis 1 sebesség-nyeresége.
+#
+# ⚠⚠ AZ ISMERETLEN KULCS "signal" — ÉS EZ NEM KÉNYELMI DÖNTÉS.
+# Ha egy JEL-paramétert tévedésből végrehajtásinak minősítenénk, a gyorsítótár
+# olyankor is újrahasználódna, amikor NEM szabadna → CSENDESEN HAMIS eredmény.
+# Fordítva (végrehajtási → jel) csak sebességet veszítünk. A hiba két iránya
+# tehát nem egyenrangú, ezért az alapértelmezés mindig a drágább, biztonságos ág.
+SIGNAL_PARAM = "signal"
+EXEC_PARAM = "execution"
+
+
+def param_class(cfg: dict, key: str) -> str:
+    """Egy paraméter osztálya: `"signal"` vagy `"execution"`.
+
+    Ismeretlen/hiányzó/érvénytelen → `"signal"` (a biztonságos oldal, lásd fent)."""
+    meta = ((cfg.get("param_meta") or {}).get("params") or {}).get(key) or {}
+    val = meta.get("recompute")
+    return val if val in (SIGNAL_PARAM, EXEC_PARAM) else SIGNAL_PARAM
+
+
+def split_params(cfg: dict, keys) -> tuple[list, list]:
+    """`(jel_paraméterek, végrehajtási_paraméterek)` — a bemeneti SORRENDET tartva."""
+    sig, exe = [], []
+    for k in keys:
+        (sig if param_class(cfg, k) == SIGNAL_PARAM else exe).append(k)
+    return sig, exe
+
+
+def unclassified_params(cfg: dict, keys) -> list:
+    """Amelyik kulcsnak NINCS kifejezett `recompute` mezője. Ezek a biztonságos
+    (`signal`) ágra esnek, tehát csak SEBESSÉGET veszítünk — de tudni akarunk
+    róluk, mert egy új paraméter így némán lelassíthatja a söprést."""
+    pm = (cfg.get("param_meta") or {}).get("params") or {}
+    return [k for k in keys
+            if (pm.get(k) or {}).get("recompute") not in (SIGNAL_PARAM, EXEC_PARAM)]
+
 # Az `optimizer` szekció MEGOSZTOTT: a MOTOR-kulcsok a vázhoz (config.json),
 # minden más (a paramétertér-tartományok + piaci szűrők) a stratégiához tartozik.
 OPTIMIZER_ENGINE_KEYS = frozenset({

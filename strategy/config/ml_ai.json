@@ -35,30 +35,37 @@
     ],
     "params": {
       "signal_tf_min": {
+        "recompute": "signal",
         "category": "ML modell",
         "comment": "A JEL idősíkja percben (5/15/30/60). Változtatás után ÚJRA KELL TANÍTANI — a régi modell más gyertyákra tanult. STRATÉGIA-szintű: a strategy/config/ml_ai.json-ban állítsd."
       },
       "ml_warmup_bars": {
+        "recompute": "signal",
         "category": "ML modell",
         "comment": "Élő feature-ablak mélysége (jel-idősík gyertyában) — min. ~700 kell az indikátor-bemelegítéshez"
       },
       "dynamic_sltp": {
+        "recompute": "execution",
         "category": "SL / TP",
         "comment": "true: SL = ATR14 × szorzó; false: fix sl_pips/tp_pips"
       },
       "sl_atr_mult": {
+        "recompute": "execution",
         "category": "SL / TP",
         "comment": "SL = ATR14 × ez (dynamic_sltp esetén)"
       },
       "tp_rr_ratio": {
+        "recompute": "execution",
         "category": "SL / TP",
         "comment": "TP = SL × ez (kockázat/hozam arány)"
       },
       "sl_points": {
+        "recompute": "execution",
         "category": "SL / TP",
         "comment": "Fix SL pipben (dynamic_sltp=false esetén; a tanítás írja páronként)"
       },
       "tp_points": {
+        "recompute": "execution",
         "category": "SL / TP",
         "comment": "Fix TP pipben (dynamic_sltp=false esetén)"
       }
