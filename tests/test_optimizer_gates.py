@@ -52,10 +52,19 @@ check("a grid/random-ag atadja", "cfg=cfg, exec_gates=exec_gates, tf_eval=_tf_ev
 check("az OOS TEST is atadja", "cfg=cfg, exec_gates=exec_gates)" in src)
 # A kiertekelo a trial-cikluson KIVUL epul (nem parameter-fuggo).
 _optuna_body = src[src.index("def optimize_pair_optuna"):src.index("def optimize_pair(")]
+# Az ELSO celfuggveny-definicio (a beagyazott kereses ota tobb van: lapos +
+# beagyazott) — a kapu-epitesnek MINDEGYIK elott kell lennie.
+import re as _re
+_first_obj = min(m.start() for m in _re.finditer(r"def _?objective", _optuna_body))
 check("az optuna-ag ABLAKONKENT epiti a kaput, nem trialonkent",
-      _optuna_body.index("_build_tf_align_evaluator")
-      < _optuna_body.index("def objective("),
-      "a kapu-epites az objective ELOTT van")
+      _optuna_body.index("_build_tf_align_evaluator") < _first_obj,
+      "a kapu-epites a celfuggveny ELOTT van")
+# ⚠ A beagyazott ag a JELOLT-LISTAT viszont trialonkent epiti — ez SZANDEKOS
+# (a jel-parameterek trialonkent valtoznak), es pont ez a kulso hurok koltsege.
+# A TF-kapu ezzel szemben parameter-fuggetlen, ezert marad kivul.
+check("a beagyazott ag a jelolt-listat a KULSO trialon belul epiti",
+      "build_signal_series" in _optuna_body and
+      _optuna_body.index("build_signal_series", _first_obj) > _first_obj)
 
 # ══ 3. A kapcsolo alapja BE, es configbol allithato ═══════════════════════
 check("a config-minta tartalmazza az uj kulcsot",

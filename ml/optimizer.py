@@ -363,8 +363,31 @@ def _dep_order(specs: dict) -> list:
     return order
 
 
-def _suggest_params(trial, opt_cfg: dict, base_params: dict) -> dict:
+def _param_split(strategy, opt_cfg: dict) -> tuple[list, list]:
+    """A HANGOLT kulcsok kettéosztva: (jel, végrehajtás).
+
+    A besorolás a `strategy/config/<név>.json` `param_meta`-jából jön. Ismeretlen
+    kulcs → jel (a drága, biztonságos ág): egy be nem sorolt paraméter inkább
+    lassítson, mint hogy a jelölt-lista gyorsítótára tévesen újrahasznosuljon.
+    """
+    from strategy.settings import load_strategy_config, param_class, EXEC_PARAM
+    try:
+        scfg = load_strategy_config(strategy.name)
+    except Exception:
+        scfg = {}
+    specs = [k for k, v in opt_cfg.items() if isinstance(v, dict) and "min" in v]
+    sig = [k for k in specs if param_class(scfg, k) != EXEC_PARAM]
+    exe = [k for k in specs if param_class(scfg, k) == EXEC_PARAM]
+    return sig, exe
+
+
+def _suggest_params(trial, opt_cfg: dict, base_params: dict,
+                    keys: "list | None" = None) -> dict:
     """Optuna trial → paraméter dict.
+
+    `keys` (opcionális): csak ezeket a kulcsokat suggeszti (a beágyazott
+    kereséshez — a külső hurok a jel-, a belső a végrehajtási dimenziókat).
+    None → mind, mint eddig.
 
     A `gt`/`lt` metaadattal ellátott range-eket DINAMIKUSAN szűkíti a MÁR
     suggeszált paraméterek alapján → érvénytelen kombináció ELŐ SEM ÁLL (nincs
@@ -374,6 +397,8 @@ def _suggest_params(trial, opt_cfg: dict, base_params: dict) -> dict:
     params = deepcopy(base_params)
     specs = {k: v for k, v in opt_cfg.items()
              if isinstance(v, dict) and "min" in v}
+    if keys is not None:
+        specs = {k: v for k, v in specs.items() if k in keys}
     for key in _dep_order(specs):
         spec = specs[key]
         lo, hi, step = spec["min"], spec["max"], spec["step"]
@@ -452,6 +477,7 @@ def optimize_pair_optuna(
     progress_callback=None,
     cfg: "dict | None" = None,
     exec_gates: bool = False,
+    nested: "bool | None" = None,
 ) -> Optional[dict]:
     """
     Optuna Bayesian optimalizálás walk-forward validációval.
@@ -462,11 +488,30 @@ def optimize_pair_optuna(
     ablakonként EGYSZER építjük meg (nem trialonként): nem függ a paraméterektől,
     viszont resample-t igényel.
     """
-    from trading.backtest import run_pair, _build_tf_align_evaluator
+    from trading.backtest import (run_pair, _build_tf_align_evaluator,
+                                  build_signal_series)
 
     # Opt-in: az rr (kockázatcsökkentés) is optimalizált dimenzió? Alapból NEM →
     # a keresési tér és a viselkedés bitazonos a korábbival.
     optimize_rr = bool(opt_cfg.get("optimize_rr", False))
+
+    # ── Beágyazott keresés (opt-in) ─────────────────────────────────────────
+    # Alapból KI → a lapos keresés viselkedése BITAZONOS a korábbival. A
+    # `nested` argumentum (ha adott) erősebb a confignál — az A/B mérőnek kell.
+    if nested is None:
+        nested = bool(opt_cfg.get("nested", False))
+    n_inner = int(opt_cfg.get("inner_trials", 8) or 8)
+    _sig_keys, _exe_keys = _param_split(strategy, opt_cfg)
+    if nested and not _exe_keys:
+        # Nincs mit söpörni belül → a beágyazás csak felesleges réteg lenne.
+        log.warning("  %s/%s — a beágyazott keresés KIMARAD: ennek a stratégiának "
+                    "nincs hangolt VÉGREHAJTÁSI paramétere (a param_meta szerint). "
+                    "Lapos keresés fut.", symbol, strategy.name)
+        nested = False
+    if nested:
+        log.info("  %s — BEÁGYAZOTT keresés: %d jel-dimenzió kívül, %d "
+                 "végrehajtási belül (%d belső trial/külső)",
+                 symbol, len(_sig_keys), len(_exe_keys), n_inner)
 
     # Deklaratív paraméter-kényszerek indításkori ellenőrzése: az elgépelt vagy
     # ismeretlen nevű kifejezéseket LOGBA jelezzük (a check() futásidőben kihagyja).
@@ -548,7 +593,7 @@ def optimize_pair_optuna(
                 row[f"rr_{_k}"] = rr.get(_k, "")
         trial.set_user_attr("row", row)
 
-    def objective(trial):
+    def _progress_tick():
         # ── Haladás MINDEN trialnál, a korai return ELŐTT ──────────────────
         # (Különben a sok érvénytelen trial esetén — pl. BTCUSD — a GUI
         #  stall-timeoutot dob, a CLI nem mutat haladást, és CSV sem készül.)
@@ -562,19 +607,19 @@ def optimize_pair_optuna(
             log.info("  %s — %d/%d trial | legjobb score: %.2f",
                      symbol, call_count[0], n_trials, best_score_so_far[0])
 
-        params = _suggest_params(trial, opt_cfg, base_params)
-        # rr (kockázatcsökkentés) dimenziók — csak ha opt-in (különben None → OFF).
-        rr_spec = _suggest_rr(trial, opt_cfg) if optimize_rr else None
-        rr_run  = _rr_for_run(rr_spec)
-        if not strategy.constraints_ok(params):
-            _record_trial(trial, params, -999999.0,
-                          note="paraméter-kényszer nem teljesült", rr=rr_spec)
-            return -999999.0
+    def _evaluate(params, rr_run, series_by_window=None):
+        """Egy paraméter-készlet pontszáma az ÖSSZES walk-forward ablakon.
 
+        A lapos és a beágyazott keresés UGYANEZT hívja — így a két mód nem
+        mérhet mást ugyanarra a paraméter-készletre. `series_by_window`: előre
+        megépített jelölt-listák (a beágyazott ág belső hurka adja); None → a
+        run_pair maga számol, mint eddig.
+        Visszaad: (score, summary|None, hiba-szöveg).
+        """
         window_scores = []
         combined_test = []          # az összes ablak TEST-trade-jei (CSV metrikákhoz)
         last_err = ""               # utolsó kivétel szövege (diagnosztika a CSV-be)
-        for w, m15_w, m1_w, tf_eval in prepared:
+        for _wi, (w, m15_w, m1_w, tf_eval) in enumerate(prepared):
             try:
                 # Teljes ablak adat (train + test) — az indikátorok warmuphoz kellenek
                 result = run_pair(
@@ -585,6 +630,7 @@ def optimize_pair_optuna(
                     strategy=strategy,
                     rr=rr_run,
                     cfg=cfg, exec_gates=exec_gates, tf_eval=tf_eval,
+                    signal_series=(series_by_window[_wi] if series_by_window else None),
                 )
 
                 # Csak a TEST periódus trade-jeit értékeljük
@@ -601,17 +647,14 @@ def optimize_pair_optuna(
 
         valid = [s for s in window_scores if s > -999999.0]
         if not valid:
-            # Ha kivétel volt → az az ok; ha nem, akkor tényleg nincs értékelhető trade.
-            _record_trial(trial, params, -999999.0, rr=rr_spec,
-                          note=last_err or "nincs értékelhető trade a TEST ablakokban")
-            return -999999.0
+            return -999999.0, None, (last_err or
+                                     "nincs értékelhető trade a TEST ablakokban")
 
         # Átlag × konzisztencia arány (hány ablak működött)
         avg_score   = float(np.mean(valid))
         consistency = len(valid) / len(window_scores)
         final_score = avg_score * consistency
 
-        # ── Sor az eredménytáblázathoz (összes ablak TEST-metrikái + params) ──
         pnl_list = [t.pnl_usd for t in combined_test]
         summary = None
         if pnl_list:
@@ -631,12 +674,106 @@ def optimize_pair_optuna(
                 "max_drawdown":  mdd,
                 "profit_factor": pf,
             }
-        _record_trial(trial, params, final_score, summary, rr=rr_spec)
+        return final_score, summary, ""
 
-        if final_score > best_score_so_far[0]:
-            best_score_so_far[0] = final_score
+    # ── LAPOS keresés (az eddigi) — minden dimenzió EGYÜTT ──────────────────
+    def _objective_flat(trial):
+        _progress_tick()
+        params = _suggest_params(trial, opt_cfg, base_params)
+        # rr (kockázatcsökkentés) dimenziók — csak ha opt-in (különben None → OFF).
+        rr_spec = _suggest_rr(trial, opt_cfg) if optimize_rr else None
+        if not strategy.constraints_ok(params):
+            _record_trial(trial, params, -999999.0,
+                          note="paraméter-kényszer nem teljesült", rr=rr_spec)
+            return -999999.0
+        score, summary, err = _evaluate(params, _rr_for_run(rr_spec))
+        if summary is None and score <= -999999.0:
+            _record_trial(trial, params, score, rr=rr_spec, note=err)
+            return score
+        _record_trial(trial, params, score, summary, rr=rr_spec)
+        if score > best_score_so_far[0]:
+            best_score_so_far[0] = score
+        return score
 
-        return final_score
+    # ── BEÁGYAZOTT keresés — kívül a JEL, belül a VÉGREHAJTÁS ───────────────
+    # Miért működik: a jel-paraméterek megváltoztatják a jelölt-listát (drága
+    # újraszámolás), a végrehajtásiak nem (lásd `strategy.settings.param_class`).
+    # A külső trial tehát ablakonként EGYSZER építi a jelölt-listát, és a belső
+    # hurok azon söpri végig a végrehajtási teret — a `run_pair` a munka nagy
+    # részét újrahasználja (mérve 1,7–2,0×).
+    #
+    # ⚠ EZ NEM UGYANAZ A KERESÉS, csak gyorsabban: a költségvetés máshogy oszlik.
+    # Azonos időből több KIÉRTÉKELÉS lesz, de KEVESEBB jel-beállításra. Hogy ez
+    # nyereség-e, az a tájképtől függ — ezért alapból KI van kapcsolva, és A/B-vel
+    # kell igazolni (`tools/nested_ab.py`).
+    def _objective_nested(trial):
+        _progress_tick()
+        sig_params = _suggest_params(trial, opt_cfg, base_params, keys=_sig_keys)
+        if not strategy.constraints_ok(sig_params):
+            # A kényszerek MIND jel-paraméterekre hivatkoznak (ellenőrizve
+            # wpr_sma-n és bollingeren), tehát itt eldönthető — nem pazarolunk rá
+            # egy teljes belső hurkot.
+            _record_trial(trial, sig_params, -999999.0,
+                          note="paraméter-kényszer nem teljesült")
+            return -999999.0
+
+        # A jelölt-lista ablakonként EGYSZER. Ha bármelyik ablak elhasal, a
+        # trial elbukik — de a hibát megnevezzük (nem néma -999999).
+        try:
+            series = [build_signal_series(symbol, m15_w, m1_w, sig_params,
+                                          pair_cfg, strategy=strategy)
+                      for _w, m15_w, m1_w, _tf in prepared]
+        except Exception as e:
+            _record_trial(trial, sig_params, -999999.0,
+                          note=f"jelölt-lista építés: {type(e).__name__}: {e}")
+            return -999999.0
+
+        n_sig = sum(len(s.signals) for s in series)
+        if n_sig == 0:
+            # Nincs egyetlen jelölt sem → a végrehajtási tér söprése értelmetlen
+            # (mind a 0 kötést adná). Ez GYAKORI a rossz jel-beállításoknál, és
+            # a belső hurok átugrásával sok időt spórolunk.
+            _record_trial(trial, sig_params, -999999.0,
+                          note="a jel-beállítás egyetlen jelöltet sem ad")
+            return -999999.0
+
+        best = {"score": -999999.0, "params": None, "summary": None, "rr": None}
+
+        def _inner(itrial):
+            p = _suggest_params(itrial, opt_cfg, sig_params, keys=_exe_keys)
+            rr_spec = _suggest_rr(itrial, opt_cfg) if optimize_rr else None
+            s, summ, _err = _evaluate(p, _rr_for_run(rr_spec), series)
+            if s > best["score"]:
+                best.update(score=s, params=p, summary=summ, rr=rr_spec)
+            # ⚠ A leállítás-kérést ITT is figyelni kell, nem csak a külső
+            # trial-határon: egy külső trial `n_inner` teljes kiértékelés, ami
+            # percekig tart. Enélkül a STOP gomb annyit „gondolkodna", és a
+            # felhasználó joggal hinné, hogy lefagyott.
+            if stop_marker(symbol, strategy.name).exists():
+                itrial.study.stop()
+            return s
+
+        inner = optuna.create_study(
+            direction="maximize",
+            sampler=optuna.samplers.TPESampler(seed=1000 + trial.number))
+        inner.optimize(_inner, n_trials=n_inner, show_progress_bar=False)
+
+        # A nyertes TELJES paraméter-készletet a trialhoz kötjük: a végén ebből
+        # olvassuk ki a legjobbat (a külső trial maga csak a jel-dimenziókat
+        # ismeri, a végrehajtásiakat a belső study „tudja").
+        _bp = best["params"] or sig_params
+        trial.set_user_attr("nested_params", {k: _bp.get(k) for k in _exe_keys})
+        if best["rr"]:
+            trial.set_user_attr("nested_rr", best["rr"])
+        trial.set_user_attr("nested_signals", n_sig)
+        _record_trial(trial, _bp, best["score"], best["summary"], rr=best["rr"],
+                      note=("" if best["summary"] else
+                            "a végrehajtási söprés egyetlen értékelhető trade-et sem adott"))
+        if best["score"] > best_score_so_far[0]:
+            best_score_so_far[0] = best["score"]
+        return best["score"]
+
+    objective = _objective_nested if nested else _objective_flat
 
     out_csv     = trials_file(symbol, strategy.name)
     storage_url = f"sqlite:///{study_db(symbol, strategy.name).as_posix()}"
@@ -718,10 +855,21 @@ def optimize_pair_optuna(
     if study.best_value <= -999999.0:
         return None
 
-    best_params = _suggest_params(study.best_trial, opt_cfg, base_params)
-    # A nyertes trial rr-je (ugyanabból a trialból visszafejtve) — a train/TEST
-    # validáció is EZZEL fut, hogy a mentett minősítés konzisztens legyen.
-    best_rr     = _suggest_rr(study.best_trial, opt_cfg) if optimize_rr else None
+    if nested:
+        # A külső trial csak a JEL-dimenziókat suggesztálta; a végrehajtásiakat a
+        # belső study nyerte meg, és a trial user_attr-jébe került. (A study-ban
+        # eltárolva → folytatás után is visszaolvasható.)
+        best_params = _suggest_params(study.best_trial, opt_cfg, base_params,
+                                      keys=_sig_keys)
+        best_params.update({k: v for k, v in
+                            (study.best_trial.user_attrs.get("nested_params") or {}).items()
+                            if v is not None})
+        best_rr = study.best_trial.user_attrs.get("nested_rr") if optimize_rr else None
+    else:
+        best_params = _suggest_params(study.best_trial, opt_cfg, base_params)
+        # A nyertes trial rr-je (ugyanabból a trialból visszafejtve) — a train/TEST
+        # validáció is EZZEL fut, hogy a mentett minősítés konzisztens legyen.
+        best_rr = _suggest_rr(study.best_trial, opt_cfg) if optimize_rr else None
     best_rr_run = _rr_for_run(best_rr)
 
     # TRAIN summary a teljes train perióduson (utolsó ablak train_start → test_start)
