@@ -527,10 +527,35 @@ class CanvasTable:
                 self._redraw_row(i, d)
                 continue
             for key, cell in cells.items():
+                # ⚠ A KATTINTÁS-VISSZAHÍVÁST MINDIG újra kell kötni, a látvány
+                # egyezésétől FÜGGETLENÜL. A rekesz `(sor_index, oszlop)` címzésű:
+                # rendezéskor ugyanabba a rekeszbe MÁS instrumentum adata kerül —
+                # a szöveget/színt az `_apply` átírja, a `_clicks`-ben viszont a
+                # RÉGI sorra zárt lambda maradna. Így a Stop/Play a láthatótól
+                # eltérő párt vezérelte (mérve: 3 sorral feljebbit).
+                #
+                # Miért nem elég a visual-változáskor kötni: a `Cell.visual()`
+                # SZÁNDÉKOSAN nem tartalmazza a visszahívást (csak alkulcs/szöveg/
+                # szín) — két pár azonos kinézetű vezérlőjénél tehát a `continue`
+                # ág fut, és az elavult kötés túlélné.
+                self._rebind_clicks(i, cell)
                 if self._visual.get((i, key)) == cell.visual():
                     continue          # nem változott → egyetlen írás sem
                 self._visual[(i, key)] = cell.visual()
                 self._apply(i, cell)
+
+    def _rebind_clicks(self, i: int, cell) -> None:
+        """A rekesz kattintás-visszahívásainak FRISSÍTÉSE az AKTUÁLIS sorra.
+
+        A vászon-elemek (tag) a rekeszhez tartoznak és a helyükön maradnak; csak
+        az mögöttük álló lambda avulhat el, amikor a rekeszbe másik instrumentum
+        kerül. Ez a függvény azt az egy dolgot pótolja."""
+        if cell.on_click:
+            self._clicks[(i, cell.key)] = cell.on_click
+        for p in (cell.parts or []):
+            sub, cb = p[0], p[3]
+            if cb:
+                self._clicks[(i, cell.key, sub)] = cb
 
     def _slot_structure_changed(self, i: int, cells: dict) -> bool:
         """Változott-e a rekesz CELLA-SZERKEZETE (nem csak a tartalma)?
