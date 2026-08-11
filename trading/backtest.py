@@ -741,10 +741,18 @@ class SignalSeries:
     allowed_hours: "frozenset | None"
     span: tuple            # (test_start, test_end) — amire épült
 
-    def for_params(self, params: dict, allowed_hours=None) -> bool:
-        """Használható-e EZEKKEL a paraméterekkel? (Kétely esetén: nem.)"""
+    def for_params(self, params: dict, allowed_hours=None,
+                   test_start=None, test_end=None) -> bool:
+        """Használható-e EZEKKEL a paraméterekkel? (Kétely esetén: nem.)
+
+        ⚠ Az IDŐSZAK is az azonosság része. Gyorsítótárból a `run_pair` a tárolt
+        táblákat használja, tehát a `test_start`/`test_end` argumentumát FIGYELMEN
+        KÍVÜL hagyja — más időszakra épült listával csendben a RÉGI időszakot
+        futtatná le, a felhasználó pedig az újat látná a fejlécen.
+        """
         ah = frozenset(allowed_hours) if allowed_hours is not None else None
         return (ah == self.allowed_hours
+                and (test_start, test_end) == self.span
                 and _signal_fingerprint(self.strategy_name, params) == self.fingerprint)
 
 
@@ -850,6 +858,39 @@ def build_signal_series(
         span=(test_start, test_end))
 
 
+def signal_series_cached(
+    cache: "SignalSeries | None",
+    symbol: str,
+    df_m15: pd.DataFrame,
+    df_m1: pd.DataFrame,
+    params: dict,
+    pair_cfg: dict,
+    strategy=None,
+    test_start: Optional[str] = None,
+    test_end: Optional[str] = None,
+    allowed_hours: Optional[set] = None,
+) -> tuple:
+    """Meglévő jelölt-lista újrahasznosítása, ha szabad — különben új.
+
+    Visszaad: `(series, reused)`. A `reused` a HÍVÓNAK szól: abból tudja
+    kiírni a felhasználónak, hogy miért volt gyors — enélkül a gyorsítótár
+    láthatatlan mágia lenne, és egy elmaradt újraépítés észrevétlen.
+
+    A szabályt (mikor szabad újrahasználni) EGY helyen tartjuk: a hívóknak nem
+    kell tudniuk, mi a jel- és mi a végrehajtási paraméter.
+    """
+    if strategy is None:
+        strategy = get_strategy({})
+    _p = _prepare_params(symbol, params, pair_cfg)
+    if cache is not None and cache.strategy_name == strategy.name \
+            and cache.for_params(_p, allowed_hours, test_start, test_end):
+        return cache, True
+    return build_signal_series(symbol, df_m15, df_m1, params, pair_cfg,
+                               strategy=strategy, test_start=test_start,
+                               test_end=test_end,
+                               allowed_hours=allowed_hours), False
+
+
 # ---------------------------------------------------------------------------
 # Fő szimuláció egy párra
 # ---------------------------------------------------------------------------
@@ -899,11 +940,13 @@ def run_pair(
     # újra, hanem hibát dobunk: a csendes újraépítés elrejtené a hívó hibáját
     # (a söprés lassulna, és senki nem tudná meg, miért).
     _cached = signal_series is not None
-    if _cached and not signal_series.for_params(params, allowed_hours):
+    if _cached and not signal_series.for_params(params, allowed_hours,
+                                                test_start, test_end):
         raise ValueError(
             f"{symbol}: a beadott jelölt-lista MÁS jel-paraméterekkel épült "
-            f"(vagy más óra-szűrővel) — használd a build_signal_series-t újra. "
-            f"A csendes újrahasznosítás hamis eredményt adna.")
+            f"(vagy más óra-szűrővel / időszakra) — használd a "
+            f"build_signal_series-t újra. A csendes újrahasznosítás hamis "
+            f"eredményt adna.")
     from core import risk_reduction as _rrm
     rr_spec    = _rr_spec(rr, risky, symbol)
     # Óvatos (felezett) méret? A spec `cautious` felülbírálja, különben a preset

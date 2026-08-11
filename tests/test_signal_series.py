@@ -220,6 +220,45 @@ for k, v in (("sl_atr_mult", 3.5), ("tp_rr_ratio", 2.0)):
           _key(full) == _key(cached), f"{len(full.trades)} vs {len(cached.trades)}")
 
 
+# ── 6b. AZ IDOSZAK is az azonossag resze ───────────────────────────────────
+# ⚠ Gyorsitotarbol a run_pair a TAROLT tablakat hasznalja, tehat a
+# test_start/test_end argumentumat figyelmen kivul hagyja. Mas idoszakra epult
+# listaval csendben a REGI idoszakot futtatna le — a felhasznalo pedig az ujat
+# latna a fejlecen. Ez a legalattomosabb valtozata a "csendes hamis"-nak.
+_ref_span = bt.build_signal_series("TEST", M15, M1, BASE, PAIR_CFG, strategy=ST,
+                                   test_start="2026-01-05")
+check("mas idoszak -> a gyorsitotar NEM hasznalhato",
+      not _ref_span.for_params(bt._prepare_params("TEST", BASE, PAIR_CFG),
+                               test_start="2026-01-08"))
+check("ugyanaz az idoszak -> hasznalhato",
+      _ref_span.for_params(bt._prepare_params("TEST", BASE, PAIR_CFG),
+                           test_start="2026-01-05"))
+try:
+    bt.run_pair("TEST", M15, M1, BASE, PAIR_CFG, TRADING_CFG, 10000.,
+                strategy=ST, signal_series=_ref_span, test_start="2026-01-08")
+    check("mas idoszakra epult lista -> hibat dob", False, "nem dobott hibat")
+except ValueError:
+    check("mas idoszakra epult lista -> hibat dob", True)
+
+
+# ── 6c. signal_series_cached: a szabaly EGY helyen el ──────────────────────
+# A hivoknak (backtest-ablak, optimalizalo) nem kell tudniuk, mi jel- es mi
+# vegrehajtasi parameter — csak ezt hivjak, es megkapjak, hogy ujrahasznalt-e.
+_c = None
+_seq = [("elso futas", {}, None, False),
+        ("csak SL valtozott", {"sl_atr_mult": 3.0}, None, True),
+        ("csak TP valtozott", {"sl_atr_mult": 3.0, "tp_rr_ratio": 2.2}, None, True),
+        ("ugyanaz megint", {"sl_atr_mult": 3.0, "tp_rr_ratio": 2.2}, None, True),
+        ("JEL valtozott", {"sl_atr_mult": 3.0, "sma_period": 120}, None, False),
+        ("IDOSZAK valtozott", {"sl_atr_mult": 3.0, "sma_period": 120},
+         "2026-01-05", False)]
+for _label, _mod, _ts, _want in _seq:
+    _c, _reused = bt.signal_series_cached(_c, "TEST", M15, M1, {**BASE, **_mod},
+                                          PAIR_CFG, strategy=ST, test_start=_ts)
+    check(f"signal_series_cached: {_label} -> "
+          f"{'ujrahasznal' if _want else 'ujraszamol'}", _reused == _want)
+
+
 # ── 7. Elteres eseten HANGOS hiba, nem csendes ujraepites ──────────────────
 try:
     bt.run_pair("TEST", M15, M1, {**BASE, "sma_period": 50}, PAIR_CFG,

@@ -152,6 +152,10 @@ class BacktestDialog:
         self._closed  = False       # az ablak bezárult-e (a háttérszál ne piszkálja a widgeteket)
         self._stop_flag = None      # threading.Event a futó backtest megszakításához
         self._summary = None
+        # Jelölt-lista gyorsítótár: a feltáró munka során a VÉGREHAJTÁST hangoljuk
+        # (SL/TP, rr, slotok, kapuk), a jel-oldal változatlan → nem kell újra
+        # kiszámolni. Az ablakhoz kötött (bezáráskor eldobódik).
+        self._sig_cache = None
         self._build()
         # Adat betöltése háttérben (a dátum-tartományhoz + a futáshoz cache-elve)
         self._load_data_async()
@@ -566,6 +570,13 @@ class BacktestDialog:
         self._tech_lbl = tk.Label(body, text="", bg=BG, fg=FG_GRAY_DIM,
                                   font=self._sf)
         self._tech_lbl.pack(anchor="w", padx=12, pady=(0, 2))
+        # A jelölt-lista állapota. ⚠ Ez NEM dísz: enélkül a gyorsítótár láthatatlan
+        # volna, és egy elmaradt újraépítés észrevétlen maradna. Ha itt „újraszámolva"
+        # áll, akkor a JEL-oldalt módosítottad — ha „újrahasznosítva", akkor csak a
+        # végrehajtást, tehát a két futás ugyanazokat a jelölteket köti.
+        self._series_lbl = tk.Label(body, text="", bg=BG, fg=FG_GRAY_DIM,
+                                    font=self._sf)
+        self._series_lbl.pack(anchor="w", padx=12, pady=(0, 2))
 
         # ── Összevetés-választó (előző/eredeti futás halvány overlay) ───────
         cmp_bar = tk.Frame(body, bg=BG)
@@ -970,7 +981,25 @@ class BacktestDialog:
         def work():
             summary, result, err, cancelled = None, None, None, False
             try:
-                from trading.backtest import run_pair
+                from trading.backtest import run_pair, signal_series_cached
+                # ── Jelölt-lista gyorsítótár (feltáró munka) ────────────────
+                # Ebben az ablakban tipikusan a VÉGREHAJTÁST hangolod: SL/TP,
+                # rr-preset, slotok, kapuk, nyitó összeg. Ilyenkor a jel-oldal
+                # (indikátorok + állapotgépek) változatlan, tehát nem kell újra
+                # kiszámolni — mérve 1,7–2,0× a második futástól.
+                # A szabályt a `signal_series_cached` őrzi: ha BÁRMI jel-oldali
+                # (vagy az óra-szűrő / az időszak) változott, újraépít.
+                series, reused = signal_series_cached(
+                    self._sig_cache, self.symbol, self._df15, self._df1, params,
+                    self.pair_cfg, strategy=self.strategy, test_start=start,
+                    test_end=end, allowed_hours=allowed)
+                self._sig_cache = series
+                if not self._closed:
+                    try:
+                        self.win.after(0, lambda r=reused, n=len(series.signals):
+                                       self._show_series_note(r, n))
+                    except Exception:
+                        pass
                 result = run_pair(self.symbol, self._df15, self._df1, params,
                                   self.pair_cfg, tcfg, ib,
                                   strategy=self.strategy, rr=rr_spec,
@@ -978,7 +1007,8 @@ class BacktestDialog:
                                   test_start=start, test_end=end,
                                   progress_callback=cb, record_events=True,
                                   stop_flag=stop_flag,
-                                  cfg=self.cfg, exec_gates=_exec_gates)
+                                  cfg=self.cfg, exec_gates=_exec_gates,
+                                  signal_series=series)
                 if stop_flag.is_set():
                     # Megszakítva: a részeredményt eldobjuk (nincs összegzés/CSV).
                     cancelled = True
@@ -1032,6 +1062,24 @@ class BacktestDialog:
                 self._status.config(text="Megszakítás…", fg=FG_YELLOW)
             except Exception:
                 pass
+
+    def _show_series_note(self, reused: bool, n_signals: int):
+        """A jelölt-lista sorsa — hogy a futás sebessége MAGYARÁZOTT legyen."""
+        if self._closed:
+            return
+        try:
+            if reused:
+                self._series_lbl.config(
+                    text=f"Jelölt-lista: újrahasznosítva ({n_signals} jel) — "
+                         f"csak a végrehajtás változott, a belépő-jelek azonosak",
+                    fg=FG_GREEN)
+            else:
+                self._series_lbl.config(
+                    text=f"Jelölt-lista: újraszámolva ({n_signals} jel) — "
+                         f"a jel-oldal (vagy az időszak/óra-szűrő) változott",
+                    fg=FG_GRAY_DIM)
+        except tk.TclError:
+            return
 
     def _on_progress(self, pct, m1_time, balance, n_open, n_closed, tech):
         if self._closed:
