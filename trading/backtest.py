@@ -981,13 +981,24 @@ def run_pair(
         if _off_hour and params.get("no_trade_resets_signal", False):
             state = strategy.bt_new_state(symbol)
 
-        # Napi veszteség limit ellenőrzés
+        # ── Napi veszteség limit ──────────────────────────────────────────────
+        # ⚠ A limit CSAK AZ ÚJ BELÉPŐT tiltja — pontosan úgy, ahogy az élő motor
+        # (`live_trader`: „a limit CSAK az ÚJ belépőt tiltja — a nyitott pozíciók
+        # kezelése … limit fölött is fut tovább (korábban a korai return azt is
+        # leállította volna)"). Ezt a javítást az él MEGKAPTA, a backtest NEM: itt
+        # egy korai `continue` állt, ami a bar TELJES feldolgozását átugrotta —
+        # a nyitott pozíciók SL/TP-jét, a BE/trailinget és a jelzés-állapotgépeket is.
+        #
+        # Következménye kettő volt, és mindkettő az él ELLEN dolgozott:
+        #  • egy limit-napon NYITOTT pozíció nem záródhatott (a stopja sem fogott),
+        #  • az M15/M1 állapotgép megállt, tehát a limit-nap UTÁN más setupból indult.
+        #
+        # (Ugyanaz a minta, mint az óra-szűrőnél: ott is csak a BELÉPŐ tiltott,
+        # a figyelés folyamatos — lásd a `_off_hour` kezelését lentebb.)
         day_key = str(m1_time.date())
         daily_loss = daily_pnl.get(day_key, 0.0)
         daily_limit = daily_limit_usd(trading_cfg, balance)
-        if daily_loss <= -daily_limit:
-            prev_m1_row = m1_row
-            continue
+        _limit_hit = daily_loss <= -daily_limit
 
         # M15 állapot: minden ÚJONNAN ZÁRT M15 gyertyát EGYSZER dolgozunk fel, a
         # LEZÁRT bart használva (nem a formálódót). Korábban a motor MINDEN M1-ticknél
@@ -1203,7 +1214,7 @@ def run_pair(
             signal = strategy.bt_on_low_close(state, prev_m1_row, m1_row, params)
 
             if (signal != "NONE" and free_slots > 0 and not _off_hour
-                    and m15_ptr < len(m15_times)):
+                    and not _limit_hit and m15_ptr < len(m15_times)):
                 m15_row = m15.iloc[m15_ptr]
 
                 # ── Végrehajtási kapuk (él-paritás) — a stratégia-jel ELŐTT ─────
