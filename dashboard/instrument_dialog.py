@@ -323,6 +323,19 @@ class InstrumentParamsDialog:
         popup.title(title)
         popup.configure(bg=BG)
         popup.grab_set()
+        # ⚠ Bezárás-jelző a HÁTTÉRSZÁLAKNAK (söprés). Enélkül egy futó söprés a
+        # már megsemmisült widgetekhez nyúlna, és a szál `TclError`-ral halna meg
+        # — némán, mert egy daemon-szál kivétele nem jut el sehova. A `<Destroy>`
+        # a gyerek-widgetekre is elsül, ezért kell a `widget is popup` szűrés.
+        self._closed = False
+
+        def _on_destroy(ev, _p=popup):
+            if ev.widget is _p:
+                self._closed = True
+                if getattr(self, "_sw_stop", None) is not None:
+                    self._sw_stop.set()      # a futó söprés álljon le magától
+
+        popup.bind("<Destroy>", _on_destroy)
 
         # ── Rögzített alsó sáv ELŐSZÖR (side="bottom") ──────────────────────
         # Kis képernyőn a hosszú paraméterlista miatt a gombok lelógtak; a
@@ -1063,7 +1076,217 @@ class InstrumentParamsDialog:
         self._space_lbl = tk.Label(body, bg=BG, fg=FG_GRAY, font=self._sf,
                                    anchor="w", justify="left")
         self._space_lbl.pack(anchor="w", padx=10)
+
+        # ── 5. SÖPRÉS: 1–2 paraméter kimerítő végigpróbálása ───────────────
+        _h("Söprés")
+        _n("Egy vagy két bepipált paraméternél a rács KIMERÍTŐEN végigpróbálható "
+           "— és az eredmény RAJZOLHATÓ: görbe, illetve hőtérkép.", FG_GRAY_DIM)
+        # ⚠ A söprés EGY időszakon mér (nem walk-forward). Ez feltáró eszköz:
+        # megmutatja a paraméter ALAKJÁT, nem azt, hogy a legjobb pont kitart-e.
+        _n("⚠ A söprés EGY időszakon mér, tehát feltáró: a legjobb pont "
+           "kiválasztása ITT még nem érvényes eredmény. Amit érdemes nézni: a "
+           "legjobb érték SZÉLES fennsík közepén van-e, vagy magányos tüskén "
+           "(az utóbbi szinte biztosan zaj).", FG_YELLOW)
+
+        sbar = tk.Frame(body, bg=BG)
+        sbar.pack(anchor="w", padx=10, pady=(4, 2), fill="x")
+        # Az időszak alapértéke a backtest-ablakban legutóbb használt — ugyanazt
+        # a párt/stratégiát nézve ne kelljen kétszer beírni ugyanazt a dátumot.
+        from core import backtest_prefs as _bprefs
+        _p = _bprefs.get(self.symbol, self.strategy.name) or {}
+        self._sw_start = tk.StringVar(value=_p.get("start") or "")
+        self._sw_end = tk.StringVar(value=_p.get("end") or "")
+        self._sw_metric = tk.StringVar(value="total_pnl")
+        for _lbl, _var, _w in (("-tól", self._sw_start, 11),
+                               ("-ig", self._sw_end, 11)):
+            tk.Label(sbar, text=_lbl, bg=BG, fg=FG_GRAY_DIM,
+                     font=self._sf).pack(side="left", padx=(0, 3))
+            tk.Entry(sbar, textvariable=_var, width=_w, bg=BG_HEADER,
+                     fg=FG_WHITE, insertbackground=FG_WHITE, relief="flat",
+                     font=self._sf).pack(side="left", padx=(0, 10))
+        tk.Label(sbar, text="mérce", bg=BG, fg=FG_GRAY_DIM,
+                 font=self._sf).pack(side="left", padx=(0, 3))
+        _mm = tk.OptionMenu(sbar, self._sw_metric, "total_pnl", "profit_factor",
+                            "win_rate", "trades", "max_drawdown")
+        _mm.config(bg=BG_HEADER, fg=FG_WHITE, relief="flat", font=self._sf,
+                   highlightthickness=0, activebackground=BG_HEADER)
+        _mm["menu"].config(bg=BG_HEADER, fg=FG_WHITE, font=self._sf)
+        _mm.pack(side="left", padx=(0, 10))
+        _mm_cmd = self._sw_metric.trace_add("write",
+                                            lambda *_a: self._redraw_sweep())
+        self._sw_btn = tk.Button(sbar, text="Söprés indítása", bg=BTN_BT_BG,
+                                 fg=BTN_BT_FG, relief="flat", font=self._sf,
+                                 command=self._start_sweep)
+        self._sw_btn.pack(side="left")
+        self._sw_status = tk.Label(sbar, text="", bg=BG, fg=FG_GRAY,
+                                   font=self._sf)
+        self._sw_status.pack(side="left", padx=(10, 0))
+
+        self._sw_canvas = tk.Canvas(body, bg=BG, height=300, highlightthickness=0)
+        self._sw_canvas.pack(fill="x", padx=10, pady=(4, 2))
+        self._sw_canvas.bind("<Configure>", lambda _e: self._redraw_sweep())
+        self._sw_best = tk.Label(body, text="", bg=BG, fg=FG_GRAY, font=self._sf,
+                                 anchor="w", justify="left")
+        self._sw_best.pack(anchor="w", padx=10, pady=(0, 8))
+        self._sw_rows, self._sw_axes = [], []
+        self._sw_stop = None
+
         self._refresh_opt_space()
+
+    # ── A söprés futtatása és rajza ─────────────────────────────────────────
+
+    def _start_sweep(self):
+        """A bepipált 1–2 paraméter kimerítő végigpróbálása háttérszálon."""
+        import threading
+        from core import opt_plan as _op
+        from core import sweep as _sw
+
+        if self._sw_stop is not None:            # fut → megszakítás
+            self._sw_stop.set()
+            self._sw_btn.config(text="Megszakítás…", state="disabled")
+            return
+
+        rows = [dict(r, skipped=not self._skip_vars[r["key"]].get())
+                for r in self._opt_rows if r["key"] in self._skip_vars]
+        plan = _op.run_plan(rows, 0)
+        if plan["kind"] not in (_op.KIND_SWEEP, _op.KIND_GRID):
+            # ⚠ Nem csendes tétlenség: megmondjuk, MIT kell tenni.
+            self._sw_status.config(
+                text=("A söpréshez PONTOSAN 1 vagy 2 paraméter legyen bepipálva "
+                      f"(most {len(plan['tuned'])}). Több dimenziónál az "
+                      f"optimalizálás a helyes eszköz."), fg=FG_YELLOW)
+            return
+
+        params = self._collect_params()
+        if params is None:
+            return
+        try:
+            from trading.backtest import load_data
+            df15, df1 = load_data(self.symbol)
+        except Exception as ex:
+            self._sw_status.config(text=f"Adat-hiba: {ex}", fg=FG_RED)
+            return
+        if df15 is None:
+            self._sw_status.config(text="Nincs letöltött előzmény.", fg=FG_RED)
+            return
+
+        axes, combos = _sw.combos(rows, self._opt_cfg_cache)
+        self._sw_axes, self._sw_rows = axes, []
+        self._sw_stop = threading.Event()
+        self._sw_btn.config(text="Megszakítás")
+        _start = self._sw_start.get().strip() or None
+        _end = self._sw_end.get().strip() or None
+        _ib = self._cfg_initial_balance()
+        _tcfg = self.root_cfg.get("trading", {})
+        _pcfg = self.cfg.get("pairs", {}).get(self.symbol) or {}
+        _exec_gates = bool(self.root_cfg.get("optimizer", {}).get("exec_gates", True))
+
+        # ⚠ A HÁTTÉRSZÁL NEM NYÚLHAT A Tk-HOZ — még `after()`-rel sem. A Tcl
+        # értelmező egyszálú; egy másik szálból hívott `after` megsérti, és a
+        # tünet nem kivétel, hanem hogy a widgetek EGYSZER CSAK ELTŰNNEK (mérve:
+        # a felugró ablak ~55 mp után magától megsemmisült futó söprés közben).
+        # Helyes minta: a szál egy SORBA ír, a főszál periodikusan kiolvassa.
+        import queue
+        self._sw_queue = queue.Queue()
+        q = self._sw_queue
+
+        def _prog(done, total, _row):
+            q.put(("progress", done, total))
+
+        def _work():
+            try:
+                res = _sw.run(self.symbol, df15, df1, params, _pcfg,
+                              _tcfg, _ib, self.strategy, combos,
+                              test_start=_start, test_end=_end,
+                              cfg=self.root_cfg, exec_gates=_exec_gates,
+                              progress=_prog, stop_flag=self._sw_stop)
+                q.put(("done", res, ""))
+            except Exception as ex:
+                q.put(("done", [], f"{type(ex).__name__}: {ex}"))
+
+        threading.Thread(target=_work, daemon=True, name="SweepRun").start()
+        self.popup.after(150, self._sw_poll)      # a főszálról indítva
+
+    def _sw_poll(self):
+        """A söprés-szál üzeneteinek kiolvasása — MINDIG a főszálon."""
+        import queue
+        if self._closed:
+            return
+        finished = False
+        try:
+            while True:
+                msg = self._sw_queue.get_nowait()
+                if msg[0] == "progress":
+                    self._sw_status.config(text=f"{msg[1]}/{msg[2]} futás…",
+                                           fg=FG_GRAY)
+                else:
+                    self._sweep_done(msg[1], msg[2])
+                    finished = True
+        except queue.Empty:
+            pass
+        except tk.TclError:
+            return
+        if not finished and self._sw_stop is not None:
+            self.popup.after(150, self._sw_poll)
+
+    def _cfg_initial_balance(self) -> float:
+        try:
+            return float((self.root_cfg.get("ml") or {}).get(
+                "starting_balance_eur", 10000.0))
+        except Exception:
+            return 10000.0
+
+    def _sweep_done(self, rows, err):
+        self._sw_stop = None
+        try:
+            self._sw_btn.config(text="Söprés indítása", state="normal")
+        except tk.TclError:
+            return
+        if err:
+            self._sw_status.config(text=err, fg=FG_RED)
+            return
+        self._sw_rows = rows
+        self._sw_status.config(text=f"{len(rows)} futás kész.", fg=FG_GREEN)
+        self._redraw_sweep()
+
+    def _redraw_sweep(self):
+        from core import sweep as _sw
+        from dashboard import sweep_view as _sv
+        from dashboard import theme as _th
+        if not getattr(self, "_sw_rows", None) or not self._sw_axes:
+            return
+        metric = self._sw_metric.get()
+        try:
+            _sv.draw(self._sw_canvas, self._sw_axes, self._sw_rows, metric,
+                     _th, self._sf, on_pick=self._apply_sweep_point)
+        except tk.TclError:
+            return
+        b = _sw.best(self._sw_rows, metric)
+        if b:
+            where = " · ".join(f"{k}={v}" for k, v in b.items()
+                               if k in [a[0] for a in self._sw_axes])
+            self._sw_best.config(
+                text=(f"Legjobb ({metric}): {where}  →  {b['trades']} kötés · "
+                      f"P&L {b['total_pnl']:+.0f}$ · PF {b['profit_factor']:.2f} · "
+                      f"DD {b['max_drawdown'] * 100:.1f}%\n"
+                      f"Kattints a rajzra egy pont paramétereinek betöltéséhez."))
+
+    def _apply_sweep_point(self, values: dict):
+        """Egy söprés-pont paramétereinek betöltése a Paraméter lap mezőibe.
+
+        ⚠ Csak a MEZŐKBE ír, nem ment: a mentés külön, tudatos lépés (a Mentés
+        gomb backtestet is futtat és minősít). Így a rajzon lehet kísérletezni
+        anélkül, hogy az élő beállítás elmozdulna."""
+        for k, v in values.items():
+            e = self.entries.get(k)
+            if e is None:
+                continue
+            e.delete(0, "end")
+            e.insert(0, self._fmt_range(v))
+        self._invalidate_bt()
+        self._sw_status.config(
+            text="A pont paraméterei betöltve a Paraméter lapra (nincs mentve).",
+            fg=FG_GREEN)
 
     def _refresh_opt_space(self):
         """A keresési tér mérete a PILLANATNYI pipák szerint."""

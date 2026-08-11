@@ -77,15 +77,37 @@ def tuned_specs(opt_cfg: dict) -> dict:
             if isinstance(v, dict) and "min" in v}
 
 
-def grid_size(spec: dict) -> int:
-    """Hány DISZKRÉT érték áll elő ebből a tartományból? (A rács, nem a folytonos tér.)"""
+def grid_values(spec: dict) -> list:
+    """A tartomány DISZKRÉT értékei — a söprés ezeket járja végig.
+
+    ⚠ Az EGÉSZ/TÖRT jelleget a `min` típusa dönti el, ugyanúgy, ahogy az
+    optimalizáló (`suggest_int` vs `suggest_float`). Ha egy egész paraméter
+    (sma_period) tört értékeket kapna, az indikátor-motor vagy elszállna, vagy
+    némán csonkolna — és a söprés görbéjén két szomszédos pont ugyanaz lenne.
+    """
     try:
-        lo, hi, step = float(spec["min"]), float(spec["max"]), float(spec["step"])
+        lo, hi, step = spec["min"], spec["max"], spec["step"]
+        as_int = isinstance(lo, int) and isinstance(step, int) and not isinstance(lo, bool)
+        lo, hi, step = float(lo), float(hi), float(step)
         if step <= 0 or hi < lo:
-            return 0
-        return int(round((hi - lo) / step, 9)) + 1
+            return []
+        n = int(round((hi - lo) / step, 9)) + 1
+        out = []
+        for i in range(n):
+            v = lo + i * step
+            out.append(int(round(v)) if as_int else round(v, 10))
+        return out
     except Exception:
-        return 0
+        return []
+
+
+def grid_size(spec: dict) -> int:
+    """Hány DISZKRÉT érték áll elő ebből a tartományból? (A rács, nem a folytonos tér.)
+
+    A `grid_values` hosszával AZONOS — egy helyen definiált, hogy a felületen
+    kiírt darabszám és a ténylegesen lefutó söprés ne térhessen el.
+    """
+    return len(grid_values(spec))
 
 
 def param_rows(cfg: dict, symbol: str, strategy_name: str, opt_cfg: dict,
