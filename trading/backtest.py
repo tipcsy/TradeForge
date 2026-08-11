@@ -334,6 +334,20 @@ def daily_limit_usd(trading_cfg: dict, balance: float) -> float:
     return balance * float(trading_cfg.get("daily_loss_limit_pct", 0.015))
 
 
+class _Row(dict):
+    """Egy gyertya-sor a `bt_*` hookoknak — a pandas Series HELYETT.
+
+    A hookok a soron három dolgot használnak: `row["oszlop"]`, `row.get(...)` és
+    `row.name` (a sor időbélyege — pl. `ml_ai.bt_entry` gyorsítótár-kulcsa). A
+    dict az elsőt kettőt tudja, a `name` slot a harmadikat.
+
+    Miért nem pandas Series: az `iterrows()` SORONKÉNT új Series-t épít, ami a
+    backtest futásidejének a legnagyobb egyedi tétele volt (mérve: 237 572 M1
+    gyertyán 5,3 mp vs 0,17 mp — 20,7×; egy 500 triales optimalizálásban ~2,8 óra).
+    """
+    __slots__ = ("name",)
+
+
 def _rr_spec(rr: "dict | None", risky: bool, symbol: str = "") -> dict:
     """A run_pair kockázatcsökkentő specje, ha a hívó nem adott sajátot.
 
@@ -919,7 +933,32 @@ def run_pair(
         except Exception:
             pass
 
-    for i, (m1_time, m1_row) in enumerate(m1.iterrows()):
+    # ── AZ M1-CIKLUS ADATELÉRÉSE — a futásidő legnagyobb egyedi tétele ─────────
+    # A `m1.iterrows()` SORONKÉNT új pandas Series-t épít. Mérve (UsaInd, egy
+    # 8 hónapos WF-ablak, 237 572 M1 gyertya):
+    #     iterrows()                 5,30 mp
+    #     dict numpy-tömbökből       0,21 mp   → 26×
+    # Egy 500 triales optimalizálásban (4 ablak/trial) ez ~2,8 ÓRA tiszta
+    # overhead a ~9-ből, nulla haszonnal.
+    #
+    # ⚠ Miért nem itertuples/nyers numpy: a STRATÉGIA-SZERZŐDÉS a `bt_*` hookoknak
+    # egy pandas Series-SORT ígér. A ténylegesen használt felület három dolog:
+    #     row["oszlop"] · row.get(...) · row.name  (a sor IDŐBÉLYEGE)
+    # A `.name` nem elméleti: az `ml_ai.bt_entry` gyorsítótár-kulcsként használja
+    # (`key = hi_row.name`). Ezért a sor egy dict-leszármazott, ami a `.name`-et is
+    # viszi — így EGYETLEN stratégiát sem kell módosítani, a gyorsítás
+    # viselkedés-semleges marad. (Mérve: 20,7× az iterrows()-hoz képest.)
+    _m1_cols = list(m1.columns)
+    _m1_col_arr = {c: m1[c].to_numpy() for c in _m1_cols}
+    _m1_index = list(m1.index)          # pandas Timestamp — kell a .hour/.date()
+    _m1_n = len(_m1_index)
+
+    for i in range(_m1_n):
+        m1_time = _m1_index[i]
+        m1_row = _Row()
+        m1_row.name = m1_time
+        for _c in _m1_cols:
+            m1_row[_c] = _m1_col_arr[_c][i]
         if i % _PROG_EVERY == 0:
             # Megszakítás (a Backtest-ablak „Megszakítás" gombja / ablak bezárása):
             # a részeredménnyel visszatérünk (a hívó eldobja). Ritkán ellenőrzünk
