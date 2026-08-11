@@ -184,6 +184,54 @@ else:
           "None jott vissza")
 
 
+# ── 5b. A FUTAS TIPUSA a hangolt dimenziok szamabol ADODIK ────────────────
+# A doksi felismerese: "OPT = parameter beallit; teljes futtatas; kiertekeles —
+# es ez 500-szor. Backtest ugyanez, csak a kiertekeles manualis." Tehat nem ket
+# funkcio van, hanem EGY, aminek a futasszama kulonbozik — es a futasszamot nem
+# kell kulon beallitani, kiderul abbol, hany parameternek adtunk tartomanyt.
+_BASE = [{"key": "a", "values": 26, "cls": "signal"},
+         {"key": "b", "values": 13, "cls": "execution"},
+         {"key": "c", "values": 9, "cls": "signal"},
+         {"key": "d", "values": 5, "cls": "signal"}]
+
+
+def _tuned(n):
+    return [dict(x, skipped=(i >= n)) for i, x in enumerate(_BASE)]
+
+
+check("0 hangolt -> EGYETLEN futas (ez a backtest)",
+      op.run_plan(_tuned(0))["kind"] == op.KIND_SINGLE and
+      op.run_plan(_tuned(0))["runs"] == 1)
+check("1 hangolt -> SOPRES, a racs-meretnyi futassal",
+      op.run_plan(_tuned(1))["kind"] == op.KIND_SWEEP and
+      op.run_plan(_tuned(1))["runs"] == 26, str(op.run_plan(_tuned(1))["runs"]))
+check("2 hangolt -> RACS, a ketto SZORZATA",
+      op.run_plan(_tuned(2))["kind"] == op.KIND_GRID and
+      op.run_plan(_tuned(2))["runs"] == 26 * 13, str(op.run_plan(_tuned(2))["runs"]))
+check("3+ hangolt -> OPTIMALIZALAS, a trial-szammal",
+      op.run_plan(_tuned(3), trials=500)["kind"] == op.KIND_OPTIMIZE and
+      op.run_plan(_tuned(3), trials=500)["runs"] == 500)
+
+# ⚠ A `runs` jelentese NEM ugyanaz a ket agon: a sopres/racs KIMERITO
+# (vegigprobaljuk), az optimalizalas MINTAVETEL — ott a ter nagysagrendekkel
+# nagyobb a mintaszamnal. Ha a felulet a kettot ugyanugy nevezne, a felhasznalo
+# azt hinne, hogy 500 trial "atnezte" a lehetosegeket.
+check("a sopres/racs KIMERITO", op.run_plan(_tuned(2))["exhaustive"] is True)
+check("az optimalizalas NEM kimerito", op.run_plan(_tuned(3))["exhaustive"] is False)
+
+check("a kihagyott kulcsok nem szamitanak bele",
+      op.run_plan(_tuned(1))["tuned"] == ["a"])
+check("a 0 ertekes (romlott) tartomany kiesik",
+      op.run_plan([{"key": "x", "values": 0, "skipped": False}])["kind"]
+      == op.KIND_SINGLE)
+
+check("idobecsles: 338 futas x 19,1 mp ~ 108 perc",
+      abs(op.estimate_minutes(338, 19.1) - 107.6) < 0.5,
+      f"{op.estimate_minutes(338, 19.1):.1f}")
+check("idobecsles ABLAKONKENT szoroz (walk-forward)",
+      op.estimate_minutes(10, 20.0, windows=4) == op.estimate_minutes(40, 20.0))
+
+
 # ── 6. A TARTOMANYOK SZERKESZTHETOK (a doksi kerese) ──────────────────────
 # "A beallitasoknal jelenjenek meg az aktualis -tol -ig step beallitasi
 #  parameter, ezek legyenek szabadon allithatoak."

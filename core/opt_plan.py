@@ -135,6 +135,66 @@ def search_space(rows: list) -> int:
 
 
 # ---------------------------------------------------------------------------
+# MI LESZ EBBŐL: egyetlen futás, söprés, rács vagy optimalizálás?
+# ---------------------------------------------------------------------------
+# A felhasználói doksi felismerése:
+#
+#   „OPT = paraméter beállít; teljes futtatás; kiértékelés — és ez 500-szor.
+#    Backtest ugyanez, csak a kiértékelés manuálisan történik."
+#
+# Ha ez igaz — és igaz —, akkor nem két funkció van, hanem EGY, aminek a
+# futásszáma különbözik. És a futásszámot nem kell külön beállítani: kiderül
+# abból, hány paraméternek adtunk tartományt. Ez a levezetés teszi értelmessé a
+# „csak az SMA-t 100→200-ig backtesteljük" kérést is: az az 1 hangolt paraméter
+# esete, nem külön funkció.
+
+KIND_SINGLE = "single"      # 0 hangolt → egyetlen futás (a mai backtest)
+KIND_SWEEP = "sweep"        # 1 hangolt → görbe
+KIND_GRID = "grid"          # 2 hangolt → hőtérkép
+KIND_OPTIMIZE = "optimize"  # 3+        → optuna mintavétel
+
+
+def run_plan(rows: list, trials: int = 500) -> dict:
+    """A HANGOLT sorokból: mi fog történni, és hány futásból.
+
+    `rows`: `param_rows` kimenete (a `skipped` mező a pillanatnyi állapot).
+    Visszaad: `kind`, `runs` (hány kiértékelés), `tuned` (kulcsok), `text`.
+
+    ⚠ A `runs` a rács/söprés ágon PONTOS (végigpróbáljuk), az optimalizálás
+    ágon a mintaszám — ott a tér ennél nagyságrendekkel nagyobb. A kettőt nem
+    szabad ugyanúgy nevezni: az egyik kimerítő, a másik mintavétel.
+    """
+    tuned = [r for r in rows if not r.get("skipped") and r.get("values", 0) > 0]
+    keys = [r["key"] for r in tuned]
+    if not tuned:
+        return {"kind": KIND_SINGLE, "runs": 1, "tuned": [], "exhaustive": True,
+                "text": "0 hangolt paraméter → EGYETLEN futás (ez a backtest)."}
+    if len(tuned) == 1:
+        n = tuned[0]["values"]
+        return {"kind": KIND_SWEEP, "runs": n, "tuned": keys, "exhaustive": True,
+                "text": f"1 hangolt paraméter → SÖPRÉS: {n} futás "
+                        f"({keys[0]} végigpróbálva)."}
+    if len(tuned) == 2:
+        a, b = tuned[0]["values"], tuned[1]["values"]
+        return {"kind": KIND_GRID, "runs": a * b, "tuned": keys, "exhaustive": True,
+                "text": f"2 hangolt paraméter → RÁCS: {a} × {b} = {a * b} futás."}
+    return {"kind": KIND_OPTIMIZE, "runs": int(trials), "tuned": keys,
+            "exhaustive": False,
+            "text": f"{len(tuned)} hangolt paraméter → OPTIMALIZÁLÁS "
+                    f"({int(trials)} mintavétel)."}
+
+
+def estimate_minutes(runs: int, sec_per_run: float, windows: int = 1) -> float:
+    """Durva időbecslés percben. `sec_per_run`: egy ablak egy kiértékelése.
+
+    ⚠ Szándékosan DURVA: a valódi idő paraméterfüggő (több kötés = lassabb), és
+    a korai elbukó trialok gyorsak. A becslés arra jó, hogy „3 perc" és „6 óra"
+    között dönts — nem arra, hogy percre tervezz.
+    """
+    return max(0.0, runs * max(1, windows) * max(0.0, sec_per_run) / 60.0)
+
+
+# ---------------------------------------------------------------------------
 # Mikor tanul és mikor vizsgázik?
 # ---------------------------------------------------------------------------
 

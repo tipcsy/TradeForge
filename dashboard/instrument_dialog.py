@@ -415,48 +415,129 @@ class InstrumentParamsDialog:
         def _cat_of(k):
             return (_pmeta.get(k, {}) or {}).get("category") or "Egyéb"
 
+        # ── EGY paraméter = EGY sor: érték ÉS söprési tartomány ─────────────
+        # Korábban ugyanazt a paramétert három helyen kellett kezelni (érték itt,
+        # érték a backtest-ablakban, tartomány az Optimalizálás lapon). A doksi
+        # panasza: „két külön kinézet ugyanarra a paraméterre".
+        #
+        # A tartomány-adat OLCSÓ (csak a stratégia configját olvassa, nem kell
+        # hozzá árfolyam-előzmény), ezért itt, az ablak felépítésekor betölthető.
+        # A walk-forward ablakok — amikhez parquet kell — maradnak lustán az
+        # Optimalizálás lapon.
+        from core import opt_plan as _op
+        from strategy.settings import load_strategy_config as _lsc
+        try:
+            self._opt_cfg_cache = _lsc(self.strategy.name).get("optimizer", {}) or {}
+        except Exception:
+            self._opt_cfg_cache = {}
+        self._opt_rows = _op.param_rows(self.root_cfg, self.symbol,
+                                        self.strategy.name, self._opt_cfg_cache)
+        _range_by_key = {r["key"]: r for r in self._opt_rows}
+        self._skip_vars = {}
+        self._range_vars = {}
+        self._range_lbls = {}
+
         _by_cat: dict[str, list] = {}
         for k in self._keys:                     # self._keys már ábécésorrendben
             _by_cat.setdefault(_cat_of(k), []).append(k)
         _ordered = [c for c in _cat_ord if c in _by_cat] + \
                    [c for c in _by_cat if c not in _cat_ord]
 
-        # Oszlop-fejléc
-        tk.Label(form, text="Paraméter", bg=BG, fg=FG_GRAY_DIM, font=self._sf,
-                 anchor="w", width=24).grid(row=0, column=0, sticky="w")
-        tk.Label(form, text="Érték", bg=BG, fg=FG_GRAY_DIM, font=self._sf,
-                 anchor="w").grid(row=0, column=1, sticky="w", padx=6)
+        # Oszlop-fejléc. A „söprés" blokk (pipa + -tól/-ig/lépés + érték-szám)
+        # AZT mondja meg, mit csinál az optimalizálás EZZEL a paraméterrel.
+        for _c, (_t, _w) in enumerate((("Paraméter", 24), ("Érték", 8),
+                                       ("", 3), ("-tól", 7), ("-ig", 7),
+                                       ("lépés", 7), ("db", 4))):
+            tk.Label(form, text=_t, bg=BG, fg=FG_GRAY_DIM, font=self._sf,
+                     anchor="w", width=_w).grid(row=0, column=_c, sticky="w",
+                                                padx=(0, 3))
         tk.Label(form, text="Megjegyzés (szerkeszthető)", bg=BG, fg=FG_GRAY_DIM,
-                 font=self._sf, anchor="w").grid(row=0, column=2, sticky="w")
-        form.grid_columnconfigure(2, weight=1)
+                 font=self._sf, anchor="w").grid(row=0, column=7, sticky="w")
+        form.grid_columnconfigure(7, weight=1)
+        _NCOL = 8
 
         _r = 1
         for cat in _ordered:
             # Kategória-elválasztó fejléc (név + vékony vonal)
             hdr = tk.Frame(form, bg=BG)
-            hdr.grid(row=_r, column=0, columnspan=3, sticky="we", pady=(8, 1))
+            hdr.grid(row=_r, column=0, columnspan=_NCOL, sticky="we", pady=(8, 1))
             tk.Label(hdr, text=cat, bg=BG, fg=FG_BLUE, font=self._sf,
                      anchor="w").pack(side="left")
             tk.Frame(hdr, bg=BG_HEADER, height=1).pack(
                 side="left", fill="x", expand=True, padx=(8, 0))
             _r += 1
             for k in _by_cat[cat]:
-                tk.Label(form, text=k, bg=BG, fg=FG_WHITE, font=self._sf,
+                _rr = _range_by_key.get(k)
+                # A JEL-osztályú paraméter neve más színnel: az újraszámoltatja a
+                # teljes belépő-listát (drága), a végrehajtási csak szűr/méretez.
+                _kfg = FG_WHITE
+                if _rr is not None:
+                    _kfg = FG_YELLOW if _rr["cls"] == "signal" else FG_BLUE
+                tk.Label(form, text=k, bg=BG, fg=_kfg, font=self._sf,
                          anchor="w", width=24).grid(row=_r, column=0, sticky="w", pady=1)
-                e = tk.Entry(form, width=14, bg=BG_HEADER, fg=FG_WHITE,
+                e = tk.Entry(form, width=8, bg=BG_HEADER, fg=FG_WHITE,
                              font=self._sf, insertbackground=FG_WHITE)
                 e.insert(0, str(self._src[k]))
-                e.grid(row=_r, column=1, padx=6, pady=1)
+                e.grid(row=_r, column=1, padx=(0, 3), pady=1, sticky="w")
                 # Kézi átírásnál a korábbi backtest-eredmény elavul → a Mentés újraszámol.
                 e.bind("<KeyRelease>", lambda ev: self._invalidate_bt())
                 self.entries[k] = e
+
+                # ── Söprési tartomány — CSAK ha van hangolható tartománya ───
+                # Ami nincs az optimalizáló terében, annál a mezők üresen
+                # maradnak: az „—" világosabban mondja, hogy ez a paraméter
+                # rögzített, mint egy kitölthetőnek látszó, de hatástalan mező.
+                if _rr is None:
+                    tk.Label(form, text="—", bg=BG, fg=FG_GRAY_DIM, font=self._sf,
+                             width=3, anchor="w").grid(row=_r, column=2, sticky="w")
+                else:
+                    bv = tk.BooleanVar(value=not _rr["skipped"])
+                    self._skip_vars[k] = bv
+                    tk.Checkbutton(form, variable=bv, bg=BG, fg=FG_WHITE,
+                                   selectcolor=BG_HEADER, activebackground=BG,
+                                   activeforeground=FG_WHITE,
+                                   command=lambda kk=k: self._on_skip_change(kk)
+                                   ).grid(row=_r, column=2, sticky="w")
+                    _vars = {}
+                    for _ci, _field in enumerate(("min", "max", "step"), start=3):
+                        sv = tk.StringVar(value=self._fmt_range(_rr[_field]))
+                        re_ = tk.Entry(form, textvariable=sv, width=7, bg=BG_HEADER,
+                                       fg=FG_WHITE, insertbackground=FG_WHITE,
+                                       relief="flat", font=self._sf)
+                        re_.grid(row=_r, column=_ci, sticky="w", padx=(0, 3), pady=1)
+                        # Enter ÉS fókusz-vesztés is ment: vagy leütöd az Entert,
+                        # vagy csak továbbkattintasz — mindkettő „kész vagyok".
+                        re_.bind("<Return>",
+                                 lambda _ev, kk=k: self._on_range_change(kk))
+                        re_.bind("<FocusOut>",
+                                 lambda _ev, kk=k: self._on_range_change(kk))
+                        _vars[_field] = sv
+                    self._range_vars[k] = _vars
+                    _nl = tk.Label(form, text=str(_rr["values"]), bg=BG,
+                                   fg=FG_GRAY, font=self._sf, width=4, anchor="w")
+                    _nl.grid(row=_r, column=6, sticky="w")
+                    self._range_lbls[k] = _nl
+
                 # Megjegyzés — szerkeszthető; a Mentés a stratégia-configba írja vissza.
                 ce = tk.Entry(form, bg=BG_HEADER, fg=FG_GRAY, font=self._sf,
                               insertbackground=FG_WHITE, relief="flat")
                 ce.insert(0, (_pmeta.get(k, {}) or {}).get("comment", ""))
-                ce.grid(row=_r, column=2, sticky="we", padx=(0, 2), pady=1)
+                ce.grid(row=_r, column=7, sticky="we", padx=(0, 2), pady=1)
                 self._comment_entries[k] = ce
                 _r += 1
+
+        # A tartomány-szerkesztés visszajelzése (mentve / hibás → visszaállt).
+        self._range_err = tk.Label(body, text="", bg=BG, fg=FG_RED, font=self._sf,
+                                   anchor="w", justify="left")
+        self._range_err.pack(anchor="w", padx=10)
+        tk.Label(body, bg=BG, fg=FG_GRAY_DIM, font=self._sf, anchor="w",
+                 justify="left", text=(
+                     "A pipa: bevonjuk-e a paramétert a keresésbe (pár+stratégia "
+                     "szintű). A -tól/-ig/lépés a STRATÉGIA közös tartománya — "
+                     "minden instrumentumra hat.\n"
+                     "Sárga = jel (újraszámolja a belépő-listát) · kék = végrehajtás "
+                     "(csak szűr és méretez) · „—” = nincs hangolható tartománya."
+                 )).pack(anchor="w", padx=10, pady=(2, 0))
 
         # ── Kapuk: mit tegyenek EZZEL a stratégiával ezen a páron ───────────
         self._build_gates(body)
@@ -964,77 +1045,18 @@ class InstrumentParamsDialog:
                 _n("Kikapcsolva: " + ", ".join(sorted(_gt.label_of(k)
                                                       for k in off)), FG_GRAY_DIM)
 
-        # ── 3. MELY paramétereket hangolja — és mit hagyjon ki ─────────────
+        # ── 3. A paraméterek EGY helyen élnek: a Paraméter lapon ───────────
+        # ⚠ Itt SZÁNDÉKOSAN nincs második paraméter-tábla. A doksi panasza épp ez
+        # volt: „két külön kinézet ugyanarra a paraméterre". Az érték, a pipa és a
+        # -tól/-ig/lépés egyetlen soron áll a Paraméter lapon; ez a lap arról szól,
+        # MIT CSINÁL az így beállított keresés.
         _h("Hangolt paraméterek")
-        _n("A pipa kiszedésével a paraméter KIMARAD a keresésből, és a jelenlegi "
-           "értékén marad. Így hangolhatsz egyszerre keveset — gyorsabb és "
-           "értelmezhetőbb. (Pár+stratégia szintű, azonnal mentődik.)", FG_GRAY_DIM)
-        _n("A „jel” osztályú paraméter újraszámoltatja a teljes belépő-listát; a "
-           "„végrehajtás” csak szűr és méretez.", FG_GRAY_DIM)
-        # ⚠ A tartomány a STRATÉGIA fájljába megy (strategy/config/<név>.json),
-        # tehát MINDEN instrumentumra érvényes — szemben a pipával, ami csak
-        # erre a párra. Ezt ki kell mondani, különben a felhasználó azt hinné,
-        # hogy egy pár tartományát szűkíti, közben az összeset átállítja.
-        _n("A -tól/-ig/lépés a STRATÉGIA közös tartománya (minden instrumentumra "
-           "érvényes). Enterrel vagy a mezőből kilépve mentődik.", FG_YELLOW)
-
-        hdr = tk.Frame(body, bg=BG)
-        hdr.pack(anchor="w", padx=10, pady=(6, 0), fill="x")
-        for txt, wdt in (("", 3), ("paraméter", 22), ("osztály", 12),
-                         ("-tól", 9), ("-ig", 9), ("lépés", 9),
-                         ("érték", 7), ("most", 10)):
-            tk.Label(hdr, text=txt, bg=BG, fg=FG_GRAY_DIM, font=self._sf,
-                     width=wdt, anchor="w").pack(side="left")
-
-        self._skip_vars = {}
-        self._range_vars = {}       # kulcs → {"min"/"max"/"step": StringVar}
-        self._range_lbls = {}       # kulcs → az „érték” (rács-méret) címkéje
-        for r in plan["params"]:
-            row = tk.Frame(body, bg=BG)
-            row.pack(anchor="w", padx=10, fill="x")
-            v = tk.BooleanVar(value=not r["skipped"])
-            self._skip_vars[r["key"]] = v
-            # A pipa a program bevett stílusával: a jelölés a FEJLÉC-háttéren
-            # látszik (`selectcolor=BG_HEADER`). Az ablak-háttérrel megegyező
-            # selectcolor mellett a bepipált és a kipipált állapot egyforma.
-            tk.Checkbutton(row, variable=v, bg=BG, fg=FG_WHITE,
-                           selectcolor=BG_HEADER, activebackground=BG,
-                           activeforeground=FG_WHITE,
-                           command=lambda k=r["key"]: self._on_skip_change(k)
-                           ).pack(side="left")
-            _cls_fg = FG_YELLOW if r["cls"] == "signal" else FG_BLUE
-            tk.Label(row, text=r["key"], bg=BG, fg=FG_WHITE, font=self._sf,
-                     width=22, anchor="w").pack(side="left")
-            tk.Label(row, text=("jel" if r["cls"] == "signal" else "végrehajtás"),
-                     bg=BG, fg=_cls_fg, font=self._sf, width=12,
-                     anchor="w").pack(side="left")
-
-            # ── SZERKESZTHETŐ tartomány (a doksi kérése) ───────────────────
-            vars_ = {}
-            for field in ("min", "max", "step"):
-                sv = tk.StringVar(value=self._fmt_range(r[field]))
-                e = tk.Entry(row, textvariable=sv, width=8, bg=BG_HEADER,
-                             fg=FG_WHITE, insertbackground=FG_WHITE,
-                             relief="flat", font=self._sf)
-                e.pack(side="left", padx=(0, 4))
-                # Enter ÉS fókusz-vesztés is ment: a felhasználó vagy leüti az
-                # Entert, vagy csak továbbkattint — mindkettő „kész vagyok".
-                e.bind("<Return>", lambda _ev, k=r["key"]: self._on_range_change(k))
-                e.bind("<FocusOut>", lambda _ev, k=r["key"]: self._on_range_change(k))
-                vars_[field] = sv
-            self._range_vars[r["key"]] = vars_
-
-            lbl = tk.Label(row, text=str(r["values"]), bg=BG, fg=FG_GRAY,
-                           font=self._sf, width=7, anchor="w")
-            lbl.pack(side="left")
-            self._range_lbls[r["key"]] = lbl
-            tk.Label(row, text=("—" if r["current"] is None else str(r["current"])),
-                     bg=BG, fg=FG_GRAY, font=self._sf, width=10,
-                     anchor="w").pack(side="left")
-
-        self._range_err = tk.Label(body, text="", bg=BG, fg=FG_RED, font=self._sf,
+        _n("A paramétereket — értéket, pipát és tartományt — a Paraméter lapon "
+           "állítod, soronként egy helyen. Az alábbi összegzés azt tükrözi.",
+           FG_GRAY_DIM)
+        self._tuned_lbl = tk.Label(body, bg=BG, fg=FG_GRAY, font=self._sf,
                                    anchor="w", justify="left")
-        self._range_err.pack(anchor="w", padx=10, pady=(4, 0))
+        self._tuned_lbl.pack(anchor="w", padx=10)
 
         # ── 4. A keresési tér MÉRETE — az arány a lényeg ───────────────────
         _h("A keresés mérete")
@@ -1049,7 +1071,7 @@ class InstrumentParamsDialog:
             return
         from core import opt_plan as _op
         rows = [dict(r, skipped=not self._skip_vars[r["key"]].get())
-                for r in self._opt_plan["params"] if r["key"] in self._skip_vars]
+                for r in self._opt_rows if r["key"] in self._skip_vars]
         space = _op.search_space(rows)
         tuned = [r for r in rows if not r["skipped"]]
         n_sig = sum(1 for r in tuned if r["cls"] == "signal")
@@ -1068,7 +1090,14 @@ class InstrumentParamsDialog:
                       f"Az optimalizálás ebből {trials} mintát vesz — nem járja be "
                       f"a teret, hanem tanul belőle. Kevesebb hangolt dimenzió = "
                       f"sűrűbb minta = megbízhatóbb eredmény."))
-        except tk.TclError:
+            # A FUTÁS TÍPUSA a hangolt dimenziók számából adódik — ugyanaz a
+            # gépezet 0, 1, 2 vagy több paraméterrel mást JELENT. A levezetés a
+            # `core.opt_plan.run_plan`-ban van (tesztelhető, és a jövőbeli
+            # Futtatás lap ugyanazt hívja majd) — itt csak megjelenítjük.
+            rp = _op.run_plan(rows, trials)
+            self._tuned_lbl.config(
+                text=rp["text"] + chr(10) + "Hangolva: " + (", ".join(rp["tuned"]) or "—"))
+        except (tk.TclError, AttributeError):
             pass
 
     @staticmethod
@@ -1096,7 +1125,7 @@ class InstrumentParamsDialog:
         vars_ = (getattr(self, "_range_vars", {}) or {}).get(key)
         if not vars_:
             return
-        orig = next((r for r in self._opt_plan["params"] if r["key"] == key), None)
+        orig = next((r for r in self._opt_rows if r["key"] == key), None)
         if orig is None:
             return
         spec, changed = {}, False
