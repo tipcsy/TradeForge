@@ -336,7 +336,7 @@ class InstrumentParamsDialog:
         # kérésére ugyanennek a formnak a lapja lett: a paraméterek MELLETT kell
         # tudni olvasni, mit is állítunk.
         from dashboard.tab_shell import TabShell
-        self._shell = TabShell(popup, ("Paraméter", "Optimalizálás", "Leírás"),
+        self._shell = TabShell(popup, ("Paraméter", "Optimalizálás", "Eredmények", "Leírás"),
                                on_show=self._on_tab)
 
         # Görgethető törzs — innentől MINDEN tartalom ide (`body`) megy.
@@ -831,6 +831,13 @@ class InstrumentParamsDialog:
         nem üres lap, hanem felszólítás. Mindig a lemezről olvas, tehát
         szerkesztés után újranyitva azonnal friss (nincs gyorsítótár, ami
         elavulhatna)."""
+        if name == "Eredmények":
+            # LUSTA: az 500 soros CSV beolvasása és a tábla felépítése nem
+            # kell minden ablak-megnyitáskor. Minden megjelenítéskor ÚJRAOLVAS:
+            # futó optimalizálás alatt a CSV 10 trialonként frissül, tehát a
+            # lap visszakattintása friss allast mutat (nem elavult masolatot).
+            self._build_results_tab()
+            return
         if name == "Optimalizálás":
             # LUSTA: a walk-forward ablakokhoz be kell olvasni az M15 előzményt
             # (parquet), ami néhány tized másodperc — nem terheljük vele minden
@@ -845,6 +852,26 @@ class InstrumentParamsDialog:
                            source=str(self.strategy.doc_path()))
         except Exception as e:
             self.lbl_err.config(text=f"A leírás nem nyitható meg: {e}")
+
+    # ── „Eredmények” lap — a trials CSV OLVASHATÓ formában ─────────────────
+    # A doksi kérése: szűrhető, rendezhető tábla, típusos mezőkkel (DD = %), a
+    # sorok színe az eredmény szerint, és ide költözik a CSV-gomb.
+
+    def _build_results_tab(self):
+        page = self._shell.page("Eredmények")
+        # ⚠ MINDIG újraépítjük. Futó optimalizálás alatt a CSV 10 trialonként
+        # frissül; egy gyorsítótárazott tábla azt sugallná, hogy nincs új
+        # eredmény — pont az ellenkezőjét annak, amiért a lap készült.
+        for w in page.winfo_children():
+            w.destroy()
+        from dashboard import results_table
+        try:
+            results_table.build(page, self.trials_csv,
+                                {"small": self._sf, "header": self._hf},
+                                on_export=self._open_trials)
+        except Exception as ex:
+            self.lbl_err.config(text=f"Az eredménytábla nem építhető: {ex}",
+                                fg=FG_RED)
 
     # ── „Optimalizálás” lap — MI FOG TÖRTÉNNI, ha megnyomod az OPT-ot ───────
     # A felhasználói doksi legsúlyosabb panasza: „nem látom az időintervallumot ·
