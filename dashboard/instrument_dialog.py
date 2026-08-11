@@ -349,7 +349,7 @@ class InstrumentParamsDialog:
         # kérésére ugyanennek a formnak a lapja lett: a paraméterek MELLETT kell
         # tudni olvasni, mit is állítunk.
         from dashboard.tab_shell import TabShell
-        self._shell = TabShell(popup, ("Paraméter", "Optimalizálás", "Eredmények", "Leírás"),
+        self._shell = TabShell(popup, ("Áttekintés", "Paraméter", "Optimalizálás", "Eredmények", "Leírás"),
                                on_show=self._on_tab)
 
         # Görgethető törzs — innentől MINDEN tartalom ide (`body`) megy.
@@ -838,6 +838,8 @@ class InstrumentParamsDialog:
                   font=self._sf, command=popup.destroy).pack(side="left", padx=6)
 
         self._fit_to_screen(popup, body, footer)
+        # Az ELSŐ lap feltöltése — most már van `self._shell` (lásd `_on_tab`).
+        self._build_overview_tab()
 
     def _open_mt4_export(self):
         """MT4-es manuális visszajátszás: tól-ig ablak kiírása a viz-fájlba.
@@ -919,12 +921,24 @@ class InstrumentParamsDialog:
         btn.config(command=_run)
 
     def _on_tab(self, name):
+        # ⚠ A TabShell a KONSTRUKTORÁBAN megmutatja az első lapot — vagyis ez a
+        # visszahívás lefut, mielőtt a `self._shell` értéket kapna. A lapokat
+        # ilyenkor még nem lehet felépíteni (nincs mihez kérni az oldalt); az
+        # első lap feltöltése a `_build` végén, expliciten történik.
+        if not hasattr(self, "_shell"):
+            return
         """A „Leírás" lap LUSTA feltöltése (`strategy/docs/<név>.md`).
 
         Ha a fájl nincs, a nézet KIÍRJA az elvárt útvonalat — így a hiányzó doksi
         nem üres lap, hanem felszólítás. Mindig a lemezről olvas, tehát
         szerkesztés után újranyitva azonnal friss (nincs gyorsítótár, ami
         elavulhatna)."""
+        if name == "Áttekintés":
+            # LUSTA + MINDIG FRISS: az állapot (él/áll, kézi szerkesztés,
+            # kapuk) menet közben változhat, egy gyorsítótárazott lap pedig
+            # éppen a figyelmeztetéseket mutatná elavultan.
+            self._build_overview_tab()
+            return
         if name == "Eredmények":
             # LUSTA: az 500 soros CSV beolvasása és a tábla felépítése nem
             # kell minden ablak-megnyitáskor. Minden megjelenítéskor ÚJRAOLVAS:
@@ -946,6 +960,166 @@ class InstrumentParamsDialog:
                            source=str(self.strategy.doc_path()))
         except Exception as e:
             self.lbl_err.config(text=f"A leírás nem nyitható meg: {e}")
+
+    # ── „Áttekintés” lap — mi ennek a párnak az ÁLLAPOTA ───────────────────
+    # A kérés: „az első oldalon csak egy dashboard-szerű dolog lehetne, ahol
+    # látod, hogy mikor kereskedik, meg a minőséget, meg ilyeneket."
+    #
+    # ⚠ A lap ÉRTÉKE nem a metrikák megismétlése — azok máshol is látszanak —,
+    # hanem a FIGYELMEZTETÉSEK: azok az állapotok, amikben minden rendben
+    # LÁTSZIK, közben nem (kézi szerkesztés a mentett minősítés után, kapu-
+    # eltérés, szennyezett OOS). Ezek ma mind némák.
+
+    _HOUR_H = 74            # az óra-sáv magassága képpontban
+
+    def _build_overview_tab(self):
+        page = self._shell.page("Áttekintés")
+        for w in page.winfo_children():
+            w.destroy()
+        from core import overview as _ov
+        from core import gates as _gt
+        try:
+            df15, _ = __import__("trading.backtest", fromlist=["x"]).load_data(self.symbol)
+        except Exception:
+            df15 = None
+        try:
+            o = _ov.build(self.root_cfg, self.symbol, self.strategy,
+                          self.data or {}, df_m15=df15)
+        except Exception as ex:
+            tk.Label(page, text=f"Az áttekintés nem építhető: {ex}", bg=BG,
+                     fg=FG_RED, font=self._sf).pack(anchor="w", padx=12, pady=12)
+            return
+
+        holder, body, _cv = _scrollable(page)
+        holder.pack(side="top", fill="both", expand=True)
+
+        # ── Fejléc: mi ez, és mit csinál MOST ──────────────────────────────
+        head = tk.Frame(body, bg=BG)
+        head.pack(anchor="w", fill="x", padx=12, pady=(10, 2))
+        tk.Label(head, text=f"{o['symbol']}  ·  {o['strategy']}", bg=BG,
+                 fg=FG_WHITE, font=self._hf).pack(side="left")
+        _state_txt = {"live": "ÉL", "stopped": "ÁLLÍTVA"}.get(o["state"], o["state"] or "—")
+        _state_fg = FG_GREEN if o["state"] == "live" else FG_GRAY
+        tk.Label(head, text=f"   {_state_txt}", bg=BG, fg=_state_fg,
+                 font=self._hf).pack(side="left")
+        if o["mode"] == "signal":
+            tk.Label(head, text="  · csak jelzés", bg=BG, fg=FG_YELLOW,
+                     font=self._sf).pack(side="left")
+        from dashboard import theme as _th
+        _gfg = _th.color(o.get("grade_color_name") or "muted")
+        tk.Label(head, text=f"   Minőség: {o['grade']}", bg=BG, fg=_gfg,
+                 font=self._hf).pack(side="left")
+        if o.get("grade_why"):
+            tk.Label(head, text=f"  ({o['grade_why']})", bg=BG, fg=FG_GRAY_DIM,
+                     font=self._sf).pack(side="left")
+
+        s = o["summary"] or {}
+        if s.get("trades"):
+            _pf = s.get("profit_factor", 0) or 0
+            tk.Label(body, bg=BG, fg=FG_GRAY, font=self._sf, anchor="w",
+                     text=(f"Trade {int(s.get('trades', 0))} · "
+                           f"Win {s.get('win_rate', 0) * 100:.0f}% · "
+                           f"MaxDD {s.get('max_drawdown', 0) * 100:.1f}% · "
+                           f"P&L {s.get('total_pnl', 0):+.0f}$ · "
+                           f"PF {'∞' if _pf == float('inf') else f'{_pf:.2f}'}")
+                     ).pack(anchor="w", padx=12)
+        else:
+            tk.Label(body, text="Nincs mentett minősítés.", bg=BG, fg=FG_GRAY_DIM,
+                     font=self._sf).pack(anchor="w", padx=12)
+
+        # ── Figyelmeztetések — ez a lap valódi haszna ──────────────────────
+        if o["warnings"]:
+            box = tk.Frame(body, bg=BG)
+            box.pack(anchor="w", fill="x", padx=12, pady=(8, 2))
+            _fg = {_ov.SEV_RISK: FG_RED, _ov.SEV_WARN: FG_YELLOW,
+                   _ov.SEV_INFO: FG_GRAY_DIM}
+            _ic = {_ov.SEV_RISK: "⚠", _ov.SEV_WARN: "!", _ov.SEV_INFO: "·"}
+            for w in o["warnings"]:
+                tk.Label(box, bg=BG, fg=_fg.get(w["sev"], FG_GRAY),
+                         font=self._sf, anchor="w", justify="left",
+                         wraplength=820,
+                         text=f"{_ic.get(w['sev'], '·')}  {w['text']}"
+                         ).pack(anchor="w")
+
+        # ── MIKOR kereskedik ──────────────────────────────────────────────
+        tk.Label(body, text="Mikor kereskedik", bg=BG, fg=FG_WHITE,
+                 font=self._hf, anchor="w").pack(anchor="w", padx=12, pady=(12, 2))
+        has_hours = any(h["pnl"] is not None for h in o["hours"])
+        if not has_hours:
+            tk.Label(body, bg=BG, fg=FG_GRAY_DIM, font=self._sf, anchor="w",
+                     text=("Nincs óránkénti adat — az optimalizálás írja a mentett "
+                           "minősítésbe. Futtass optimalizálást.")
+                     ).pack(anchor="w", padx=12)
+        else:
+            cv = tk.Canvas(body, bg=BG, height=self._HOUR_H + 26,
+                           highlightthickness=0)
+            cv.pack(fill="x", padx=12, pady=(2, 0))
+            cv.bind("<Configure>",
+                    lambda _e, c=cv, hh=o["hours"]: self._draw_hours(c, hh))
+            self._ov_canvas = cv
+            tk.Label(body, bg=BG, fg=FG_GRAY_DIM, font=self._sf, anchor="w",
+                     justify="left", wraplength=820, text=(
+                         "Oszlop = az adott óra P&L-je a mentett minősítésből; a szám "
+                         "alatta a kötésszám. A halvány órák a kereskedési órákon "
+                         "KÍVÜL esnek.\n"
+                         "⚠ Egy enyhén mínuszos óra 3 kötésből zaj, 300 kötésből "
+                         "rendszeres veszteség — a kettőből ellentétes teendő "
+                         "következik. Ezért van kiírva a kötésszám is.")
+                     ).pack(anchor="w", padx=12, pady=(2, 0))
+
+        # ── Kapuk / adat / kor ────────────────────────────────────────────
+        tk.Label(body, text="Környezet", bg=BG, fg=FG_WHITE, font=self._hf,
+                 anchor="w").pack(anchor="w", padx=12, pady=(12, 2))
+        act = [k for k, e in (o["gates"] or {}).items() if e != _gt.EFFECT_NONE]
+        tk.Label(body, bg=BG, fg=FG_GRAY, font=self._sf, anchor="w",
+                 justify="left", text=(
+                     "Kapuk: " + (", ".join(
+                         f"{_gt.label_of(k)} ({_gt.EFFECT_LABEL.get(o['gates'][k], '')})"
+                         for k in sorted(act)) if act else "egyik sem aktív"))
+                 ).pack(anchor="w", padx=12)
+        if o["data_from"] is not None:
+            tk.Label(body, bg=BG, fg=FG_GRAY, font=self._sf, anchor="w",
+                     text=(f"Előzmény: {str(o['data_from'])[:10]} … "
+                           f"{str(o['data_to'])[:10]}")).pack(anchor="w", padx=12)
+        _age = o["optimized_age_days"]
+        tk.Label(body, bg=BG, fg=FG_GRAY, font=self._sf, anchor="w",
+                 text=(f"Utolsó optimalizálás: {str(o['optimized_at'])[:10]}"
+                       f"  ({_age:.0f} napja)" if _age is not None
+                       else "Utolsó optimalizálás: —")).pack(anchor="w", padx=12,
+                                                             pady=(0, 10))
+
+    def _draw_hours(self, cv, hours):
+        """A 24 órás sáv. Oszlop = P&L, alatta a kötésszám."""
+        try:
+            cv.delete("all")
+            w = max(int(cv.winfo_width()), 320)
+        except tk.TclError:
+            return
+        vals = [h["pnl"] for h in hours if h["pnl"] is not None]
+        if not vals:
+            return
+        top = max(abs(min(vals)), abs(max(vals))) or 1.0
+        pad = 24
+        bw = (w - 2 * pad) / 24.0
+        mid = self._HOUR_H / 2 + 4
+        cv.create_line(pad, mid, w - pad, mid, fill=FG_GRAY_DIM)
+        for i, h in enumerate(hours):
+            x = pad + i * bw
+            v = h["pnl"]
+            if v is not None:
+                hh = (abs(v) / top) * (self._HOUR_H / 2 - 6)
+                # A tiltott óra HALVÁNY: látszik, hogy ott van eredmény, de nem
+                # kereskedünk — enélkül a felhasználó nem értené, miért nincs
+                # kötés egy nyereséges órában.
+                col = (FG_GREEN if v > 0 else FG_RED) if h["allowed"] else FG_GRAY_DIM
+                y0, y1 = (mid - hh, mid) if v > 0 else (mid, mid + hh)
+                cv.create_rectangle(x + 1, y0, x + bw - 1, y1, fill=col, width=0)
+            if i % 2 == 0:
+                cv.create_text(x + bw / 2, self._HOUR_H + 8, text=f"{h['hour']:02d}",
+                               fill=FG_GRAY_DIM, font=self._sf)
+            if h.get("count"):
+                cv.create_text(x + bw / 2, self._HOUR_H + 19, text=str(h["count"]),
+                               fill=FG_GRAY_DIM, font=self._sf)
 
     # ── „Eredmények” lap — a trials CSV OLVASHATÓ formában ─────────────────
     # A doksi kérése: szűrhető, rendezhető tábla, típusos mezőkkel (DD = %), a
@@ -1433,9 +1607,15 @@ class InstrumentParamsDialog:
             popup.update_idletasks()
             # A lapok eltérő szélességűek (az Eredmények tábla a legszélesebb) —
             # a rögzített méret a KÉPERNYŐHÖZ igazodik, hogy egyik lap se lógjon ki.
-            w = min(max(popup.winfo_reqwidth(), 900),
-                    int(popup.winfo_screenwidth() * 0.92))
-            h = min(max(popup.winfo_reqheight(), 600),
+            # ⚠ A méretet a LEGSZÉLESEBB laphoz kell szabni, nem az éppen
+            # láthatóhoz. Az első lap az Áttekintés (keskeny), a Paraméter
+            # tábla viszont 8 oszlop — ha a `popup` pillanatnyi igényéből
+            # méreteznénk, a paraméter-tábla beszorulna, és pont azt kellene
+            # kézzel átméretezni, ami a napi munka.
+            need = max(body.winfo_reqwidth() + 40, popup.winfo_reqwidth())
+            w = min(max(need, 900), int(popup.winfo_screenwidth() * 0.92))
+            h = min(max(body.winfo_reqheight() + footer.winfo_reqheight() + 90,
+                        popup.winfo_reqheight(), 600),
                     int(popup.winfo_screenheight() * 0.88))
             popup.geometry(f"{w}x{h}")
             popup.minsize(720, 480)
