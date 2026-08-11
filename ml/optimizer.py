@@ -495,6 +495,25 @@ def optimize_pair_optuna(
     # a keresési tér és a viselkedés bitazonos a korábbival.
     optimize_rr = bool(opt_cfg.get("optimize_rr", False))
 
+    # ── „Csak EZEKET a paramétereket hangold" ───────────────────────────────
+    # A felhasználó a paraméter-ablak Optimalizálás lapján kikapcsolhat
+    # dimenziókat (pl. „most csak az SMA-t"). A kihagyott kulcs tartománya
+    # kikerül a keresési térből → a `base_params` értékén marad, tehát az
+    # optuna nem is sorsolja. Pár+stratégia szintű (`core.opt_plan`).
+    #
+    # ⚠ ITT kell kivenni, a legelején: ha csak a suggeszt-ágon szűrnénk, a
+    # `_warn_step_grid`, a `_param_split` és a kényszer-ellenőrzés még a teljes
+    # téren dolgozna — a napló és a felület mást mondana, mint a valóság.
+    from core import opt_plan as _oplan
+    _skip = _oplan.skip_keys(cfg or {}, symbol, strategy.name)
+    if _skip:
+        _dropped = [k for k in _skip if k in opt_cfg]
+        if _dropped:
+            opt_cfg = {k: v for k, v in opt_cfg.items() if k not in _skip}
+            log.info("  %s/%s — %d paraméter KIHAGYVA a keresésből (az alapértékén "
+                     "marad): %s", symbol, strategy.name, len(_dropped),
+                     ", ".join(sorted(_dropped)))
+
     # ── Beágyazott keresés (opt-in) ─────────────────────────────────────────
     # Alapból KI → a lapos keresés viselkedése BITAZONOS a korábbival. A
     # `nested` argumentum (ha adott) erősebb a confignál — az A/B mérőnek kell.

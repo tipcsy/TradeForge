@@ -336,7 +336,7 @@ class InstrumentParamsDialog:
         # kérésére ugyanennek a formnak a lapja lett: a paraméterek MELLETT kell
         # tudni olvasni, mit is állítunk.
         from dashboard.tab_shell import TabShell
-        self._shell = TabShell(popup, ("Paraméter", "Leírás"),
+        self._shell = TabShell(popup, ("Paraméter", "Optimalizálás", "Leírás"),
                                on_show=self._on_tab)
 
         # Görgethető törzs — innentől MINDEN tartalom ide (`body`) megy.
@@ -831,6 +831,12 @@ class InstrumentParamsDialog:
         nem üres lap, hanem felszólítás. Mindig a lemezről olvas, tehát
         szerkesztés után újranyitva azonnal friss (nincs gyorsítótár, ami
         elavulhatna)."""
+        if name == "Optimalizálás":
+            # LUSTA: a walk-forward ablakokhoz be kell olvasni az M15 előzményt
+            # (parquet), ami néhány tized másodperc — nem terheljük vele minden
+            # ablak-megnyitást, csak ha tényleg megnézed.
+            self._build_opt_tab()
+            return
         if name != "Leírás":
             return
         from dashboard import md_view
@@ -839,6 +845,184 @@ class InstrumentParamsDialog:
                            source=str(self.strategy.doc_path()))
         except Exception as e:
             self.lbl_err.config(text=f"A leírás nem nyitható meg: {e}")
+
+    # ── „Optimalizálás” lap — MI FOG TÖRTÉNNI, ha megnyomod az OPT-ot ───────
+    # A felhasználói doksi legsúlyosabb panasza: „nem látom az időintervallumot ·
+    # nem látom a lehetséges paramétereket · nem tudom csak egyeseket
+    # optimalizálni · nem látom, melyik kapu működött". Ez a lap mindet
+    # megválaszolja, FUTTATÁS NÉLKÜL, a valódi forrásokból (`core.opt_plan`).
+
+    def _build_opt_tab(self):
+        page = self._shell.page("Optimalizálás")
+        if getattr(self, "_opt_built", False):
+            self._refresh_opt_space()      # a kihagyások változhattak
+            return
+        self._opt_built = True
+        from core import opt_plan as _op
+        from strategy.settings import load_strategy_config
+
+        try:
+            ocfg = load_strategy_config(self.strategy.name).get("optimizer", {}) or {}
+        except Exception:
+            ocfg = {}
+        df15 = None
+        try:
+            from trading.backtest import load_data
+            df15, _ = load_data(self.symbol)
+        except Exception:
+            pass
+        try:
+            cur = self._collect_params() or {}
+        except Exception:
+            cur = {}
+        plan = _op.build(self.root_cfg, self.symbol, self.strategy, ocfg,
+                         df_m15=df15, current=cur)
+        self._opt_cfg_cache = ocfg
+        self._opt_plan = plan
+
+        holder, body, _cv = _scrollable(page)
+        holder.pack(side="top", fill="both", expand=True)
+
+        def _h(txt):
+            tk.Label(body, text=txt, bg=BG, fg=FG_WHITE, font=self._hf,
+                     anchor="w").pack(anchor="w", padx=10, pady=(12, 2))
+
+        def _n(txt, fg=FG_GRAY):
+            tk.Label(body, text=txt, bg=BG, fg=fg, font=self._sf,
+                     anchor="w", justify="left").pack(anchor="w", padx=10)
+
+        # ── 1. MIKOR tanul és MIKOR vizsgázik ──────────────────────────────
+        _h("Időszakok")
+        if plan["data_from"] is not None:
+            _n(f"Letöltött előzmény:  {str(plan['data_from'])[:10]}  …  "
+               f"{str(plan['data_to'])[:10]}")
+        w = plan["wf"]
+        _n(f"Walk-forward: {w['splits']} ablak, ablakonként {w['train_months']} hó "
+           f"tanulás + {w['test_months']} hó vizsga")
+        if not plan["windows"]:
+            _n("⚠ Egyetlen ablak sem áll össze — kevés az előzmény. Tölts le "
+               "hosszabbat, vagy csökkentsd a wf_train_months/wf_test_months értéket.",
+               FG_RED)
+        for wr in plan["windows"]:
+            tk.Label(body, bg=BG, fg=FG_GRAY, font=self._sf, anchor="w",
+                     text=f"   #{wr['i']}   tanul  {str(wr['train_start'])[:10]} → "
+                          f"{str(wr['test_start'])[:10]}      vizsgázik  "
+                          f"{str(wr['test_start'])[:10]} → {str(wr['test_end'])[:10]}"
+                     ).pack(anchor="w", padx=10)
+        # ⚠ A mentett minősítés a VIZSGA-ablakokból jön. Ezt ki kell mondani,
+        # különben a „jó” jelző úgy hat, mintha a teljes időszakra szólna.
+        _n("A mentett minősítés CSAK a vizsga-ablakok kötéseiből számol.", FG_GRAY_DIM)
+
+        # ── 2. Mely KAPUK élnek a keresés alatt ────────────────────────────
+        _h("Kapuk a keresés alatt")
+        if not plan["exec_gates"]:
+            _n("⚠ A végrehajtási kapuk KI vannak kapcsolva az optimalizálásban "
+               "(optimizer.exec_gates). A beállított kapuk látszólag élnek, de a "
+               "keresés nem tud róluk — a kapott paraméterek olyan világból jönnek, "
+               "ami élesben nem létezik.", FG_RED)
+        else:
+            from core import gates as _gt
+            act = [(k, e) for k, e in plan["gate_effects"].items()
+                   if e != _gt.EFFECT_NONE]
+            if not act:
+                _n("Egyetlen kapu sincs bekapcsolva — a keresés minden jelet enged.",
+                   FG_YELLOW)
+            for k, e in sorted(act):
+                tk.Label(body, bg=BG, fg=FG_GRAY, font=self._sf, anchor="w",
+                         text=f"   {_gt.label_of(k)}:  {_gt.EFFECT_LABEL.get(e, e)}"
+                         ).pack(anchor="w", padx=10)
+            off = [k for k, e in plan["gate_effects"].items()
+                   if e == _gt.EFFECT_NONE]
+            if off:
+                _n("Kikapcsolva: " + ", ".join(sorted(_gt.label_of(k)
+                                                      for k in off)), FG_GRAY_DIM)
+
+        # ── 3. MELY paramétereket hangolja — és mit hagyjon ki ─────────────
+        _h("Hangolt paraméterek")
+        _n("A pipa kiszedésével a paraméter KIMARAD a keresésből, és a jelenlegi "
+           "értékén marad. Így hangolhatsz egyszerre keveset — gyorsabb és "
+           "értelmezhetőbb. (Pár+stratégia szintű, azonnal mentődik.)", FG_GRAY_DIM)
+        _n("A „jel” osztályú paraméter újraszámoltatja a teljes belépő-listát; a "
+           "„végrehajtás” csak szűr és méretez.", FG_GRAY_DIM)
+
+        hdr = tk.Frame(body, bg=BG)
+        hdr.pack(anchor="w", padx=10, pady=(6, 0), fill="x")
+        for txt, wdt in (("", 3), ("paraméter", 22), ("osztály", 13),
+                         ("-tól", 8), ("-ig", 8), ("lépés", 8),
+                         ("érték", 7), ("most", 10)):
+            tk.Label(hdr, text=txt, bg=BG, fg=FG_GRAY_DIM, font=self._sf,
+                     width=wdt, anchor="w").pack(side="left")
+
+        self._skip_vars = {}
+        for r in plan["params"]:
+            row = tk.Frame(body, bg=BG)
+            row.pack(anchor="w", padx=10, fill="x")
+            v = tk.BooleanVar(value=not r["skipped"])
+            self._skip_vars[r["key"]] = v
+            tk.Checkbutton(row, variable=v, bg=BG, activebackground=BG,
+                           selectcolor=BG, bd=0, highlightthickness=0,
+                           command=lambda k=r["key"]: self._on_skip_change(k)
+                           ).pack(side="left")
+            _cls_fg = FG_YELLOW if r["cls"] == "signal" else FG_BLUE
+            for txt, wdt, fg in (
+                    (r["key"], 22, FG_WHITE),
+                    ("jel" if r["cls"] == "signal" else "végrehajtás", 13, _cls_fg),
+                    (str(r["min"]), 8, FG_GRAY), (str(r["max"]), 8, FG_GRAY),
+                    (str(r["step"]), 8, FG_GRAY),
+                    (str(r["values"]), 7, FG_GRAY),
+                    ("—" if r["current"] is None else str(r["current"]), 10, FG_GRAY)):
+                tk.Label(row, text=txt, bg=BG, fg=fg, font=self._sf,
+                         width=wdt, anchor="w").pack(side="left")
+
+        # ── 4. A keresési tér MÉRETE — az arány a lényeg ───────────────────
+        _h("A keresés mérete")
+        self._space_lbl = tk.Label(body, bg=BG, fg=FG_GRAY, font=self._sf,
+                                   anchor="w", justify="left")
+        self._space_lbl.pack(anchor="w", padx=10)
+        self._refresh_opt_space()
+
+    def _refresh_opt_space(self):
+        """A keresési tér mérete a PILLANATNYI pipák szerint."""
+        if not getattr(self, "_opt_built", False):
+            return
+        from core import opt_plan as _op
+        rows = [dict(r, skipped=not self._skip_vars[r["key"]].get())
+                for r in self._opt_plan["params"] if r["key"] in self._skip_vars]
+        space = _op.search_space(rows)
+        tuned = [r for r in rows if not r["skipped"]]
+        n_sig = sum(1 for r in tuned if r["cls"] == "signal")
+        trials = int((self._opt_cfg_cache or {}).get("max_trials", 500) or 500)
+        space_txt = ("gyakorlatilag végtelen" if space >= 10 ** 18
+                     else f"{space:,}".replace(",", " "))
+        # ⚠ Ez a legfontosabb szám az egész lapon: az optuna NEM járja be a
+        # teret, hanem mintavételez. A trial-szám önmagában semmit nem mond —
+        # csak a térhez viszonyítva. Enélkül könnyű azt hinni, hogy 500 trial
+        # „átnézte” a lehetőségeket.
+        try:
+            self._space_lbl.config(
+                text=(f"{len(tuned)} hangolt dimenzió ({n_sig} jel + "
+                      f"{len(tuned) - n_sig} végrehajtás), rácson "
+                      f"{space_txt} kombináció.\n"
+                      f"Az optimalizálás ebből {trials} mintát vesz — nem járja be "
+                      f"a teret, hanem tanul belőle. Kevesebb hangolt dimenzió = "
+                      f"sűrűbb minta = megbízhatóbb eredmény."))
+        except tk.TclError:
+            pass
+
+    def _on_skip_change(self, key: str):
+        """A pipa AZONNAL a config.json-ba megy (mint a kapu-választók).
+
+        Nem a Mentés gombhoz kötjük: az a paraméter-KÉSZLETET menti; hogy mit
+        hangolunk, az más kérdés — félrevezető volna, ha némán arra várna."""
+        from core import opt_plan as _op
+        skip = {k for k, v in self._skip_vars.items() if not v.get()}
+        _op.set_skip_keys(self.root_cfg, self.symbol, self.strategy.name, skip)
+        try:
+            self._save_main_config()
+        except Exception as ex:
+            self.lbl_err.config(text=f"Mentési hiba: {ex}", fg=FG_RED)
+            return
+        self._refresh_opt_space()
 
     def _fit_to_screen(self, popup, body, footer):
         """Az ablak méretezése a KÉPERNYŐHÖZ: ha a tartalom elfér, minden látszik
