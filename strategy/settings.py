@@ -246,6 +246,75 @@ def save_param_comments(name: str, comments: dict) -> bool:
         return False
 
 
+def save_optimizer_ranges(name: str, ranges: dict) -> bool:
+    """Az optimalizálási TARTOMÁNYOK visszaírása (`optimizer.<kulcs>.min/max/step`).
+
+    A doksi kérése: „a beállításoknál jelenjenek meg az aktuális -tól -ig step
+    beállítási paraméterek, ezek legyenek szabadon állíthatóak."
+
+    ⚠ Csak a min/max/step MEZŐKET írja, a spec többi kulcsát (`gt`/`lt`) érintetlenül
+    hagyja: azok a paraméter-KÉNYSZEREK hordozói (`sma > wpr` jellegű dinamikus
+    tartomány-szűkítés). Ha egy tartomány-szerkesztés némán eldobná őket, az
+    optimalizáló érvénytelen kombinációkat kezdene sorsolni, és a felhasználó
+    csak abból venné észre, hogy hirtelen sok trial „kényszer nem teljesült"
+    jelöléssel bukik el.
+
+    Csak akkor ír, ha VÁLTOZOTT valami. `False` = nem írt (nincs változás vagy hiba).
+    """
+    p = strategy_config_path(name)
+    try:
+        with open(p, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as ex:
+        log.warning("optimizer tartomány mentés — a config nem olvasható (%s): %s",
+                    name, ex)
+        return False
+    opt = data.setdefault("optimizer", {})
+    changed = False
+    for key, spec in (ranges or {}).items():
+        cur = opt.get(key)
+        if not isinstance(cur, dict) or "min" not in cur:
+            continue                    # nem tartomány-kulcs → nem nyúlunk hozzá
+        for field in ("min", "max", "step"):
+            if field in spec and cur.get(field) != spec[field]:
+                cur[field] = spec[field]
+                changed = True
+    if not changed:
+        return False
+    try:
+        tmp = p.with_suffix(".json.tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        tmp.replace(p)                  # atomikus csere
+        return True
+    except Exception as ex:
+        log.warning("optimizer tartomány mentési hiba (%s): %s", name, ex)
+        return False
+
+
+def validate_range(spec: dict) -> str:
+    """`""` ha a tartomány használható, különben az EMBERI hibaüzenet.
+
+    ⚠ Ezek nem formasági kifogások. Egy `min > max` tartományból az optuna
+    kivételt dob (minden trial elbukik), a `step <= 0` végtelen ciklust vagy
+    nulla értéket ad, a túl nagy lépésköz pedig EGYETLEN értékre szűkíti a
+    dimenziót — az utóbbi a legalattomosabb, mert csendben „optimalizál", csak
+    éppen nincs mit választani.
+    """
+    lo, hi, step = spec.get("min"), spec.get("max"), spec.get("step")
+    for v, nev in ((lo, "-tól"), (hi, "-ig"), (step, "lépés")):
+        if not isinstance(v, (int, float)):
+            return f"a(z) „{nev}” nem szám"
+    if step <= 0:
+        return "a lépésköz csak pozitív lehet"
+    if lo > hi:
+        return "a „-tól” nagyobb, mint a „-ig”"
+    if lo + step > hi and lo != hi:
+        return (f"ekkora lépésközzel csak EGYETLEN érték áll elő ({lo:g}) — "
+                f"a paraméter gyakorlatilag rögzített")
+    return ""
+
+
 def duplicate_keys(text: str) -> list[str]:
     """A JSON-szövegben TÖBBSZÖR szereplő objektum-kulcsok (egy szinten belül).
 

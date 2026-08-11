@@ -258,9 +258,32 @@ def build(parent, path, fonts, on_export=None, theme=None):
     count_lbl.pack(side="left", padx=(6, 0))
 
     # ── A tábla ─────────────────────────────────────────────────────────────
+    # ⚠ A ttk.Treeview NEM a tk widgetek színeit örökli: saját, platform-függő
+    # (világos) alapértelmezése van, ezért sötét témában vakító fehér táblaként
+    # jelenne meg. A stílust a BETÖLTÖTT téma értékeiből építjük, minden
+    # felépítéskor újra — így a bőrváltás után nyíló ablak már az új színekkel
+    # jön. (A téma értékek szerint importálódik, ezért a modul-szintű BG-t nem
+    # elég egyszer beállítani: a stílus-nevet is a színhez kötjük, különben egy
+    # korábban regisztrált, RÉGI színű stílus maradna érvényben.)
+    style = ttk.Style()
+    try:
+        style.theme_use("clam")         # az egyetlen beépített téma, ami enged színt
+    except Exception:
+        pass
+    sname = f"Res{abs(hash((BG, th.BG_HEADER, FG_WHITE))) % 10 ** 8}.Treeview"
+    style.configure(sname, background=BG, fieldbackground=BG, foreground=FG_WHITE,
+                    borderwidth=0, rowheight=20)
+    style.configure(sname + ".Heading", background=th.BG_HEADER, foreground=FG_GRAY,
+                    relief="flat", borderwidth=0)
+    style.map(sname + ".Heading", background=[("active", th.BG_HEADER)])
+    # A kijelölt sor: a saját kiemelő színünk, hogy a szöveg olvasható maradjon.
+    style.map(sname, background=[("selected", th.BG_HEADER)],
+              foreground=[("selected", FG_WHITE)])
+
     holder = tk.Frame(wrap, bg=BG)
     holder.pack(fill="both", expand=True, padx=10, pady=(0, 6))
-    tree = ttk.Treeview(holder, columns=cols, show="headings", height=18)
+    tree = ttk.Treeview(holder, columns=cols, show="headings", height=18,
+                        style=sname)
     ysb = ttk.Scrollbar(holder, orient="vertical", command=tree.yview)
     xsb = ttk.Scrollbar(holder, orient="horizontal", command=tree.xview)
     tree.configure(yscroll=ysb.set, xscroll=xsb.set)

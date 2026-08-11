@@ -183,7 +183,85 @@ else:
     check("az optimalizalas ad eredmenyt a szintetikus adaton", False,
           "None jott vissza")
 
+
+# ── 6. A TARTOMANYOK SZERKESZTHETOK (a doksi kerese) ──────────────────────
+# "A beallitasoknal jelenjenek meg az aktualis -tol -ig step beallitasi
+#  parameter, ezek legyenek szabadon allithatoak."
+#
+# ⚠ A teszt SOHA nem irhatja a valodi strategy configot: a
+# `strategy_config_path`-ot temp masolatra teritjuk. (A `_save_main_config`
+# stubolasa itt nem vedene — ez a modul KOZVETLENUL ir fajlt.)
+import json as _json
 import shutil
+
+from strategy import settings as _sx
+
+_real_cfg = _sx.strategy_config_path("wpr_sma")
+_tmp_dir = Path(tempfile.mkdtemp(prefix="optrange_test_"))
+_tmp_cfg = _tmp_dir / "wpr_sma.json"
+shutil.copy2(_real_cfg, _tmp_cfg)
+_before = _real_cfg.read_text(encoding="utf-8")
+_sx.strategy_config_path = lambda name: _tmp_cfg
+
+check("ervenyes tartomany OK", _sx.validate_range({"min": 50, "max": 300, "step": 10}) == "")
+check("min > max -> hiba", "nagyobb" in _sx.validate_range(
+    {"min": 300, "max": 50, "step": 10}))
+check("nulla lepeskoz -> hiba", "pozitiv" in _sx.validate_range(
+    {"min": 1, "max": 3, "step": 0}).replace("í", "i"))
+check("nem szam -> hiba", "nem szám" in _sx.validate_range(
+    {"min": 1, "max": 3, "step": "x"}))
+# ⚠ A legalattomosabb eset: a tartomany ervenyes-nek LATSZIK, de a lepeskoz
+# akkora, hogy EGYETLEN ertek all elo — a dimenzio csendben rogzitett lesz,
+# es a felhasznalo azt hiszi, optimalizalja.
+check("tul nagy lepeskoz (1 ertek) -> hiba", "EGYETLEN" in _sx.validate_range(
+    {"min": 1.0, "max": 3.0, "step": 5.0}))
+
+check("mentes visszaadja, hogy irt",
+      _sx.save_optimizer_ranges("wpr_sma", {"sma_period": {"min": 60, "max": 280,
+                                                           "step": 20}}) is True)
+_saved = _json.loads(_tmp_cfg.read_text(encoding="utf-8"))["optimizer"]["sma_period"]
+check("a tartomany TENYLEG elmentodott",
+      (_saved["min"], _saved["max"], _saved["step"]) == (60, 280, 20), str(_saved))
+check("valtozatlan mentes -> nem ir feleslegesen",
+      _sx.save_optimizer_ranges("wpr_sma", {"sma_period": {"min": 60, "max": 280,
+                                                           "step": 20}}) is False)
+
+# ⚠ A `gt`/`lt` a PARAMETER-KENYSZEREK hordozoja (dinamikus tartomany-szukites).
+# Ha egy tartomany-szerkesztes neman eldobna oket, az optimalizalo ervenytelen
+# kombinaciokat kezdene sorsolni, es a felhasznalo csak abbol venne eszre, hogy
+# hirtelen sok trial "kenyszer nem teljesult" jelolessel bukik el.
+_spec_keys = {k: v for k, v in _json.loads(
+    _tmp_cfg.read_text(encoding="utf-8"))["optimizer"].items()
+    if isinstance(v, dict) and ("gt" in v or "lt" in v)}
+_orig_keys = {k: v for k, v in _json.loads(_before)["optimizer"].items()
+              if isinstance(v, dict) and ("gt" in v or "lt" in v)}
+check("a gt/lt kenyszerek TULELIK a tartomany-mentest",
+      {k: {kk: vv for kk, vv in v.items() if kk in ("gt", "lt")}
+       for k, v in _spec_keys.items()} ==
+      {k: {kk: vv for kk, vv in v.items() if kk in ("gt", "lt")}
+       for k, v in _orig_keys.items()},
+      f"{len(_orig_keys)} kulcs")
+
+check("nem tartomany-kulcsra NEM ir (pl. constraints)",
+      _sx.save_optimizer_ranges("wpr_sma", {"constraints": {"min": 1}}) is False)
+check("ismeretlen kulcsra NEM ir",
+      _sx.save_optimizer_ranges("wpr_sma", {"nincs_ilyen": {"min": 1, "max": 2,
+                                                            "step": 1}}) is False)
+
+# A grid_size a mentett tartomanyt kovesse (a felulet ezt irja ki "ertek"-kent).
+check("a racs-meret a mentett tartomanybol jon",
+      op.grid_size({"min": 60, "max": 280, "step": 20}) == 12,
+      str(op.grid_size({"min": 60, "max": 280, "step": 20})))
+
+# A modul visszaallitasa: a lambda-t nem hagyhatjuk benne (a kesobbi tesztek
+# ugyanezt a modult importaljak — egy bennfelejtett terites ott mar NEM
+# szandekos, es a valodi configot celozna).
+import importlib
+importlib.reload(_sx)
+check("a VALODI strategy config ERINTETLEN maradt",
+      _real_cfg.read_text(encoding="utf-8") == _before)
+shutil.rmtree(_tmp_dir, ignore_errors=True)
+
 shutil.rmtree(ps.PARAMS_DIR, ignore_errors=True)
 
 print()

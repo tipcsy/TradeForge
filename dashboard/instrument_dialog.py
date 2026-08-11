@@ -971,35 +971,70 @@ class InstrumentParamsDialog:
            "értelmezhetőbb. (Pár+stratégia szintű, azonnal mentődik.)", FG_GRAY_DIM)
         _n("A „jel” osztályú paraméter újraszámoltatja a teljes belépő-listát; a "
            "„végrehajtás” csak szűr és méretez.", FG_GRAY_DIM)
+        # ⚠ A tartomány a STRATÉGIA fájljába megy (strategy/config/<név>.json),
+        # tehát MINDEN instrumentumra érvényes — szemben a pipával, ami csak
+        # erre a párra. Ezt ki kell mondani, különben a felhasználó azt hinné,
+        # hogy egy pár tartományát szűkíti, közben az összeset átállítja.
+        _n("A -tól/-ig/lépés a STRATÉGIA közös tartománya (minden instrumentumra "
+           "érvényes). Enterrel vagy a mezőből kilépve mentődik.", FG_YELLOW)
 
         hdr = tk.Frame(body, bg=BG)
         hdr.pack(anchor="w", padx=10, pady=(6, 0), fill="x")
-        for txt, wdt in (("", 3), ("paraméter", 22), ("osztály", 13),
-                         ("-tól", 8), ("-ig", 8), ("lépés", 8),
+        for txt, wdt in (("", 3), ("paraméter", 22), ("osztály", 12),
+                         ("-tól", 9), ("-ig", 9), ("lépés", 9),
                          ("érték", 7), ("most", 10)):
             tk.Label(hdr, text=txt, bg=BG, fg=FG_GRAY_DIM, font=self._sf,
                      width=wdt, anchor="w").pack(side="left")
 
         self._skip_vars = {}
+        self._range_vars = {}       # kulcs → {"min"/"max"/"step": StringVar}
+        self._range_lbls = {}       # kulcs → az „érték” (rács-méret) címkéje
         for r in plan["params"]:
             row = tk.Frame(body, bg=BG)
             row.pack(anchor="w", padx=10, fill="x")
             v = tk.BooleanVar(value=not r["skipped"])
             self._skip_vars[r["key"]] = v
-            tk.Checkbutton(row, variable=v, bg=BG, activebackground=BG,
-                           selectcolor=BG, bd=0, highlightthickness=0,
+            # A pipa a program bevett stílusával: a jelölés a FEJLÉC-háttéren
+            # látszik (`selectcolor=BG_HEADER`). Az ablak-háttérrel megegyező
+            # selectcolor mellett a bepipált és a kipipált állapot egyforma.
+            tk.Checkbutton(row, variable=v, bg=BG, fg=FG_WHITE,
+                           selectcolor=BG_HEADER, activebackground=BG,
+                           activeforeground=FG_WHITE,
                            command=lambda k=r["key"]: self._on_skip_change(k)
                            ).pack(side="left")
             _cls_fg = FG_YELLOW if r["cls"] == "signal" else FG_BLUE
-            for txt, wdt, fg in (
-                    (r["key"], 22, FG_WHITE),
-                    ("jel" if r["cls"] == "signal" else "végrehajtás", 13, _cls_fg),
-                    (str(r["min"]), 8, FG_GRAY), (str(r["max"]), 8, FG_GRAY),
-                    (str(r["step"]), 8, FG_GRAY),
-                    (str(r["values"]), 7, FG_GRAY),
-                    ("—" if r["current"] is None else str(r["current"]), 10, FG_GRAY)):
-                tk.Label(row, text=txt, bg=BG, fg=fg, font=self._sf,
-                         width=wdt, anchor="w").pack(side="left")
+            tk.Label(row, text=r["key"], bg=BG, fg=FG_WHITE, font=self._sf,
+                     width=22, anchor="w").pack(side="left")
+            tk.Label(row, text=("jel" if r["cls"] == "signal" else "végrehajtás"),
+                     bg=BG, fg=_cls_fg, font=self._sf, width=12,
+                     anchor="w").pack(side="left")
+
+            # ── SZERKESZTHETŐ tartomány (a doksi kérése) ───────────────────
+            vars_ = {}
+            for field in ("min", "max", "step"):
+                sv = tk.StringVar(value=self._fmt_range(r[field]))
+                e = tk.Entry(row, textvariable=sv, width=8, bg=BG_HEADER,
+                             fg=FG_WHITE, insertbackground=FG_WHITE,
+                             relief="flat", font=self._sf)
+                e.pack(side="left", padx=(0, 4))
+                # Enter ÉS fókusz-vesztés is ment: a felhasználó vagy leüti az
+                # Entert, vagy csak továbbkattint — mindkettő „kész vagyok".
+                e.bind("<Return>", lambda _ev, k=r["key"]: self._on_range_change(k))
+                e.bind("<FocusOut>", lambda _ev, k=r["key"]: self._on_range_change(k))
+                vars_[field] = sv
+            self._range_vars[r["key"]] = vars_
+
+            lbl = tk.Label(row, text=str(r["values"]), bg=BG, fg=FG_GRAY,
+                           font=self._sf, width=7, anchor="w")
+            lbl.pack(side="left")
+            self._range_lbls[r["key"]] = lbl
+            tk.Label(row, text=("—" if r["current"] is None else str(r["current"])),
+                     bg=BG, fg=FG_GRAY, font=self._sf, width=10,
+                     anchor="w").pack(side="left")
+
+        self._range_err = tk.Label(body, text="", bg=BG, fg=FG_RED, font=self._sf,
+                                   anchor="w", justify="left")
+        self._range_err.pack(anchor="w", padx=10, pady=(4, 0))
 
         # ── 4. A keresési tér MÉRETE — az arány a lényeg ───────────────────
         _h("A keresés mérete")
@@ -1036,6 +1071,77 @@ class InstrumentParamsDialog:
         except tk.TclError:
             pass
 
+    @staticmethod
+    def _fmt_range(v):
+        """Tartomány-érték szerkeszthető alakja. Egészre nem írunk `.0`-t, és a
+        lebegőpontos maradékot sem (`0.30000000000000004` → `0.3`)."""
+        if isinstance(v, bool) or v is None:
+            return "" if v is None else str(v)
+        if isinstance(v, int):
+            return str(v)
+        if isinstance(v, float):
+            return f"{v:g}"
+        return str(v)
+
+    def _on_range_change(self, key: str):
+        """A -tól/-ig/lépés mentése a STRATÉGIA configjába.
+
+        ⚠ Az EGÉSZ/TÖRT jelleget megőrizzük: az optimalizáló abból dönti el,
+        hogy `suggest_int`-et vagy `suggest_float`-ot hív. Ha egy egész
+        paraméter (pl. sma_period) tartománya véletlenül float-tá válna, az
+        optuna tizedes SMA-periódust sorsolna — az indikátor-motor pedig
+        vagy elszállna, vagy némán csonkolna.
+        """
+        from strategy.settings import save_optimizer_ranges, validate_range
+        vars_ = (getattr(self, "_range_vars", {}) or {}).get(key)
+        if not vars_:
+            return
+        orig = next((r for r in self._opt_plan["params"] if r["key"] == key), None)
+        if orig is None:
+            return
+        spec, changed = {}, False
+        for field in ("min", "max", "step"):
+            raw = vars_[field].get().strip().replace(",", ".")
+            was = orig[field]
+            try:
+                val = int(round(float(raw))) if isinstance(was, int) else float(raw)
+            except (ValueError, TypeError):
+                self._range_err.config(
+                    text=f"{key}: a(z) „{field}” értéke nem szám — a mező visszaállt.",
+                    fg=FG_RED)
+                vars_[field].set(self._fmt_range(was))
+                return
+            spec[field] = val
+            changed = changed or val != was
+        if not changed:
+            self._range_err.config(text="", fg=FG_RED)
+            return
+
+        err = validate_range(spec)
+        if err:
+            # ⚠ NEM mentünk hibás tartományt, és VISSZAÁLLÍTJUK a mezőket. Egy
+            # elmentett `min > max` az összes trialt elbuktatná — a felhasználó
+            # órákkal később, egy üres eredménytáblából venné észre.
+            self._range_err.config(text=f"{key}: {err} — a mezők visszaálltak.",
+                                   fg=FG_RED)
+            for field in ("min", "max", "step"):
+                vars_[field].set(self._fmt_range(orig[field]))
+            return
+
+        if save_optimizer_ranges(self.strategy.name, {key: spec}):
+            orig.update(spec)
+            from core import opt_plan as _op
+            n = _op.grid_size(spec)
+            self._range_lbls[key].config(text=str(n))
+            orig["values"] = n
+            self._range_err.config(
+                text=f"{key}: mentve ({spec['min']:g} … {spec['max']:g} / "
+                     f"{spec['step']:g} → {n} érték)", fg=FG_GREEN)
+            self._refresh_opt_space()
+        else:
+            self._range_err.config(text=f"{key}: a mentés nem sikerült "
+                                        f"(lásd a naplót).", fg=FG_RED)
+
     def _on_skip_change(self, key: str):
         """A pipa AZONNAL a config.json-ba megy (mint a kapu-választók).
 
@@ -1052,10 +1158,18 @@ class InstrumentParamsDialog:
         self._refresh_opt_space()
 
     def _fit_to_screen(self, popup, body, footer):
-        """Az ablak méretezése a KÉPERNYŐHÖZ: ha a tartalom elfér, minden látszik
-        (mint eddig); ha nem, a törzs görgethetővé zsugorodik, a gombsor pedig
-        marad az alján. A canvas magától nem kér magasságot (create_window), ezért
-        a belső frame igényéből — a képernyőre vágva — állítjuk be."""
+        """Az ablak méretezése a KÉPERNYŐHÖZ, majd a méret RÖGZÍTÉSE.
+
+        Ha a tartalom elfér, minden látszik; ha nem, a törzs görgethetővé
+        zsugorodik, a gombsor pedig marad az alján.
+
+        ⚠ A méret rögzítése nem kozmetika. A Tk egy toplevelt alapból a tartalma
+        köré méretez — lapváltáskor tehát az ablak ugrálna: a Paraméter lap magas,
+        az Eredmények széles, a Leírás keskeny. A doksi ezt külön panaszolja
+        („amikor megnyitom, az egész Paraméter ablak összeugrik kicsire").
+        Egy explicit `geometry()` után a Tk abbahagyja az automatikus méretezést,
+        így a lapok EGYFORMA ablakban nyílnak. Átméretezni a felhasználó továbbra
+        is tud — csak a program nem teszi meg helyette."""
         try:
             popup.update_idletasks()
             need_h = body.winfo_reqheight()
@@ -1064,6 +1178,15 @@ class InstrumentParamsDialog:
             avail = int(popup.winfo_screenheight() * 0.85) - footer.winfo_reqheight() - 80
             self._body_canvas.config(height=max(240, min(need_h, avail)),
                                      width=need_w)
+            popup.update_idletasks()
+            # A lapok eltérő szélességűek (az Eredmények tábla a legszélesebb) —
+            # a rögzített méret a KÉPERNYŐHÖZ igazodik, hogy egyik lap se lógjon ki.
+            w = min(max(popup.winfo_reqwidth(), 900),
+                    int(popup.winfo_screenwidth() * 0.92))
+            h = min(max(popup.winfo_reqheight(), 600),
+                    int(popup.winfo_screenheight() * 0.88))
+            popup.geometry(f"{w}x{h}")
+            popup.minsize(720, 480)
         except Exception:
             pass
 
