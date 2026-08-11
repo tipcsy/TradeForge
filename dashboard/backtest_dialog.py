@@ -97,7 +97,17 @@ class BacktestDialog:
 
     def __init__(self, parent, symbol, cfg, strategy, params, pair_cfg,
                  rr_spec, header_font, small_font, on_result=None,
-                 preset_name: str = "Ki", on_apply_params=None):
+                 preset_name: str = "Ki", on_apply_params=None, host=None):
+        # `host`: ha adott (egy Frame), a tartalom ODA épül, nem külön ablakba —
+        # így ugyanez az osztály szolgálja ki a Paraméterek ablak „Futtatás"
+        # lapját is. A logika (haladás, grafikon, összevetés, CSV, MT5-export)
+        # BETŰRE ugyanaz; csak a befogadó és a bezárás-szemantika más.
+        #
+        # ⚠ Miért nem másoltam ki a tartalmat a lapra: két példány óhatatlanul
+        # elcsúszna. A backtest-ablak a projekt egyik legtöbbet használt felülete
+        # — egy „majdnem ugyanolyan" második változat pont abban térne el, ami
+        # ritkán fut (megszakítás, hibaág, MT5-export), és az nem derülne ki.
+        self._host    = host
         self.parent   = parent
         self.symbol   = symbol
         self.cfg      = cfg
@@ -156,7 +166,10 @@ class BacktestDialog:
         # (SL/TP, rr, slotok, kapuk), a jel-oldal változatlan → nem kell újra
         # kiszámolni. Az ablakhoz kötött (bezáráskor eldobódik).
         self._sig_cache = None
+        import queue as _queue
+        self._ui_q = _queue.Queue()      # háttérszál → főszál (lásd `_post`)
         self._build()
+        self._ui_poll()                  # a FŐSZÁLRÓL indítva
         # Adat betöltése háttérben (a dátum-tartományhoz + a futáshoz cache-elve)
         self._load_data_async()
 
@@ -247,20 +260,30 @@ class BacktestDialog:
 
     # ── UI ──────────────────────────────────────────────────────────────────
     def _build(self):
-        win = tk.Toplevel(self.parent)
-        self.win = win
-        win.title(f"{self.symbol} — {self.strategy.name} Backtest")
-        win.configure(bg=BG)
+        if self._host is not None:
+            # Beágyazva: a tartalom a kapott keretbe megy. A `self.win` a
+            # BEFOGLALÓ ablak — az `after()`, a képernyőméret-lekérdezés és a
+            # grab ugyanúgy működik, csak nem mi hoztuk létre, tehát nem is mi
+            # zárjuk be.
+            container = self._host
+            win = self._host.winfo_toplevel()
+            self.win = win
+        else:
+            win = tk.Toplevel(self.parent)
+            self.win = win
+            container = win
+            win.title(f"{self.symbol} — {self.strategy.name} Backtest")
+            win.configure(bg=BG)
 
         # ── Rögzített alsó sáv ELŐSZÖR (side="bottom") ──────────────────────
         # A pack-sorrend miatt a lentre kötött sáv kapja meg a helyét először, a
         # görgethető törzs csak a maradékot → a Backtest indítása / Mentés a
         # Paraméterekhez / Bezárás gombok kis képernyőn is MINDIG látszanak.
-        footer = tk.Frame(win, bg=BG)
+        footer = tk.Frame(container, bg=BG)
         footer.pack(side="bottom", fill="x")
 
         # Görgethető törzs — innentől MINDEN tartalom ide (`body`) megy.
-        holder, body, self._body_canvas = _scrollable(win)
+        holder, body, self._body_canvas = _scrollable(container)
         holder.pack(side="top", fill="both", expand=True)
         self._body = body
 
@@ -633,16 +656,25 @@ class BacktestDialog:
                                         fg=BTN_BT_FG, relief="flat", font=self._sf,
                                         state="disabled", command=self._open_build_csv)
         self._btn_build_csv.pack(side="left", padx=6)
-        tk.Button(btns, text="Bezárás", bg=BTN_DIS_BG, fg=BTN_DIS_FG, relief="flat",
-                  font=self._sf, command=self._close).pack(side="left", padx=6)
-
-        # A szülő (Stratégia Paraméterek) ablak grab_set-tel modális → a gyereknek
-        # is meg kell fognia a grabot, különben kattinthatatlan. Záráskor a grabot
-        # visszaadjuk a szülőnek.
-        win.grab_set()
-        win.protocol("WM_DELETE_WINDOW", self._close)
-
-        self._fit_to_screen(win, body, footer)
+        # ⚠ Beágyazva NINCS „Bezárás": az a befoglaló ablakot zárná be, nem a
+        # lapot — a felhasználó pedig azt hinné, csak a backtestet csukja be.
+        if self._host is None:
+            tk.Button(btns, text="Bezárás", bg=BTN_DIS_BG, fg=BTN_DIS_FG,
+                      relief="flat", font=self._sf,
+                      command=self._close).pack(side="left", padx=6)
+            # A szülő (Stratégia Paraméterek) ablak grab_set-tel modális → a
+            # gyereknek is meg kell fognia a grabot, különben kattinthatatlan.
+            # Záráskor a grabot visszaadjuk a szülőnek.
+            win.grab_set()
+            win.protocol("WM_DELETE_WINDOW", self._close)
+            self._fit_to_screen(win, body, footer)
+        else:
+            # Beágyazva a befoglaló ablak mérete a mérvadó; a törzs a
+            # rendelkezésre álló helyet tölti ki (nem a tartalom diktál).
+            try:
+                self._body_canvas.config(height=520)
+            except Exception:
+                pass
 
     def _fit_to_screen(self, win, body, footer):
         """Az ablak méretezése a KÉPERNYŐHÖZ: ha a tartalom elfér, minden látszik;
@@ -659,13 +691,60 @@ class BacktestDialog:
         except Exception:
             pass
 
+    # ── Szálbiztos UI-frissítés ─────────────────────────────────────────────
+    # ⚠ A Tcl értelmező EGYSZÁLÚ. A háttérszálból hívott `win.after()` megsérti:
+    # a tünet nem kivétel, hanem hogy a frissítés ELVÉSZ, vagy — rosszabb esetben
+    # — a widgetek egyszer csak eltűnnek. (Ugyanez a hiba a söprésnél mérhető
+    # volt: ~55 mp után magától megsemmisült a felugró ablak.)
+    #
+    # Amíg ez az osztály KÜLÖN ablak volt, egy ilyen sérülés a backtest-ablakot
+    # vitte el. Beágyazva viszont a Paraméterek ablakot vinné — a paramétereiddel
+    # együtt. Ezért lett a minta helyes: a szál egy SORBA ír, a főszál futtatja.
+    def _post(self, fn):
+        """Háttérszálból: futtasd ezt a FŐSZÁLON, amint lehet."""
+        try:
+            self._ui_q.put(fn)
+        except Exception:
+            pass
+
+    def _ui_poll(self):
+        import queue as _q
+        if self._closed:
+            return
+        try:
+            while True:
+                fn = self._ui_q.get_nowait()
+                try:
+                    fn()
+                except tk.TclError:
+                    return          # a widgetek megsemmisültek — csendben állunk
+                except Exception:
+                    pass
+        except _q.Empty:
+            pass
+        try:
+            self.win.after(120, self._ui_poll)
+        except tk.TclError:
+            pass
+
+    def shutdown(self):
+        """A háttérmunka leállítása widget-rombolás NÉLKÜL.
+
+        Beágyazott módban a BEFOGLALÓ ablak zárul be; ilyenkor is jeleznünk kell
+        a szálnak, hogy ne ütemezzen több widget-frissítést, különben a
+        megsemmisült progressbar miatt `TclError`-cunami jön az after-ekből.
+        """
+        self._closed = True
+        if self._stop_flag is not None:
+            self._stop_flag.set()
+
     def _close(self):
         # Előbb jelezzük a háttérszálnak: ne ütemezzen több widget-frissítést, és a
         # futó backtest álljon le — különben a megsemmisült progressbar/widgetek
         # miatt `TclError`-cunami jönne az after-callbackekből.
-        self._closed = True
-        if self._stop_flag is not None:
-            self._stop_flag.set()
+        self.shutdown()
+        if self._host is not None:
+            return          # beágyazva nincs mit bezárni (nem mi nyitottuk)
         try:
             self.parent.grab_set()
         except Exception:
@@ -842,7 +921,7 @@ class BacktestDialog:
                 # Hiányzó előzmény → MAGÁTÓL letölti (frissen felvett instrumentum)
                 def _st(msg):
                     try:
-                        self.win.after(0, lambda: self._span_lbl.config(
+                        self._post(lambda: self._span_lbl.config(
                             text=f"Előzmény: {msg}", fg=FG_GRAY_DIM))
                     except Exception:
                         pass
@@ -850,7 +929,7 @@ class BacktestDialog:
             except Exception as ex:
                 err = str(ex)
             try:
-                self.win.after(0, lambda: self._data_ready(df15, df1, err))
+                self._post(lambda: self._data_ready(df15, df1, err))
             except Exception:
                 pass
 
@@ -973,7 +1052,7 @@ class BacktestDialog:
             if self._closed:
                 return
             try:
-                self.win.after(0, lambda: self._on_progress(
+                self._post(lambda: self._on_progress(
                     pct, m1_time, balance, n_open, n_closed, tech))
             except Exception:
                 pass
@@ -996,7 +1075,7 @@ class BacktestDialog:
                 self._sig_cache = series
                 if not self._closed:
                     try:
-                        self.win.after(0, lambda r=reused, n=len(series.signals):
+                        self._post(lambda r=reused, n=len(series.signals):
                                        self._show_series_note(r, n))
                     except Exception:
                         pass
@@ -1046,7 +1125,7 @@ class BacktestDialog:
             if self._closed:
                 return   # az ablak közben bezárult — ne érintsük a widgeteket
             try:
-                self.win.after(0, lambda: self._done(summary, result, ib, err, cancelled))
+                self._post(lambda: self._done(summary, result, ib, err, cancelled))
             except Exception:
                 pass
 

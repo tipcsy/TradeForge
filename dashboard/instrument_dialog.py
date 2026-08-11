@@ -334,6 +334,9 @@ class InstrumentParamsDialog:
                 self._closed = True
                 if getattr(self, "_sw_stop", None) is not None:
                     self._sw_stop.set()      # a futó söprés álljon le magától
+                _bt = getattr(self, "_run_tab", None)
+                if _bt is not None:
+                    _bt.shutdown()           # a beágyazott backtest is
 
         popup.bind("<Destroy>", _on_destroy)
 
@@ -349,8 +352,9 @@ class InstrumentParamsDialog:
         # kérésére ugyanennek a formnak a lapja lett: a paraméterek MELLETT kell
         # tudni olvasni, mit is állítunk.
         from dashboard.tab_shell import TabShell
-        self._shell = TabShell(popup, ("Áttekintés", "Paraméter", "Optimalizálás", "Eredmények", "Leírás"),
-                               on_show=self._on_tab)
+        self._shell = TabShell(popup, ("Áttekintés", "Paraméter", "Futtatás", "Optimalizálás",
+                                "Eredmények", "Leírás"),
+                               on_show=self._on_tab, notify_every_show=True)
 
         # Görgethető törzs — innentől MINDEN tartalom ide (`body`) megy.
         holder, body, self._body_canvas = _scrollable(self._shell.page("Paraméter"))
@@ -939,6 +943,9 @@ class InstrumentParamsDialog:
             # éppen a figyelmeztetéseket mutatná elavultan.
             self._build_overview_tab()
             return
+        if name == "Futtatás":
+            self._build_run_tab()
+            return
         if name == "Eredmények":
             # LUSTA: az 500 soros CSV beolvasása és a tábla felépítése nem
             # kell minden ablak-megnyitáskor. Minden megjelenítéskor ÚJRAOLVAS:
@@ -960,6 +967,50 @@ class InstrumentParamsDialog:
                            source=str(self.strategy.doc_path()))
         except Exception as e:
             self.lbl_err.config(text=f"A leírás nem nyitható meg: {e}")
+
+    # ── „Futtatás” lap — a backtest, BEÁGYAZVA ─────────────────────────────
+    # A doksi panasza: ugyanazt a paramétert két külön kinézetben kellett
+    # kezelni. A backtest innentől nem külön ablak, hanem lap — a paraméterek
+    # mellett, ugyanabban az ablakban.
+    #
+    # ⚠ A tartalom NEM másolat: ugyanaz a `BacktestDialog` épül ide, csak egy
+    # keretbe ablak helyett. Egy „majdnem ugyanolyan" második változat pont
+    # abban térne el, ami ritkán fut (megszakítás, hibaág, MT5-export), és az
+    # nem derülne ki.
+
+    def _build_run_tab(self):
+        page = self._shell.page("Futtatás")
+        if getattr(self, "_run_tab", None) is not None:
+            # ⚠ ÚJRAÉPÍTÉS, ha a paraméterek közben változtak. A backtest a
+            # MEGNYITÁSKORI paraméterekkel dolgozik; ha a Paraméter lapon
+            # átírtál valamit, egy régi példány CSENDBEN a régi értékekkel
+            # futna — és a lap fejléce mégis az újakat sugallná.
+            cur = self._collect_params()
+            if cur is not None and cur == getattr(self, "_run_params", None):
+                return
+            self._run_tab.shutdown()
+            self._run_tab = None
+        for w in page.winfo_children():
+            w.destroy()
+
+        params = self._collect_params()
+        if params is None:
+            return                      # hibás mező — a lbl_err már szól róla
+        pair_cfg = self.cfg.get("pairs", {}).get(self.symbol)
+        if not isinstance(pair_cfg, dict):
+            tk.Label(page, text="Nincs pár-config ehhez az instrumentumhoz.",
+                     bg=BG, fg=FG_RED, font=self._sf).pack(anchor="w", padx=12,
+                                                           pady=12)
+            return
+        from dashboard.backtest_dialog import BacktestDialog
+        self._run_params = dict(params)
+        self._run_tab = BacktestDialog(
+            self.popup, self.symbol, self.cfg, self.strategy, params, pair_cfg,
+            self._rr_spec_from_ui(), self._hf, self._sf,
+            on_result=self._on_bt_window_result,
+            preset_name=self._rr_name.get(),
+            on_apply_params=self._apply_params_from_bt,
+            host=page)
 
     # ── „Áttekintés” lap — mi ennek a párnak az ÁLLAPOTA ───────────────────
     # A kérés: „az első oldalon csak egy dashboard-szerű dolog lehetne, ahol
@@ -2457,9 +2508,17 @@ class InstrumentParamsDialog:
 
     # ── Backtest önálló ablak (progress + időszak + élő egyenleg) ────────────
     def _open_backtest_window(self):
-        """A „Backtest" gomb a szabványos B3 ablakot nyitja (állítható időszak,
-        progress bar, élő egyenleg/kötések/technika). Az eredményt visszaadja ide
-        (metrika-sáv + a Mentés is látja)."""
+        """A „Backtest" gomb a FUTTATÁS LAPRA vált (a backtest odaköltözött).
+
+        ⚠ A gomb megmarad, és nem nyit új ablakot: a doksi panasza épp az volt,
+        hogy ugyanaz a paraméter két külön kinézetben jelenik meg. A megszokott
+        gomb viszont ne tűnjön el — csak vezessen a helyére.
+        """
+        try:
+            self._shell.show("Futtatás")
+            return
+        except Exception:
+            pass          # ha valamiért nincs lap, marad a régi, ablakos út
         params = self._collect_params()
         if params is None:
             return

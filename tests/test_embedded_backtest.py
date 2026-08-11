@@ -1,0 +1,162 @@
+"""A backtest LAPKENT: ugyanaz az osztaly, csak keretbe epulve.
+
+A doksi panasza: ugyanazt a parametert ket kulon kinezetben kellett kezelni. A
+backtest ezert nem kulon ablak tobbe, hanem a Parameterek ablak "Futtatas" lapja.
+
+⚠ A LEGFONTOSABB DONTES: a tartalom NEM masolat. Ugyanaz a `BacktestDialog`
+epul a lapra, csak `host=` kerettel ablak helyett. Egy "majdnem ugyanolyan"
+masodik valtozat pont abban terne el, ami RITKAN fut (megszakitas, hibaag,
+MT5-export) — es az nem derulne ki, amig eppen kellene.
+
+Ez a teszt azt orzi, hogy a beagyazott mod ne tegyen olyat, amit egy LAP nem
+tehet: ne nyisson ablakot, ne fogja meg a grabot, es ne legyen rajta "Bezaras"
+gomb (az a BEFOGLALO ablakot zarna be — a felhasznalo pedig azt hinne, csak a
+backtestet csukja be).
+"""
+import copy
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from core import applog
+applog.harden_console()
+
+results = []
+
+
+def check(name, ok, detail=""):
+    results.append(bool(ok))
+    print(f"{'PASS' if ok else 'FAIL'}  {name}" + (f"  [{detail}]" if detail else ""))
+
+
+try:
+    import tkinter as tk
+    _p = tk.Tk(); _p.destroy()
+    TK_OK = True
+except Exception as e:
+    TK_OK = False
+    print(f"KIHAGYVA: nincs hasznalhato tkinter ({type(e).__name__}: {e})")
+
+if TK_OK:
+    import tkinter as tk
+    from dashboard import theme as _th
+    from dashboard.backtest_dialog import BacktestDialog
+    from strategy.settings import load_config
+    from strategy import get_strategy_by_name
+
+    root = tk.Tk(); root.withdraw()
+    _th._FONTS.clear()
+    fonts = _th.fonts()
+    cfg = load_config("config.json")
+    st = get_strategy_by_name("wpr_sma")
+    sym = next(iter([s for s in cfg["pairs"] if not s.startswith("_")]), None)
+    pair_cfg = cfg["pairs"][sym]
+    params = {k: v for k, v in st.base_params(cfg).items()
+              if not isinstance(v, (dict, list))}
+
+    def _buttons(dlg):
+        out = []
+
+        def walk(w):
+            for c in w.winfo_children():
+                if isinstance(c, tk.Button):
+                    try:
+                        out.append(str(c.cget("text")))
+                    except Exception:
+                        pass
+                walk(c)
+        walk(dlg.win if dlg._host is None else dlg._host)
+        return out
+
+    # ── BEAGYAZOTT mod ─────────────────────────────────────────────────────
+    holder = tk.Toplevel(root)
+    holder.withdraw()
+    page = tk.Frame(holder)
+    page.pack(fill="both", expand=True)
+    n_before = len(root.winfo_children())
+    emb = BacktestDialog(holder, sym, cfg, st, params, pair_cfg, None,
+                         fonts["header"], fonts["small"], host=page)
+    root.update_idletasks()
+
+    check("beagyazva NEM nyit uj ablakot",
+          len(root.winfo_children()) == n_before,
+          f"{n_before} -> {len(root.winfo_children())}")
+    check("a `win` a BEFOGLALO ablak (az after/kepernyo-lekerdezes miatt kell)",
+          emb.win is holder)
+    check("a tartalom a kapott keretbe kerult", len(page.winfo_children()) > 0)
+    _b = _buttons(emb)
+    check("van indito gomb", any("Backtest" in t for t in _b), str(_b[:4]))
+    # ⚠ A "Bezaras" a BEFOGLALO ablakot zarna be.
+    check("beagyazva NINCS „Bezárás” gomb", not any("Bezár" in t for t in _b),
+          str(_b))
+
+    # A `shutdown()` widget-rombolas NELKUL all le — a befoglalo ablak
+    # bezarasakor ezt hivja a gazda.
+    emb.shutdown()
+    check("shutdown() jelzi a lezarast", emb._closed is True)
+    check("...de a widgeteket NEM semmisiti meg", page.winfo_exists() == 1)
+    emb._close()
+    check("beagyazva a _close() sem zarja be a befoglalo ablakot",
+          holder.winfo_exists() == 1)
+    holder.destroy()
+
+    # ── ONALLO (regi) mod valtozatlan ──────────────────────────────────────
+    parent = tk.Toplevel(root); parent.withdraw()
+    solo = BacktestDialog(parent, sym, cfg, st, params, pair_cfg, None,
+                          fonts["header"], fonts["small"])
+    root.update_idletasks()
+    check("onalloan SAJAT ablakot nyit", solo.win is not parent)
+    _sb = _buttons(solo)
+    check("onalloan VAN „Bezárás” gomb", any("Bezár" in t for t in _sb), str(_sb))
+    solo._close()
+    check("onalloan a _close() BEZARJA az ablakot", not solo.win.winfo_exists())
+    parent.destroy()
+
+    # ── A lap a Parameterek ablakban ───────────────────────────────────────
+    from dashboard import instrument_dialog as idlg
+    d = idlg.InstrumentParamsDialog(root, sym, cfg, st, fonts["header"],
+                                    fonts["small"], lambda: None,
+                                    root_cfg=copy.deepcopy(cfg))
+    root.update_idletasks()
+    check("van „Futtatás” lap", "Futtatás" in d._shell.names(), str(d._shell.names()))
+    d._shell.show("Futtatás"); root.update_idletasks()
+    check("a lap beagyazott backtestet epit", d._run_tab is not None)
+    check("...ami NEM sajat ablak", d._run_tab.win is d.popup)
+
+    _first = d._run_tab
+    d._shell.show("Paraméter"); d._shell.show("Futtatás"); root.update_idletasks()
+    check("valtozatlan parameternel NEM epul ujra (nem vesz el az allapot)",
+          d._run_tab is _first)
+
+    # ⚠ A backtest a MEGNYITASKORI parameterekkel dolgozik. Ha a Parameter lapon
+    # atirsz valamit, egy regi peldany CSENDBEN a regi ertekekkel futna — a lap
+    # fejlece viszont az ujakat sugallna.
+    _key = next((k for k in d.entries if k == "sma_period"), None)
+    if _key:
+        d.entries[_key].delete(0, "end")
+        d.entries[_key].insert(0, "123")
+        d._shell.show("Paraméter"); d._shell.show("Futtatás")
+        root.update_idletasks()
+        check("parameter-valtozas utan UJRAEPUL a lap",
+              d._run_tab is not _first)
+        check("...es az UJ erteket viszi", d._run_tab.params.get(_key) == 123,
+              str(d._run_tab.params.get(_key)))
+    else:
+        check("nincs sma_period a parameterek kozott (kihagyva)", True)
+
+    # Minden lap megnyithato egymas utan (a lapok nem semmisitik egymast)
+    ok_all = True
+    for t in d._shell.names():
+        try:
+            d._shell.show(t); root.update_idletasks()
+        except Exception:
+            ok_all = False
+    check("minden lap megnyithato egymas utan", ok_all)
+    d.popup.destroy()
+    root.destroy()
+
+print()
+print(f"{sum(results)}/{len(results)} teszt PASS")
+sys.exit(0 if all(results) else 1)

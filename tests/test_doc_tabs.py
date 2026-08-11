@@ -67,6 +67,20 @@ if TK_OK:
         check("a lapvaltas oda-vissza megy", sh.current == "B")
         check("az `on_show` laponkent EGYSZER fut (lusta feltoltes)",
               seen == ["A", "B", "C"], str(seen))
+
+        # ⚠ …DE van lap, aminek a tartalma KOZBEN elavul: futo optimalizalas
+        # alatt frissulo eredmeny-CSV, a par allapota, vagy a masik lapon atirt
+        # parameterek. Ott a "laponkent egyszer" azt jelentene, hogy a felulet
+        # MAGABIZTOSAN elavult adatot mutat — a felhasznalo visszakattint
+        # "megnezni, hogy all", es ugyanazt latja, mint tiz perce.
+        seen2 = []
+        sh2 = TabShell(root, ("A", "B"), on_show=seen2.append,
+                       notify_every_show=True)
+        sh2.show("B"); sh2.show("A"); sh2.show("B")
+        check("notify_every_show -> MINDEN megjelenitesnel ertesit",
+              seen2 == ["A", "B", "A", "B"], str(seen2))
+        check("...es az alapertelmezes valtozatlan maradt (lusta)",
+              seen == ["A", "B", "C"], str(seen))
         check("a lapok NEM semmisulnek meg (csak kicsomagolodnak)",
               all(sh.page(n).winfo_exists() for n in ("A", "B", "C")))
 

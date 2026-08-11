@@ -34,14 +34,27 @@ class TabShell:
     tölti fel őket (`shell.page("Leírás")`).
 
     `on_show(name)`: opcionális, a lapváltáskor fut. A LUSTA feltöltéshez kell:
-    egy Markdown-leírást fölösleges megjeleníteni, amíg rá sem néztek."""
+    egy Markdown-leírást fölösleges megjeleníteni, amíg rá sem néztek.
 
-    def __init__(self, parent, names, width: int = 130, on_show=None):
+    `notify_every_show`: alapból HAMIS — az `on_show` laponként EGYSZER fut
+    (lusta feltöltés). Igazra állítva MINDEN megjelenítéskor fut.
+
+    ⚠ Miért kell a választás: van lap, amit egyszer felépíteni elég (statikus
+    leírás), és van, aminek a tartalma KÖZBEN elavul — futó optimalizálás alatt
+    frissülő eredmény-CSV, a pár állapota, vagy a másik lapon átírt paraméterek.
+    Az utóbbiaknál a laponként-egyszer szemantika azt jelentené, hogy a felület
+    MAGABIZTOSAN elavult adatot mutat: a felhasználó visszakattint „megnézni,
+    hogy áll", és ugyanazt látja, mint tíz perce. Ilyenkor a hívó dönt, mit épít
+    újra — de ahhoz értesülnie kell."""
+
+    def __init__(self, parent, names, width: int = 130, on_show=None,
+                 notify_every_show: bool = False):
         self._f = _theme.fonts()
         self._on_show = on_show
         self._pages: dict = {}
         self._btns: dict = {}
         self._shown: set = set()
+        self._always = bool(notify_every_show)
         self.current: str = ""
 
         self.frame = tk.Frame(parent, bg=BG)
@@ -78,7 +91,7 @@ class TabShell:
         self._pages[name].pack(fill="both", expand=True)
         self._btns[name].config(bg=BG, fg=FG_WHITE)
         self.current = name
-        if self._on_show is not None and name not in self._shown:
+        if self._on_show is not None and (self._always or name not in self._shown):
             self._shown.add(name)
             self._on_show(name)
 
