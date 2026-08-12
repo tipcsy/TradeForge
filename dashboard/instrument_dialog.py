@@ -1391,7 +1391,11 @@ class InstrumentParamsDialog:
         # LÉTREHOZZUK visszahívás nélkül, elmentjük, és csak utána kötjük be —
         # majd expliciten megmutatjuk az elsőt. (Ugyanez a csapda a fő héjnál is
         # elsült; lásd `_on_tab`.)
-        sub = TabShell(page, ("MT4", "MT5"), width=90, notify_every_show=True)
+        # A fülek FENT: egy bal oldali fülsávon BELÜL egy másik bal oldali sáv
+        # két függőleges oszlopot adna egymás mellett — elveszi a tartalom
+        # helyét, és nehéz eldönteni, melyik szint melyik.
+        sub = TabShell(page, ("MT4", "MT5"), notify_every_show=True,
+                       side="top")
         self._link_sub = sub
         sub._on_show = self._build_link_pane
         sub.show("MT4")
@@ -1451,6 +1455,10 @@ class InstrumentParamsDialog:
         tk.Button(row, text="Kitelepítés", bg=BTN_PLAY_BG, fg=BTN_PLAY_FG,
                   relief="flat", font=self._sf,
                   command=lambda p=name: self._deploy_mql(p)).pack(side="left")
+        tk.Button(row, text="Fordítás (F7 helyett)", bg=BTN_BT_BG, fg=BTN_BT_FG,
+                  relief="flat", font=self._sf,
+                  command=lambda p=name: self._compile_mql(p)).pack(side="left",
+                                                                    padx=(6, 0))
         self._link_status = tk.Label(row, text="", bg=BG, fg=FG_GRAY,
                                      font=self._sf)
         self._link_status.pack(side="left", padx=(10, 0))
@@ -1467,18 +1475,12 @@ class InstrumentParamsDialog:
 
         # ── 2. AMIT INNEN INDÍTHATSZ ───────────────────────────────────────
         if name == "MT4":
+            # ── A VISSZAJÁTSZÁS ITT, a lapon (nem külön ablakban) ───────────
             _h("Visszajátszás generálása")
             _n("A Paraméter lap AKTUÁLIS értékeivel kiírja a választott időszak "
                "jelzéseit a MetaTrader közös mappájába. A Strategy Testerben a "
                "TradeForgeViz/WPR/Bands indikátorokat rakd fel, `_BT` utótaggal.")
-            tk.Button(body, text="MT4 visszajátszás…", bg=BTN_BT_BG, fg=BTN_BT_FG,
-                      relief="flat", font=self._sf,
-                      command=self._open_mt4_export).pack(anchor="w", padx=10,
-                                                          pady=(4, 2))
-            _n("⚠ A kapukkal futtatott export CSAK azokat a jelzéseket mutatja, "
-               "amiket a motor tényleg megkötne. Ha a nyers jelzéseket akarod "
-               "látni, kapuk nélkül exportálj — a kettő különbsége mutatja meg, "
-               "mennyit szűrnek a kapuk.", FG_GRAY_DIM)
+            self._build_mt4_export(body)
         else:
             _h("Élő megjelenítés")
             _n("Az élő motor folyamatosan írja a viz-fájlt a közös mappába; a "
@@ -1486,6 +1488,158 @@ class InstrumentParamsDialog:
                "beállítását a Futtatás lap fejléce mutatja.")
             _n("A ⚙ Kapuk ablakban állítod, melyik kapu mit tegyen — az élő "
                "megjelenítés a következő körben követi.", FG_GRAY_DIM)
+
+    def _build_mt4_export(self, body):
+        """A visszajátszás-export a LAPON — nem külön ablakban.
+
+        ⚠ Az időszak MEGJEGYZŐDIK (pár+stratégia szintű), és van naptár-ikon.
+        Külön ablakban a dátumot minden megnyitáskor újra be kellett gépelni, és
+        a legutóbb használt hét sem látszott — pedig manuális teszteléskor
+        pontosan ugyanarra a hétre akarsz visszatérni.
+        """
+        from datetime import date, timedelta
+        # A megjegyzett beállítások ugyanabban a tárban, ahol a backtest-ablak
+        # időszaka — pár+stratégia szintű, `mt4_` előtaggal elkülönítve.
+        from core import backtest_prefs as _bp
+
+        try:
+            saved = _bp.get(self.symbol, self.strategy.name) or {}
+        except Exception:
+            saved = {}
+        _to = date.today()
+        _fr = _to - timedelta(days=12)
+        self._mx_from = tk.StringVar(value=saved.get("mt4_from") or _fr.isoformat())
+        self._mx_to = tk.StringVar(value=saved.get("mt4_to") or _to.isoformat())
+        self._mx_trades = tk.BooleanVar(value=bool(saved.get("mt4_trades")))
+        self._mx_gates = tk.BooleanVar(value=bool(saved.get("mt4_gates", True)))
+
+        row = tk.Frame(body, bg=BG)
+        row.pack(anchor="w", padx=10, pady=(6, 2))
+        for lbl, var in (("-tól", self._mx_from), ("-ig", self._mx_to)):
+            tk.Label(row, text=lbl, bg=BG, fg=FG_GRAY_DIM,
+                     font=self._sf).pack(side="left", padx=(0, 3))
+            e = tk.Entry(row, textvariable=var, width=11, bg=BG_HEADER,
+                         fg=FG_WHITE, insertbackground=FG_WHITE, relief="flat",
+                         font=self._sf)
+            e.pack(side="left")
+            tk.Button(row, text="📅", bg=BG_HEADER, fg=FG_WHITE, relief="flat",
+                      font=self._sf, cursor="hand2",
+                      command=lambda v=var, a=e: self._pick_date(v, a)
+                      ).pack(side="left", padx=(2, 12))
+
+        opt = tk.Frame(body, bg=BG)
+        opt.pack(anchor="w", padx=10)
+        tk.Checkbutton(opt, text="Végrehajtási kapukkal (amit a motor tényleg megkötne)",
+                       variable=self._mx_gates, bg=BG, fg=FG_WHITE,
+                       selectcolor=BG_HEADER, activebackground=BG,
+                       activeforeground=FG_WHITE, font=self._sf).pack(anchor="w")
+        tk.Checkbutton(opt, text="A bot VALÓS kötései is látszódjanak "
+                                 "(manuális teszthez NE)",
+                       variable=self._mx_trades, bg=BG, fg=FG_GRAY,
+                       selectcolor=BG_HEADER, activebackground=BG,
+                       activeforeground=FG_WHITE, font=self._sf).pack(anchor="w")
+
+        brow = tk.Frame(body, bg=BG)
+        brow.pack(anchor="w", padx=10, pady=(6, 2))
+        self._mx_btn = tk.Button(brow, text="Export", bg=BTN_PLAY_BG,
+                                 fg=BTN_PLAY_FG, relief="flat", font=self._sf,
+                                 command=self._run_mt4_export)
+        self._mx_btn.pack(side="left")
+        self._mx_lbl = tk.Label(brow, text="", bg=BG, fg=FG_GRAY_DIM,
+                                font=self._sf, justify="left", wraplength=620)
+        self._mx_lbl.pack(side="left", padx=(10, 0))
+        tk.Label(body, bg=BG, fg=FG_GRAY_DIM, font=self._sf, anchor="w",
+                 justify="left", wraplength=820,
+                 text=("⚠ Kapukkal az export CSAK azokat a jelzéseket mutatja, "
+                       "amiket a motor tényleg megkötne. A kettő különbsége "
+                       "mutatja meg, mennyit szűrnek a kapuk — GOLD-on egy "
+                       "napon az 5 jelzésből 4-et a TF-együttállás vett ki.")
+                 ).pack(anchor="w", padx=10, pady=(2, 8))
+
+    def _pick_date(self, var, anchor):
+        """Naptár-ikon → dátumválasztó, a mező mellé kihorgonyozva."""
+        from datetime import date
+        from dashboard.date_picker import CalendarPopup
+        try:
+            cur = date.fromisoformat(var.get().strip())
+        except (ValueError, AttributeError):
+            cur = date.today()
+        CalendarPopup(self.popup, anchor=anchor, initial=cur, font=self._sf,
+                      on_pick=lambda d: var.set(d.isoformat()))
+
+    def _run_mt4_export(self):
+        import threading
+        from core import backtest_prefs as _bp
+
+        t_from = self._mx_from.get().strip()
+        t_to = self._mx_to.get().strip()
+        # Az időszak MEGJEGYZŐDIK — a következő megnyitáskor ez jön vissza.
+        try:
+            _bp.save(self.symbol, self.strategy.name,
+                     mt4_from=t_from, mt4_to=t_to,
+                     mt4_trades=bool(self._mx_trades.get()),
+                     mt4_gates=bool(self._mx_gates.get()))
+        except Exception:
+            pass
+        self._mx_btn.config(state="disabled")
+        self._mx_lbl.config(text="Export fut…", fg=FG_GRAY_DIM)
+        _gates = bool(self._mx_gates.get())
+        _trades = bool(self._mx_trades.get())
+        q = __import__("queue").Queue()
+
+        def _work():
+            from tools.viz_export import export_window
+            try:
+                ok, msg = export_window(
+                    self.symbol, t_from, t_to, strategy_name=self.strategy.name,
+                    suffix="_BT", show_trades=_trades, cfg=self.root_cfg,
+                    exec_gates=_gates, status=lambda m: q.put(("s", m)))
+            except Exception as ex:
+                ok, msg = False, f"Hiba: {ex}"
+            q.put(("d", (ok, msg)))
+
+        def _poll():
+            import queue as _q
+            done = False
+            try:
+                while True:
+                    kind, val = q.get_nowait()
+                    if kind == "s":
+                        self._mx_lbl.config(text=str(val), fg=FG_GRAY_DIM)
+                    else:
+                        ok, msg = val
+                        self._mx_lbl.config(text=msg,
+                                            fg=(FG_GREEN if ok else FG_RED))
+                        self._mx_btn.config(state="normal")
+                        done = True
+            except _q.Empty:
+                pass
+            except tk.TclError:
+                return
+            if not done:
+                self.popup.after(150, _poll)
+
+        threading.Thread(target=_work, daemon=True, name="MT4Export").start()
+        self.popup.after(150, _poll)
+
+    def _compile_mql(self, platform: str):
+        """Fordítás MetaEditorral — és az eredmény ELLENŐRZÉSE."""
+        from core import mt_deploy as _md
+        self._link_status.config(text="Fordítás…", fg=FG_GRAY)
+        self.popup.update_idletasks()
+        try:
+            res = _md.compile_all(platform, _md.discover_roots())
+        except Exception as ex:
+            self._link_status.config(text=f"Hiba: {ex}", fg=FG_RED)
+            return
+        if res["failed"] or res["errors"]:
+            first = (res["failed"] or res["errors"])[0]
+            self._link_status.config(
+                text=f"{len(res['ok'])} rendben, {len(res['failed'])} nem — {first}"[:150],
+                fg=FG_RED)
+        else:
+            self._link_status.config(text=f"{len(res['ok'])} fájl lefordítva.",
+                                     fg=FG_GREEN)
 
     def _deploy_mql(self, platform: str):
         """A repó indikátorainak kimásolása MINDEN megtalált terminál-mappába."""

@@ -36,6 +36,11 @@ class TabShell:
     `on_show(name)`: opcionális, a lapváltáskor fut. A LUSTA feltöltéshez kell:
     egy Markdown-leírást fölösleges megjeleníteni, amíg rá sem néztek.
 
+    `side`: a fülsáv helye — `"left"` (alap) vagy `"top"`. A felső elrendezés
+    ALFÜLEKHEZ való: egy bal oldali fülsávon BELÜL egy másik bal oldali sáv két
+    függőleges oszlopot adna egymás mellett, ami elveszi a tartalom helyét és
+    nehéz eldönteni, melyik szint melyik.
+
     `notify_every_show`: alapból HAMIS — az `on_show` laponként EGYSZER fut
     (lusta feltöltés). Igazra állítva MINDEN megjelenítéskor fut.
 
@@ -48,7 +53,7 @@ class TabShell:
     újra — de ahhoz értesülnie kell."""
 
     def __init__(self, parent, names, width: int = 130, on_show=None,
-                 notify_every_show: bool = False):
+                 notify_every_show: bool = False, side: str = "left"):
         self._f = _theme.fonts()
         self._on_show = on_show
         self._pages: dict = {}
@@ -57,20 +62,31 @@ class TabShell:
         self._always = bool(notify_every_show)
         self.current: str = ""
 
+        self._side = "top" if str(side).lower() == "top" else "left"
         self.frame = tk.Frame(parent, bg=BG)
         self.frame.pack(fill="both", expand=True)
-        self._tabs = tk.Frame(self.frame, bg=BG_HEADER, width=width)
-        self._tabs.pack(side="left", fill="y")
-        self._tabs.pack_propagate(False)
+        if self._side == "top":
+            self._tabs = tk.Frame(self.frame, bg=BG_HEADER)
+            self._tabs.pack(side="top", fill="x")
+        else:
+            self._tabs = tk.Frame(self.frame, bg=BG_HEADER, width=width)
+            self._tabs.pack(side="left", fill="y")
+            self._tabs.pack_propagate(False)
         self._body = tk.Frame(self.frame, bg=BG)
-        self._body.pack(side="left", fill="both", expand=True)
+        self._body.pack(side="top" if self._side == "top" else "left",
+                        fill="both", expand=True)
 
         for name in names:
             self._pages[name] = tk.Frame(self._body, bg=BG)
             lbl = tk.Label(self._tabs, text=name, bg=BG_HEADER, fg=FG_GRAY,
-                           font=self._f["small"], anchor="w", padx=12, pady=8,
+                           font=self._f["small"],
+                           anchor="center" if self._side == "top" else "w",
+                           padx=16 if self._side == "top" else 12, pady=8,
                            cursor="hand2")
-            lbl.pack(fill="x")
+            if self._side == "top":
+                lbl.pack(side="left")
+            else:
+                lbl.pack(fill="x")
             lbl.bind("<Button-1>", lambda _e, n=name: self.show(n))
             self._btns[name] = lbl
         if names:

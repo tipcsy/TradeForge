@@ -148,6 +148,36 @@ check("minden talalt gyokerben van MQL4 vagy MQL5",
           for r in _roots), str(_roots[:2]))
 
 
+
+# ── 8. FORDITAS: a sikert a KIMENETEN merjuk, nem a kilepesi kodon ────────
+# ⚠ Ezen a gepen a MetaEditor MINDEN dokumentalt alakra (`/compile:`, `+/log`,
+# `+/portable`, relativ ut) 0,2 mp alatt kilepett rc=0-val, naplo nelkul — es
+# NEM forditott: sem az .ex4/.ex5 nem frissult, sem uj fajl nem keletkezett
+# sehol a gepen. Ha csak a kilepesi kodot neznenk, a felulet magabiztosan
+# "rendben"-t irna, a terminal pedig tovabbra is a REGI leforditottat futtatna.
+import inspect as _i
+_src = _i.getsource(md.compile_file)
+check("a forditas a KIMENET idejet nezi (nem csak a kilepesi kodot)",
+      "before" in _src and "after > before" in _src)
+check("...es sikert CSAK akkor jelent", "lefordítva" in _src)
+check("rc=0 + valtozatlan kimenet -> NEM siker, es megmondja a teendot",
+      "nem fordított" in _src and "F7" in _src)
+# A naplo UTF-16; utf-8-cal olvasva a hibauzenet elveszne.
+check("a naplot UTF-16-kent olvassa", 'encoding="utf-16"' in _src)
+
+# A MetaEditor keresese a PORTABLE telepitesekben is (ott van, ahol a terminal).
+_me4 = md.metaeditor(md.MT4, _roots)
+_me5 = md.metaeditor(md.MT5, _roots)
+check("MT4 MetaEditor megvan", _me4 is not None, str(_me4))
+check("MT5 MetaEditor megvan", _me5 is not None, str(_me5))
+# ⚠ A MEGFELELO peldany kell: az MT4-e .mq4-et fordit, az MT5-e .mq5-ot.
+if _me4 and _me5:
+    check("a ket platform KULON MetaEditort kap", _me4 != _me5)
+    check("az MT4-e MQL4-es telepitesbol jon",
+          (Path(_me4).parent / "MQL4").is_dir(), str(_me4))
+    check("az MT5-e MQL5-os telepitesbol jon",
+          (Path(_me5).parent / "MQL5").is_dir(), str(_me5))
+
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")
 sys.exit(0 if all(results) else 1)
