@@ -31,21 +31,74 @@ log = logging.getLogger(__name__)
 
 MT4, MT5 = "MT4", "MT5"
 
-# A repó forrásmappái platformonként, és a terminálon belüli célmappa.
-_SRC = {MT4: ("mt4", "*.mq4", "MQL4"), MT5: ("mt5", "*.mq5", "MQL5")}
+# A repó forrásmappái platformonként, és a terminálon belüli MQL-gyökér.
+# ⚠ Az MT5-höz a `tools/` is hozzátartozik: a backtest-visszajátszó és a két
+# néző ott lakik (történelmi okból). Ha csak az `mt5/`-öt néznénk, azok
+# csendben kimaradnának a kitelepítésből.
+_SRC = {MT4: (("mt4",), "*.mq4", "MQL4"),
+        MT5: (("mt5", "tools"), "*.mq5", "MQL5")}
+
+# Melyik fájl HOVA megy a terminálon belül. Alap: `Indicators`.
+# ⚠ Az EXPERT (`OnTick`) az `Experts` mappába való — az `Indicators`-ba téve a
+# terminál fel sem kínálja a Strategy Testerben.
+_EXPERTS = {"BacktestReplayer"}
+
+# Mi micsoda — a felület ezt írja ki a fájlnév mellé. A szöveg a fájlok saját
+# fejlécéből származik, nem találgatás.
+_DESC = {
+    "TradeForgeViz": ("belépő-jelzések, SL/TP, kötések",
+                      "a fő megjelenítő: a Python írta jelzés-fájlt rajzolja a chartra"),
+    "TradeForgeWPR": ("Williams %R a stratégia matekjával",
+                      "külön al-ablak; a paramétereit a motor fájljából veszi"),
+    "TradeForgeBands": ("állapot-sáv (TBAND)",
+                        "külön al-ablak: mikor van nyitva a jelzési ablak"),
+    "TradeForgeProbe": ("diagnosztika",
+                        "nem rajzol; megmondja, eléri-e a terminál a fájlokat"),
+    "BacktestReplayer": ("EXPERT — a Python backtestjét játssza vissza",
+                         "a Strategy Testerbe való (nem a chartra); az esemény-"
+                         "naplót játssza le, nem szimulál újra"),
+    "BacktestPnLViewer": ("a visszajátszás P&L-görbéje", "a Replayer CSV-jéből"),
+    "BacktestTradesViewer": ("a visszajátszás kötései a charton",
+                             "a Replayer CSV-jéből"),
+}
+
+# Melyik indikátort kell RÁHÚZNI a chartra, platformonként — a felület ezt írja
+# ki, mert a két platform MÁS: MT4-en a három rész külön indikátor, MT5-ön a
+# fő megjelenítő maga rajzolja az al-ablakokat.
+USAGE = {
+    MT4: ("MT4-en MIND A HÁROM indikátort rá kell húzni a chartra "
+          "(TradeForgeViz + TradeForgeWPR + TradeForgeBands), és mindháromnál "
+          "ugyanazt az utótagot kell beállítani (visszajátszáshoz `_BT`)."),
+    MT5: ("MT5-ön elég a TradeForgeViz — a WPR és a Bands külön al-ablak, csak "
+          "akkor kell, ha azokat is látni akarod."),
+}
 
 
 def repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+def subfolder_of(src: Path) -> str:
+    """A terminálon belüli célmappa neve ehhez a fájlhoz."""
+    return "Experts" if src.stem in _EXPERTS else "Indicators"
+
+
+def describe(src: Path) -> tuple:
+    """`(rövid, használat)` — mit csinál ez a fájl. Ismeretlen → üres."""
+    return _DESC.get(src.stem, ("", ""))
+
+
 def sources(platform: str) -> list:
-    """A kitelepítendő indikátor-források a repóból."""
-    sub, pat, _ = _SRC.get(platform, (None, None, None))
-    if not sub:
+    """A kitelepítendő források a repóból (indikátorok ÉS expertek)."""
+    subs, pat, _ = _SRC.get(platform, (None, None, None))
+    if not subs:
         return []
-    d = repo_root() / sub
-    return sorted(d.glob(pat)) if d.is_dir() else []
+    out = []
+    for sub in subs:
+        d = repo_root() / sub
+        if d.is_dir():
+            out.extend(sorted(d.glob(pat)))
+    return out
 
 
 def _terminal_roots() -> list:
@@ -144,16 +197,140 @@ def targets(platform: str, extra_roots=None,
     out = []
     if include_appdata:
         for root in _terminal_roots():
-            d = root / mql / "Indicators"
-            if d.is_dir():
+            d = root / mql
+            if d.is_dir() and d not in out:
                 out.append(d)
     for r in (extra_roots or []):
         d = Path(r)
-        if d.name.lower() != "indicators":
-            d = d / mql / "Indicators"
+        if d.name.upper() not in ("MQL4", "MQL5"):
+            d = d / mql
         if d.is_dir() and d not in out:
             out.append(d)
     return out
+
+
+def dest_for(mql_root: Path, src: Path) -> Path:
+    """A konkrét célfájl: `<MQL4|MQL5>/<Indicators|Experts>/<név>`."""
+    return mql_root / subfolder_of(src) / src.name
+
+
+# ---------------------------------------------------------------------------
+# A LEFORDÍTOTT (.ex4/.ex5) tárolása a repóban — verzió-ellenőrzéssel
+# ---------------------------------------------------------------------------
+# A kérés: „ne tároljuk mégiscsak le az ex4/ex5 fájlokat? Ha azok is verziózva
+# vannak, akkor nem lehet gond a tárolással (figyelmeztetés jöhet, ha nem
+# egyezik a verzió)."
+#
+# ⚠ A `#property version` NEM elég: kézzel írják, és két különböző forrás
+# viselheti ugyanazt. Ezért a jegyzék a forrás TARTALMÁNAK ujjlenyomatát tárolja
+# (sha1) — az akkor is eltér, ha a verziószámot elfelejtették emelni. A
+# verziószámot is elmentjük, mert EMBERI olvasásra az mond valamit.
+
+_MANIFEST = "compiled.json"
+
+
+def _compiled_dir(platform: str) -> Path:
+    return repo_root() / ("mt4" if platform == MT4 else "mt5") / "compiled"
+
+
+def _sha1(p: Path) -> str:
+    import hashlib
+    try:
+        return hashlib.sha1(p.read_bytes()).hexdigest()
+    except OSError:
+        return ""
+
+
+def source_version(src: Path) -> str:
+    """A `#property version "x.yz"` a forrásból (üres, ha nincs)."""
+    import re
+    try:
+        m = re.search(r'#property\s+version\s+"([^"]+)"',
+                      src.read_text(encoding="utf-8", errors="replace"))
+        return m.group(1) if m else ""
+    except OSError:
+        return ""
+
+
+def _manifest(platform: str) -> dict:
+    import json
+    p = _compiled_dir(platform) / _MANIFEST
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def compiled_status(platform: str) -> list:
+    """A repóban TÁROLT lefordított fájlok állapota a forráshoz képest.
+
+    `state`: `"nincs tárolva"` · `"egyezik"` · `"MÁS FORRÁSHOZ készült"`.
+    """
+    man = _manifest(platform)
+    cdir = _compiled_dir(platform)
+    ext = ".ex4" if platform == MT4 else ".ex5"
+    out = []
+    for src in sources(platform):
+        ex = cdir / (src.stem + ext)
+        rec = man.get(ex.name) or {}
+        if not ex.exists():
+            st = "nincs tárolva"
+        elif rec.get("source_sha1") == _sha1(src):
+            st = "egyezik"
+        else:
+            st = "MÁS FORRÁSHOZ készült"
+        out.append({"file": src.name, "compiled": ex.name, "state": st,
+                    "version": source_version(src),
+                    "stored_version": rec.get("source_version", "")})
+    return out
+
+
+def capture_compiled(platform: str, extra_roots=None,
+                     include_appdata: bool = True) -> dict:
+    """A terminálban LEFORDÍTOTT fájlok beemelése a repóba, jegyzékkel.
+
+    Ezt a MetaEditoros F7 UTÁN kell futtatni: a frissen fordított `.ex4`/`.ex5`
+    bekerül a repóba, és MELLÉ íródik, melyik forrás-tartalomból készült. Így a
+    következő kitelepítéskor a lefordított is mehet — és ha közben a forrás
+    változott, azt a `compiled_status` KIMONDJA.
+    """
+    import json
+    from datetime import datetime, timezone
+
+    ext = ".ex4" if platform == MT4 else ".ex5"
+    cdir = _compiled_dir(platform)
+    cdir.mkdir(parents=True, exist_ok=True)
+    man = _manifest(platform)
+    res = {"taken": [], "missing": [], "errors": []}
+    for src in sources(platform):
+        newest, newest_m = None, -1.0
+        for root in targets(platform, extra_roots, include_appdata):
+            cand = dest_for(root, src).with_suffix(ext)
+            if cand.exists():
+                m = cand.stat().st_mtime
+                if m > newest_m:
+                    newest, newest_m = cand, m
+        if newest is None:
+            res["missing"].append(src.name)
+            continue
+        try:
+            shutil.copy2(newest, cdir / (src.stem + ext))
+        except OSError as ex_:
+            res["errors"].append(f"{src.name}: {ex_}")
+            continue
+        man[src.stem + ext] = {
+            "source_sha1": _sha1(src),
+            "source_version": source_version(src),
+            "captured": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "from": str(newest),
+        }
+        res["taken"].append(src.stem + ext)
+    try:
+        (cdir / _MANIFEST).write_text(
+            json.dumps(man, indent=2, ensure_ascii=False), encoding="utf-8")
+    except OSError as ex_:
+        res["errors"].append(str(ex_))
+    return res
 
 
 def _same_bytes(a: Path, b: Path) -> bool:
@@ -173,14 +350,15 @@ def status(platform: str, extra_roots=None, include_appdata: bool = True) -> lis
     out = []
     for tgt in targets(platform, extra_roots, include_appdata):
         for src in sources(platform):
-            dst = tgt / src.name
+            dst = dest_for(tgt, src)
             if not dst.exists():
                 st = "hiányzik"
             elif _same_bytes(src, dst):
                 st = "friss"
             else:
                 st = "elavult"
-            out.append({"target": tgt, "file": src.name, "state": st})
+            out.append({"target": dst.parent, "file": src.name, "state": st,
+                        "kind": subfolder_of(src)})
     return out
 
 
@@ -192,7 +370,8 @@ def deploy(platform: str, extra_roots=None, dry_run: bool = False,
     A `skipped` a már azonos fájl (nem írunk feleslegesen — a terminál a
     fájlváltozásra újrafordíthat/újratölthet).
     """
-    res = {"copied": [], "skipped": [], "errors": [], "targets": 0}
+    res = {"copied": [], "skipped": [], "errors": [], "targets": 0,
+           "stale_compiled": []}
     tgts = targets(platform, extra_roots, include_appdata)
     res["targets"] = len(tgts)
     srcs = sources(platform)
@@ -205,20 +384,41 @@ def deploy(platform: str, extra_roots=None, dry_run: bool = False,
             f"(AppData\\MetaQuotes\\Terminal\\…\\{_SRC[platform][2]}\\Indicators). "
             f"Portable módban add meg a terminál telepítési mappáját.")
         return res
+    # A TAROLT leforditottak: csak azt visszuk ki, ami a MOSTANI forrashoz
+    # keszult — kulonben a terminalban ujra a "regi fut, uj forras" allapot allna
+    # elo, csak eppen a repobol szallitva.
+    _cs = {c["file"]: c for c in compiled_status(platform)}
+    _cdir = _compiled_dir(platform)
+    _ext = ".ex4" if platform == MT4 else ".ex5"
+
     for tgt in tgts:
         for src in srcs:
-            dst = tgt / src.name
-            if dst.exists() and _same_bytes(src, dst):
-                res["skipped"].append(str(dst))
-                continue
-            if dry_run:
-                res["copied"].append(str(dst))
-                continue
+            dst = dest_for(tgt, src)
             try:
-                shutil.copy2(src, dst)
-                res["copied"].append(str(dst))
+                dst.parent.mkdir(parents=True, exist_ok=True)
             except OSError as ex:
-                res["errors"].append(f"{dst}: {ex}")
+                res["errors"].append(f"{dst.parent}: {ex}")
+                continue
+            pairs = [(src, dst)]
+            _c = _cs.get(src.name) or {}
+            if _c.get("state") == "egyezik":
+                pairs.append((_cdir / (src.stem + _ext), dst.with_suffix(_ext)))
+            elif _c.get("state") == "MÁS FORRÁSHOZ készült":
+                res["stale_compiled"].append(src.name)
+            for s_, d_ in pairs:
+                if not s_.exists():
+                    continue
+                if d_.exists() and _same_bytes(s_, d_):
+                    res["skipped"].append(str(d_))
+                    continue
+                if dry_run:
+                    res["copied"].append(str(d_))
+                    continue
+                try:
+                    shutil.copy2(s_, d_)
+                    res["copied"].append(str(d_))
+                except OSError as ex:
+                    res["errors"].append(f"{d_}: {ex}")
     return res
 
 
@@ -378,12 +578,14 @@ def compiled_beside(platform: str, extra_roots=None, include_appdata: bool = Tru
     out = []
     for tgt in targets(platform, extra_roots, include_appdata):
         for src in sources(platform):
-            s = tgt / src.name
-            c = tgt / (src.stem + ext)
+            s = dest_for(tgt, src)
+            c = s.with_suffix(ext)
             if not c.exists():
-                out.append({"target": tgt, "file": src.name, "state": "nincs fordítva"})
+                out.append({"target": s.parent, "file": src.name,
+                            "state": "nincs fordítva"})
             elif s.exists() and c.stat().st_mtime < s.stat().st_mtime:
-                out.append({"target": tgt, "file": src.name, "state": "RÉGEBBI a forrásnál"})
+                out.append({"target": s.parent, "file": src.name,
+                            "state": "RÉGEBBI a forrásnál"})
             else:
-                out.append({"target": tgt, "file": src.name, "state": "rendben"})
+                out.append({"target": s.parent, "file": src.name, "state": "rendben"})
     return out

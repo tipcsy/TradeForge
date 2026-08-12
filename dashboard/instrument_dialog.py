@@ -1455,23 +1455,54 @@ class InstrumentParamsDialog:
         tk.Button(row, text="Kitelepítés", bg=BTN_PLAY_BG, fg=BTN_PLAY_FG,
                   relief="flat", font=self._sf,
                   command=lambda p=name: self._deploy_mql(p)).pack(side="left")
-        tk.Button(row, text="Fordítás (F7 helyett)", bg=BTN_BT_BG, fg=BTN_BT_FG,
+        # ⚠ NINCS „Fordítás" gomb: a MetaEditor parancssori fordítása egyetlen
+        # dokumentált alakra sem működött (rc=0, semmi kimenet). Helyette a
+        # F7 UTÁN ide lehet BEHOZNI a lefordítottat a repóba — így verziózva
+        # tárolódik, és a következő kitelepítés már viheti is.
+        tk.Button(row, text="Lefordított beolvasása", bg=BTN_BT_BG, fg=BTN_BT_FG,
                   relief="flat", font=self._sf,
-                  command=lambda p=name: self._compile_mql(p)).pack(side="left",
+                  command=lambda p=name: self._capture_mql(p)).pack(side="left",
                                                                     padx=(6, 0))
         self._link_status = tk.Label(row, text="", bg=BG, fg=FG_GRAY,
                                      font=self._sf)
         self._link_status.pack(side="left", padx=(10, 0))
 
-        me = _md.metaeditor(name)
-        _n(("MetaEditor: " + str(me)) if me else
-           "MetaEditor: nem találom — a fordítás (F7) kézzel megy a terminálból.",
-           FG_GRAY_DIM)
-        # ⚠ Nem fordítunk. Kimondjuk, mert a „kitelepítve" önmagában NEM jelenti
-        # azt, hogy az új kód FUT: a régi .ex4/.ex5 addig érvényben marad.
-        _n("A kitelepítés a FORRÁST másolja. A terminál a LEFORDÍTOTT változatot "
-           "futtatja — a másolás után nyisd meg a fájlt a MetaEditorban és "
-           "fordítsd újra (F7).", FG_YELLOW)
+        # ── MELYIK FÁJL MICSODA ────────────────────────────────────────────
+        # A kérés: „nem látom, milyen fájlokat is szeretne odamásolni, és egy
+        # rövid leírás sem ártana, hogy melyik mit csinál."
+        _h("Mit telepít ki")
+        cs = {c["file"]: c for c in _md.compiled_status(name)}
+        for src in _md.sources(name):
+            rovid, hasznalat = _md.describe(src)
+            line = tk.Frame(body, bg=BG)
+            line.pack(anchor="w", fill="x", padx=10)
+            _sub = _md.subfolder_of(src)
+            tk.Label(line, text=f"   {src.name}", bg=BG,
+                     fg=(FG_YELLOW if _sub == "Experts" else FG_WHITE),
+                     font=self._sf, anchor="w", width=26).pack(side="left")
+            tk.Label(line, text=_sub, bg=BG, fg=FG_GRAY_DIM, font=self._sf,
+                     width=11, anchor="w").pack(side="left")
+            _v = _md.source_version(src)
+            tk.Label(line, text=(f"v{_v}" if _v else "—"), bg=BG, fg=FG_GRAY_DIM,
+                     font=self._sf, width=7, anchor="w").pack(side="left")
+            tk.Label(line, text=rovid, bg=BG, fg=FG_GRAY, font=self._sf,
+                     anchor="w").pack(side="left")
+            # A TÁROLT lefordított állapota — ha más forráshoz készült, az baj.
+            _c = cs.get(src.name) or {}
+            if _c.get("state") == "MÁS FORRÁSHOZ készült":
+                tk.Label(line, text="  ⚠ a tárolt lefordított MÁS forráshoz készült",
+                         bg=BG, fg=FG_RED, font=self._sf, anchor="w").pack(side="left")
+            elif _c.get("state") == "egyezik":
+                tk.Label(line, text="  ✓ lefordított tárolva", bg=BG, fg=FG_GREEN,
+                         font=self._sf, anchor="w").pack(side="left")
+        _n(_md.USAGE.get(name, ""), FG_GRAY)
+
+        # ⚠ Nem fordítunk — és ezt nem szépítjük. A „kitelepítve" önmagában NEM
+        # jelenti azt, hogy az új kód FUT: a régi .ex4/.ex5 addig érvényben marad.
+        _n("A kitelepítés a FORRÁST viszi ki (és a repóban tárolt lefordítottat, "
+           "ha az ugyanahhoz a forráshoz készült). Ha nincs tárolva: nyisd meg a "
+           "fájlt a MetaEditorban, nyomj F7-et, majd itt a Lefordított "
+           "beolvasása gombot — utána már a bináris is utazik.", FG_YELLOW)
 
         # ── 2. AMIT INNEN INDÍTHATSZ ───────────────────────────────────────
         if name == "MT4":
@@ -1527,17 +1558,39 @@ class InstrumentParamsDialog:
                       command=lambda v=var, a=e: self._pick_date(v, a)
                       ).pack(side="left", padx=(2, 12))
 
+        # ── MI KERÜLJÖN A CHARTRA ──────────────────────────────────────────
+        # ⚠ A két beállítás KÉT KÜLÖNBÖZŐ dolgot ír a chartra, és korábban a
+        # feliratuk ezt elmosta:
+        #   • az első a BELÉPŐ-JELZÉSEK körét szűkíti (mit jelzett volna a
+        #     stratégia, illetve ebből mi ment volna át a szűrőkön),
+        #   • a második EXTRA réteg: a bot ténylegesen megnyitott pozíciói.
+        # A „kapu" szó ráadásul foglalt (együttállás, spread, volatilitás), és a
+        # jelölők NEM kapuk — belépési pontok. Ezért itt a szűrők NEVE szerepel.
+        tk.Label(body, text="Mi kerüljön a chartra", bg=BG, fg=FG_WHITE,
+                 font=self._sf, anchor="w").pack(anchor="w", padx=10, pady=(6, 0))
         opt = tk.Frame(body, bg=BG)
         opt.pack(anchor="w", padx=10)
-        tk.Checkbutton(opt, text="Végrehajtási kapukkal (amit a motor tényleg megkötne)",
+        tk.Checkbutton(opt, text="Belépő-jelzések: csak a végrehajthatók "
+                                 "(a spread / együttállás / volatilitás szűrők után)",
                        variable=self._mx_gates, bg=BG, fg=FG_WHITE,
                        selectcolor=BG_HEADER, activebackground=BG,
                        activeforeground=FG_WHITE, font=self._sf).pack(anchor="w")
-        tk.Checkbutton(opt, text="A bot VALÓS kötései is látszódjanak "
-                                 "(manuális teszthez NE)",
+        tk.Label(opt, bg=BG, fg=FG_GRAY_DIM, font=self._sf, anchor="w",
+                 justify="left", wraplength=780,
+                 text=("      Kipipálva azt látod, amit a motor tényleg megkötött "
+                       "volna. Kipipálatlanul MINDEN jelzés kikerül, szűrés "
+                       "nélkül — a kettő különbsége mutatja, mennyit szűrnek a "
+                       "beállításaid.")).pack(anchor="w")
+        tk.Checkbutton(opt, text="Az ÉLES kötések is (amit a bot valóban nyitott)",
                        variable=self._mx_trades, bg=BG, fg=FG_GRAY,
                        selectcolor=BG_HEADER, activebackground=BG,
-                       activeforeground=FG_WHITE, font=self._sf).pack(anchor="w")
+                       activeforeground=FG_WHITE, font=self._sf).pack(anchor="w",
+                                                                      pady=(4, 0))
+        tk.Label(opt, bg=BG, fg=FG_GRAY_DIM, font=self._sf, anchor="w",
+                 justify="left", wraplength=780,
+                 text=("      Ez KÜLÖN réteg a jelzések mellett. Manuális "
+                       "teszteléshez hagyd üresen: a bot kötései elárulnák a "
+                       "megfejtést.")).pack(anchor="w")
 
         brow = tk.Frame(body, bg=BG)
         brow.pack(anchor="w", padx=10, pady=(6, 2))
@@ -1622,24 +1675,30 @@ class InstrumentParamsDialog:
         threading.Thread(target=_work, daemon=True, name="MT4Export").start()
         self.popup.after(150, _poll)
 
-    def _compile_mql(self, platform: str):
-        """Fordítás MetaEditorral — és az eredmény ELLENŐRZÉSE."""
+    def _capture_mql(self, platform: str):
+        """A terminálban LEFORDÍTOTT fájlok beemelése a repóba (F7 után).
+
+        ⚠ A jegyzék a FORRÁS TARTALMÁNAK ujjlenyomatát tárolja, nem csak a
+        `#property version`-t: az utóbbit kézzel írják, és két különböző forrás
+        viselheti ugyanazt. Így ha később a forrás változik, a tárolt
+        lefordítottról KIDERÜL, hogy már máshoz tartozik."""
         from core import mt_deploy as _md
-        self._link_status.config(text="Fordítás…", fg=FG_GRAY)
-        self.popup.update_idletasks()
         try:
-            res = _md.compile_all(platform, _md.discover_roots())
+            res = _md.capture_compiled(platform, _md.discover_roots())
         except Exception as ex:
             self._link_status.config(text=f"Hiba: {ex}", fg=FG_RED)
             return
-        if res["failed"] or res["errors"]:
-            first = (res["failed"] or res["errors"])[0]
-            self._link_status.config(
-                text=f"{len(res['ok'])} rendben, {len(res['failed'])} nem — {first}"[:150],
-                fg=FG_RED)
-        else:
-            self._link_status.config(text=f"{len(res['ok'])} fájl lefordítva.",
-                                     fg=FG_GREEN)
+        msg = f"{len(res['taken'])} lefordított fájl beolvasva a repóba."
+        if res["missing"]:
+            msg += (f" Nincs lefordítva: {', '.join(res['missing'][:3])}"
+                    f"{'…' if len(res['missing']) > 3 else ''} — nyisd meg a "
+                    f"MetaEditorban és nyomj F7-et.")
+        self._link_status.config(
+            text=msg[:170], fg=(FG_YELLOW if res["missing"] else FG_GREEN))
+        try:
+            self._build_link_pane(platform)
+        except Exception:
+            pass
 
     def _deploy_mql(self, platform: str):
         """A repó indikátorainak kimásolása MINDEN megtalált terminál-mappába."""

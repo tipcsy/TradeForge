@@ -149,34 +149,56 @@ check("minden talalt gyokerben van MQL4 vagy MQL5",
 
 
 
-# ── 8. FORDITAS: a sikert a KIMENETEN merjuk, nem a kilepesi kodon ────────
-# ⚠ Ezen a gepen a MetaEditor MINDEN dokumentalt alakra (`/compile:`, `+/log`,
-# `+/portable`, relativ ut) 0,2 mp alatt kilepett rc=0-val, naplo nelkul — es
-# NEM forditott: sem az .ex4/.ex5 nem frissult, sem uj fajl nem keletkezett
-# sehol a gepen. Ha csak a kilepesi kodot neznenk, a felulet magabiztosan
-# "rendben"-t irna, a terminal pedig tovabbra is a REGI leforditottat futtatna.
-import inspect as _i
-_src = _i.getsource(md.compile_file)
-check("a forditas a KIMENET idejet nezi (nem csak a kilepesi kodot)",
-      "before" in _src and "after > before" in _src)
-check("...es sikert CSAK akkor jelent", "lefordítva" in _src)
-check("rc=0 + valtozatlan kimenet -> NEM siker, es megmondja a teendot",
-      "nem fordított" in _src and "F7" in _src)
-# A naplo UTF-16; utf-8-cal olvasva a hibauzenet elveszne.
-check("a naplot UTF-16-kent olvassa", 'encoding="utf-16"' in _src)
+# ── 8. MI MICSODA: al-mappa + leiras ─────────────────────────────────────
+# A keres: "nem latom, milyen fajlokat is szeretne odamasolni … egy rovid
+# leiras sem artana, hogy melyik mit csinal".
+_mt5 = {p.stem: p for p in md.sources(md.MT5)}
+check("az MT5 forrasok kozt ott a tools/ tartalma is",
+      "BacktestReplayer" in _mt5, str(sorted(_mt5)))
+# ⚠ Az EXPERT az `Experts` mappaba valo — az `Indicators`-ba teve a terminal
+# fel sem kinalja a Strategy Testerben.
+check("a BacktestReplayer EXPERT-kent celoz",
+      md.subfolder_of(_mt5["BacktestReplayer"]) == "Experts")
+check("a TradeForgeViz INDIKATORKENT celoz",
+      md.subfolder_of(_mt5["TradeForgeViz"]) == "Indicators")
+check("minden forrasnak van leirasa",
+      all(md.describe(p)[0] for pf in (md.MT4, md.MT5) for p in md.sources(pf)),
+      str([p.name for pf in (md.MT4, md.MT5) for p in md.sources(pf)
+           if not md.describe(p)[0]]))
+check("van hasznalati utmutato mindket platformra",
+      bool(md.USAGE.get(md.MT4)) and bool(md.USAGE.get(md.MT5)))
+# A ket platform MAS hasznalatu — ez a szoveg lenyege.
+check("...es a ketto NEM ugyanaz", md.USAGE[md.MT4] != md.USAGE[md.MT5])
 
-# A MetaEditor keresese a PORTABLE telepitesekben is (ott van, ahol a terminal).
-_me4 = md.metaeditor(md.MT4, _roots)
-_me5 = md.metaeditor(md.MT5, _roots)
-check("MT4 MetaEditor megvan", _me4 is not None, str(_me4))
-check("MT5 MetaEditor megvan", _me5 is not None, str(_me5))
-# ⚠ A MEGFELELO peldany kell: az MT4-e .mq4-et fordit, az MT5-e .mq5-ot.
-if _me4 and _me5:
-    check("a ket platform KULON MetaEditort kap", _me4 != _me5)
-    check("az MT4-e MQL4-es telepitesbol jon",
-          (Path(_me4).parent / "MQL4").is_dir(), str(_me4))
-    check("az MT5-e MQL5-os telepitesbol jon",
-          (Path(_me5).parent / "MQL5").is_dir(), str(_me5))
+
+# ── 9. A LEFORDITOTT TAROLASA es a VERZIO-ELLENORZES ─────────────────────
+# A keres: "ne taroljuk megiscsak le az ex4/ex5 fajlokat? Ha azok is verziozva
+# vannak, akkor nem lehet gond a tarolassal (figyelmeztetes johet, ha nem
+# egyezik a verzio!)".
+#
+# ⚠ A `#property version` NEM eleg: kezzel irjak, es ket kulonbozo forras
+# viselheti ugyanazt. Ezert a jegyzek a forras TARTALMANAK ujjlenyomatat
+# tarolja — az akkor is elter, ha a verzioszamot elfelejtettek emelni.
+check("a forras-verzio kiolvashato",
+      md.source_version(md.sources(md.MT4)[0]) != "",
+      md.source_version(md.sources(md.MT4)[0]))
+
+_cs = md.compiled_status(md.MT5)
+check("minden forrasra van tarolt-allapot", len(_cs) == len(md.sources(md.MT5)))
+check("az allapot ertelmes ertek",
+      all(c["state"] in ("nincs tárolva", "egyezik", "MÁS FORRÁSHOZ készült")
+          for c in _cs), str({c["state"] for c in _cs}))
+
+import inspect as _i
+_src = _i.getsource(md.capture_compiled)
+check("a beolvasas a forras SHA-jat is rogziti (nem csak a verziot)",
+      "source_sha1" in _src and "source_version" in _src)
+_dep = _i.getsource(md.deploy)
+# ⚠ A tarolt binaris CSAK akkor mehet ki, ha a MOSTANI forrashoz keszult —
+# kulonben ugyanaz a "regi fut, uj forras" allapot allna elo, csak a repobol
+# szallitva.
+check("a kitelepites csak EGYEZO leforditottat visz ki",
+      '"egyezik"' in _dep and "stale_compiled" in _dep)
 
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")

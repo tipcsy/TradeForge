@@ -11,3 +11,8 @@ trades.csv
 config*másolata*.json
 config*copy*.json
 config.local.json
+
+# A repoban TAROLT leforditott MQL binarisok (verziozva, jegyzekkel).
+# Ezek SZANDEKOSAN a repoban vannak — lasd core/mt_deploy.py.
+!mt4/compiled/
+!mt5/compiled/
