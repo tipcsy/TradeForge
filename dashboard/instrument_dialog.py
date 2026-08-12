@@ -1030,7 +1030,7 @@ class InstrumentParamsDialog:
             on_result=self._on_bt_window_result,
             preset_name=self._rr_name.get(),
             on_apply_params=self._apply_params_from_bt,
-            host=bt_host)
+            host=bt_host, on_state=self._on_run_state)
 
     # ── A TERV-SÁV: mi fog történni, ha elindítod ──────────────────────────
     # A felhasználó észrevétele: „a Paraméter, Futtatás, Optimalizálás igazából
@@ -1149,6 +1149,21 @@ class InstrumentParamsDialog:
         # A söprés IDŐSZAKA a backtest mezőiből jön (egy helyen állítod) — a
         # `_start_sweep` onnan olvassa, ezért itt nincs külön dátum-mező.
         self._refresh_opt_space()
+
+    def _on_run_state(self, running: bool):
+        """A beágyazott backtest futás-állapota → a terv-sáv EGYETLEN gombja.
+
+        Enélkül a gomb futás közben is „Indítás"-t mutatna, és egy második
+        kattintás újraindítaná azt, ami épp fut."""
+        try:
+            if running:
+                self._plan_btn.config(text="Megszakítás",
+                                      command=self._run_tab._cancel)
+            else:
+                self._plan_btn.config(text="Indítás", state="normal",
+                                      command=self._start_planned)
+        except (tk.TclError, AttributeError):
+            pass
 
     def _start_planned(self):
         """Az EGYETLEN Indítás gomb: a bepipált dimenziók száma dönti el, mi fut.

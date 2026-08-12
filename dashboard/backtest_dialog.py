@@ -97,7 +97,8 @@ class BacktestDialog:
 
     def __init__(self, parent, symbol, cfg, strategy, params, pair_cfg,
                  rr_spec, header_font, small_font, on_result=None,
-                 preset_name: str = "Ki", on_apply_params=None, host=None):
+                 preset_name: str = "Ki", on_apply_params=None, host=None,
+                 on_state=None):
         # `host`: ha adott (egy Frame), a tartalom ODA épül, nem külön ablakba —
         # így ugyanez az osztály szolgálja ki a Paraméterek ablak „Futtatás"
         # lapját is. A logika (haladás, grafikon, összevetés, CSV, MT5-export)
@@ -108,6 +109,10 @@ class BacktestDialog:
         # — egy „majdnem ugyanolyan" második változat pont abban térne el, ami
         # ritkán fut (megszakítás, hibaág, MT5-export), és az nem derülne ki.
         self._host    = host
+        # `on_state(fut: bool)` — a beágyazó ebből tudja, mikor váltson a
+        # saját gombja Megszakításra és vissza. Enélkül a gazda gombja
+        # futás közben is „Indítás"-t mutatna.
+        self._on_state = on_state
         self.parent   = parent
         self.symbol   = symbol
         self.cfg      = cfg
@@ -395,29 +400,45 @@ class BacktestDialog:
                              "százalékos hozamot skálázza. Üresen a config\n"
                              "kezdő egyenlege (starting_balance_eur).")
 
-        # ── Paraméterek (SZERKESZTHETŐ — feltáró) ───────────────────────────
-        phdr = tk.Frame(body, bg=BG)
-        phdr.pack(fill="x", padx=12, pady=(2, 0))
-        tk.Label(phdr, text="Paraméterek (szerkeszthető — feltáró):", bg=BG,
-                 fg=FG_GRAY, font=self._sf).pack(side="left")
-        tk.Button(phdr, text="Vissza", bg=BG_HEADER, fg=FG_WHITE, relief="flat",
-                  font=self._sf, cursor="hand2", command=self._reset_params).pack(
-                  side="left", padx=(8, 0))
-        pform = tk.Frame(body, bg=BG)
-        pform.pack(anchor="w", padx=12, pady=(2, 2))
+        # ── Paraméterek ─────────────────────────────────────────────────────
+        # ⚠ BEÁGYAZVA NINCS paraméter-lista. A lap MELLETT ott a Paraméter lap,
+        # ugyanazokkal a kulcsokkal — két szerkeszthető másolat ugyanarra az
+        # értékre pontosan azt a zavart okozza, ami miatt az egesz átalakítás
+        # elindult: „melyiket használja épp?". A válasz mostantól egyértelmű: a
+        # Paraméter lapét (a Futtatás lap újraépül, ha ott átírsz valamit).
+        #
+        # Önálló ablakként viszont MEGMARAD: ott nincs mellette paraméter-űrlap,
+        # és a feltáró szerkesztés + „Vissza" a fő értéke.
         self._pentries = {}
-        _COLS = 2
-        for i, k in enumerate(self._param_keys):
-            r, c = divmod(i, _COLS)
-            cell = tk.Frame(pform, bg=BG)
-            cell.grid(row=r, column=c, sticky="w", padx=(0, 12), pady=1)
-            tk.Label(cell, text=k, bg=BG, fg=FG_WHITE, font=self._sf,
-                     anchor="w", width=22).pack(side="left")
-            e = tk.Entry(cell, width=9, bg=BG_HEADER, fg=FG_WHITE, font=self._sf,
-                         insertbackground=FG_WHITE)
-            e.insert(0, str(self._init_params[k]))
-            e.pack(side="left")
-            self._pentries[k] = e
+        if self._host is None:
+            phdr = tk.Frame(body, bg=BG)
+            phdr.pack(fill="x", padx=12, pady=(2, 0))
+            tk.Label(phdr, text="Paraméterek (szerkeszthető — feltáró):", bg=BG,
+                     fg=FG_GRAY, font=self._sf).pack(side="left")
+            tk.Button(phdr, text="Vissza", bg=BG_HEADER, fg=FG_WHITE,
+                      relief="flat", font=self._sf, cursor="hand2",
+                      command=self._reset_params).pack(side="left", padx=(8, 0))
+            pform = tk.Frame(body, bg=BG)
+            pform.pack(anchor="w", padx=12, pady=(2, 2))
+            _COLS = 2
+            for i, k in enumerate(self._param_keys):
+                r, c = divmod(i, _COLS)
+                cell = tk.Frame(pform, bg=BG)
+                cell.grid(row=r, column=c, sticky="w", padx=(0, 12), pady=1)
+                tk.Label(cell, text=k, bg=BG, fg=FG_WHITE, font=self._sf,
+                         anchor="w", width=22).pack(side="left")
+                e = tk.Entry(cell, width=9, bg=BG_HEADER, fg=FG_WHITE,
+                             font=self._sf, insertbackground=FG_WHITE)
+                e.insert(0, str(self._init_params[k]))
+                e.pack(side="left")
+                self._pentries[k] = e
+        else:
+            tk.Label(body, bg=BG, fg=FG_GRAY_DIM, font=self._sf, anchor="w",
+                     justify="left", wraplength=820,
+                     text=("A paraméterek a Paraméter lapon állnak — az ott "
+                           "beírt értékekkel fut. (Ha ott átírsz valamit, ez a "
+                           "lap magától frissül.)")
+                     ).pack(anchor="w", padx=12, pady=(2, 2))
 
         # ── Vezérlő-csoportok: Kockázatcsökkentés + Pozícióépítés (FELTÁRÓ) ──
         # Ugyanaz a logikai tiltás, mint az instrumentum-ablakban: a nem releváns
@@ -643,13 +664,25 @@ class BacktestDialog:
         self._btn_start = tk.Button(btns, text="Backtest indítása", bg=BTN_BT_BG,
                                     fg=BTN_BT_FG, relief="flat", font=self._sf,
                                     state="disabled", command=self._start)
-        self._btn_start.pack(side="left", padx=6)
+        # ⚠ Beágyazva a saját indító gomb NEM látszik: a gazda terv-sávján áll
+        # EGY gomb, ami a bepipált dimenziók számából dönt (backtest / söprés /
+        # optimalizálás). Két indító gomb ugyanazon a lapon pontosan azt a
+        # „melyiket használja épp?" zavart okozná, ami miatt az átalakítás
+        # elindult — ráadásul a másik a TERVET is megkerülné. A widget viszont
+        # LÉTREJÖN: a belső állapotváltások (Megszakítás / vissza) rá hivatkoznak.
+        if self._host is None:
+            self._btn_start.pack(side="left", padx=6)
+        # ⚠ Beágyazva ez a gomb NEM CSINÁLNA SEMMIT: a paraméterek a Paraméter
+        # lapról jönnek (nincs mit visszaírni), a friss eredményt pedig az
+        # `on_result` már átadta a metrika-sávnak. Egy tétlen gomb rosszabb, mint
+        # a hiányzó: azt sugallná, hogy van egy külön mentendő állapot.
         self._btn_apply = tk.Button(btns, text="Mentés a Paraméterekhez",
                                     bg=BTN_PLAY_BG, fg=BTN_PLAY_FG, relief="flat",
                                     font=self._sf, command=self._apply_params)
         if self._on_apply_params is None:
             self._btn_apply.config(state="disabled")
-        self._btn_apply.pack(side="left", padx=6)
+        if self._host is None:
+            self._btn_apply.pack(side="left", padx=6)
         # Építés CSV — a ráépítések TÉTELESEN (mint a Trials CSV). Csak akkor él,
         # ha a futásban volt ráépítés (a fájl ilyenkor készül el).
         self._btn_build_csv = tk.Button(btns, text="Építés CSV", bg=BTN_BT_BG,
@@ -874,6 +907,10 @@ class BacktestDialog:
         `min_spread_points`. (Korábban csak a `_` kezdetűek maradtak → ezek a defaultra
         estek vissza.) Hiba → None."""
         new = dict(self.params)
+        # Beágyazva nincs saját paraméter-űrlap: a lap a Paraméter lap értékeivel
+        # épült (`self.params`), és ott is szerkeszted. Nincs mit összeszedni.
+        if not self._pentries:
+            return new
         for k in self._param_keys:
             raw = self._pentries[k].get().strip()
             orig = self._init_params.get(k)
@@ -1016,6 +1053,11 @@ class BacktestDialog:
         self._stop_flag = threading.Event()
         # A start gomb futás közben MEGSZAKÍTÁS gombbá válik (a _done visszaállítja).
         self._btn_start.config(text="Megszakítás", state="normal", command=self._cancel)
+        if self._on_state:
+            try:
+                self._on_state(True)
+            except Exception:
+                pass
         self._status.config(text="Backtest fut… (a Megszakítás gombbal leállítható)",
                             fg=FG_GRAY)
         self._pbar.config(value=0.0)
@@ -1183,6 +1225,11 @@ class BacktestDialog:
             return   # az ablak bezárult — nincs mit frissíteni
         # A gomb visszaáll indító gombbá (a futás közben Megszakítás volt).
         try:
+            if self._on_state:
+                try:
+                    self._on_state(False)
+                except Exception:
+                    pass
             self._btn_start.config(text="Backtest indítása", state="normal",
                                    command=self._start)
         except Exception:

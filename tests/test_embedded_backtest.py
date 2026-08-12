@@ -153,6 +153,39 @@ if TK_OK:
     # nem kell kulon beallitani: kiderul abbol, hany parametert pipaltal be.
     check("nincs kulon „Optimalizálás” lap", "Optimalizálás" not in d._shell.names(),
           str(d._shell.names()))
+
+    # ⚠ A LAPON NINCS MASODIK PARAMETER-URLAP. A bejelentes szo szerint: "a
+    # futtatas lapon meg mindig ott vannak a parameterek, igy zavaro, hogy
+    # melyiket hasznalja epp". Ket szerkesztheto masolat ugyanarra az ertekre
+    # pontosan ezt a kerdest szuli — es nincs ra jo valasz.
+    check("beagyazva NINCS sajat parameter-urlap", not d._run_tab._pentries,
+          f"{len(d._run_tab._pentries)} mezo")
+
+    # ⚠ ES NINCS MASODIK INDITO GOMB SEM. A gazda terv-savjan all EGY gomb, ami a
+    # bepipalt dimenziok szamabol dontl; egy masik gomb a TERVET is megkerulne
+    # (2 hangolt parameternel egyetlen backtestet inditana).
+    _vis = []
+
+    def _walk(w):
+        for c in w.winfo_children():
+            if isinstance(c, tk.Button):
+                try:
+                    t = str(c.cget("text"))
+                    if t and c.winfo_ismapped():
+                        _vis.append(t)
+                except Exception:
+                    pass
+            _walk(c)
+
+    root.update_idletasks()
+    _walk(d._shell.page("Futtatás"))
+    check("EGYETLEN indito gomb latszik a lapon",
+          sum(1 for t in _vis if "indít" in t.lower()) == 1, str(_vis))
+    check("...es a beagyazott sajat gombja nincs kicsomagolva",
+          not d._run_tab._btn_start.winfo_ismapped())
+    # A widget viszont LETEZIK: a belso allapotvaltasok ra hivatkoznak.
+    check("...de a widget letezik (a belso allapotvaltasokhoz)",
+          d._run_tab._btn_start is not None)
     check("a terv-sáv a FUTTATÁS lapon él", d._tuned_lbl is not None)
     check("...és EGYETLEN Indítás gomb van", getattr(d, "_plan_btn", None) is not None)
 
