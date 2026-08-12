@@ -138,13 +138,40 @@ def export_window(symbol: str, t_from: str, t_to: str, strategy_name: str = None
     if not lines:
         return False, f"{symbol} — a viz üres lett (a stratégia nem adott objektumot)."
 
+    # ── A BELÉPŐ-JELZÉSEK a KÉRT ablakra szűkítve ───────────────────────────
+    # ⚠ Az indikátorokhoz warmup kell (GOLD-on ~19–21 NAP visszafelé), és a
+    # stratégia a kapott TELJES szeletre rajzol jelzést. Enélkül a fájlba a
+    # bemelegítő szakasz jelei is bekerültek: egy 2026-07-13 → 07-18 kérésre 72
+    # jelzés íródott ki, amiből 61 még JÚNIUSI volt — miközben az üzenet a kért
+    # hetet írta. Az MT4-ben ez a szám a navigáció alapja („HÁTRA: 3”), tehát a
+    # felhasználó egy nem létező hétnyi jelzést számolt volna.
+    #
+    # A SÁVOKAT/görbéket NEM vágjuk: azok folytonos kontextusok, és a warmup
+    # szakaszon is helyes a rajzuk. Csak a JELZÉS-objektumok szűkülnek.
+    _from_ts, _to_ts = int(ts_from.timestamp()), int(ts_to.timestamp())
+
+    def _in_window(ln: str) -> bool:
+        if not ln.startswith(("VLINE;", "ARROW;", "TEXT;")):
+            return True
+        f = ln.split(";")
+        try:
+            t = int(f[2])
+        except (IndexError, ValueError):
+            return True          # nem érthető idő → inkább bent hagyjuk
+        return _from_ts <= t <= _to_ts
+
+    n_all = sum(1 for ln in lines if ln.startswith("VLINE;"))
+    lines = [ln for ln in lines if _in_window(ln)]
+
     path = mt5_visual.write_lines(symbol, lines, clear_first=True, name_suffix=suffix)
     if path is None:
         return False, "Nem sikerült írni a Common\\Files mappába."
 
     n_sig = sum(1 for ln in lines if ln.startswith("VLINE;"))
+    _cut = n_all - n_sig
     return True, (f"{symbol} / {strat_name}: {n_sig} belépő jelzés kiírva "
                   f"({t_from} → {t_to}) → {path.name}"
+                  + (f"  ·  {_cut} a bemelegítő szakaszból kihagyva" if _cut else "")
                   + ("" if show_trades else "  ·  valós kötések nélkül")
                   + ("" if exec_gates else "  ·  ⚠ KAPUK NÉLKÜL (nyers jelzések)"))
 
