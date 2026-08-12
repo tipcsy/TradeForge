@@ -2,13 +2,37 @@
   "BacktestPnLViewer.ex5": {
     "source_sha1": "ecc8e24d878613a869774b1c571fedeec0afd3a6",
     "source_version": "1.10",
-    "captured": "2026-08-12T21:40:59+00:00",
+    "captured": "2026-08-12T21:54:44+00:00",
     "from": "C:\\Metatrades\\ActiveTrades Metatrade 5\\MQL5\\Indicators\\BacktestPnLViewer.ex5"
   },
   "BacktestReplayer.ex5": {
     "source_sha1": "4461c907de3c81efac4f9de35d189dbe41b37607",
     "source_version": "4.10",
-    "captured": "2026-08-12T21:40:59+00:00",
+    "captured": "2026-08-12T21:54:44+00:00",
     "from": "C:\\Metatrades\\ActiveTrades Metatrade 5\\MQL5\\Experts\\BacktestReplayer.ex5"
+  },
+  "TradeForgeBands.ex5": {
+    "source_sha1": "3016bf4d6a9188fd242e2307d2c7a7364d6d0196",
+    "source_version": "2.40",
+    "captured": "2026-08-12T21:54:44+00:00",
+    "from": "C:\\Metatrades\\ActiveTrades Metatrade 5\\MQL5\\Indicators\\TradeForgeBands.ex5"
+  },
+  "TradeForgeViz.ex5": {
+    "source_sha1": "6f9765c245729c100ea43206e607758e69fae6f9",
+    "source_version": "2.40",
+    "captured": "2026-08-12T21:54:44+00:00",
+    "from": "C:\\Metatrades\\ActiveTrades Metatrade 5\\MQL5\\Indicators\\TradeForgeViz.ex5"
+  },
+  "TradeForgeWPR.ex5": {
+    "source_sha1": "3717fea43a7fe88fb2f45d2787e7fdada642212c",
+    "source_version": "2.40",
+    "captured": "2026-08-12T21:54:44+00:00",
+    "from": "C:\\Metatrades\\ActiveTrades Metatrade 5\\MQL5\\Indicators\\TradeForgeWPR.ex5"
+  },
+  "BacktestTradesViewer.ex5": {
+    "source_sha1": "a0c020c395b241d06168d16b0f297e981a14803d",
+    "source_version": "1.00",
+    "captured": "2026-08-12T21:54:44+00:00",
+    "from": "C:\\Metatrades\\ActiveTrades Metatrade 5\\MQL5\\Indicators\\BacktestTradesViewer.ex5"
   }
 }
