@@ -7,6 +7,7 @@
 //|  programból a ChartIndicatorAdd után).                           |
 //|  A TradeForgeViz rakja fel iCustom-mal a stratégia paramétereivel.|
 //+------------------------------------------------------------------+
+#property version   "2.40"        // TradeForge v2.40; utolso tartalmi modositas: 2026-07-10
 #property indicator_separate_window
 #property indicator_buffers 1
 #property indicator_plots   1

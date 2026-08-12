@@ -1,0 +1,14 @@
+{
+  "BacktestPnLViewer.ex5": {
+    "source_sha1": "ecc8e24d878613a869774b1c571fedeec0afd3a6",
+    "source_version": "1.10",
+    "captured": "2026-08-12T21:40:59+00:00",
+    "from": "C:\\Metatrades\\ActiveTrades Metatrade 5\\MQL5\\Indicators\\BacktestPnLViewer.ex5"
+  },
+  "BacktestReplayer.ex5": {
+    "source_sha1": "4461c907de3c81efac4f9de35d189dbe41b37607",
+    "source_version": "4.10",
+    "captured": "2026-08-12T21:40:59+00:00",
+    "from": "C:\\Metatrades\\ActiveTrades Metatrade 5\\MQL5\\Experts\\BacktestReplayer.ex5"
+  }
+}

@@ -11,6 +11,7 @@
 //|  (F7), majd húzd a kívánt chartra. A fájlt a Python az MT5 közös  |
 //|  (Common) mappájába írja, ezért FILE_COMMON-nal olvassuk.        |
 //+------------------------------------------------------------------+
+#property version   "2.40"        // TradeForge v2.40; utolso tartalmi modositas: 2026-07-29
 #property indicator_chart_window
 #property indicator_plots 0
 

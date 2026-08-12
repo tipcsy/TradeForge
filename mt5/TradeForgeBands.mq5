@@ -19,6 +19,7 @@
 //|  küldő végzi). A bufferbe töltés a gyertya-idő → állapot leképzés  |
 //|  alapján megy, így M1 és M15 charton is illeszkedik.             |
 //+------------------------------------------------------------------+
+#property version   "2.40"        // TradeForge v2.40; utolso tartalmi modositas: 2026-08-09
 #property indicator_separate_window
 #property indicator_buffers 12
 #property indicator_plots   4

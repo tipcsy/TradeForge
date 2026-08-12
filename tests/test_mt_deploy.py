@@ -82,7 +82,10 @@ check("kitelepites utan MINDEN friss",
 res2 = md.deploy(md.MT5, [fake], include_appdata=False)
 check("masodszorra mar nem masol (mind friss)", not res2["copied"],
       str(res2["copied"][:2]))
-check("...hanem kihagyottkent szamolja", len(res2["skipped"]) == len(st2))
+# ⚠ A kihagyottak kozt a FORRAS es a hozza tarolt BINARIS is szerepelhet,
+# ezert legalabb annyi, ahany forras — nem pontosan annyi.
+check("...hanem kihagyottkent szamolja", len(res2["skipped"]) >= len(st2),
+      f"{len(res2['skipped'])} kihagyott / {len(st2)} forras")
 
 # ── 3. ELAVULT eszlelese — EZ a modul letjogosultsaga ─────────────────────
 _first = md.sources(md.MT5)[0]
@@ -101,8 +104,15 @@ check("az elavultat FELULIRJA", any(_first.name in c for c in _r3["copied"]))
 # .ex5 — es a terminal AZT futtatja. A "kitelepitve" tehat NEM jelenti, hogy az
 # uj kod fut.
 cb = {c["file"]: c["state"] for c in md.compiled_beside(md.MT5, [fake], include_appdata=False)}
-check("forditas nelkul: „nincs fordítva”",
-      all(v == "nincs fordítva" for v in cb.values()), str(set(cb.values())))
+# ⚠ Ahol a repoban VAN tarolt (egyezo) binaris, oda a kitelepites azt is kivitte
+# — ott tehat mar "rendben" all. Amihez nincs tarolt, az "nincs fordítva".
+_stored = {c["file"] for c in md.compiled_status(md.MT5) if c["state"] == "egyezik"}
+check("ahol nincs tarolt binaris, ott „nincs fordítva”",
+      all(v == "nincs fordítva" for k, v in cb.items() if k not in _stored),
+      str({k: v for k, v in cb.items() if k not in _stored and v != "nincs fordítva"}))
+check("...ahol viszont van tarolt, azt a kitelepites KI IS VITTE",
+      all(cb.get(k) == "rendben" for k in _stored if k in cb),
+      str({k: cb.get(k) for k in _stored if k in cb}))
 import os
 import time
 _ex = fake / "MQL5" / "Indicators" / (_first.stem + ".ex5")
@@ -199,6 +209,54 @@ _dep = _i.getsource(md.deploy)
 # szallitva.
 check("a kitelepites csak EGYEZO leforditottat visz ki",
       '"egyezik"' in _dep and "stale_compiled" in _dep)
+
+
+# ── 10. A BEOLVASAS NEM KOTHET REGI BINARIST UJ FORRASHOZ ────────────────
+# ⚠ Ez elo is allt: a verzio-sor hozzaadasa utan a beolvasas a MEG A REGI
+# forrasbol forditott .ex5-oket az UJ forras ujjlenyomatahoz kotötte volna, es a
+# felulet magabiztosan "egyezik"-et mutatott volna. Pontosan az az allapot, ami
+# ellen az egesz modul keszult.
+_t2 = Path(tempfile.mkdtemp(prefix="mtcapture_test_"))
+_term = _t2 / "Broker MT4"
+_ind = _term / "MQL4" / "Indicators"
+_ind.mkdir(parents=True)
+_src0 = md.sources(md.MT4)[0]
+_dep = _ind / _src0.name
+shutil.copy2(_src0, _dep)                       # kitelepitve (byte-azonos)
+_exf = _dep.with_suffix(".ex4")
+_exf.write_bytes(b"binaris")
+os.utime(_exf, None)                            # a binaris UJABB a forrasnal
+
+_cdir = md._compiled_dir(md.MT4)
+_backup = None
+if _cdir.exists():
+    _backup = Path(tempfile.mkdtemp()) / "compiled_backup"
+    shutil.copytree(_cdir, _backup)
+    shutil.rmtree(_cdir)
+
+r1 = md.capture_compiled(md.MT4, [_term], include_appdata=False)
+check("egyezo forras + ujabb binaris -> ATVESZI",
+      _src0.stem + ".ex4" in r1["taken"], str(r1))
+
+# Most a TERMINALBAN levo forras ELTER a repotol (mintha kozben szerkesztettuk
+# volna a repo-forrast, es meg nem telepitettuk ki).
+_dep.write_text("// MAS SZOVEG" + chr(10), encoding="utf-8")
+shutil.rmtree(_cdir, ignore_errors=True)
+r2 = md.capture_compiled(md.MT4, [_term], include_appdata=False)
+check("ELTERO forras -> NEM veszi at (nem koti hamisan)",
+      _src0.name in r2["missing"] and not r2["taken"], str(r2))
+
+# Es ha a binaris REGEBBI a forrasnal, akkor sem.
+shutil.copy2(_src0, _dep)
+os.utime(_exf, (_dep.stat().st_mtime - 60, _dep.stat().st_mtime - 60))
+shutil.rmtree(_cdir, ignore_errors=True)
+r3 = md.capture_compiled(md.MT4, [_term], include_appdata=False)
+check("REGEBBI binaris -> NEM veszi at", _src0.name in r3["missing"], str(r3))
+
+shutil.rmtree(_cdir, ignore_errors=True)
+if _backup is not None:
+    shutil.copytree(_backup, _cdir)
+shutil.rmtree(_t2, ignore_errors=True)
 
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")

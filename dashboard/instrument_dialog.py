@@ -841,103 +841,26 @@ class InstrumentParamsDialog:
                                    fg=BTN_PLAY_FG, relief="flat", font=self._sf,
                                    command=self._save)
         self._btn_save.pack(side="left", padx=6)
+        # ⚠ A GOMBSOR MEGTISZTÍTVA. A „Backtest", a „Trials CSV" és az „MT4
+        # visszajátszás" mind LEKERÜLT: mindháromnak van saját lapja
+        # (Futtatás / Eredmények / Kapcsolat→MT4), és a lapos változat többet
+        # tud — megjegyzett időszakot, szűrést, naptárat, élő tervet.
+        #
+        # Két belépési pont ugyanahhoz a művelethez nem kényelem, hanem kérdés:
+        # „melyik a mérvadó?". Éppen ezt a kérdést szüntettük meg a lapok
+        # összevonásával; egy megmaradt gomb visszahozta volna.
+        #
+        # A `_btn_bt` widget LÉTREJÖN (a Mentés-ág állítgatja az állapotát),
+        # csak nincs kicsomagolva.
         self._btn_bt = tk.Button(btns, text="Backtest", bg=BTN_BT_BG, fg=BTN_BT_FG,
                                  relief="flat", font=self._sf,
                                  command=self._open_backtest_window)
-        self._btn_bt.pack(side="left", padx=6)
-        tk.Button(btns, text="Trials CSV", bg=BTN_BT_BG, fg=BTN_BT_FG, relief="flat",
-                  font=self._sf, command=self._open_trials).pack(side="left", padx=6)
-        # MT4-es manuális visszajátszás: EBBEN az ablakban van a helye, mert a
-        # belépők STRATÉGIA-FÜGGŐK — más stratégia más jelzéseket ad ugyanarra a
-        # hétre. (Egy globális gomb nem tudná, melyiket exportálja.)
-        tk.Button(btns, text="MT4 visszajátszás", bg=BTN_BT_BG, fg=BTN_BT_FG,
-                  relief="flat", font=self._sf,
-                  command=self._open_mt4_export).pack(side="left", padx=6)
         tk.Button(btns, text="Mégse", bg=BTN_DIS_BG, fg=BTN_DIS_FG, relief="flat",
                   font=self._sf, command=popup.destroy).pack(side="left", padx=6)
 
         self._fit_to_screen(popup, body, footer)
         # Az ELSŐ lap feltöltése — most már van `self._shell` (lásd `_on_tab`).
         self._build_overview_tab()
-
-    def _open_mt4_export(self):
-        """MT4-es manuális visszajátszás: tól-ig ablak kiírása a viz-fájlba.
-
-        ⚠ STRATÉGIA-FÜGGŐ: az exportot EZZEL az ablakkal nyitott stratégiával
-        (`self.strategy.name`) számoljuk — más stratégia ugyanarra a hétre MÁS
-        belépőket ad. Ezért van a gomb itt, és nem egy globális menüben.
-
-        Külön fájlba (`_BT`) ír, hogy az élő motor pillanatképét ne írja felül.
-        A valós kötések alapból KIMARADNAK: manuális teszten azok a megfejtés."""
-        import threading
-        from datetime import date, timedelta
-
-        pop = tk.Toplevel(self.popup)
-        pop.title(f"MT4 visszajátszás — {self.symbol} / {self.strategy.name}")
-        pop.configure(bg=BG)
-        pop.transient(self.parent)
-
-        tk.Label(pop, text=f"{self.symbol}  ·  stratégia: {self.strategy.name}",
-                 bg=BG, fg=FG_WHITE, font=self._sf).grid(row=0, column=0, columnspan=3,
-                                                   sticky="w", padx=10, pady=(10, 2))
-        tk.Label(pop, text="A jelzéseket EZZEL a stratégiával számoljuk.",
-                 bg=BG, fg=FG_GRAY_DIM, font=self._sf).grid(
-                     row=1, column=0, columnspan=3, sticky="w", padx=10)
-
-        _to = date.today()
-        _fr = _to - timedelta(days=12)
-        v_from = tk.StringVar(value=_fr.isoformat())
-        v_to = tk.StringVar(value=_to.isoformat())
-        v_trades = tk.BooleanVar(value=False)
-
-        tk.Label(pop, text="-tól (ÉÉÉÉ-HH-NN):", bg=BG, fg=FG_WHITE, font=self._sf).grid(
-            row=2, column=0, sticky="e", padx=(10, 4), pady=(10, 2))
-        tk.Entry(pop, textvariable=v_from, width=14, font=self._sf).grid(
-            row=2, column=1, sticky="w", pady=(10, 2))
-        tk.Label(pop, text="-ig:", bg=BG, fg=FG_WHITE, font=self._sf).grid(
-            row=3, column=0, sticky="e", padx=(10, 4))
-        tk.Entry(pop, textvariable=v_to, width=14, font=self._sf).grid(
-            row=3, column=1, sticky="w")
-
-        tk.Checkbutton(pop, text="A bot VALÓS kötései is látszódjanak (manuális teszthez NE)",
-                       variable=v_trades, bg=BG, fg=FG_GRAY_DIM, selectcolor=BG,
-                       activebackground=BG, font=self._sf).grid(
-                           row=4, column=0, columnspan=3, sticky="w", padx=10, pady=(8, 2))
-
-        lbl = tk.Label(pop, text="", bg=BG, fg=FG_GRAY_DIM, font=self._sf,
-                       justify="left", wraplength=460)
-        lbl.grid(row=5, column=0, columnspan=3, sticky="w", padx=10, pady=(6, 2))
-
-        btn = tk.Button(pop, text="Export", bg=BTN_PLAY_BG, fg=BTN_PLAY_FG,
-                        relief="flat", font=self._sf)
-        btn.grid(row=6, column=0, padx=10, pady=10, sticky="w")
-        tk.Button(pop, text="Bezár", bg=BTN_DIS_BG, fg=BTN_DIS_FG, relief="flat",
-                  font=self._sf, command=pop.destroy).grid(row=6, column=1,
-                                                           pady=10, sticky="w")
-
-        def _run():
-            btn.config(state="disabled")
-            lbl.config(text="Export fut…", fg=FG_GRAY_DIM)
-
-            def _work():
-                # A KÖZÖS exportáló út (a CLI is ezt hívja) — nincs másolt logika.
-                from tools.viz_export import export_window
-                try:
-                    ok, msg = export_window(
-                        self.symbol, v_from.get().strip(), v_to.get().strip(),
-                        strategy_name=self.strategy.name, suffix="_BT",
-                        show_trades=bool(v_trades.get()), cfg=self.root_cfg,
-                        status=lambda m: pop.after(0, lambda: lbl.config(text=m)))
-                except Exception as ex:
-                    ok, msg = False, f"Hiba: {ex}"
-                def _done():
-                    lbl.config(text=msg, fg=(FG_GREEN if ok else FG_RED))
-                    btn.config(state="normal")
-                pop.after(0, _done)
-
-            threading.Thread(target=_work, daemon=True, name="MT4Export").start()
-
-        btn.config(command=_run)
 
     def _on_tab(self, name):
         # ⚠ A TabShell a KONSTRUKTORÁBAN megmutatja az első lapot — vagyis ez a

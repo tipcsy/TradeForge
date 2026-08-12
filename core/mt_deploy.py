@@ -305,11 +305,28 @@ def capture_compiled(platform: str, extra_roots=None,
     for src in sources(platform):
         newest, newest_m = None, -1.0
         for root in targets(platform, extra_roots, include_appdata):
-            cand = dest_for(root, src).with_suffix(ext)
-            if cand.exists():
-                m = cand.stat().st_mtime
-                if m > newest_m:
-                    newest, newest_m = cand, m
+            deployed = dest_for(root, src)
+            cand = deployed.with_suffix(ext)
+            if not cand.exists() or not deployed.exists():
+                continue
+            # ⚠ CSAK olyan binárist veszünk át, ami BIZONYÍTHATÓAN a MOSTANI
+            # forrásból készült. Két feltétel, és mindkettő kell:
+            #   (a) a terminálban levő FORRÁS byte-azonos a repóéval — különben
+            #       a bináris egy MÁSIK szöveghez tartozik,
+            #   (b) a bináris ÚJABB annál a forrásnál — különben előbb készült.
+            #
+            # Enélkül a jegyzék a MOSTANI forrás ujjlenyomatát írná egy RÉGI
+            # binárishoz, és a felület magabiztosan „egyezik"-et mutatna. Ez
+            # pontosan az az állapot, ami ellen az egész modul készült — és az
+            # első futáskor elő is állt: a verzió-sor hozzáadása után a
+            # beolvasás a régi .ex5-öket az új forráshoz kötötte volna.
+            if not _same_bytes(src, deployed):
+                continue
+            if cand.stat().st_mtime < deployed.stat().st_mtime:
+                continue
+            m = cand.stat().st_mtime
+            if m > newest_m:
+                newest, newest_m = cand, m
         if newest is None:
             res["missing"].append(src.name)
             continue
