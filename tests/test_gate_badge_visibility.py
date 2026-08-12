@@ -122,6 +122,80 @@ check("...es PIROSSAL (nem nemul el)", _c["volatility"].fg == _th.FG_RED,
       str(_c["volatility"].fg))
 
 
+
+# ── 5. A cella MAGATOL ERTHETO legyen ─────────────────────────────────────
+# ⚠ A puszta arany nem mond semmit: a "0,51×" onmagaban nem arulja el, hogy az
+# sok vagy keves — ahhoz tudni kellene a savot. A savon KIVULI erteknel ezert
+# ott az IRANY is.
+from dashboard import row_source as rs
+
+
+def _vc(atr, base, lo=0.6, hi=3.0):
+    return rs._volatility_cell({"atr_price": atr, "atr_baseline": base,
+                                "vol_params": {"atr_min_pct": lo,
+                                               "atr_max_pct": hi}})
+
+
+check("a savban: puszta arany, nem blokkol",
+      _vc(15.0, 10.0)["text"] == "1.50×" and not _vc(15.0, 10.0)["blocking"])
+check("a PADLO alatt: lefele nyil", _vc(5.1, 10.0)["text"].endswith("↓"),
+      _vc(5.1, 10.0)["text"])
+check("a PLAFON folott: felfele nyil", _vc(42.0, 10.0)["text"].endswith("↑"),
+      _vc(42.0, 10.0)["text"])
+check("...es mindketto BLOKKOLONAK jelolt",
+      _vc(5.1, 10.0)["blocking"] and _vc(42.0, 10.0)["blocking"])
+check("a cella az INDOKOT is viszi (a kapu-ablakhoz)",
+      "csendes" in (_vc(5.1, 10.0).get("why") or ""), _vc(5.1, 10.0).get("why", ""))
+check("merce nelkul: „—”, nem 0", _vc(12.0, None)["text"] == "—")
+
+# Az oszlop MINTA-szovege (ez adja a szelesseget) ferjen az iranyjelnek is.
+_w = (lr.COLUMN_SAMPLES if hasattr(lr, "COLUMN_SAMPLES") else {}) or {}
+_sample = None
+for _k in dir(lr):
+    _v = getattr(lr, _k)
+    if isinstance(_v, dict) and "volatility" in _v and isinstance(
+            _v.get("volatility"), tuple):
+        _sample = _v["volatility"][1]
+        break
+check("az oszlop minta-szovege elbirja az iranyjelet",
+      _sample is None or len(_sample) >= len("9.99×↓"), str(_sample))
+
+
+# ── 6. MINDEN kapu-megnyito lefut (NameError nelkul) ──────────────────────
+# ⚠ A `_show_volatility_gate`-bol HIANYZOTT a `core.gates` importja. Nem derult
+# ki, mert a cellara ra sem lehetett kattintani (nem letezett) — amint
+# megjelent, azonnal NameError-ral szallt el. Ez a teszt MINDEGYIKET meghivja.
+try:
+    from dashboard import gui as _gui
+    _cls = next(c for _n, c in vars(_gui).items()
+                if isinstance(c, type) and hasattr(c, "_show_volatility_gate"))
+
+    _opened = []
+
+    class _Fake(_cls):
+        def __init__(self):
+            pass
+
+        def _open_gate_dialog(self, sym, key):
+            _opened.append(key)
+
+    _f = _Fake()
+    _names = [n for n in dir(_cls)
+              if n.startswith("_show_") and n.endswith("_gate")]
+    _bad = []
+    for _n in _names:
+        try:
+            getattr(_f, _n)("TEST")
+        except Exception as ex:
+            _bad.append(f"{_n}: {type(ex).__name__}: {ex}")
+    check(f"minden kapu-megnyito lefut ({len(_names)} db)", not _bad,
+          "; ".join(_bad))
+    check("...es tenylegesen kaput nyit", len(_opened) == len(_names),
+          f"{len(_opened)}/{len(_names)}")
+except StopIteration:
+    check("nincs dashboard-osztaly (kihagyva)", True)
+
+
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")
 sys.exit(0 if all(results) else 1)

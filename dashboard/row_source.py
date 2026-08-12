@@ -95,8 +95,17 @@ def _volatility_cell(ctx: dict, on_click=None, symbol: str = None) -> dict:
     r = st["ratio"]
     if r != r:
         return {"text": "—", "blocking": False, "value": None, "on_click": click}
-    return {"text": f"{r:.2f}×", "blocking": not st["ok"], "value": float(r),
-            "on_click": click}
+    # ⚠ A PUSZTA ARÁNY nem mond semmit: a „0,51×" önmagában nem árulja el, hogy
+    # az sok vagy kevés — ahhoz tudni kellene a sávot. Ezért a sávon KÍVÜLI
+    # értékhez odatesszük az IRÁNYT is: „0,51×↓" = a padló alatt (túl csendes),
+    # „4,20×↑" = a plafon fölött (túl kaotikus). Így a cella magától érthető,
+    # a pontos küszöböket pedig a rákattintás nyitotta ablak mutatja.
+    mark = ""
+    if not st["ok"]:
+        _lo, _hi = st.get("lo") or 0.0, st.get("hi") or 0.0
+        mark = "↓" if (_lo > 0 and float(atr) < _lo) else ("↑" if _hi > 0 else "")
+    return {"text": f"{r:.2f}×{mark}", "blocking": not st["ok"],
+            "value": float(r), "why": st.get("why", ""), "on_click": click}
 
 
 def _cost_cell(ctx: dict, on_click=None, symbol: str = None) -> dict:

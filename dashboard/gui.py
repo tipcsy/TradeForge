@@ -3133,7 +3133,13 @@ class DashboardWindow:
 
     def _show_volatility_gate(self, symbol: str):
         """A Volatilitás-oszlop CSAK KIJELZÉS: az ablak megmutatja a mostani
-        ATR-t, a kalibrált mércét és az engedett sávot — hatást nem állít."""
+        ATR-t, a kalibrált mércét és az engedett sávot — hatást nem állít.
+
+        ⚠ Innen HIÁNYZOTT a `core.gates` importja (a testvér-metódusokban ott
+        van). Nem derült ki, mert a `Volat.` cellát a tábla SOSEM rajzolta meg
+        (lásd v2.37.1) — így erre a kódra rá sem lehetett kattintani. Amint a
+        cella megjelent, azonnal `NameError`-ral szállt el."""
+        from core import gates as _g
         self._open_gate_dialog(symbol, _g.VOLATILITY)
 
     def _show_market_gate(self, symbol: str):

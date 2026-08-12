@@ -84,7 +84,11 @@ if fs:
 print("== A cella: arany + blokkolo allapot ==")
 ctx_out = g.ctx_from_state(DS(140.19, 272.75), PRM, PC)
 cell = rs._volatility_cell(ctx_out)
-check("a BTCUSD-eset 0.51x-et mutat", cell["text"] == "0.51×", cell["text"])
+# ⚠ Az ARANY a lenyeg; a savon KIVULI erteknel a cella az IRANYT is kiirja
+# ("0,51×↓" = a padlo alatt). A puszta arany onmagaban nem arulja el, hogy az
+# sok vagy keves — ahhoz tudni kellene a savot.
+check("a BTCUSD-eset 0.51x-et mutat", cell["text"].startswith("0.51×"), cell["text"])
+check("...es az IRANYT is (a padlo alatt)", cell["text"].endswith("↓"), cell["text"])
 check("...es BLOKKOLONAK jelzi", cell["blocking"] is True)
 check("...a rendezheto ertek is megvan", abs(cell["value"] - 0.514) < 0.01,
       str(cell["value"]))
@@ -134,7 +138,10 @@ check("van leirasa", (g.doc_text(g.VOLATILITY) or "").strip() != "" and
 check("a leiras a valodi meressel indokol", "0,51" in g.doc_text(g.VOLATILITY))
 
 from dashboard import live_row as lr             # noqa: E402
-check("van fejlec-szovege", lr._HEADER_TEXT.get("volatility") == "Volat.")
+# A fejlec mondja meg, MIHEZ kepest merunk: az „×" jelzi, hogy ez ARANY (a
+# kalibralt mercehez), nem abszolut ATR.
+check("van fejlec-szovege", (lr._HEADER_TEXT.get("volatility") or "").startswith("Volat."),
+      lr._HEADER_TEXT.get("volatility"))
 check("van szelesseg-mintaja", "volatility" in lr._SAMPLE)
 
 print()
