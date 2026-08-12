@@ -105,6 +105,16 @@ def cells_for(d: dict, collapsed: dict, on_close=None) -> dict:
             out["cost"] = Cell("cost", text=co.get("text", "—"), anchor="center",
                                on_click=co.get("on_click"),
                                fg=(FG_RED if co.get("blocking") else FG_GREEN))
+        # ⚠ A VOLATILITÁS oszlopa eddig KIMARADT innen: a fejléce megjelent (a
+        # `gate_order` engedi), de cella SOSEM készült hozzá — az oszlop minden
+        # soron ÜRES volt. Közben a `K.Össz.` számolta a volatilitás blokkoló
+        # állapotát, tehát a sor „⛔1"-et mutatott LÁTHATÓ ok nélkül. Pontosan az
+        # a hibaosztály, ami miatt ez az oszlop egyáltalán megszületett: a
+        # BTCUSD hetekig némán nem kereskedett 0,51× aránnyal.
+        vo = g.get("volatility") or {}
+        out["volatility"] = Cell("volatility", text=vo.get("text", "—"),
+                                 anchor="center", on_click=vo.get("on_click"),
+                                 fg=(FG_RED if vo.get("blocking") else FG_GREEN))
     badge = g.get("badge", "✓")
     out["badge"] = Cell("badge", text=badge, anchor="center",
                         fg=(FG_RED if badge != "✓" else FG_GREEN))

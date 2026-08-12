@@ -224,7 +224,20 @@ def row_data(symbol: str, ds, strategy_names, cfg: dict = None,
 
     # A K.Össz.-hez a MÉRÉST nézzük: minden kaput blokkolónak véve megkapjuk,
     # hány kapu áll blokkoló állapotban (lásd a modul fejlécét).
-    measure_effects = {k: _g.EFFECT_BLOCK for k in _g.KEYS}
+    #
+    # ⚠ DE CSAK AZ ENGEDÉLYEZETTEKET. A Beállításokban kikapcsolt kapunak nincs
+    # oszlopa ÉS nem is szól bele a kereskedésbe (`gate_layout` mester-kapcsoló)
+    # — ha mégis beleszámolna a jelvénybe, a sor „⛔1"-et mutatna olyasmiért,
+    # aminek se látható nyoma, se tényleges hatása nincs. A felhasználó pedig
+    # jogosan kérdezné, hogy akkor MIÉRT nem kereskedik.
+    #
+    # A kikapcsoltakat kifejezetten `EFFECT_NONE`-ra kell állítani, nem elhagyni
+    # a szótárból: az `evaluate` a hiányzó kulcsra a kapu ALAPÉRTELMEZETT
+    # hatásával számol, nem semmissel.
+    from core import gate_layout as _gl
+    _on = set(_gl.enabled_gates(cfg or {}))
+    measure_effects = {k: (_g.EFFECT_BLOCK if k in _on else _g.EFFECT_NONE)
+                       for k in _g.KEYS}
     _measured = _g.evaluate(ctx, measure_effects)
     badge = _g.badge(_measured)
     blocking_count = len(_g.blocking(_measured))   # a rendezéshez (a `⛔n` száma)
