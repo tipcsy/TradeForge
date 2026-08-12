@@ -368,7 +368,7 @@ class InstrumentParamsDialog:
         # tudni olvasni, mit is állítunk.
         from dashboard.tab_shell import TabShell
         self._shell = TabShell(popup, ("Áttekintés", "Paraméter", "Futtatás",
-                                "Eredmények", "Leírás"),
+                                "Eredmények", "Kapcsolat", "Leírás"),
                                on_show=self._on_tab, notify_every_show=True)
 
         # Görgethető törzs — innentől MINDEN tartalom ide (`body`) megy.
@@ -961,6 +961,12 @@ class InstrumentParamsDialog:
         if name == "Futtatás":
             self._build_run_tab()
             return
+        if name == "Kapcsolat":
+            # MINDIG friss: a terminál-mappák állapota (mi van kint, mi elavult)
+            # két megnyitás között is változhat — egy gyorsítótárazott lap épp
+            # azt takarná el, amiért készült.
+            self._build_link_tab()
+            return
         if name == "Eredmények":
             # LUSTA: az 500 soros CSV beolvasása és a tábla felépítése nem
             # kell minden ablak-megnyitáskor. Minden megjelenítéskor ÚJRAOLVAS:
@@ -1364,6 +1370,144 @@ class InstrumentParamsDialog:
             if h.get("count"):
                 cv.create_text(x + bw / 2, self._HOUR_H + 19, text=str(h["count"]),
                                fill=FG_GRAY_DIM, font=self._sf)
+
+    # ── „Kapcsolat” lap — MT4 / MT5 ────────────────────────────────────────
+    # A doksi kérése: az indikátorok kimásolása a megfelelő MetaTrader mappába,
+    # backtest-generálás az AKTUÁLIS paraméterekkel, és leírás a működésről.
+    #
+    # ⚠ MIÉRT EZ A LAP LEGFONTOSABB RÉSZE AZ ÁLLAPOT, nem a gomb: a `.mq4`/`.mq5`
+    # a repóban él, a terminál a SAJÁTJÁBÓL olvas. Ha a kettő eltér, a terminál
+    # CSENDBEN a régit futtatja, és a javítást hiába keresed a képernyőn — pont
+    # ez történt az MT4-es visszajátszás fejlesztésekor (kilenc verzió, mind néma
+    # hiba). A lap ezért ELŐSZÖR megmondja, mi van kint, és csak utána kínál gombot.
+
+    def _build_link_tab(self):
+        page = self._shell.page("Kapcsolat")
+        for w in page.winfo_children():
+            w.destroy()
+        from dashboard.tab_shell import TabShell
+        # ⚠ A TabShell a KONSTRUKTORÁBAN megmutatja az első lapot, tehát a
+        # visszahívás lefutna, mielőtt a `self._link_sub` létezne. Ezért előbb
+        # LÉTREHOZZUK visszahívás nélkül, elmentjük, és csak utána kötjük be —
+        # majd expliciten megmutatjuk az elsőt. (Ugyanez a csapda a fő héjnál is
+        # elsült; lásd `_on_tab`.)
+        sub = TabShell(page, ("MT4", "MT5"), width=90, notify_every_show=True)
+        self._link_sub = sub
+        sub._on_show = self._build_link_pane
+        sub.show("MT4")
+
+    def _build_link_pane(self, name: str):
+        from core import mt_deploy as _md
+        pane = self._link_sub.page(name)
+        for w in pane.winfo_children():
+            w.destroy()
+        holder, body, _cv = _scrollable(pane)
+        holder.pack(side="top", fill="both", expand=True)
+
+        def _h(txt):
+            tk.Label(body, text=txt, bg=BG, fg=FG_WHITE, font=self._hf,
+                     anchor="w").pack(anchor="w", padx=10, pady=(10, 2))
+
+        def _n(txt, fg=FG_GRAY):
+            tk.Label(body, text=txt, bg=BG, fg=fg, font=self._sf, anchor="w",
+                     justify="left", wraplength=820).pack(anchor="w", padx=10)
+
+        roots = _md.discover_roots()
+        st = _md.status(name, roots)
+        tgts = _md.targets(name, roots)
+
+        # ── 1. MI VAN KINT ─────────────────────────────────────────────────
+        _h(f"{name} indikátorok — mi van a terminálokban")
+        if not tgts:
+            _n("Nem találtam terminál-mappát. Portable telepítésnél a "
+               "MetaTrader a saját mappájából olvas — nyisd meg a terminálban a "
+               "Fájl → Adatmappa megnyitása pontot, és nézd meg, hol van.", FG_RED)
+        else:
+            from collections import Counter
+            cnt = Counter(s["state"] for s in st)
+            _fg = (FG_RED if cnt.get("elavult") else
+                   (FG_YELLOW if cnt.get("hiányzik") else FG_GREEN))
+            _n(f"{len(tgts)} terminál-mappa · friss {cnt.get('friss', 0)} · "
+               f"elavult {cnt.get('elavult', 0)} · hiányzik {cnt.get('hiányzik', 0)}",
+               _fg)
+            # ⚠ Az ELAVULT a legfontosabb: ott MÁS fut, mint amit a repóban látsz.
+            bad = [s for s in st if s["state"] == "elavult"]
+            for s in bad:
+                tk.Label(body, bg=BG, fg=FG_RED, font=self._sf, anchor="w",
+                         justify="left", wraplength=820,
+                         text=f"   ⚠ ELAVULT: {s['file']}  —  {s['target']}"
+                         ).pack(anchor="w", padx=10)
+            if bad:
+                _n("Az elavult fájlnál a terminál MÁST futtat, mint ami a "
+                   "repóban van. Kitelepítés után a MetaEditorban újra kell "
+                   "fordítani (F7), különben a régi lefordított marad érvényben.",
+                   FG_RED)
+            for t in tgts:
+                tk.Label(body, bg=BG, fg=FG_GRAY_DIM, font=self._sf, anchor="w",
+                         text=f"   {t}").pack(anchor="w", padx=10)
+
+        row = tk.Frame(body, bg=BG)
+        row.pack(anchor="w", padx=10, pady=(6, 2))
+        tk.Button(row, text="Kitelepítés", bg=BTN_PLAY_BG, fg=BTN_PLAY_FG,
+                  relief="flat", font=self._sf,
+                  command=lambda p=name: self._deploy_mql(p)).pack(side="left")
+        self._link_status = tk.Label(row, text="", bg=BG, fg=FG_GRAY,
+                                     font=self._sf)
+        self._link_status.pack(side="left", padx=(10, 0))
+
+        me = _md.metaeditor(name)
+        _n(("MetaEditor: " + str(me)) if me else
+           "MetaEditor: nem találom — a fordítás (F7) kézzel megy a terminálból.",
+           FG_GRAY_DIM)
+        # ⚠ Nem fordítunk. Kimondjuk, mert a „kitelepítve" önmagában NEM jelenti
+        # azt, hogy az új kód FUT: a régi .ex4/.ex5 addig érvényben marad.
+        _n("A kitelepítés a FORRÁST másolja. A terminál a LEFORDÍTOTT változatot "
+           "futtatja — a másolás után nyisd meg a fájlt a MetaEditorban és "
+           "fordítsd újra (F7).", FG_YELLOW)
+
+        # ── 2. AMIT INNEN INDÍTHATSZ ───────────────────────────────────────
+        if name == "MT4":
+            _h("Visszajátszás generálása")
+            _n("A Paraméter lap AKTUÁLIS értékeivel kiírja a választott időszak "
+               "jelzéseit a MetaTrader közös mappájába. A Strategy Testerben a "
+               "TradeForgeViz/WPR/Bands indikátorokat rakd fel, `_BT` utótaggal.")
+            tk.Button(body, text="MT4 visszajátszás…", bg=BTN_BT_BG, fg=BTN_BT_FG,
+                      relief="flat", font=self._sf,
+                      command=self._open_mt4_export).pack(anchor="w", padx=10,
+                                                          pady=(4, 2))
+            _n("⚠ A kapukkal futtatott export CSAK azokat a jelzéseket mutatja, "
+               "amiket a motor tényleg megkötne. Ha a nyers jelzéseket akarod "
+               "látni, kapuk nélkül exportálj — a kettő különbsége mutatja meg, "
+               "mennyit szűrnek a kapuk.", FG_GRAY_DIM)
+        else:
+            _h("Élő megjelenítés")
+            _n("Az élő motor folyamatosan írja a viz-fájlt a közös mappába; a "
+               "chartra rakott TradeForgeViz/WPR/Bands ebből dolgozik. A kapuk "
+               "beállítását a Futtatás lap fejléce mutatja.")
+            _n("A ⚙ Kapuk ablakban állítod, melyik kapu mit tegyen — az élő "
+               "megjelenítés a következő körben követi.", FG_GRAY_DIM)
+
+    def _deploy_mql(self, platform: str):
+        """A repó indikátorainak kimásolása MINDEN megtalált terminál-mappába."""
+        from core import mt_deploy as _md
+        try:
+            res = _md.deploy(platform, _md.discover_roots())
+        except Exception as ex:
+            self._link_status.config(text=f"Hiba: {ex}", fg=FG_RED)
+            return
+        if res["errors"]:
+            self._link_status.config(text=res["errors"][0][:110], fg=FG_RED)
+            return
+        self._link_status.config(
+            text=(f"{len(res['copied'])} fájl kimásolva "
+                  f"({res['targets']} mappába), {len(res['skipped'])} már friss "
+                  f"volt. Fordítsd újra a MetaEditorban (F7)."),
+            fg=FG_GREEN)
+        # A lap újraépül, hogy az állapot AZONNAL a valóságot mutassa.
+        try:
+            self._build_link_pane(platform)
+        except Exception:
+            pass
 
     # ── „Eredmények” lap — a trials CSV OLVASHATÓ formában ─────────────────
     # A doksi kérése: szűrhető, rendezhető tábla, típusos mezőkkel (DD = %), a
