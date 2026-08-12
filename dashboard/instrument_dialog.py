@@ -270,6 +270,21 @@ class InstrumentParamsDialog:
         # jelzi a _bt_done-nak, hogy a backtest UTÁN folytassa a mentést.
         self._save_after_bt = False
 
+        # ── A FUTTATÁS lap állapota ────────────────────────────────────────
+        # ⚠ Ezeknek a `_build()` ELŐTT kell létezniük: a lap lustán épül, de a
+        # Paraméter lap pipái (`_on_skip_change` → `_refresh_opt_space`) és a
+        # bezárás-kezelő már előbb hozzájuk nyúlhat.
+        self._run_tab = None        # a beágyazott backtest
+        self._run_params = None     # amivel épült (paraméter-változásra újraépül)
+        self._tuned_lbl = None      # a terv-sáv címkéi
+        self._space_lbl = None
+        self._sweep_box = None
+        self._sw_stop = None        # futó söprés megszakító-jelzője (háttérszál)
+        self._sw_rows, self._sw_axes = [], []
+        self._opt_rows = []
+        self._opt_plan = None
+        self._opt_cfg_cache = {}
+
         self._build()
 
     # ── trials CSV ──────────────────────────────────────────────────────────
@@ -352,7 +367,7 @@ class InstrumentParamsDialog:
         # kérésére ugyanennek a formnak a lapja lett: a paraméterek MELLETT kell
         # tudni olvasni, mit is állítunk.
         from dashboard.tab_shell import TabShell
-        self._shell = TabShell(popup, ("Áttekintés", "Paraméter", "Futtatás", "Optimalizálás",
+        self._shell = TabShell(popup, ("Áttekintés", "Paraméter", "Futtatás",
                                 "Eredmények", "Leírás"),
                                on_show=self._on_tab, notify_every_show=True)
 
@@ -953,12 +968,6 @@ class InstrumentParamsDialog:
             # lap visszakattintása friss allast mutat (nem elavult masolatot).
             self._build_results_tab()
             return
-        if name == "Optimalizálás":
-            # LUSTA: a walk-forward ablakokhoz be kell olvasni az M15 előzményt
-            # (parquet), ami néhány tized másodperc — nem terheljük vele minden
-            # ablak-megnyitást, csak ha tényleg megnézed.
-            self._build_opt_tab()
-            return
         if name != "Leírás":
             return
         from dashboard import md_view
@@ -1002,6 +1011,17 @@ class InstrumentParamsDialog:
                      bg=BG, fg=FG_RED, font=self._sf).pack(anchor="w", padx=12,
                                                            pady=12)
             return
+        # ── A lap KÉT részből áll ──────────────────────────────────────────
+        # Fent a TERV (mi fog történni és milyen feltételek mellett), alatta a
+        # tényleges futtató. A korábbi külön „Optimalizálás" lap tartalma ide
+        # költözött: ugyanarra a kérdésre válaszolt, csak más számmal.
+        plan_box = tk.Frame(page, bg=BG)
+        plan_box.pack(side="top", fill="x")
+        bt_host = tk.Frame(page, bg=BG)
+        bt_host.pack(side="top", fill="both", expand=True)
+
+        self._build_plan_strip(plan_box)
+
         from dashboard.backtest_dialog import BacktestDialog
         self._run_params = dict(params)
         self._run_tab = BacktestDialog(
@@ -1010,7 +1030,165 @@ class InstrumentParamsDialog:
             on_result=self._on_bt_window_result,
             preset_name=self._rr_name.get(),
             on_apply_params=self._apply_params_from_bt,
-            host=page)
+            host=bt_host)
+
+    # ── A TERV-SÁV: mi fog történni, ha elindítod ──────────────────────────
+    # A felhasználó észrevétele: „a Paraméter, Futtatás, Optimalizálás igazából
+    # egy és ugyanaz — de valahogy mégsem." Igaza volt, és a törés itt van:
+    #
+    #     Paraméter        → MILYEN érték?
+    #     Futtatás         → futtasd le EGYSZER
+    #     Optimalizálás    → futtasd le SOKSZOR
+    #
+    # A második és a harmadik UGYANAZ a kérdés, más számmal — és a számot nem
+    # kell külön beállítani, kiderül abból, hány paramétert pipáltál be
+    # (`core.opt_plan.run_plan`). Ezért lett a három lapból kettő.
+
+    def _build_plan_strip(self, box):
+        from core import opt_plan as _op
+        from core import gates as _gt
+        from strategy.settings import load_strategy_config as _lsc
+
+        try:
+            self._opt_cfg_cache = _lsc(self.strategy.name).get("optimizer", {}) or {}
+        except Exception:
+            self._opt_cfg_cache = {}
+        df15 = None
+        try:
+            from trading.backtest import load_data
+            df15, _ = load_data(self.symbol)
+        except Exception:
+            pass
+        try:
+            plan = _op.build(self.root_cfg, self.symbol, self.strategy,
+                             self._opt_cfg_cache, df_m15=df15)
+        except Exception:
+            plan = None
+        self._opt_plan = plan
+
+        head = tk.Frame(box, bg=BG)
+        head.pack(anchor="w", fill="x", padx=12, pady=(10, 0))
+        tk.Label(head, text="Mi fog történni", bg=BG, fg=FG_WHITE,
+                 font=self._hf).pack(side="left")
+        self._plan_btn = tk.Button(head, text="Indítás", bg=BTN_PLAY_BG,
+                                   fg=BTN_PLAY_FG, relief="flat", font=self._sf,
+                                   command=self._start_planned)
+        self._plan_btn.pack(side="right", padx=(8, 0))
+
+        self._tuned_lbl = tk.Label(box, bg=BG, fg=FG_GRAY, font=self._sf,
+                                   anchor="w", justify="left")
+        self._tuned_lbl.pack(anchor="w", padx=12)
+        self._space_lbl = tk.Label(box, bg=BG, fg=FG_GRAY_DIM, font=self._sf,
+                                   anchor="w", justify="left")
+        self._space_lbl.pack(anchor="w", padx=12, pady=(0, 4))
+
+        # ── A FELTÉTELEK: időszakok és kapuk (a volt Optimalizálás lapról) ──
+        if plan:
+            cond = tk.Frame(box, bg=BG)
+            cond.pack(anchor="w", fill="x", padx=12)
+            w = plan["wf"]
+            _txt = (f"Walk-forward: {w['splits']} ablak × ({w['train_months']} hó "
+                    f"tanulás + {w['test_months']} hó vizsga)")
+            if plan["windows"]:
+                _last = plan["windows"][-1]
+                _txt += (f"  ·  utolsó vizsga: {str(_last['test_start'])[:10]} → "
+                         f"{str(_last['test_end'])[:10]}")
+            tk.Label(cond, text=_txt, bg=BG, fg=FG_GRAY_DIM, font=self._sf,
+                     anchor="w").pack(anchor="w")
+            if not plan["windows"]:
+                tk.Label(cond, bg=BG, fg=FG_RED, font=self._sf, anchor="w",
+                         justify="left", wraplength=820,
+                         text=("⚠ Egyetlen walk-forward ablak sem áll össze — kevés "
+                               "az előzmény. Az optimalizálás nem indul el.")
+                         ).pack(anchor="w")
+            if not plan["exec_gates"]:
+                tk.Label(cond, bg=BG, fg=FG_RED, font=self._sf, anchor="w",
+                         justify="left", wraplength=820,
+                         text=("⚠ A végrehajtási kapuk KI vannak kapcsolva az "
+                               "optimalizálásban — a kapott paraméterek olyan "
+                               "világból jönnek, ami élesben nem létezik.")
+                         ).pack(anchor="w")
+            else:
+                act = sorted(k for k, e in (plan["gate_effects"] or {}).items()
+                             if e != _gt.EFFECT_NONE)
+                tk.Label(cond, bg=BG, fg=FG_GRAY_DIM, font=self._sf, anchor="w",
+                         text=("Kapuk: " + (", ".join(
+                             f"{_gt.label_of(k)} "
+                             f"({_gt.EFFECT_LABEL.get(plan['gate_effects'][k], '')})"
+                             for k in act) if act else "egyik sem aktív"))
+                         ).pack(anchor="w")
+            tk.Label(cond, bg=BG, fg=FG_GRAY_DIM, font=self._sf, anchor="w",
+                     justify="left", wraplength=820,
+                     text=("A mentett minősítés CSAK a vizsga-ablakok kötéseiből "
+                           "számol. A paramétereket és a tartományokat a "
+                           "Paraméter lapon állítod.")).pack(anchor="w")
+
+        # ── SÖPRÉS: a rajz és a mércéje (1–2 hangolt paraméternél) ──────────
+        self._sweep_box = tk.Frame(box, bg=BG)
+        self._sweep_box.pack(anchor="w", fill="x", padx=12, pady=(4, 0))
+        _sb = tk.Frame(self._sweep_box, bg=BG)
+        _sb.pack(anchor="w", fill="x")
+        tk.Label(_sb, text="mérce", bg=BG, fg=FG_GRAY_DIM,
+                 font=self._sf).pack(side="left", padx=(0, 3))
+        self._sw_metric = tk.StringVar(value="total_pnl")
+        _mm = tk.OptionMenu(_sb, self._sw_metric, "total_pnl", "profit_factor",
+                            "win_rate", "trades", "max_drawdown")
+        _mm.config(bg=BG_HEADER, fg=FG_WHITE, relief="flat", font=self._sf,
+                   highlightthickness=0, activebackground=BG_HEADER)
+        _mm["menu"].config(bg=BG_HEADER, fg=FG_WHITE, font=self._sf)
+        _mm.pack(side="left", padx=(0, 10))
+        self._sw_metric.trace_add("write", lambda *_a: self._redraw_sweep())
+        self._sw_status = tk.Label(_sb, text="", bg=BG, fg=FG_GRAY, font=self._sf)
+        self._sw_status.pack(side="left")
+        self._sw_canvas = tk.Canvas(self._sweep_box, bg=BG, height=260,
+                                    highlightthickness=0)
+        self._sw_canvas.bind("<Configure>", lambda _e: self._redraw_sweep())
+        self._sw_best = tk.Label(self._sweep_box, text="", bg=BG, fg=FG_GRAY,
+                                 font=self._sf, anchor="w", justify="left")
+        self._sw_rows, self._sw_axes = [], []
+        # A söprés IDŐSZAKA a backtest mezőiből jön (egy helyen állítod) — a
+        # `_start_sweep` onnan olvassa, ezért itt nincs külön dátum-mező.
+        self._refresh_opt_space()
+
+    def _start_planned(self):
+        """Az EGYETLEN Indítás gomb: a bepipált dimenziók száma dönti el, mi fut.
+
+        ⚠ Ez nem kényelmi összevonás. Eddig ugyanaz a művelet (paraméter beállít
+        → teljes futtatás → kiértékelés) HÁROM helyen indult, más-más néven, és
+        a felhasználónak kellett fejben tartania, melyik mit jelent."""
+        from core import opt_plan as _op
+        rows = [dict(r, skipped=not self._skip_vars[r["key"]].get())
+                for r in self._opt_rows if r["key"] in self._skip_vars]
+        kind = _op.run_plan(rows, 0)["kind"]
+        if kind == _op.KIND_SINGLE:
+            # 0 hangolt → EGYETLEN futás: ez maga a backtest.
+            if self._run_tab is not None:
+                self._sweep_box.pack_forget()
+                self._run_tab._start()
+            return
+        if kind in (_op.KIND_SWEEP, _op.KIND_GRID):
+            self._sweep_box.pack(anchor="w", fill="x", padx=12, pady=(4, 0))
+            self._sw_canvas.pack(fill="x", pady=(4, 2))
+            self._sw_best.pack(anchor="w", pady=(0, 8))
+            self._start_sweep()
+            return
+        # 3+ hangolt → OPTIMALIZÁLÁS. Az OPT a főképernyő vezérlője (külön
+        # processz, folytatható study) — innen csak elindítjuk, ha a hívó
+        # bekötötte; különben megmondjuk, hol van.
+        self._sweep_box.pack_forget()
+        if callable(getattr(self, "on_optimize", None)):
+            try:
+                self.on_optimize(self.symbol, self.strategy.name)
+                self._sw_status.config(text="Optimalizálás elindítva.", fg=FG_GREEN)
+                return
+            except Exception as ex:
+                self._sw_status.config(text=f"Indítási hiba: {ex}", fg=FG_RED)
+                return
+        self._sw_status.config(
+            text=("Ennyi hangolt paraméternél az OPTIMALIZÁLÁS fut — azt a "
+                  "főképernyő OPT gombja indítja (folytatható, külön processz). "
+                  "Söpréshez pipálj ki mindent 1–2 paraméter kivételével."),
+            fg=FG_YELLOW)
 
     # ── „Áttekintés” lap — mi ennek a párnak az ÁLLAPOTA ───────────────────
     # A kérés: „az első oldalon csak egy dashboard-szerű dolog lehetne, ahol
@@ -1192,174 +1370,6 @@ class InstrumentParamsDialog:
             self.lbl_err.config(text=f"Az eredménytábla nem építhető: {ex}",
                                 fg=FG_RED)
 
-    # ── „Optimalizálás” lap — MI FOG TÖRTÉNNI, ha megnyomod az OPT-ot ───────
-    # A felhasználói doksi legsúlyosabb panasza: „nem látom az időintervallumot ·
-    # nem látom a lehetséges paramétereket · nem tudom csak egyeseket
-    # optimalizálni · nem látom, melyik kapu működött". Ez a lap mindet
-    # megválaszolja, FUTTATÁS NÉLKÜL, a valódi forrásokból (`core.opt_plan`).
-
-    def _build_opt_tab(self):
-        page = self._shell.page("Optimalizálás")
-        if getattr(self, "_opt_built", False):
-            self._refresh_opt_space()      # a kihagyások változhattak
-            return
-        self._opt_built = True
-        from core import opt_plan as _op
-        from strategy.settings import load_strategy_config
-
-        try:
-            ocfg = load_strategy_config(self.strategy.name).get("optimizer", {}) or {}
-        except Exception:
-            ocfg = {}
-        df15 = None
-        try:
-            from trading.backtest import load_data
-            df15, _ = load_data(self.symbol)
-        except Exception:
-            pass
-        try:
-            cur = self._collect_params() or {}
-        except Exception:
-            cur = {}
-        plan = _op.build(self.root_cfg, self.symbol, self.strategy, ocfg,
-                         df_m15=df15, current=cur)
-        self._opt_cfg_cache = ocfg
-        self._opt_plan = plan
-
-        holder, body, _cv = _scrollable(page)
-        holder.pack(side="top", fill="both", expand=True)
-
-        def _h(txt):
-            tk.Label(body, text=txt, bg=BG, fg=FG_WHITE, font=self._hf,
-                     anchor="w").pack(anchor="w", padx=10, pady=(12, 2))
-
-        def _n(txt, fg=FG_GRAY):
-            tk.Label(body, text=txt, bg=BG, fg=fg, font=self._sf,
-                     anchor="w", justify="left").pack(anchor="w", padx=10)
-
-        # ── 1. MIKOR tanul és MIKOR vizsgázik ──────────────────────────────
-        _h("Időszakok")
-        if plan["data_from"] is not None:
-            _n(f"Letöltött előzmény:  {str(plan['data_from'])[:10]}  …  "
-               f"{str(plan['data_to'])[:10]}")
-        w = plan["wf"]
-        _n(f"Walk-forward: {w['splits']} ablak, ablakonként {w['train_months']} hó "
-           f"tanulás + {w['test_months']} hó vizsga")
-        if not plan["windows"]:
-            _n("⚠ Egyetlen ablak sem áll össze — kevés az előzmény. Tölts le "
-               "hosszabbat, vagy csökkentsd a wf_train_months/wf_test_months értéket.",
-               FG_RED)
-        for wr in plan["windows"]:
-            tk.Label(body, bg=BG, fg=FG_GRAY, font=self._sf, anchor="w",
-                     text=f"   #{wr['i']}   tanul  {str(wr['train_start'])[:10]} → "
-                          f"{str(wr['test_start'])[:10]}      vizsgázik  "
-                          f"{str(wr['test_start'])[:10]} → {str(wr['test_end'])[:10]}"
-                     ).pack(anchor="w", padx=10)
-        # ⚠ A mentett minősítés a VIZSGA-ablakokból jön. Ezt ki kell mondani,
-        # különben a „jó” jelző úgy hat, mintha a teljes időszakra szólna.
-        _n("A mentett minősítés CSAK a vizsga-ablakok kötéseiből számol.", FG_GRAY_DIM)
-
-        # ── 2. Mely KAPUK élnek a keresés alatt ────────────────────────────
-        _h("Kapuk a keresés alatt")
-        if not plan["exec_gates"]:
-            _n("⚠ A végrehajtási kapuk KI vannak kapcsolva az optimalizálásban "
-               "(optimizer.exec_gates). A beállított kapuk látszólag élnek, de a "
-               "keresés nem tud róluk — a kapott paraméterek olyan világból jönnek, "
-               "ami élesben nem létezik.", FG_RED)
-        else:
-            from core import gates as _gt
-            act = [(k, e) for k, e in plan["gate_effects"].items()
-                   if e != _gt.EFFECT_NONE]
-            if not act:
-                _n("Egyetlen kapu sincs bekapcsolva — a keresés minden jelet enged.",
-                   FG_YELLOW)
-            for k, e in sorted(act):
-                tk.Label(body, bg=BG, fg=FG_GRAY, font=self._sf, anchor="w",
-                         text=f"   {_gt.label_of(k)}:  {_gt.EFFECT_LABEL.get(e, e)}"
-                         ).pack(anchor="w", padx=10)
-            off = [k for k, e in plan["gate_effects"].items()
-                   if e == _gt.EFFECT_NONE]
-            if off:
-                _n("Kikapcsolva: " + ", ".join(sorted(_gt.label_of(k)
-                                                      for k in off)), FG_GRAY_DIM)
-
-        # ── 3. A paraméterek EGY helyen élnek: a Paraméter lapon ───────────
-        # ⚠ Itt SZÁNDÉKOSAN nincs második paraméter-tábla. A doksi panasza épp ez
-        # volt: „két külön kinézet ugyanarra a paraméterre". Az érték, a pipa és a
-        # -tól/-ig/lépés egyetlen soron áll a Paraméter lapon; ez a lap arról szól,
-        # MIT CSINÁL az így beállított keresés.
-        _h("Hangolt paraméterek")
-        _n("A paramétereket — értéket, pipát és tartományt — a Paraméter lapon "
-           "állítod, soronként egy helyen. Az alábbi összegzés azt tükrözi.",
-           FG_GRAY_DIM)
-        self._tuned_lbl = tk.Label(body, bg=BG, fg=FG_GRAY, font=self._sf,
-                                   anchor="w", justify="left")
-        self._tuned_lbl.pack(anchor="w", padx=10)
-
-        # ── 4. A keresési tér MÉRETE — az arány a lényeg ───────────────────
-        _h("A keresés mérete")
-        self._space_lbl = tk.Label(body, bg=BG, fg=FG_GRAY, font=self._sf,
-                                   anchor="w", justify="left")
-        self._space_lbl.pack(anchor="w", padx=10)
-
-        # ── 5. SÖPRÉS: 1–2 paraméter kimerítő végigpróbálása ───────────────
-        _h("Söprés")
-        _n("Egy vagy két bepipált paraméternél a rács KIMERÍTŐEN végigpróbálható "
-           "— és az eredmény RAJZOLHATÓ: görbe, illetve hőtérkép.", FG_GRAY_DIM)
-        # ⚠ A söprés EGY időszakon mér (nem walk-forward). Ez feltáró eszköz:
-        # megmutatja a paraméter ALAKJÁT, nem azt, hogy a legjobb pont kitart-e.
-        _n("⚠ A söprés EGY időszakon mér, tehát feltáró: a legjobb pont "
-           "kiválasztása ITT még nem érvényes eredmény. Amit érdemes nézni: a "
-           "legjobb érték SZÉLES fennsík közepén van-e, vagy magányos tüskén "
-           "(az utóbbi szinte biztosan zaj).", FG_YELLOW)
-
-        sbar = tk.Frame(body, bg=BG)
-        sbar.pack(anchor="w", padx=10, pady=(4, 2), fill="x")
-        # Az időszak alapértéke a backtest-ablakban legutóbb használt — ugyanazt
-        # a párt/stratégiát nézve ne kelljen kétszer beírni ugyanazt a dátumot.
-        from core import backtest_prefs as _bprefs
-        _p = _bprefs.get(self.symbol, self.strategy.name) or {}
-        self._sw_start = tk.StringVar(value=_p.get("start") or "")
-        self._sw_end = tk.StringVar(value=_p.get("end") or "")
-        self._sw_metric = tk.StringVar(value="total_pnl")
-        for _lbl, _var, _w in (("-tól", self._sw_start, 11),
-                               ("-ig", self._sw_end, 11)):
-            tk.Label(sbar, text=_lbl, bg=BG, fg=FG_GRAY_DIM,
-                     font=self._sf).pack(side="left", padx=(0, 3))
-            tk.Entry(sbar, textvariable=_var, width=_w, bg=BG_HEADER,
-                     fg=FG_WHITE, insertbackground=FG_WHITE, relief="flat",
-                     font=self._sf).pack(side="left", padx=(0, 10))
-        tk.Label(sbar, text="mérce", bg=BG, fg=FG_GRAY_DIM,
-                 font=self._sf).pack(side="left", padx=(0, 3))
-        _mm = tk.OptionMenu(sbar, self._sw_metric, "total_pnl", "profit_factor",
-                            "win_rate", "trades", "max_drawdown")
-        _mm.config(bg=BG_HEADER, fg=FG_WHITE, relief="flat", font=self._sf,
-                   highlightthickness=0, activebackground=BG_HEADER)
-        _mm["menu"].config(bg=BG_HEADER, fg=FG_WHITE, font=self._sf)
-        _mm.pack(side="left", padx=(0, 10))
-        _mm_cmd = self._sw_metric.trace_add("write",
-                                            lambda *_a: self._redraw_sweep())
-        self._sw_btn = tk.Button(sbar, text="Söprés indítása", bg=BTN_BT_BG,
-                                 fg=BTN_BT_FG, relief="flat", font=self._sf,
-                                 command=self._start_sweep)
-        self._sw_btn.pack(side="left")
-        self._sw_status = tk.Label(sbar, text="", bg=BG, fg=FG_GRAY,
-                                   font=self._sf)
-        self._sw_status.pack(side="left", padx=(10, 0))
-
-        self._sw_canvas = tk.Canvas(body, bg=BG, height=300, highlightthickness=0)
-        self._sw_canvas.pack(fill="x", padx=10, pady=(4, 2))
-        self._sw_canvas.bind("<Configure>", lambda _e: self._redraw_sweep())
-        self._sw_best = tk.Label(body, text="", bg=BG, fg=FG_GRAY, font=self._sf,
-                                 anchor="w", justify="left")
-        self._sw_best.pack(anchor="w", padx=10, pady=(0, 8))
-        self._sw_rows, self._sw_axes = [], []
-        self._sw_stop = None
-
-        self._refresh_opt_space()
-
-    # ── A söprés futtatása és rajza ─────────────────────────────────────────
-
     def _start_sweep(self):
         """A bepipált 1–2 paraméter kimerítő végigpróbálása háttérszálon."""
         import threading
@@ -1368,7 +1378,7 @@ class InstrumentParamsDialog:
 
         if self._sw_stop is not None:            # fut → megszakítás
             self._sw_stop.set()
-            self._sw_btn.config(text="Megszakítás…", state="disabled")
+            self._plan_btn.config(text="Megszakítás…", state="disabled")
             return
 
         rows = [dict(r, skipped=not self._skip_vars[r["key"]].get())
@@ -1398,9 +1408,13 @@ class InstrumentParamsDialog:
         axes, combos = _sw.combos(rows, self._opt_cfg_cache)
         self._sw_axes, self._sw_rows = axes, []
         self._sw_stop = threading.Event()
-        self._sw_btn.config(text="Megszakítás")
-        _start = self._sw_start.get().strip() or None
-        _end = self._sw_end.get().strip() or None
+        self._plan_btn.config(text="Megszakítás")
+        # ⚠ Az IDOSZAK a backtest mezoibol jon — EGY helyen allitod. Korabban a
+        # sopresnek sajat datum-mezoi voltak, tehat ugyanazt ketszer kellett
+        # beirni, es a ket ertek csendben elterhetett.
+        _bt = getattr(self, "_run_tab", None)
+        _start = (_bt._start_var.get().strip() or None) if _bt else None
+        _end = (_bt._end_var.get().strip() or None) if _bt else None
         _ib = self._cfg_initial_balance()
         _tcfg = self.root_cfg.get("trading", {})
         _pcfg = self.cfg.get("pairs", {}).get(self.symbol) or {}
@@ -1464,7 +1478,7 @@ class InstrumentParamsDialog:
     def _sweep_done(self, rows, err):
         self._sw_stop = None
         try:
-            self._sw_btn.config(text="Söprés indítása", state="normal")
+            self._plan_btn.config(text="Indítás", state="normal")
         except tk.TclError:
             return
         if err:
@@ -1514,8 +1528,12 @@ class InstrumentParamsDialog:
             fg=FG_GREEN)
 
     def _refresh_opt_space(self):
-        """A keresési tér mérete a PILLANATNYI pipák szerint."""
-        if not getattr(self, "_opt_built", False):
+        """A terv-sáv frissítése a PILLANATNYI pipák szerint.
+
+        A Paraméter lap pipái ezt hívják — de a terv-sáv a FUTTATÁS lapon él, és
+        az lustán épül. Amíg nincs meg, nincs mit frissíteni (a lap felépülésekor
+        magától lefut)."""
+        if getattr(self, "_tuned_lbl", None) is None:
             return
         from core import opt_plan as _op
         rows = [dict(r, skipped=not self._skip_vars[r["key"]].get())

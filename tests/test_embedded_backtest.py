@@ -146,6 +146,51 @@ if TK_OK:
     else:
         check("nincs sma_period a parameterek kozott (kihagyva)", True)
 
+    # ── A HAROM lapbol KETTO lett ──────────────────────────────────────────
+    # A felhasznalo eszrevetele: "a Parameter, Futtatas, Optimalizalas igazabol
+    # egy es ugyanaz — de valahogy megsem". A tores: a Futtatas EGYSZER futtat,
+    # az Optimalizalas SOKSZOR — ugyanaz a kerdes, mas szammal. A szamot pedig
+    # nem kell kulon beallitani: kiderul abbol, hany parametert pipaltal be.
+    check("nincs kulon „Optimalizálás” lap", "Optimalizálás" not in d._shell.names(),
+          str(d._shell.names()))
+    check("a terv-sáv a FUTTATÁS lapon él", d._tuned_lbl is not None)
+    check("...és EGYETLEN Indítás gomb van", getattr(d, "_plan_btn", None) is not None)
+
+    # ⚠ A terv a PILLANATNYI pipakat tukrozze: ha a felulet mast mond, mint ami
+    # elindul, a felhasznalo orakra elindit valamit, amire nem szamitott.
+    from core import opt_plan as _op
+    if d._skip_vars:
+        for _v in d._skip_vars.values():
+            _v.set(False)
+        d._refresh_opt_space()
+        check("0 hangolt -> a terv EGYETLEN futast mond",
+              "EGYETLEN futás" in d._tuned_lbl.cget("text"),
+              d._tuned_lbl.cget("text").split("\n")[0])
+        _k = sorted(d._skip_vars)[0]
+        d._skip_vars[_k].set(True)
+        d._refresh_opt_space()
+        check("1 hangolt -> SÖPRÉS", "SÖPRÉS" in d._tuned_lbl.cget("text"),
+              d._tuned_lbl.cget("text").split("\n")[0])
+        _k2 = sorted(d._skip_vars)[1]
+        d._skip_vars[_k2].set(True)
+        d._refresh_opt_space()
+        check("2 hangolt -> RÁCS", "RÁCS" in d._tuned_lbl.cget("text"),
+              d._tuned_lbl.cget("text").split("\n")[0])
+        for _v in d._skip_vars.values():
+            _v.set(True)
+        d._refresh_opt_space()
+        check("mind hangolva -> OPTIMALIZÁLÁS",
+              "OPTIMALIZÁLÁS" in d._tuned_lbl.cget("text"),
+              d._tuned_lbl.cget("text").split("\n")[0])
+
+    # ⚠ A sopres IDOSZAKA a backtest mezoibol jon — EGY helyen allitod. Korabban
+    # sajat datum-mezoi voltak, tehat ugyanazt ketszer kellett beirni, es a ket
+    # ertek csendben elterhetett.
+    import inspect as _insp
+    _src = _insp.getsource(idlg.InstrumentParamsDialog._start_sweep)
+    check("a söprés a backtest dátum-mezőiből dolgozik (nincs második hely)",
+          "_start_var" in _src and "_sw_start" not in _src)
+
     # Minden lap megnyithato egymas utan (a lapok nem semmisitik egymast)
     ok_all = True
     for t in d._shell.names():
