@@ -66,7 +66,9 @@ _SAMPLE = {
     "cost": ("mono", "99.9:1 +999%"),
     "volatility": ("mono", "9.99×↓"),
     "badge": ("mono", "⛔9"),
-    "stages": ("mono", "●●●●"), "quality": ("small", "Közepes"),
+    # ⚠ A minta a BETUT is tartalmazza („V"/„J" a pottyok elott): enelkul a
+    # betu kilogna a cellabol, vagy raszorulna a pottyokre.
+    "stages": ("mono", "V ●●●●"), "quality": ("small", "Közepes"),
     "ctrl": ("small", "■ OPT"), "opt": ("small", "99/99"),
     "position": ("mono", "+9999.99$ +99.99R"),
     "daily": ("mono", "+9999.99$ +99.99R"),
@@ -131,9 +133,14 @@ def _mode_mark(st: dict) -> tuple:
         # ⚠ „Csak jelzes" modban a jelzes CSAK az MT5 charton latszik. Ha nincs
         # nyitott chart a Viz-cel, a jelzes SEHOL nem jelenik meg — a program
         # dolgozik, es semmi nem tortenik. Ezt ki kell irni: „J!" pirossal.
+        # ⚠ A BETU ONMAGABAN ELEG — a szin hordozza az uzenetet:
+        #   zold  = van nyitott Viz-chart, a jelzes MEGERKEZIK
+        #   piros = nincs chart, a jelzes SEHOVA nem jut el
+        # A felkialtojel csak zsufolta a cellat (a pottyokre csuszott), es nem
+        # mondott tobbet, mint a szin.
         if st.get("chart_open") is False:
-            return "J!", FG_RED
-        return "J", FG_YELLOW
+            return "J", FG_RED
+        return "J", FG_GREEN
     if mode:
         return "V", (FG_GREEN if live else FG_GRAY_DIM)
     return "", FG_GRAY_DIM

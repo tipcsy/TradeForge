@@ -40,13 +40,21 @@ from dashboard import theme as th
 
 check("valodi kereskedes -> „V”",
       lr._mode_mark({"mode": "live", "live": True}) == ("V", th.FG_GREEN))
-check("csak jelzes, van chart -> „J”",
+# ⚠ A BETU ONMAGABAN eleg — a SZIN hordozza az uzenetet. A felkialtojel csak
+# zsufolta a cellat (a pottyokre csuszott), es nem mondott tobbet a szinnel.
+check("csak jelzes, van chart -> „J” ZOLDEN",
       lr._mode_mark({"mode": "signal", "live": True, "chart_open": True})
-      == ("J", th.FG_YELLOW))
+      == ("J", th.FG_GREEN))
 # ⚠ EZ A LENYEG: jelzes-mod NYITOTT CHART NELKUL — a jelzes sehova nem jut el.
-check("csak jelzes, NINCS chart -> „J!” pirossal",
+check("csak jelzes, NINCS chart -> „J” PIROSAN",
       lr._mode_mark({"mode": "signal", "live": True, "chart_open": False})
-      == ("J!", th.FG_RED))
+      == ("J", th.FG_RED))
+check("a jelolo MINDIG egy karakter (nincs felkialtojel)",
+      all(len(lr._mode_mark(x)[0]) <= 1 for x in (
+          {"mode": "live", "live": True},
+          {"mode": "signal", "live": True, "chart_open": True},
+          {"mode": "signal", "live": True, "chart_open": False},
+          {"mode": "signal", "live": False})))
 # Ami nem fut, ott a mod kerdese pillanatnyilag nem dont semmit.
 check("allitva -> halvany, nincs riasztas",
       lr._mode_mark({"mode": "signal", "live": False, "chart_open": False})[1]
@@ -58,7 +66,7 @@ check("ismeretlen mod -> nincs betu", lr._mode_mark({})[0] == "")
 # ⚠ Ha nem tudjuk (nincs adat), NE riasszunk: a hamis riasztas ugyanolyan rossz,
 # mint a hianyzo — par kor utan senki nem nezne.
 check("hianyzo chart-adat -> nem riaszt",
-      lr._mode_mark({"mode": "signal", "live": True}) == ("J", th.FG_YELLOW))
+      lr._mode_mark({"mode": "signal", "live": True}) == ("J", th.FG_GREEN))
 
 
 # ── 2. AZ OPT LEKERULT A SORBELI VEZERLESROL ──────────────────────────────
@@ -82,8 +90,40 @@ if TK:
     check("a vezerlesben CSAK a Play/Stop maradt",
           [p[0] for p in ctrl.parts] == ["run"], str([p[0] for p in ctrl.parts]))
     stages = next(c for k, c in cells.items() if k.endswith("|stages"))
-    check("a jelzes-cella viszi a betut", stages.text == "J!", stages.text)
+    check("a jelzes-cella viszi a betut", stages.text == "J", stages.text)
     check("...es a szinet is", stages.fg == th.FG_RED)
+
+    # ⚠ A BETU NEM CSUSZHAT RA A KERETRE. Elso nekifutasra a mar kozepre tett
+    # potty-blokk BALJARA kerult, es a keret pont ott kezdodik (`sx-4`) — a
+    # kepernyon osszefolytak. Most a betu es a pottyok EGYUTT kerulnek kozepre.
+    import copy as _copy
+    from dashboard import canvas_table as _ct
+    _root = tk.Tk(); _root.withdraw()
+    from dashboard import theme as _th2
+    _th2._FONTS.clear()
+    _f = _th2.fonts()
+    _rows = []
+    for _sym, _fr in (("AAA", "blocked"), ("BBB", "reduced")):
+        _r = _copy.deepcopy(lr.demo_row()); _r["symbol"] = _sym
+        _s0 = _r["strategies"][0]
+        _s0.update(mode="signal", live=True, chart_open=False, frame=_fr)
+        _rows.append(_r)
+    _tbl = _ct.CanvasTable(_root, _f, rows=_rows, collapsed={})
+    _root.update_idletasks()
+    _bad = []
+    for _i in range(len(_rows)):
+        _ids = _tbl._items.get((_i, "wpr_sma|stages")) or []
+        _bc = _tbl._bc["mid"]
+        _tx = [t for t in _ids if _bc.type(t) == "text"]
+        _rc = [t for t in _ids if _bc.type(t) == "rectangle"]
+        if _tx and _rc:
+            if _bc.bbox(_tx[0])[2] > _bc.bbox(_rc[-1])[0]:
+                _bad.append(_rows[_i]["symbol"])
+    check("a betu NEM log ra a keretre", not _bad, str(_bad))
+    # Az oszlop mintaszovege birja el a betut is.
+    check("a „stages” oszlop mintaja szamol a betuvel",
+          "V" in lr._SAMPLE["stages"][1], lr._SAMPLE["stages"][1])
+    _root.destroy()
 else:
     check("nincs tkinter (a cella-tesztek kihagyva)", True)
 

@@ -418,15 +418,19 @@ class CanvasTable:
             dw = fdot.measure(_lr._DOT)
             total = dw * max(1, len(cell.dots))
             # ⚠ A pöttyök ELŐTT egy betű (a jelzés-cellában „V"/„J": valódi
-            # kötés vagy csak jelzés). A pötty-blokkot NEM toljuk el miatta: a
-            # betű a blokk BAL OLDALÁRA kerül, így az oszlopok egy vonalban
-            # maradnak — az elcsúszás egy 12 soros táblán azonnal olvashatatlan.
-            mark_w = self._f["small"].measure(cell.text) + 3 if cell.text else 0
-            sx = x + (w - total) / 2
+            # kötés vagy csak jelzés). A betű és a pötty-blokk EGYÜTT kerül
+            # középre — korábban a betű a már középre tett blokk BALJÁRA került,
+            # és RÁCSÚSZOTT a keretre (a keret `sx-4`-nél kezdődik, a betű ott
+            # ért véget). Így mindkettőnek saját helye van, és az oszlop
+            # tartalma továbbra is középen ül.
+            _MARK_GAP = 8
+            mark_w = (self._f["small"].measure(cell.text) + _MARK_GAP
+                      if cell.text else 0)
+            sx = x + (w - total - mark_w) / 2 + mark_w
             if cell.text:
                 ids.append(bc.create_text(
-                    max(x + 2, sx - mark_w), cy, text=cell.text, fill=cell.fg,
-                    font=self._f["small"], anchor="w", tags=(tag, rtag)))
+                    sx - _MARK_GAP, cy, text=cell.text, fill=cell.fg,
+                    font=self._f["small"], anchor="e", tags=(tag, rtag)))
             if cell.frame:
                 st = _FRAME_STYLE.get(cell.frame) or {}
                 r = bc.create_rectangle(sx - 4, y0 + 2, sx + total + 4,
