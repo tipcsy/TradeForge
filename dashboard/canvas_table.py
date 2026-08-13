@@ -417,7 +417,16 @@ class CanvasTable:
             fdot = self._f["mono"]
             dw = fdot.measure(_lr._DOT)
             total = dw * max(1, len(cell.dots))
+            # ⚠ A pöttyök ELŐTT egy betű (a jelzés-cellában „V"/„J": valódi
+            # kötés vagy csak jelzés). A pötty-blokkot NEM toljuk el miatta: a
+            # betű a blokk BAL OLDALÁRA kerül, így az oszlopok egy vonalban
+            # maradnak — az elcsúszás egy 12 soros táblán azonnal olvashatatlan.
+            mark_w = self._f["small"].measure(cell.text) + 3 if cell.text else 0
             sx = x + (w - total) / 2
+            if cell.text:
+                ids.append(bc.create_text(
+                    max(x + 2, sx - mark_w), cy, text=cell.text, fill=cell.fg,
+                    font=self._f["small"], anchor="w", tags=(tag, rtag)))
             if cell.frame:
                 st = _FRAME_STYLE.get(cell.frame) or {}
                 r = bc.create_rectangle(sx - 4, y0 + 2, sx + total + 4,
@@ -479,9 +488,17 @@ class CanvasTable:
         self._items[(i, cell.key)] = ids
         self._visual[(i, cell.key)] = cell.visual()
         if cell.kind == "dots" and cell.frame:
-            bc.itemconfigure(ids[1] if cell.on_click else ids[0],
-                             outline=(_FRAME_STYLE.get(cell.frame) or {}).get(
-                                 "outline", ""))
+            # ⚠ A keretet TÍPUS szerint keressük, nem index szerint. A korábbi
+            # `ids[1] if on_click else ids[0]` azt feltételezte, hogy a kereten
+            # kívül legfeljebb a kattintás-alátét áll előtte — a mód-jelölő betű
+            # bevezetése ezt azonnal elrontotta (`unknown option "-outline"`: a
+            # szöveg-elemre próbált körvonalat állítani). A `hit` alátét is
+            # téglalap, ezért az UTOLSÓT vesszük: a keret később készül.
+            rects = [t for t in ids if bc.type(t) == "rectangle"]
+            if rects:
+                bc.itemconfigure(rects[-1],
+                                 outline=(_FRAME_STYLE.get(cell.frame) or {}).get(
+                                     "outline", ""))
 
     def fire(self, row_index: int, key: str, sub: str = None) -> bool:
         """Egy cella kattintásának KIVÁLTÁSA. Minden `tag_bind` ide mutat, tehát
@@ -570,6 +587,10 @@ class CanvasTable:
             prev = self._visual.get((i, key))
             if prev is None or len(prev[2]) != len(cell.dots):
                 return True
+            # A BETŰ megjelenése/eltűnése is ELEM-számot változtat (a mód-jelölő
+            # a jelzés-cellában) — helyben nem írható át, ha nincs mit.
+            if bool(prev[0]) != bool(cell.text):
+                return True
         return False
 
     def _redraw_row(self, i: int, d: dict):
@@ -593,6 +614,13 @@ class CanvasTable:
         bc = self._bc[pane]
         texts = [t for t in ids if bc.type(t) == "text"]
         if cell.kind == "dots":
+            # ⚠ Ha van BETŰ a pöttyök előtt, az az ELSŐ szöveg-elem — azt nem
+            # szabad a `dots` első színével átfesteni, mert onnantól minden
+            # pötty egy hellyel elcsúszna. (A rajzolás sorrendje: betű, keret,
+            # pöttyök.)
+            if cell.text and texts:
+                bc.itemconfigure(texts[0], text=cell.text, fill=cell.fg)
+                texts = texts[1:]
             for t, col in zip(texts, cell.dots):
                 bc.itemconfigure(t, fill=col)
             rects = [t for t in ids if bc.type(t) == "rectangle"]

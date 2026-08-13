@@ -107,18 +107,15 @@ if TK_OK:
     check("a cellak szovege es szine a ROGZITETT ertekeket adja", not bad, str(bad))
 
     run = next(p for p in cells["wpr_sma|ctrl"].parts if p[0] == "run")
-    opt = next(p for p in cells["wpr_sma|ctrl"].parts if p[0] == "opt")
     check("a futo strategian PIROS stop-jel all", (run[1], run[2]) == ("■", FG_RED),
           str((run[1], run[2])))
-    check("...es az OPT kek, amig inditható", (opt[1], opt[2]) == ("OPT", FG_BLUE),
-          str((opt[1], opt[2])))
-    # Kereskedo strategian az OPT HALVANY: a futas vegen felulirodna a
-    # parameterfajlja, tehat tiltott muvelet — de a felirat marad "OPT".
-    st0["opt_enabled"] = False
-    _o2 = next(p for p in cc.cells_for(snap_row, {})["wpr_sma|ctrl"].parts
-               if p[0] == "opt")
-    check("...es HALVANY, ha a strategia epp kereskedik",
-          (_o2[1], _o2[2]) == ("OPT", FG_GRAY_DIM), str((_o2[1], _o2[2])))
+    # ⚠ Az OPT LEKERULT a sorbeli vezerlesrol: egy gombrol orakra inditott
+    # valamit, amirol a felulet semmit nem mondott. Az optimalizalas mostantol a
+    # parameter-ablak Futtatas lapjarol indul, ahol LATOD, mi fog tortenni
+    # (idoszakok, kapuk, hangolt dimenziok, keresesi ter meret).
+    check("a vezerlesben CSAK a Play/Stop van (az OPT lekerult)",
+          [p[0] for p in cells["wpr_sma|ctrl"].parts] == ["run"],
+          str([p[0] for p in cells["wpr_sma|ctrl"].parts]))
     st0["live"], st0["enabled"] = False, False
     cells2 = cc.cells_for(snap_row, {})
     run2 = next(p for p in cells2["wpr_sma|ctrl"].parts if p[0] == "run")
@@ -174,12 +171,17 @@ if TK_OK:
                              ("align", None, "align"),
                              ("momentum", None, "momentum"),
                              ("wpr_sma|stages", None, "stages"),
-                             ("wpr_sma|ctrl", "run", "run"),
-                             ("wpr_sma|ctrl", "opt", "opt")):
+                             ("wpr_sma|ctrl", "run", "run")):
         clicks.clear()
         ok = fire(key, sub)
         check(f"kattintas: {expect}", ok and clicks == [expect],
               f"talalt={ok}, {clicks}")
+
+    # ⚠ Az OPT alkulcs MAR NINCS a vezerlesben — es ezt kulon rogzitjuk, hogy
+    # egy jovobeli visszaszivargas azonnal kiderüljön.
+    check("az „opt” alkulcs NINCS bekotve (lekerult a sorbeli vezerlesrol)",
+          not any(len(k) == 3 and k[2] == "opt" for k in tbl2.clickable()),
+          str([k for k in tbl2.clickable() if len(k) == 3][:4]))
 
     clicks.clear()
     fire("close")

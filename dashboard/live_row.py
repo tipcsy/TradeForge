@@ -35,7 +35,7 @@ a `tkinter` is csak a betű-méréshez kell (`fonts[...].measure`).
 from __future__ import annotations
 
 from dashboard.theme import (FG_WHITE, FG_GREEN, FG_RED, FG_GRAY, FG_GRAY_DIM,
-                             FG_BLUE, FG_ORANGE)
+                             FG_BLUE, FG_ORANGE, FG_YELLOW)
 
 # A cellák közötti hézag és a belső margó — egy helyen, hogy a fejléc és a sor
 # BIZTOSAN ugyanúgy számoljon (különben az oszlopok elcsúsznak).
@@ -110,6 +110,33 @@ _HEADER_TEXT = {
     "daily": "Napi P&L", "quality": "Min.", "ctrl": "Vezérlés", "opt": "Opt",
     "total_pos": "Pozíció", "total_daily": "Napi P&L", "close": "",
 }
+
+
+def _mode_mark(st: dict) -> tuple:
+    """`(betu, szin)` a jelzes-cella ele: „V" = VALODI kotest nyit, „J" = csak jelez.
+
+    ⚠ MIERT KELL. A ket allapot ranezesre AZONOS volt: ugyanaz a potty-sor,
+    ugyanaz a zold Play gomb — pedig az egyik penzt mozgat, a masik nem. Aki
+    „csak jelzes" modban hitte magat, kotesekre ebredhetett (vagy forditva: valos
+    kereskedest vart, es csak jelzeseket kapott).
+
+    Ami NEM fut (nincs engedelyezve vagy allitva van), az halvany: ott a mod
+    kerdese pillanatnyilag nem dont semmit.
+    """
+    mode = str(st.get("mode") or "")
+    live = bool(st.get("live"))
+    if mode == "signal":
+        if not live:
+            return "J", FG_GRAY_DIM
+        # ⚠ „Csak jelzes" modban a jelzes CSAK az MT5 charton latszik. Ha nincs
+        # nyitott chart a Viz-cel, a jelzes SEHOL nem jelenik meg — a program
+        # dolgozik, es semmi nem tortenik. Ezt ki kell irni: „J!" pirossal.
+        if st.get("chart_open") is False:
+            return "J!", FG_RED
+        return "J", FG_YELLOW
+    if mode:
+        return "V", (FG_GREEN if live else FG_GRAY_DIM)
+    return "", FG_GRAY_DIM
 
 
 def show_market(collapsed: dict) -> bool:

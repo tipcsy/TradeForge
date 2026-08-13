@@ -204,7 +204,7 @@ def row_data(symbol: str, ds, strategy_names, cfg: dict = None,
              on_toggle=None, on_opt=None, on_stages=None,
              on_symbol=None, on_align=None, on_spread=None,
              on_market=None, on_momentum=None, on_cost=None,
-             on_volatility=None) -> dict:
+             on_volatility=None, open_charts=None) -> dict:
     """Egy instrumentum sorának adata a `live_row.LiveRow` számára.
 
     `ds`          — `live_trader.PairDashboardState` (duck-typed).
@@ -262,9 +262,24 @@ def row_data(symbol: str, ds, strategy_names, cfg: dict = None,
         # is visszaadhatná).
         live = bool(live_of(symbol, name)) if live_of else False
         live = live and enabled
+        # ⚠ KÖTÉS-MÓD a jelzés-cella elé: „V" = valódi kötést nyit, „J" = csak
+        # jelez. A kettő ránézésre EGYFORMA volt — ugyanaz a pötty-sor, ugyanaz
+        # a zöld Play —, pedig az egyik pénzt mozgat, a másik nem. A `mode_of`
+        # ugyanazt a forrást olvassa, amit a motor.
+        try:
+            from core import trade_mode as _tmx
+            _mode = _tmx.mode_of(cfg or {}, symbol, name)
+        except Exception:
+            _mode = ""
         strategies.append({
             "name": name,
             "enabled": enabled,
+            "mode": _mode,
+            # ⚠ Van-e NYITOTT chart az MT5-on, ami a jelzest megkapja? „Csak
+            # jelzes" modban ez dont: chart nelkul a jelzes SEHOL nem jelenik
+            # meg. A hivo adja be (egyszer, kororkent) — parkent lekerdezni
+            # mappa-listazast jelentene minden sorra.
+            "chart_open": (symbol in (open_charts or set())),
             "stages": _stages(ds, name,
                               stage_order_of(name) if stage_order_of else None),
             "frame": _g.frame_state(states),

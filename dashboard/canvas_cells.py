@@ -123,9 +123,14 @@ def cells_for(d: dict, collapsed: dict, on_close=None) -> dict:
     for st in (d.get("strategies") or []):
         n = st.get("name", "")
         coll = _lr.is_collapsed(collapsed, n)
+        # ⚠ A pöttyök ELŐTT egy betű: „V" = VALÓDI kötést nyit, „J" = csak
+        # jelez. Enélkül a két állapot ránézésre azonos — ugyanaz a pötty-sor,
+        # ugyanaz a zöld Play —, pedig az egyik pénzt mozgat, a másik nem. A
+        # betűt a `_lr._mode_mark` adja (ott a szín is).
+        _mk, _mk_fg = _lr._mode_mark(st)
         out[f"{n}|stages"] = Cell(
             f"{n}|stages", kind="dots", on_click=st.get("on_stages"),
-            frame=(st.get("frame") or ""),
+            frame=(st.get("frame") or ""), text=_mk, fg=_mk_fg,
             dots=[_lr._stage_color(s) for s in (st.get("stages") or [])])
         if not coll:
             pos, day = st.get("position") or {}, st.get("daily") or {}
@@ -139,13 +144,15 @@ def cells_for(d: dict, collapsed: dict, on_close=None) -> dict:
             q = st.get("quality") or "—"
             out[f"{n}|quality"] = Cell(f"{n}|quality", text=q, anchor="center",
                                        font="small", fg=_lr._quality_color(q))
+        # ⚠ A VEZERLES mostantol CSAK Play/Stop. Az OPT lekerult: az
+        # optimalizalas a parameter-ablak Futtatas lapjarol indul, ahol LATOD,
+        # mi fog tortenni (idoszakok, kapuk, hangolt dimenziok, keresesi ter).
+        # Egy sorbeli gomb ezt mind atugrotta — orakra inditott valamit, amirol
+        # a felulet semmit nem mondott.
         run_txt, run_fg = _lr._run_text(st)
-        opt_txt, opt_fg = _lr._opt_text(st)
         out[f"{n}|ctrl"] = Cell(f"{n}|ctrl", kind="ctrl", parts=[
             ("run", run_txt, run_fg, st.get("on_toggle"),
              bool(st.get("enabled", True))),
-            ("opt", opt_txt, opt_fg, st.get("on_opt"),
-             bool(st.get("opt_enabled", True) or st.get("opt_state"))),
         ])
         if not coll:
             out[f"{n}|opt"] = Cell(f"{n}|opt", text=st.get("opt") or "—",

@@ -2979,6 +2979,16 @@ class DashboardWindow:
         positions = (getattr(self, "_mt5_cache", {}) or {}).get("positions_detail") or []
         syms = [s for s, p in self.cfg["pairs"].items() if isinstance(p, dict)]
 
+        # ⚠ NYITOTT MT5-CHARTOK — KÖRÖNKÉNT EGYSZER. Mappa-listázás; páronként
+        # lekérdezve 12-30× futna feleslegesen minden frissítésnél. A hiba, amit
+        # megelőz: „csak jelzés" módban álló pár, amihez nincs nyitott chart —
+        # a jelzés sehol nem jelenik meg, és eddig semmi nem szólt róla.
+        try:
+            from core import mt_charts as _mch
+            _open_charts = _mch.open_symbols()
+        except Exception:
+            _open_charts = set()
+
         rows = []
         for sym in syms:
             ds = self.dashboard_ref.get(sym)
@@ -2996,6 +3006,7 @@ class DashboardWindow:
                 opt_enabled_of=self._live2_opt_enabled,
                 opt_state_of=self._live2_opt_state,
                 enabled_of=self._strategy_enabled,
+                open_charts=_open_charts,
                 on_toggle=self._handle_run_strategy,
                 on_opt=self._live2_opt_click,
                 on_stages=self._show_strategy_params,

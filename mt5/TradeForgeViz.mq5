@@ -11,7 +11,7 @@
 //|  (F7), majd húzd a kívánt chartra. A fájlt a Python az MT5 közös  |
 //|  (Common) mappájába írja, ezért FILE_COMMON-nal olvassuk.        |
 //+------------------------------------------------------------------+
-#property version   "2.40"        // TradeForge v2.40; utolso tartalmi modositas: 2026-07-29
+#property version   "2.41"        // TradeForge v2.41; eletjel-fajl (chart nyitva?) 2026-08-13
 #property indicator_chart_window
 #property indicator_plots 0
 
@@ -148,6 +148,7 @@ int OnInit()
    PurgeOldAlertMarks();   // régi riasztás-jelölők (a globális változók ne gyűljenek)
    EventSetTimer(TimerSeconds);
    RefreshFromFile();
+   WriteHeartbeat();   // azonnal, hogy ne kelljen a timerre varni
    return(INIT_SUCCEEDED);
 }
 
@@ -155,6 +156,14 @@ int OnInit()
 void OnDeinit(const int reason)
 {
    EventKillTimer();
+   // ⚠ Az eletjel-fajlt TOROLJUK: chart bezarasakor a felulet AZONNAL tudja,
+   // hogy ide mar nem erkezik jelzes. Nelkule a fajl kora dontene, tehat
+   // percekig "elonek" latszana egy bezart chart.
+   {
+      string fn = "TFV_ALIVE_" + _Symbol + "_" + IntegerToString((int)Period())
+                + (InpStrategy == "" ? "" : "_" + InpStrategy) + ".txt";
+      FileDelete(fn, FILE_COMMON);
+   }
    // Az AUTO-felrakott indikátorokat leszedjük (a TradeForgeViz-hez tartoznak).
    // A rajz-objektumok (TFV_) SZÁNDÉKOSAN maradnak.
    RemoveOurWPRs();
@@ -175,6 +184,38 @@ int OnCalculate(const int rates_total, const int prev_calculated,
 void OnTimer()
 {
    RefreshFromFile();
+   WriteHeartbeat();
+}
+
+//+------------------------------------------------------------------+
+//| ÉLETJEL: "ez a chart NYITVA van, és fut rajta a Viz"             |
+//|                                                                  |
+//| MIERT KELL. A dashboardon be lehet allitani egy part "csak        |
+//| jelzes" modba — de ha az MT5-on NINCS nyitva hozza chart a        |
+//| TradeForgeViz-cel, a jelzes SOSEM jelenik meg sehol. A program    |
+//| eddig ezt nem tudhatta: a Python fajlba IR, de nem latja, hogy    |
+//| olvassa-e valaki. Nema hiba — a felhasznalo varja a jelzest, es   |
+//| csak annyi tortenik, hogy nincs.                                  |
+//|                                                                  |
+//| PELDANYONKENT KULON FAJL (szimbolum + idosik + strategia): ha     |
+//| mindenki UGYANABBA a fajlba irna, egymast tulnak felul, es a      |
+//| legutolso iro elnyomna a tobbit. Kulon fajlnal a Python egyszeruen|
+//| kilistazza a mappat, es a fajl KORABOL latja, hogy el-e meg.      |
+//+------------------------------------------------------------------+
+void WriteHeartbeat()
+{
+   string fn = "TFV_ALIVE_" + _Symbol + "_" + IntegerToString((int)Period())
+             + (InpStrategy == "" ? "" : "_" + InpStrategy) + ".txt";
+   int h = FileOpen(fn, FILE_WRITE | FILE_TXT | FILE_ANSI | FILE_COMMON);
+   if(h == INVALID_HANDLE)
+      return;
+   // Egyetlen sor, pontosvesszos — ugyanaz a formatum, mint a viz-fajle.
+   // Az IDO a szerver ideje; a Python a FAJL koraval dolgozik (az a helyi ora),
+   // de a mezot kiirjuk, hogy elteres eseten lassek.
+   FileWrite(h, "ALIVE;" + _Symbol + ";" + IntegerToString((int)Period()) + ";"
+              + InpStrategy + ";" + TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS)
+              + ";" + IntegerToString((int)TimeGMT()));
+   FileClose(h);
 }
 
 //+------------------------------------------------------------------+
