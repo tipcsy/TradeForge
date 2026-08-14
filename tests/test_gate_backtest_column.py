@@ -8,10 +8,14 @@ kapu: kipipalod, futtatsz, kiveszed, futtatsz — a kulonbseg a kapue. Egyetlen
 kozos `exec_gates` kapcsoloval (mind vagy semmi) ez a kerdes fel sem tehető
 volt; a `tools/gate_ab.py` is csak azert szuletett, mert a feluleten nem ment.
 
-⚠ ES A LEGFONTOSABB INVARIANS: a backtest az ELES hatasbol indul, es legfeljebb
-KIVESZ belole — SOHA nem tesz hozza. Egy kapu, ami elesben nem szol bele, a
-merésben sem szolhat: kulonben a backtest olyan vilagot modellezne, ami nem
-letezik, es a kapott parameterek elesben mast csinalnanak.
+⚠ A PIPA MINDKET IRANYBAN szabad. Egy korabbi valtozat tiltotta az elesben
+kikapcsolt kapu bepipalasat („a backtest ne modellezzen nem letezo vilagot") —
+de eppen ez a feltaro meres lenyege, es a tiltas elvette a legfontosabb
+kerdest: MEGERI-e bekapcsolni. Amit a felulet cserebe VALLAL: az elteres soha
+nem lehet nema — a sor vegen es a becsukott fejlecen is ki van irva.
+
+Az EGYETLEN kivetel a CSAK KIJELZES kapu, es az nem hazirend, hanem TENY: a
+`decide` atugorja, tehat a bepipalas semmit nem tenne.
 """
 import copy
 import sys
@@ -80,18 +84,39 @@ check("...es a hatas ujra az eles", g.effects_for(c, SYM, STRAT, for_backtest=Tr
       [g.SPREAD] == g.EFFECT_BLOCK)
 
 
-# ── 4. AZ INVARIANS: a backtest nem TEHET HOZZA ──────────────────────────
-# Egy elesben KI-re allitott kapu a merésben sem elhet — akkor sem, ha valaki a
-# tarba `true`-t irna.
+# ── 4. „MI LENNE, HA BEKAPCSOLNAM?" — a merés TOBBET is modellezhet ──────
+# ⚠ Ez a felhasznalo kerése: „az egyes kapukat kell tudjuk allitani akkor is,
+# ha azok ki vannak kapcsolva." Kulonben nem lehetne megmerni, MEGERI-e.
 c2 = {"pairs": {SYM: {"gates": {g.SPREAD: {STRAT: g.EFFECT_NONE}},
                       "gates_backtest": {STRAT: {g.SPREAD: True}}}}}
-check("elesben KI -> a backtestben is KI (a pipa nem elesitheti)",
-      g.effects_for(c2, SYM, STRAT, for_backtest=True)[g.SPREAD] == g.EFFECT_NONE)
+check("elesben KI, de a merésre BE -> a backtest modellezi",
+      g.effects_for(c2, SYM, STRAT, for_backtest=True)[g.SPREAD] != g.EFFECT_NONE)
+# Milyen hatassal? A kapu sajat alapertelmezesevel; ha az is „nincs", akkor
+# BLOKKOL — egy kapu bekapcsolasan azt szokas erteni, hogy akadalyoz.
+check("...a kapu sajat alapertelmezett hatasaval",
+      g.effects_for(c2, SYM, STRAT, for_backtest=True)[g.SPREAD] == g.EFFECT_BLOCK)
+check("...az ELES hatas kozben valtozatlanul KI",
+      g.effects_for(c2, SYM, STRAT)[g.SPREAD] == g.EFFECT_NONE)
 
-_bt = g.effects_for(c, SYM, STRAT, for_backtest=True)
-_live = g.effects_for(c, SYM, STRAT)
-check("a backtest hatasa MINDIG az eles reszhalmaza",
-      all(_bt[k] == _live[k] or _bt[k] == g.EFFECT_NONE for k in g.KEYS))
+# Egy kapu, aminek nincs sajat alapertelmezese sem (`none`), szinten blokkol.
+c3 = {"pairs": {SYM: {"gates_backtest": {STRAT: {g.MOMENTUM: True}}}}}
+check("a `none` alapertelmezesu kapu is BLOKKOL, ha a merésre bekapcsolod",
+      g.effects_for(c3, SYM, STRAT, for_backtest=True)[g.MOMENTUM] == g.EFFECT_BLOCK)
+
+# ⚠ AMIT CSEREBE VALLALUNK: az elteres NEM lehet nema.
+check("az elteres LEKERDEZHETO", g.backtest_differs(c2, SYM, STRAT) == [g.SPREAD],
+      str(g.backtest_differs(c2, SYM, STRAT)))
+check("...mindket iranyban", set(g.backtest_differs(
+      {"pairs": {SYM: {"gates": {g.SPREAD: {STRAT: g.EFFECT_BLOCK}},
+                       "gates_backtest": {STRAT: {g.SPREAD: False,
+                                                  g.MOMENTUM: True}}}}},
+      SYM, STRAT)) == {g.SPREAD, g.MOMENTUM})
+check("egyezéskor URES a lista", g.backtest_differs(_cfg(), SYM, STRAT) == [])
+
+# A CSAK KIJELZES kapu marad az egyetlen kivetel — meg kezi `true` mellett is.
+c4 = {"pairs": {SYM: {"gates_backtest": {STRAT: {g.VOLATILITY: True}}}}}
+check("a CSAK KIJELZES kaput semmi nem elesitheti",
+      g.effects_for(c4, SYM, STRAT, for_backtest=True)[g.VOLATILITY] == g.EFFECT_NONE)
 
 
 # ── 5. A BACKTEST TENYLEG ezt hasznalja ──────────────────────────────────
@@ -130,19 +155,16 @@ if TK:
     check("minden kapunak van backtest-pipaja",
           set(d._gate_bt_vars) == set(g.KEYS), str(sorted(d._gate_bt_vars)))
 
-    # ⚠ A pipa csak ott jelenthet valamit, ahol a kapu ELESBEN dont. Ahol a
-    # hatas „ki", ott LETILTVA — egy bepipalva marado jelolo azt igerne, hogy a
-    # meres szamol vele.
+    # ⚠ A pipa MINDEN dontokepes kapun allithato — akkor is, ha elesben ki van
+    # kapcsolva. Egyedul a CSAK KIJELZES kapun letiltva (ott tenyleg nem tenne
+    # semmit).
     _bad = []
     for k in g.KEYS:
-        eff = g.effect_for(live, sym, "wpr_sma", k)
-        usable = eff != g.EFFECT_NONE and not g.is_display_only(k)
         state = str(d._gate_bt_cb[k].cget("state"))
-        if usable and state == "disabled":
-            _bad.append(f"{k}: hatas={eff} de letiltva")
-        if not usable and state != "disabled":
-            _bad.append(f"{k}: hatas={eff} de engedve")
-    check("a pipa CSAK ott engedve, ahol a kapu elesben dont", not _bad,
+        want = "disabled" if g.is_display_only(k) else "normal"
+        if state != want:
+            _bad.append(f"{k}: {state} (varhato: {want})")
+    check("a pipa MINDEN kapun allithato, csak a kijelzo kivetel", not _bad,
           "; ".join(_bad))
 
     # A megszunt harmadik oszlop: csak akkor szol, ha van MIT mondania.
@@ -152,10 +174,29 @@ if TK:
     # ⚠ Egy dolgot viszont MEGTART: a globalis kikapcsolast. A legordulo olyankor
     # „ki"-t mutat — mintha a felhasznalo allitotta volna ugy.
     from core import gate_layout as gl
-    _off = [k for k in g.KEYS if not gl.is_enabled(live, k)]
+    _off = [k for k in g.KEYS if not gl.is_enabled(live, k)
+            and not g.is_display_only(k)
+            and not g.backtest_enabled(live, sym, "wpr_sma", k)]
     check("a globalisan kikapcsoltnal KIIRJA az okot",
           all("Beállításokban" in _texts[k] for k in _off) if _off else True,
           str({k: _texts[k] for k in _off}))
+
+    # ⚠ AZ ELTERES NEM LEHET NEMA: ha egy elesben kikapcsolt kaput bepipalsz, a
+    # sor vegen ki kell irnia — kulonben a meres hetekig mast modellezne.
+    _k = next((k for k in g.KEYS if not g.is_display_only(k)
+               and g.effect_for(live, sym, "wpr_sma", k) == g.EFFECT_NONE), None)
+    if _k:
+        d._gate_bt_vars[_k].set(True)
+        d._on_gate_bt_change(_k)
+        check("elteresnel a sor vege FIGYELMEZTET",
+              "⚠" in d._gate_src_lbl[_k].cget("text"),
+              d._gate_src_lbl[_k].cget("text"))
+        check("...es a becsukott fejlec is",
+              "eltér" in d._sections["kapuk"]._sum.cget("text"),
+              d._sections["kapuk"]._sum.cget("text"))
+        d._gate_bt_vars[_k].set(False); d._on_gate_bt_change(_k)
+    else:
+        check("nincs kikapcsolt kapu a teszt-paron (kihagyva)", True)
 
     root.destroy()
 else:

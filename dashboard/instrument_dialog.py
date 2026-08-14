@@ -372,7 +372,12 @@ class InstrumentParamsDialog:
                                on_show=self._on_tab, notify_every_show=True)
 
         # Görgethető törzs — innentől MINDEN tartalom ide (`body`) megy.
-        holder, body, self._body_canvas = _scrollable(self._shell.page("Paraméter"))
+        # ⚠ VÍZSZINTESEN IS, de csak ha kell: a kockázatcsökkentés sora Pajzs +
+        # Kiszállási jelnél jóval szélesebb, mint Ki-nél, és keskeny ablakon a
+        # jobb széle eddig NÉMÁN levágódott. A csúszka az OLDAL alján ül, nem egy
+        # szakaszon belül — így egy kérdést old meg egy helyen.
+        holder, body, self._body_canvas = _scrollable(self._shell.page("Paraméter"),
+                                                      horizontal=True)
         holder.pack(side="top", fill="both", expand=True)
         self._body = body
 
@@ -1345,8 +1350,15 @@ class InstrumentParamsDialog:
             eff = _gt.effects_for(self.root_cfg, self.symbol, self.strategy.name)
             n_on = sum(1 for e in eff.values() if e != _gt.EFFECT_NONE)
             if "kapuk" in secs:
-                secs["kapuk"].set_summary(
-                    f"{n_on} aktív" if n_on else "egyik sem aktív")
+                _txt = f"{n_on} aktív" if n_on else "egyik sem aktív"
+                # ⚠ Az ELTÉRÉS a becsukott fejlécen is látszik: különben egy
+                # feltáró beállítás (pl. „mérjük meg a lendület-kaput") némán
+                # ott maradna, és a backtest hetekig mást mérne, mint az él.
+                _d = _gt.backtest_differs(self.root_cfg, self.symbol,
+                                          self.strategy.name)
+                if _d:
+                    _txt += f" · ⚠ a mérés {len(_d)} kapuban eltér"
+                secs["kapuk"].set_summary(_txt)
         except Exception:
             pass
         try:
@@ -1371,7 +1383,22 @@ class InstrumentParamsDialog:
             pass
         try:
             if "kockazat" in secs:
-                secs["kockazat"].set_summary(self._rr_name.get())
+                # ⚠ NEM elég a preset neve. A szakasz három FÜGGETLEN tengelyt
+                # tartalmaz (preset · runner · építés) + két kapcsolót, és
+                # becsukva eddig csak az elsőt lehetett látni — pont az volt a
+                # kérdés, „mi van bekapcsolva", amit a becsukás nem szülhet újra.
+                _bits = [self._rr_name.get()]
+                _rn = getattr(self, "_runner_name", None)
+                if _rn is not None and self._runner_frame.winfo_manager():
+                    _bits.append(f"runner: {_rn.get()}")
+                if getattr(self, "_cautious_var", None) is not None                         and self._cautious_var.get():
+                    _bits.append("óvatos méret")
+                if getattr(self, "_cc_var", None) is not None and self._cc_var.get():
+                    _bits.append(f"cost-cut {self._cc_bars_var.get()}")
+                _bm = getattr(self, "_build_mode_name", None)
+                if _bm is not None and _bm.get() not in ("Ki", ""):
+                    _bits.append(f"építés: {_bm.get()}")
+                secs["kockazat"].set_summary(" · ".join(_bits))
         except Exception:
             pass
 
@@ -2248,9 +2275,16 @@ class InstrumentParamsDialog:
                  bg=BG, fg=FG_GRAY, font=self._sf).pack(anchor="w", padx=10, pady=(8, 0))
 
         hours_frame = tk.Frame(popup, bg=BG)
-        hours_frame.pack(anchor="w", padx=10, pady=(2, 2))
+        hours_frame.pack(fill="x", padx=10, pady=(2, 2))
+        # ⚠ TELJES SZÉLESSÉG: a 24 óra EGYENLŐEN osztozik a rendelkezésre álló
+        # helyen (`uniform` — enélkül a P&L-számot tartalmazó oszlopok szélesebbek
+        # lennének, és a rács „lélegezne" a számok hosszától). Így az ablakot
+        # szélesítve nagyobbak a kattintható célpontok, nem marad üres jobb oldal.
+        for _h in range(24):
+            hours_frame.grid_columnconfigure(_h, weight=1, uniform="ora")
         hour_on = {h: (h in _checked0) for h in range(24)}
         hour_btns = {}
+        self._hour_btns = hour_btns
 
         def _paint(h):
             btn = hour_btns[h]
@@ -2266,10 +2300,12 @@ class InstrumentParamsDialog:
 
         for h in range(24):
             colf = tk.Frame(hours_frame, bg=BG)
-            colf.grid(row=0, column=h, padx=1)
-            btn = tk.Label(colf, text=f"{h:02d}", width=2, padx=2, pady=2,
+            colf.grid(row=0, column=h, padx=1, sticky="nsew")
+            # A `width` KIKERÜLT: fix karakter-szélességgel a címke nem nyúlna a
+            # rendelkezésre álló helyre, és a rács szélesedne ugyan, a gombok nem.
+            btn = tk.Label(colf, text=f"{h:02d}", padx=2, pady=3,
                            font=_theme.fonts()["small_bold"], cursor="hand2")
-            btn.pack()
+            btn.pack(fill="x")
             btn.bind("<Button-1>", lambda e, hh=h: _toggle(hh))
             hour_btns[h] = btn
             _paint(h)
@@ -2396,45 +2432,55 @@ class InstrumentParamsDialog:
         """A sor VÉGI megjegyzés — csak akkor szól, ha van MIT mondania.
 
         ⚠ Korábban itt a „→ hatás (forrás)" állt, ami szó szerint ugyanaz volt,
-        mint a legördülő felirata („Örökölt (akadályozza a beszállást)"). Egy
-        dolgot vitt, amit a legördülő NEM: ha a kapu a Beállításokban
-        GLOBÁLISAN ki van kapcsolva. Akkor ugyanis a legördülő „ki"-t mutat —
-        mintha te állítottad volna úgy.
+        mint a legördülő felirata („Örökölt (akadályozza a beszállást)").
+
+        Amit MOND, az három dolog, ebben a fontossági sorrendben:
+          1. ELTÉR-e a mérés az élestől — ez a legfontosabb, mert egy feltáró
+             beállítás különben hetekig ott maradna, és a backtest csendben mást
+             mérne, mint ami történik;
+          2. hogy a kapu CSAK KIJELZÉS (a szűrés a paraméterekben van);
+          3. hogy a Beállításokban GLOBÁLISAN ki van kapcsolva — mert a legördülő
+             olyankor „Ki"-t mutat, mintha te állítottad volna úgy.
         """
-        eff, src = self._g.effect_with_source(self.root_cfg, self.symbol,
-                                              self.strategy.name, key)
         lbl = self._gate_src_lbl.get(key)
         if lbl is None:
             return
-        if src == self._g.SRC_MASTER_OFF:
-            lbl.config(text="a Beállításokban kikapcsolva", fg=FG_YELLOW)
-        elif self._g.is_display_only(key):
+        eff, src = self._g.effect_with_source(self.root_cfg, self.symbol,
+                                              self.strategy.name, key)
+        if self._g.is_display_only(key):
             lbl.config(text="csak kijelzés — a szűrés a paraméterekben van",
                        fg=FG_GRAY_DIM)
+            return
+        bt = self._g.effects_for(self.root_cfg, self.symbol, self.strategy.name,
+                                 for_backtest=True)[key]
+        if bt != eff:
+            lbl.config(fg=FG_YELLOW, text=(
+                "⚠ a mérésből kivéve — élesben szól bele"
+                if bt == self._g.EFFECT_NONE else
+                "⚠ csak a mérésben — élesben nem szól bele"))
+        elif src == self._g.SRC_MASTER_OFF:
+            lbl.config(text="a Beállításokban kikapcsolva", fg=FG_YELLOW)
         else:
             lbl.config(text="")
 
     def _refresh_gate_bt(self, key: str):
         """A backtest-pipa ÁLLAPOTA és értéke.
 
-        ⚠ A pipa csak ott jelenthet valamit, ahol a kapu ÉLESBEN egyáltalán dönt.
-        Ha a hatás „ki" (akár te állítottad, akár a Beállításokban globálisan ki
-        van kapcsolva), akkor a backtest sem modellezheti — egy bepipálva
-        maradó jelölő ilyenkor azt ígérné, hogy a mérés számol vele.
-        Ugyanez a CSAK KIJELZÉS kapura (volatilitás): a `decide` átugorja.
+        ⚠ A pipa FÜGGETLEN az éles hatástól — mindkét irányban. Egy élesben
+        kikapcsolt kapu is bekapcsolható a mérésre: a „mi lenne, ha
+        bekapcsolnám?" épp a backtest dolga, és a tiltása elvette volna a
+        legfontosabb kérdést — megéri-e egyáltalán bekapcsolni. Az ELTÉRÉST a
+        sor végi megjegyzés mondja ki, hogy ne maradjon néma.
 
-        A MENTETT érték megmarad: ha a kaput később visszakapcsolod, a pipa a
-        korábbi állapotával tér vissza."""
+        Az EGYETLEN kivétel a CSAK KIJELZÉS kapu, és az nem házirend, hanem
+        tény: a `decide` átugorja, tehát a bepipálás semmit nem tenne."""
         cb = (getattr(self, "_gate_bt_cb", None) or {}).get(key)
         var = (getattr(self, "_gate_bt_vars", None) or {}).get(key)
         if cb is None or var is None:
             return
-        eff = self._g.effect_for(self.root_cfg, self.symbol,
-                                 self.strategy.name, key)
-        usable = (eff != self._g.EFFECT_NONE) and not self._g.is_display_only(key)
-        stored = self._g.backtest_enabled(self.root_cfg, self.symbol,
-                                          self.strategy.name, key)
-        var.set(bool(stored and usable))
+        usable = not self._g.is_display_only(key)
+        var.set(usable and self._g.backtest_enabled(
+            self.root_cfg, self.symbol, self.strategy.name, key))
         try:
             cb.config(state=("normal" if usable else "disabled"))
         except tk.TclError:
@@ -2454,6 +2500,7 @@ class InstrumentParamsDialog:
         except Exception as ex:
             self.lbl_err.config(text=f"Mentési hiba: {ex}", fg=FG_RED)
             return
+        self._refresh_gate_source(key)   # az ELTÉRÉS azonnal látszódjék
         self._refresh_section_summaries()
         self._invalidate_bt()      # a korábbi backtest MÁS kapukkal futott
 
@@ -2485,8 +2532,8 @@ class InstrumentParamsDialog:
         except Exception as ex:
             self.lbl_err.config(text=f"Kapu-mentési hiba: {ex}", fg=FG_RED)
             return
-        self._refresh_gate_source(key)
-        self._refresh_gate_bt(key)   # a hatás „ki"-re váltása letiltja a pipát
+        self._refresh_gate_bt(key)
+        self._refresh_gate_source(key)   # a hatás váltása ELTÉRÉST szülhet
         # A választható „Örökölt (…)" felirat is változhat, ha közben a felsőbb
         # szint mást mond — újraépítjük a menüt, hogy ne mutasson elavult értéket.
         self._gate_vars[key].set(self._gate_choice_text(
@@ -2802,9 +2849,11 @@ class InstrumentParamsDialog:
 
     def _on_cautious_change(self):
         self._rrs.set_cautious(self.symbol, bool(self._cautious_var.get()))
+        self._refresh_section_summaries()
 
     def _on_cost_cut_change(self):
         self._rrs.set_cost_cut(self.symbol, bool(self._cc_var.get()))
+        self._refresh_section_summaries()
 
     def _on_cost_cut_bars_save(self, _event=None):
         raw = self._cc_bars_var.get().strip().replace(",", ".")
@@ -2814,6 +2863,7 @@ class InstrumentParamsDialog:
             return
         if v > 0:
             self._rrs.set_cost_cut_bars(self.symbol, v)
+            self._refresh_section_summaries()
 
     def _on_runner_change(self, name: str):
         self._rrs.set_runner(self.symbol, self._runner_from_name(name))
@@ -2904,6 +2954,13 @@ class InstrumentParamsDialog:
             if trig == self._pb.TRIGGER_R_CONVERGE:
                 self._build_rshrink_frame.pack(side="left", padx=(8, 0))
         self._refit_width()
+        self._rr_summary_changed()
+
+    def _rr_summary_changed(self):
+        """A kockázat-vezérlők LÁTHATÓSÁGA befolyásolja az összegzést (a runner
+        csak Felező/Pajzsnál szerepelhet benne), ezért a láthatóság-frissítés
+        UTÁN kell újraszámolni — nem előtte."""
+        self._refresh_section_summaries()
 
     def _refit_width(self):
         """A törzs szélessége kövesse az ELŐBUKKANÓ vezérlőket: a kockázatcsökkentés

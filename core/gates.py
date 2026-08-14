@@ -371,16 +371,30 @@ _BT_SECTION = "gates_backtest"
 def backtest_enabled(cfg: dict, symbol: str, strategy: str, key: str) -> bool:
     """Modellezze-e a backtest EZT a kaput ezen a páron/stratégián?
 
-    ⚠ A CSAK KIJELZÉS kapu SOHA nem modellezhető: a `decide` átugorja, a valódi
-    szűrés a stratégia saját `bt_entry`-jében van. Ha a pipa bejelölhető volna,
-    azt ígérné, hogy hat.
+    ⚠ FÜGGETLEN az éles hatástól — MINDKÉT irányban. Egy élesben KIKAPCSOLT
+    kapu is bekapcsolható a mérésre: a „mi lenne, ha bekapcsolnám?" épp a
+    backtest dolga. (Egy korábbi változat ezt tiltotta, mert „a backtest ne
+    modellezzen nem létező világot" — de éppen ez a feltáró mérés lényege, és a
+    tiltás elvette a legfontosabb kérdést: megéri-e bekapcsolni.)
+
+    Amit a felület KIMOND, ha a kettő eltér: hogy a mérés MÁST modellez, mint
+    ami élesben történik. Az eltérés így látható marad, nem néma.
+
+    ⚠ A CSAK KIJELZÉS kapu az EGYETLEN kivétel, és az nem házirend, hanem TÉNY:
+    a `decide` átugorja, tehát a bepipálás semmit nem tenne. A valódi szűrés a
+    stratégia saját `bt_entry`-jében van.
+
+    Alapértelmezés: modellezze, ha élesben dönt; ne, ha nem. Így a mérés
+    alapból az élet tükrözi, és csak akkor tér el, ha te kéred.
     """
     if is_display_only(key):
         return False
     sec = (((cfg or {}).get("pairs", {}).get(symbol) or {})
            .get(_BT_SECTION) or {}).get(strategy) or {}
     v = sec.get(key)
-    return True if v is None else bool(v)
+    if v is not None:
+        return bool(v)
+    return effect_for(cfg, symbol, strategy, key) != EFFECT_NONE
 
 
 def set_backtest(cfg: dict, symbol: str, strategy: str, key: str,
@@ -389,17 +403,19 @@ def set_backtest(cfg: dict, symbol: str, strategy: str, key: str,
 
     Az ALAPÉRTELMEZÉSSEL egyező érték KIKERÜL a configból — a fájl csak az
     eltérést rögzítheti, különben egy későbbi alapérték-változás némán
-    hatástalan maradna az így „beállított" kulcsokra.
+    hatástalan maradna az így „beállított" kulcsokra. Az alapértelmezés itt az
+    ÉLES állapot, tehát a bejegyzés akkor marad meg, ha a mérés eltér tőle.
     """
     cfg = cfg if cfg is not None else {}
     pairs = cfg.setdefault("pairs", {})
     pc = pairs.setdefault(symbol, {})
     sec = pc.get(_BT_SECTION) or {}
     per = dict(sec.get(strategy) or {})
-    if bool(value):
-        per.pop(key, None)                 # az alapértelmezés: modellezze
+    _dflt = effect_for(cfg, symbol, strategy, key) != EFFECT_NONE
+    if bool(value) == _dflt:
+        per.pop(key, None)
     else:
-        per[key] = False
+        per[key] = bool(value)
     if per:
         sec[strategy] = per
         pc[_BT_SECTION] = sec
@@ -424,10 +440,29 @@ def effects_for(cfg: dict, symbol: str, strategy: str,
     out = {k: effect_for(cfg, symbol, strategy, k) for k in KEYS}
     if for_backtest:
         for k in KEYS:
-            if out[k] != EFFECT_NONE and not backtest_enabled(cfg, symbol,
-                                                              strategy, k):
+            on = backtest_enabled(cfg, symbol, strategy, k)
+            if not on:
                 out[k] = EFFECT_NONE
+            elif out[k] == EFFECT_NONE:
+                # ⚠ „Mi lenne, ha bekapcsolnám?" — a mérés modellezi, holott
+                # élesben ki van kapcsolva. Milyen HATÁSSAL? A kapu saját
+                # alapértelmezésével; ha az is „nincs", akkor BLOKKOL — mert egy
+                # kapu bekapcsolásán azt szokás érteni, hogy akadályoz.
+                d = default_effect_of(k)
+                out[k] = d if d != EFFECT_NONE else EFFECT_BLOCK
     return out
+
+
+def backtest_differs(cfg: dict, symbol: str, strategy: str) -> list:
+    """Mely kapuknál tér el a MÉRÉS az ÉLES viselkedéstől?
+
+    A felület ezt írja ki: az eltérés legyen látható, ne néma. Enélkül egy
+    feltáró beállítás hetekig ott maradhatna, és a backtest csendben mást
+    mérne, mint ami történik.
+    """
+    live = effects_for(cfg, symbol, strategy)
+    bt = effects_for(cfg, symbol, strategy, for_backtest=True)
+    return [k for k in KEYS if live[k] != bt[k]]
 
 
 # ---------------------------------------------------------------------------
