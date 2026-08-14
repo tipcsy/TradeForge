@@ -2318,9 +2318,21 @@ class InstrumentParamsDialog:
                                                                     pady=(2, 4))
         self._gate_vars = {}
         self._gate_src_lbl = {}
+        self._gate_bt_vars = {}
+        self._gate_bt_cb = {}
         grid = tk.Frame(box, bg=BG)
         grid.pack(fill="x")
-        for i, g in enumerate(_g.REGISTRY):
+        # ── OSZLOP-FEJLÉC: név · állapot (élesben) · backtest ───────────────
+        # ⚠ A korábbi harmadik oszlop („→ hatás (forrás)") KIKERÜLT: szó szerint
+        # ugyanazt mondta, ami a legördülőben állt. Egyetlen dolgot vitt, amit a
+        # legördülő NEM: ha a kapu a Beállításokban globálisan ki van kapcsolva.
+        # Az megmaradt — de csak akkor jelenik meg, amikor tényleg ez a helyzet.
+        for _c, _t in ((0, "név"), (1, "állapot (élesben)"), (2, "backtest")):
+            tk.Label(grid, text=_t, bg=BG, fg=FG_GRAY_DIM, font=self._sf,
+                     anchor=("center" if _c == 2 else "w")).grid(
+                         row=0, column=_c, sticky="we", pady=(0, 2),
+                         padx=(0 if _c == 0 else 6, 0))
+        for i, g in enumerate(_g.REGISTRY, start=1):
             key = g["key"]
             tk.Label(grid, text=g["label"], bg=BG, fg=FG_WHITE, font=self._sf,
                      anchor="w", width=22).grid(row=i, column=0, sticky="w", pady=1)
@@ -2335,12 +2347,26 @@ class InstrumentParamsDialog:
             om.config(width=max(len(t) for t in self._gate_choices(key)),
                       anchor="w")
             om.grid(row=i, column=1, sticky="w", padx=6)
+
+            # ── A BACKTEST-PIPA: modellezze-e a mérés ezt a kaput? ──────────
+            # ⚠ Ezzel mérhető meg, mennyit visz el egy kapu: kipipálod,
+            # futtatsz, kiveszed, futtatsz — a különbség a kapué.
+            bv = tk.BooleanVar(value=_g.backtest_enabled(
+                self.root_cfg, self.symbol, self.strategy.name, key))
+            self._gate_bt_vars[key] = bv
+            cb = tk.Checkbutton(grid, variable=bv, bg=BG, fg=FG_WHITE,
+                                selectcolor=BG_HEADER, activebackground=BG,
+                                activeforeground=FG_WHITE,
+                                command=lambda k=key: self._on_gate_bt_change(k))
+            cb.grid(row=i, column=2, padx=(6, 0))
+            self._gate_bt_cb[key] = cb
             lbl = tk.Label(grid, text="", bg=BG, fg=FG_GRAY_DIM, font=self._sf,
                            anchor="w")
-            lbl.grid(row=i, column=2, sticky="w", padx=(6, 0))
+            lbl.grid(row=i, column=3, sticky="w", padx=(6, 0))
             self._gate_vars[key] = var
             self._gate_src_lbl[key] = lbl
             self._refresh_gate_source(key)
+            self._refresh_gate_bt(key)
         self._refresh_section_summaries()
         tk.Label(box, text="A „csak jelzés” NEM kapu-hatás: az a stratégia "
                            "kötés-módja (a soron állítható).",
@@ -2367,13 +2393,69 @@ class InstrumentParamsDialog:
         return self._gate_choices(key)[0]
 
     def _refresh_gate_source(self, key: str):
+        """A sor VÉGI megjegyzés — csak akkor szól, ha van MIT mondania.
+
+        ⚠ Korábban itt a „→ hatás (forrás)" állt, ami szó szerint ugyanaz volt,
+        mint a legördülő felirata („Örökölt (akadályozza a beszállást)"). Egy
+        dolgot vitt, amit a legördülő NEM: ha a kapu a Beállításokban
+        GLOBÁLISAN ki van kapcsolva. Akkor ugyanis a legördülő „ki"-t mutat —
+        mintha te állítottad volna úgy.
+        """
         eff, src = self._g.effect_with_source(self.root_cfg, self.symbol,
                                               self.strategy.name, key)
         lbl = self._gate_src_lbl.get(key)
-        if lbl is not None:
-            lbl.config(text=f"→ {self._g.EFFECT_LABEL[eff]}  "
-                            f"({self._g.SOURCE_LABEL.get(src, src)})",
-                       fg=FG_WHITE if src == self._g.SRC_PAIR else FG_GRAY_DIM)
+        if lbl is None:
+            return
+        if src == self._g.SRC_MASTER_OFF:
+            lbl.config(text="a Beállításokban kikapcsolva", fg=FG_YELLOW)
+        elif self._g.is_display_only(key):
+            lbl.config(text="csak kijelzés — a szűrés a paraméterekben van",
+                       fg=FG_GRAY_DIM)
+        else:
+            lbl.config(text="")
+
+    def _refresh_gate_bt(self, key: str):
+        """A backtest-pipa ÁLLAPOTA és értéke.
+
+        ⚠ A pipa csak ott jelenthet valamit, ahol a kapu ÉLESBEN egyáltalán dönt.
+        Ha a hatás „ki" (akár te állítottad, akár a Beállításokban globálisan ki
+        van kapcsolva), akkor a backtest sem modellezheti — egy bepipálva
+        maradó jelölő ilyenkor azt ígérné, hogy a mérés számol vele.
+        Ugyanez a CSAK KIJELZÉS kapura (volatilitás): a `decide` átugorja.
+
+        A MENTETT érték megmarad: ha a kaput később visszakapcsolod, a pipa a
+        korábbi állapotával tér vissza."""
+        cb = (getattr(self, "_gate_bt_cb", None) or {}).get(key)
+        var = (getattr(self, "_gate_bt_vars", None) or {}).get(key)
+        if cb is None or var is None:
+            return
+        eff = self._g.effect_for(self.root_cfg, self.symbol,
+                                 self.strategy.name, key)
+        usable = (eff != self._g.EFFECT_NONE) and not self._g.is_display_only(key)
+        stored = self._g.backtest_enabled(self.root_cfg, self.symbol,
+                                          self.strategy.name, key)
+        var.set(bool(stored and usable))
+        try:
+            cb.config(state=("normal" if usable else "disabled"))
+        except tk.TclError:
+            pass
+
+    def _on_gate_bt_change(self, key: str):
+        """A backtest-pipa AZONNAL a config.json-ba megy.
+
+        ⚠ Ez NEM az éles hatást állítja: az „állapot" oszlop marad, ami volt. Ez
+        csak azt mondja meg, hogy a MÉRÉS modellezze-e a kaput — épp ezzel
+        mérhető, mennyit visz el (kipipálod, futtatsz, kiveszed, futtatsz)."""
+        val = bool(self._gate_bt_vars[key].get())
+        self._g.set_backtest(self.root_cfg, self.symbol, self.strategy.name,
+                             key, val)
+        try:
+            self._save_main_config()
+        except Exception as ex:
+            self.lbl_err.config(text=f"Mentési hiba: {ex}", fg=FG_RED)
+            return
+        self._refresh_section_summaries()
+        self._invalidate_bt()      # a korábbi backtest MÁS kapukkal futott
 
     def _on_gate_change(self, key: str):
         """A választás AZONNAL a config.json-ba megy (`pairs.<SYM>.gates`).
@@ -2404,6 +2486,7 @@ class InstrumentParamsDialog:
             self.lbl_err.config(text=f"Kapu-mentési hiba: {ex}", fg=FG_RED)
             return
         self._refresh_gate_source(key)
+        self._refresh_gate_bt(key)   # a hatás „ki"-re váltása letiltja a pipát
         # A választható „Örökölt (…)" felirat is változhat, ha közben a felsőbb
         # szint mást mond — újraépítjük a menüt, hogy ne mutasson elavult értéket.
         self._gate_vars[key].set(self._gate_choice_text(

@@ -622,7 +622,8 @@ def _pair_market_series(cfg, symbol, strategy_name, m15, exec_gates: bool):
     try:
         from core import gates as _gt
         from core import market_strategy as _ms
-        if not _gt.active(_gt.effects_for(cfg or {}, symbol, strategy_name),
+        if not _gt.active(_gt.effects_for(cfg or {}, symbol, strategy_name,
+                                          for_backtest=True),
                           _gt.MARKET):
             return None
         name = _ms.market_name_of((cfg.get("pairs") or {}).get(symbol) or {})
@@ -643,7 +644,8 @@ def _pair_momentum(cfg, symbol, strategy_name, m15, df_m1, exec_gates: bool) -> 
     try:
         from core import gates as _gt
         from core import momentum as _momx
-        if not _gt.active(_gt.effects_for(cfg or {}, symbol, strategy_name),
+        if not _gt.active(_gt.effects_for(cfg or {}, symbol, strategy_name,
+                                          for_backtest=True),
                           _gt.MOMENTUM):
             return out
         pc = (cfg.get("pairs") or {}).get(symbol) or {}
@@ -1042,7 +1044,11 @@ def run_pair(
     # ── A kapuk HATÁSA (v1.97.0) — nem csak be/ki, hanem blokkol/csökkent/ki ──
     # Ugyanaz a config és ugyanaz a döntés-modul, mint élesben (`core/gates.py`),
     # így a backtest nem modellezhet mást, mint amit az él tesz.
-    _gate_eff = (_gt.effects_for(cfg or {}, symbol, strategy.name)
+    # ⚠ `for_backtest=True`: a kapu-tablaban KIPIPALATLAN kapuk kimaradnak a
+    # modellezesbol. Az eles hatasbol indulunk, es legfeljebb KIVESZUNK —
+    # a backtest sosem alkalmazhat olyan kaput, ami elesben nem szol bele.
+    _gate_eff = (_gt.effects_for(cfg or {}, symbol, strategy.name,
+                                 for_backtest=True)
                  if _exec_gates else {k: _gt.EFFECT_NONE for k in _gt.KEYS})
     # A piac-kapu per-gyertya besorolása — EGYSZER, mint a TF-kiértékelő
     # (paraméter-független). None, ha a kapu ki van kapcsolva vagy nincs osztályozó.
@@ -1955,7 +1961,8 @@ def run_portfolio_backtest(
             "tf_eval":   (_build_tf_align_evaluator(cfg, sym, strategy.name, df_m1)
                           if _exec_gates else None),
             # A kapuk HATÁSA per (pár × stratégia) — a `core.gates.decide` bemenete.
-            "gate_eff":  (_gt.effects_for(cfg, sym, strategy.name) if _exec_gates
+            "gate_eff":  (_gt.effects_for(cfg, sym, strategy.name,
+                                          for_backtest=True) if _exec_gates
                           else {k: _gt.EFFECT_NONE for k in _gt.KEYS}),
             # Piac-kapu: per-gyertya besorolás (EGYSZER, mint a tf_eval — nem
             # paraméter-függő). None, ha a kapu ki van kapcsolva/nincs osztályozó.

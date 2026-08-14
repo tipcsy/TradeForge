@@ -352,9 +352,82 @@ def effect_for(cfg: dict, symbol: str, strategy: str, key: str) -> str:
     return effect_with_source(cfg, symbol, strategy, key)[0]
 
 
-def effects_for(cfg: dict, symbol: str, strategy: str) -> dict:
-    """`{kapu_kulcs: hatás}` egy (pár, stratégia) párosra — az `evaluate` bemenete."""
-    return {k: effect_for(cfg, symbol, strategy, k) for k in KEYS}
+# ---------------------------------------------------------------------------
+# MODELLEZZE-E A BACKTEST? — kapunként, külön az éles hatástól
+# ---------------------------------------------------------------------------
+# A felhasználó kérése: a kapu-táblában az „állapot" azt mondja, mi történik
+# ÉLESBEN, egy külön pipa pedig azt, hogy a BACKTEST modellezze-e.
+#
+# ⚠ MIÉRT KELL A KETTŐ KÜLÖN. Épp ezzel lehet megmérni, mennyit visz el egy
+# kapu: kipipálod, futtatsz, kiveszed, futtatsz — a különbség a kapué. Egyetlen
+# közös `exec_gates` kapcsolóval (mind vagy semmi) ez nem volt megkérdezhető, és
+# a `tools/gate_ab.py` is csak azért létezik, mert a felületen nem lehetett.
+#
+# A tár a config-házirendet követi: CSAK AZ ELTÉRÉST rögzítjük. Alapértelmezés =
+# „modellezze" minden olyan kapunál, ami élesben egyáltalán dönt.
+_BT_SECTION = "gates_backtest"
+
+
+def backtest_enabled(cfg: dict, symbol: str, strategy: str, key: str) -> bool:
+    """Modellezze-e a backtest EZT a kaput ezen a páron/stratégián?
+
+    ⚠ A CSAK KIJELZÉS kapu SOHA nem modellezhető: a `decide` átugorja, a valódi
+    szűrés a stratégia saját `bt_entry`-jében van. Ha a pipa bejelölhető volna,
+    azt ígérné, hogy hat.
+    """
+    if is_display_only(key):
+        return False
+    sec = (((cfg or {}).get("pairs", {}).get(symbol) or {})
+           .get(_BT_SECTION) or {}).get(strategy) or {}
+    v = sec.get(key)
+    return True if v is None else bool(v)
+
+
+def set_backtest(cfg: dict, symbol: str, strategy: str, key: str,
+                 value: bool) -> dict:
+    """A backtest-pipa mentése (a `cfg`-t HELYBEN módosítja, és vissza is adja).
+
+    Az ALAPÉRTELMEZÉSSEL egyező érték KIKERÜL a configból — a fájl csak az
+    eltérést rögzítheti, különben egy későbbi alapérték-változás némán
+    hatástalan maradna az így „beállított" kulcsokra.
+    """
+    cfg = cfg if cfg is not None else {}
+    pairs = cfg.setdefault("pairs", {})
+    pc = pairs.setdefault(symbol, {})
+    sec = pc.get(_BT_SECTION) or {}
+    per = dict(sec.get(strategy) or {})
+    if bool(value):
+        per.pop(key, None)                 # az alapértelmezés: modellezze
+    else:
+        per[key] = False
+    if per:
+        sec[strategy] = per
+        pc[_BT_SECTION] = sec
+    else:
+        sec.pop(strategy, None)
+        if sec:
+            pc[_BT_SECTION] = sec
+        else:
+            pc.pop(_BT_SECTION, None)
+    return cfg
+
+
+def effects_for(cfg: dict, symbol: str, strategy: str,
+                for_backtest: bool = False) -> dict:
+    """`{kapu_kulcs: hatás}` egy (pár, stratégia) párosra — az `evaluate` bemenete.
+
+    `for_backtest=True` → a kapu-táblában KIPIPÁLATLAN kapuk `EFFECT_NONE`-t
+    kapnak. Így ugyanaz a hívás szolgálja az élt és a backtestet, és a kettő
+    nem tud szétcsúszni: a backtest MINDIG az éles hatásból indul, és legfeljebb
+    kivesz belőle — soha nem tesz hozzá.
+    """
+    out = {k: effect_for(cfg, symbol, strategy, k) for k in KEYS}
+    if for_backtest:
+        for k in KEYS:
+            if out[k] != EFFECT_NONE and not backtest_enabled(cfg, symbol,
+                                                              strategy, k):
+                out[k] = EFFECT_NONE
+    return out
 
 
 # ---------------------------------------------------------------------------
