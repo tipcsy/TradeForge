@@ -194,14 +194,14 @@ for _f, _lbl in ((ROOT / "mt4" / "TradeForgeBands.mq4", "MQL4"),
 check("a ket Bands-indikator verzioja AZONOS",
       _vers["MQL4"] == _vers["MQL5"] and _vers["MQL4"] is not None, str(_vers))
 
-# ...es kovesse az app verziojat (a javitas csak akkor ér valamit, ha a
-# felhasznalo latja, hogy ujra kell forditania).
-sys.path.insert(0, str(ROOT))
-from version import APP_VERSION
-check("...es az app verziojanak fo-szamait viszi",
-      _vers["MQL5"] and APP_VERSION.startswith(_vers["MQL5"]),
-      f"indikator={_vers['MQL5']}  app={APP_VERSION}")
-
+# ⚠ AZ APP VERZIOJAHOZ NEM kotjuk. Egy korabbi valtozata ezt kerte
+# (`APP_VERSION.startswith(indikator_verzio)`), de az MINDEN app-verzioemelesnel
+# ujrafordítást kovetelt volna — a `mt_deploy` a forras sha1-jehez koti a tarolt
+# binarist, tehat egy tartalmi valtozas NELKULI verzioemeles csak feleslegesen
+# ervenytelenitene a lefordított .ex4/.ex5 fajlokat. Az ORIZENDO invarians az,
+# hogy a KETTO EGYMASSAL egyezzen: azok tenyleg ugyanazt a savot rajzoljak.
+check("...es mindketto ki van tolve (nem ures)",
+      all(v and v.count(".") >= 1 for v in _vers.values()), str(_vers))
 
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")

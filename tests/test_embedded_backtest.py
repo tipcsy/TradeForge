@@ -195,8 +195,85 @@ if TK_OK:
     # A widget viszont LETEZIK: a belso allapotvaltasok ra hivatkoznak.
     check("...de a widget letezik (a belso allapotvaltasokhoz)",
           d._run_tab._btn_start is not None)
+    # ── EGY FORRAS: a duplikalt vezerlok LEKERULTEK a futtatasrol ─────────
+    # A felhasznalo szo szerint: „azert raktuk egy helyre, hogy egy helyen legyen
+    # allithato". Minden ilyen vezerlonek van sajat SZAKASZA feljebb a lapon; egy
+    # masodik, szerkesztheto masolat pontosan azt a kerdest szuli, amiert az
+    # egesz atalakitas elindult: „most akkor melyiket hasznalja?".
+    _mapped = []
+
+    def _walk_all(w):
+        for c in w.winfo_children():
+            try:
+                t = str(c.cget("text")) if "text" in c.keys() else ""
+            except Exception:
+                t = ""
+            if t and c.winfo_ismapped():
+                _mapped.append(t)
+            _walk_all(c)
+
+    root.update_idletasks()
+    _walk_all(d._sections["futtatas"].body)
+    _joined = " | ".join(_mapped)
+    check("NINCS „csak a kereskedesi orakban” kapcsolo",
+          "kereskedési órákban" not in _joined, _joined[:160])
+    check("NINCS „vegrehajtasi kapuk” mester-kapcsolo",
+          "végrehajtási kapuk" not in _joined, _joined[:160])
+    check("NINCS masodik Kockázatcsökkentés csoport",
+          "Kockázatcsökkentés" not in _joined, _joined[:160])
+    check("NINCS masodik Pozícióépítés csoport",
+          "Pozícióépítés" not in _joined, _joined[:160])
+    # A widgetek LETEZNEK (a belso lathatosag-logika rajuk epul), csak nem latszanak.
+    check("...de a widgetek leteznek", d._run_tab._rr_name is not None
+          and d._run_tab._hours_filter_var is not None)
+
+    # ⚠ ES AZ ERTEK A SZAKASZBOL JON, FUTASKOR lekerdezve. A beagyazott peldany
+    # csak PARAMETER-valtozasra epul ujra; egy atadott pillanatkep elavulna, es a
+    # futas neman a regivel menne.
+    check("mind a 24 ora -> nincs ora-szuro", d._run_tab._allowed_hours() is None)
+    d._hour_on[3] = False
+    check("a szakaszban kikapcsolt ora AZONNAL hat (nincs ujraepites)",
+          d._run_tab._allowed_hours() is not None
+          and 3 not in d._run_tab._allowed_hours(),
+          str(len(d._run_tab._allowed_hours() or [])) + " ora")
+    d._hour_on[3] = True
+
+    from core import risk_reduction as _rrx2
+    from core import rr_state as _rrs2
+    d._rr_name.set(_rrs2.NAME[_rrx2.PRESET_SHIELD]); d._on_rr_change(_rrs2.NAME[_rrx2.PRESET_SHIELD])
+    check("az rr is a szakaszbol jon, elve",
+          (d._run_tab._current_rr_spec() or {}).get("preset") == _rrx2.PRESET_SHIELD,
+          str((d._run_tab._current_rr_spec() or {}).get("preset")))
+    check("az epites is a szakaszbol",
+          d._run_tab._current_build_cfg()["mode"] == d._bst.get_mode(sym))
+
+    # ⚠ A KAPUK: beagyazva NINCS mester-kapcsolo, mert a Kapuk szakaszban
+    # KAPUNKENT dontesz (`gates_backtest`). Egy folerendelt „mind vagy semmi"
+    # elnyomhatna a pipakat — azok neman hatastalanok lennenek.
+    import inspect as _insp
+    from dashboard import backtest_dialog as _bdmod
+    _ssrc = _insp.getsource(_bdmod.BacktestDialog._start)
+    check("beagyazva a vegrehajtasi kapuk MINDIG elnek",
+          "True if self._host is not None" in _ssrc, "")
+
     check("a terv-sáv a FUTTATÁS szakaszban él", d._tuned_lbl is not None)
     check("...és EGYETLEN Indítás gomb van", getattr(d, "_plan_btn", None) is not None)
+
+    # ⚠ A FUTAS-ALLAPOT a gomb MELLETT all, nem a rajz dobozaban. Korabban a
+    # `_sweep_box`-ban ult, amit az OPTIMALIZALAS ag epp elrejt (`pack_forget`):
+    # az Indítás gomb elinditott egy orakig tarto optimalizalast, es SEMMI
+    # visszajelzest nem adott. Pontosan igy nez ki egy „beragadt" program.
+    check("a futas-allapot a FUTTATAS szakaszban van",
+          getattr(d, "_run_status", None) is not None
+          and str(d._run_status.winfo_parent()).startswith(
+              str(d._sections["futtatas"].body)),
+          str(getattr(d, "_run_status", None)))
+    check("...NEM a rajz dobozaban (amit az OPT ag elrejt)",
+          not str(d._run_status).startswith(str(d._sweep_box)),
+          f"{d._run_status} vs {d._sweep_box}")
+    _osrc = _insp.getsource(idlg.InstrumentParamsDialog._start_planned)
+    check("az OPTIMALIZALAS ag a lathato cimkere ir",
+          "_sw_status" not in _osrc and "_run_status" in _osrc, "")
 
     # ⚠ A terv a PILLANATNYI pipakat tukrozze: ha a felulet mast mond, mint ami
     # elindul, a felhasznalo orakra elindit valamit, amire nem szamitott.

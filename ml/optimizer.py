@@ -460,6 +460,36 @@ def _warn_step_grid(symbol: str, specs: dict) -> None:
                         symbol, key, lo, hi, step, eff, hi, hi)
 
 
+def _opt_allowed_hours(symbol: str, strategy, pair_cfg: dict):
+    """A KERESKEDÉSI ÓRÁK az optimalizáláshoz — a live-val EGYEZŐ feloldással.
+
+    ⚠ EZ EDDIG HIÁNYZOTT. Az optimalizáló mind a 24 órán hangolt, az él viszont
+    csak a `trade_hours` órákban köt — a kapott paraméterek tehát részben olyan
+    órákra optimalizáltak, amikben a motor SOHA nem lép be. Ugyanaz a hiba-osztály,
+    mint a v1.95.0-ban javított kapu-eltérés, csak az órákra.
+
+    Ma minden párnál mind a 24 óra engedve van, tehát a javítás EGYETLEN mentett
+    paramétert sem érint — de az első szűkítéskor némán szétcsúszott volna.
+
+    `None` → nincs korlát (a `run_pair` ilyenkor minden órát enged)."""
+    # ⚠ A KONVERZIO IS A VEDELEM ALATT: egy elgepelt `trade_hours` (pl. szoveg)
+    # kulonben `ValueError`-t dobna az optimalizalas KOZEPEN, egy orak ota futo
+    # munkat elvive. Hibas bemenetnel inkabb NE szurjunk — az a korabbi, ismert
+    # viselkedes; a csendes elszallas nem az.
+    try:
+        from core.params_store import resolve_trade_hours
+        th = resolve_trade_hours(symbol, getattr(strategy, "name", None),
+                                 (pair_cfg or {}).get("trade_hours"))
+        if th is None:
+            return None
+        hours = {int(h) for h in th}
+    except Exception:
+        log.warning("%s — ertelmezhetetlen trade_hours, az optimalizalas MINDEN "
+                    "oran fut (mint eddig)", symbol)
+        return None
+    return None if len(hours) >= 24 else hours
+
+
 def optimize_pair_optuna(
     symbol: str,
     df_m15: pd.DataFrame,
@@ -626,6 +656,8 @@ def optimize_pair_optuna(
             log.info("  %s — %d/%d trial | legjobb score: %.2f",
                      symbol, call_count[0], n_trials, best_score_so_far[0])
 
+    _hours = _opt_allowed_hours(symbol, strategy, pair_cfg)
+
     def _evaluate(params, rr_run, series_by_window=None):
         """Egy paraméter-készlet pontszáma az ÖSSZES walk-forward ablakon.
 
@@ -649,6 +681,7 @@ def optimize_pair_optuna(
                     strategy=strategy,
                     rr=rr_run,
                     cfg=cfg, exec_gates=exec_gates, tf_eval=tf_eval,
+                    allowed_hours=_hours,
                     signal_series=(series_by_window[_wi] if series_by_window else None),
                 )
 
@@ -898,7 +931,8 @@ def optimize_pair_optuna(
         m15_tr = df_m15[df_m15.index >= windows[0]["train_start"]]
         m1_tr  = df_m1[df_m1.index  >= windows[0]["train_start"]]
         train_result = _rp(symbol, m15_tr, m1_tr, best_params, pair_cfg, trading_cfg,
-                           initial_balance, strategy=strategy, rr=best_rr_run)
+                           initial_balance, strategy=strategy, rr=best_rr_run,
+                           allowed_hours=_hours)
         train_trades = [
             t for t in train_result.closed
             if t.close_time is not None and t.close_time < last_window["test_start"]
@@ -980,6 +1014,7 @@ def optimize_pair(
                 test_start=None,   # TRAIN: teljes adat a train_end-ig
                 strategy=strategy,
                 cfg=cfg, exec_gates=exec_gates, tf_eval=_tf_eval,
+                allowed_hours=_opt_allowed_hours(symbol, strategy, pair_cfg),
             )
             # TRAIN adatra szűrünk
             train_result_trades = [
@@ -1282,7 +1317,9 @@ def optimize_symbol(symbol, df_m15, df_m1, cfg, initial_balance, progress=None,
                                 pair_cfg, trading_cfg, initial_balance,
                                 test_start=test_start, strategy=strategy,
                                 rr=_rr_for_run(_best_rr),
-                                cfg=cfg, exec_gates=exec_gates)
+                                cfg=cfg, exec_gates=exec_gates,
+                                allowed_hours=_opt_allowed_hours(symbol, strategy,
+                                                                 pair_cfg))
         test_summary = test_result.summary(initial_balance)
     except Exception as e:
         log.warning("  %s — TEST hiba: %s", symbol, e)

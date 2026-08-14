@@ -1086,7 +1086,10 @@ class InstrumentParamsDialog:
             preset_name=self._rr_name.get(),
             on_apply_params=self._apply_params_from_bt,
             host=bt_host, on_state=self._on_run_state, host_scroll=False,
-            on_run_done=self._on_run_done)
+            on_run_done=self._on_run_done,
+            provide_hours=self._allowed_hours_from_ui,
+            provide_rr=self._rr_spec_from_ui,
+            provide_build=self._build_cfg_from_ui)
         self._refresh_section_summaries()
 
     # ── A TERV-SÁV: mi fog történni, ha elindítod ──────────────────────────
@@ -1131,6 +1134,16 @@ class InstrumentParamsDialog:
                                    fg=BTN_PLAY_FG, relief="flat", font=self._sf,
                                    command=self._start_planned)
         self._plan_btn.pack(side="right", padx=(8, 0))
+        # ⚠ A FUTÁS ÁLLAPOTA IDE KERÜL, a gomb mellé — és nem a rajz dobozába.
+        # Az korábban a `_sweep_box`-ban ült, amit az OPTIMALIZÁLÁS ág épp
+        # `pack_forget()`-tel elrejt: az Indítás gomb tehát elindított egy órákig
+        # tartó optimalizálást, és SEMMI visszajelzést nem adott róla. Pontosan
+        # így néz ki egy „beragadt" program.
+        self._run_status = _autowrap(tk.Label(box, text="", bg=BG, fg=FG_GRAY,
+                                              font=self._sf, anchor="w",
+                                              justify="left"),
+                                     self._body_canvas)
+        self._run_status.pack(anchor="w", fill="x", padx=12)
 
         self._tuned_lbl = _autowrap(tk.Label(box, bg=BG, fg=FG_GRAY, font=self._sf,
                                              anchor="w", justify="left"),
@@ -1230,6 +1243,43 @@ class InstrumentParamsDialog:
                                  on_export=self._export_trades)
         self._trade_rows = []
 
+    def _allowed_hours_from_ui(self):
+        """A KERESKEDÉSI ÓRÁK szakasz pillanatnyi állapota — ez a mérés óra-kapuja.
+
+        ⚠ Nincs külön „csak a kereskedési órákban" kapcsoló. A felhasználó
+        kérése szó szerint: „azért raktuk egy helyre, hogy egy helyen legyen
+        állítható. Ha mind, akkor kereskedik mindenhol; ha csökkentünk rajta,
+        akkor csökken a backtest és az optimalizálás is."
+
+        Mind a 24 óra → `None`: az azonos a „nincs szűrés"-sel, de olcsóbb (a
+        `run_pair` ilyenkor nem is nézi az órát), és a naplóban is egyértelmű."""
+        try:
+            on = {int(h) for h, v in (self._hour_on or {}).items() if v}
+        except (TypeError, ValueError, AttributeError):
+            return None
+        return None if len(on) >= 24 else on
+
+    def _build_cfg_from_ui(self):
+        """A POZÍCIÓÉPÍTÉS szakasz pillanatnyi állapota (a `run_pair` build
+        override-ja) — ugyanaz az egy-forrás elv, mint az óráknál és az rr-nél."""
+        _bst, _pb = self._bst, self._pb
+        mode = {v: k for k, v in _bst.NAME.items()}.get(
+            self._build_mode_name.get(), _bst.MODE_OFF)
+        trig = {v: k for k, v in _pb.TRIGGER_NAME.items()}.get(
+            self._build_trig_name.get(), _pb.TRIGGER_CANDLE)
+
+        def _f(var, dflt, lo=None, hi=None):
+            v = _num(var.get())
+            if v is None or (lo is not None and v <= lo) or                (hi is not None and v >= hi):
+                return dflt
+            return v
+
+        return {"mode": mode,
+                "size_factor": _f(self._build_sf_var, 0.7, lo=0),
+                "trigger": trig,
+                "r_step": _f(self._build_rstep_var, 1.0, lo=0),
+                "r_shrink": _f(self._build_rshrink_var, 0.5, lo=0, hi=1)}
+
     def _export_trades(self, rows):
         """A MEGJELENÍTETT (szűrt) kötések CSV-be — a magyar Excel formátumában.
 
@@ -1303,12 +1353,16 @@ class InstrumentParamsDialog:
             # 0 hangolt → EGYETLEN futás: ez maga a backtest.
             if self._run_tab is not None:
                 self._sweep_box.pack_forget()
+                self._run_status.config(text="Backtest indul…", fg=FG_GRAY)
                 self._run_tab._start()
             return
         if kind in (_op.KIND_SWEEP, _op.KIND_GRID):
             self._sweep_box.pack(anchor="w", fill="x", padx=12, pady=(4, 0))
             self._sw_canvas.pack(fill="x", pady=(4, 2))
             self._sw_best.pack(anchor="w", pady=(0, 8))
+            self._run_status.config(
+                text=f"{_op.run_plan(rows, 0)['runs']} futás indul — az Eredmény "
+                     f"szakaszban rajzolódik.", fg=FG_GRAY)
             self._start_sweep()
             return
         # 3+ hangolt → OPTIMALIZÁLÁS. Az OPT a főképernyő vezérlője (külön
@@ -1318,12 +1372,16 @@ class InstrumentParamsDialog:
         if callable(getattr(self, "on_optimize", None)):
             try:
                 self.on_optimize(self.symbol, self.strategy.name)
-                self._sw_status.config(text="Optimalizálás elindítva.", fg=FG_GREEN)
+                self._run_status.config(
+                    text=("Optimalizálás elindítva (külön processz). A haladás a "
+                          "főképernyő OPT gombján látszik; az eredmények a "
+                          "Kísérletek lapon jelennek meg, menet közben is."),
+                    fg=FG_GREEN)
                 return
             except Exception as ex:
-                self._sw_status.config(text=f"Indítási hiba: {ex}", fg=FG_RED)
+                self._run_status.config(text=f"Indítási hiba: {ex}", fg=FG_RED)
                 return
-        self._sw_status.config(
+        self._run_status.config(
             text=("Ennyi hangolt paraméternél az OPTIMALIZÁLÁS fut — azt a "
                   "főképernyő OPT gombja indítja (folytatható, külön processz). "
                   "Végigpróbáláshoz pipálj ki mindent 1–2 paraméter kivételével."),

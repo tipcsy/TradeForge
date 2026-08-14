@@ -98,7 +98,8 @@ class BacktestDialog:
     def __init__(self, parent, symbol, cfg, strategy, params, pair_cfg,
                  rr_spec, header_font, small_font, on_result=None,
                  preset_name: str = "Ki", on_apply_params=None, host=None,
-                 on_state=None, host_scroll: bool = True, on_run_done=None):
+                 on_state=None, host_scroll: bool = True, on_run_done=None,
+                 provide_hours=None, provide_rr=None, provide_build=None):
         # `host`: ha adott (egy Frame), a tartalom ODA épül, nem külön ablakba —
         # így ugyanez az osztály szolgálja ki a Paraméterek ablak „Futtatás"
         # lapját is. A logika (haladás, grafikon, összevetés, CSV, MT5-export)
@@ -129,6 +130,19 @@ class BacktestDialog:
         # most lefuttatott futás nézete, és épp feltáró beállításnál a
         # legérdekesebb.
         self._on_run_done = on_run_done
+        # ── EGY FORRÁS: a beágyazó ad ÉLŐ értéket, nem pillanatképet ────────
+        # ⚠ Beágyazva ugyanezek a beállítások ott állnak a lap FELJEBBI
+        # szakaszaiban (Kereskedési órák · Kapuk · Kockázatcsökkentés). Egy
+        # második, szerkeszthető másolat pontosan azt a kérdést szüli, amiért az
+        # egész átalakítás elindult: „most akkor melyiket használja?".
+        #
+        # ⚠ ÉS MIÉRT FÜGGVÉNY, NEM ÉRTÉK. A beágyazott példány csak akkor épül
+        # újra, ha a PARAMÉTEREK változnak. Ha a kockázatcsökkentést a szakaszban
+        # átállítod, egy átadott pillanatkép elavulna — a futás némán a régivel
+        # menne. A hívó függvényét FUTÁSKOR kérdezzük meg.
+        self._provide_hours = provide_hours
+        self._provide_rr    = provide_rr
+        self._provide_build = provide_build
         self.parent   = parent
         self.symbol   = symbol
         self.cfg      = cfg
@@ -214,6 +228,8 @@ class BacktestDialog:
         """Az ablakban BEÁLLÍTOTT rr-spec (feltáró). None, ha 'Ki' ÉS a cost-cut
         is ki. Tartalmazza az Exit-configot (Runner=Kiszállási jel dönti) és a
         cost-cutot (Ki preset mellett is élhet — önálló idő-stop)."""
+        if self._provide_rr is not None:
+            return self._provide_rr()          # a szakasz az EGYETLEN forrás
         preset = self._preset_from_name(self._rr_name.get())
         cc_on  = bool(self._cc_var.get())
         if preset == _rrx.PRESET_OFF and not cc_on:
@@ -255,6 +271,10 @@ class BacktestDialog:
         stratégia kereskedési órái (trade_hours), a live `process_pair`-rel EGYEZŐ
         feloldással: stratégia-hatókörű `{symbol}_hours.json` → legacy trade_hours →
         sess_start/sess_end tartomány."""
+        # Beágyazva a KERESKEDÉSI ÓRÁK szakasz dönt (egy helyen állítod), és
+        # nincs kapcsoló: ha ott szűkítesz, a mérés is szűkül.
+        if self._provide_hours is not None:
+            return self._provide_hours()
         if not self._hours_filter_var.get():
             return None
         th = resolve_trade_hours(self.symbol, self.strategy.name,
@@ -267,6 +287,8 @@ class BacktestDialog:
     def _current_build_cfg(self):
         """Az ablakban BEÁLLÍTOTT építés-config (feltáró) — mode + size_factor + trigger
         + R-paraméterek (a run_pair `build` override-jához)."""
+        if self._provide_build is not None:
+            return self._provide_build()       # a szakasz az EGYETLEN forrás
         mode = {v: k for k, v in _bst.NAME.items()}.get(
             self._build_mode_name.get(), _bst.MODE_OFF)
         sf = _num(self._build_sf_var.get())
@@ -374,10 +396,17 @@ class BacktestDialog:
         hrow = tk.Frame(body, bg=BG)
         hrow.pack(anchor="w", padx=12, pady=(0, 4))
         self._hours_filter_var = tk.BooleanVar(value=False)
-        tk.Checkbutton(hrow, text="Csak a kereskedési órákban (trade_hours, mint élesben)",
-                       variable=self._hours_filter_var, bg=BG, fg=FG_GRAY,
-                       selectcolor=BG_HEADER, font=self._sf, activebackground=BG,
-                       activeforeground=FG_WHITE).pack(side="left")
+        _hcb = tk.Checkbutton(hrow,
+                              text="Csak a kereskedési órákban (trade_hours, mint élesben)",
+                              variable=self._hours_filter_var, bg=BG, fg=FG_GRAY,
+                              selectcolor=BG_HEADER, font=self._sf,
+                              activebackground=BG, activeforeground=FG_WHITE)
+        # ⚠ Beágyazva NINCS kapcsoló: a lap tetején ott a Kereskedési órák
+        # szakasz, és az dönt. Egy kapcsoló, ami felülírhatja, azt jelentené,
+        # hogy a beállított órák néha nem érvényesek — épp azt a bizonytalanságot
+        # hozná vissza, amiért az órákat egy helyre tettük.
+        if self._host is None:
+            _hcb.pack(side="left")
 
         # ── Végrehajtási kapuk (él-paritás) ─────────────────────────────────
         # Bekapcsolva a backtest UGYANAZT a két VÉGREHAJTÁSI kaput modellezi, amit az
@@ -385,7 +414,12 @@ class BacktestDialog:
         # instrumentumra a configban be van kapcsolva). Így a backtest nem nyit olyan
         # belépőt, amit élesben egy kapu kiszűrne. Alap: BE. KI → nyers jelek.
         grow = tk.Frame(body, bg=BG)
-        grow.pack(anchor="w", padx=12, pady=(0, 4))
+        # ⚠ Beágyazva NINCS mester-kapcsoló: a Kapuk szakaszban KAPUNKÉNT
+        # eldöntöd, modellezze-e a mérés (`gates_backtest`). Egy fölérendelt
+        # „mind vagy semmi" kapcsoló mellett nem lehetne tudni, melyik nyert —
+        # és épp a kapunkénti mérés volt az, amiért a harmadik oszlop készült.
+        if self._host is None:
+            grow.pack(anchor="w", padx=12, pady=(0, 4))
         self._exec_gates_var = tk.BooleanVar(value=True)
         tk.Checkbutton(grow,
                        text="Reális végrehajtási kapuk (TF-együttállás + spread, mint élesben)",
@@ -474,7 +508,13 @@ class BacktestDialog:
         # ALATT (nem egymás mellett): a kockázatcsökkentés sora hosszú, mellette a
         # Pozícióépítés kilógott az ablakból.
         ctl = tk.Frame(body, bg=BG)
-        ctl.pack(anchor="w", fill="x", padx=12, pady=(2, 0))
+        # ⚠ Beágyazva NEM csomagoljuk: a lapon FELJEBB ott a Kockázatcsökkentés
+        # szakasz (preset · runner · exit · cost-cut · építés), és az dönt. A
+        # widgetek LÉTREJÖNNEK — a láthatóság-logika és a belső hivatkozások rájuk
+        # épülnek —, csak nem látszanak; az ÉRTÉKET a `_provide_rr`/`_provide_build`
+        # adja, FUTÁSKOR lekérdezve.
+        if self._host is None:
+            ctl.pack(anchor="w", fill="x", padx=12, pady=(2, 0))
 
         rrg = tk.LabelFrame(ctl, text=" Kockázatcsökkentés (feltáró) ",
                             bg=BG, fg=FG_BLUE, font=self._sf, labelanchor="nw")
@@ -609,12 +649,14 @@ class BacktestDialog:
 
         self._update_rr_visibility()
 
-        tk.Label(body, text="(feltáró — nem ment; az Építés Auto módban BÁRMELY presettel "
-                           "modelleződik (a kockázatmentes runnerre is, mint élesben), "
-                           "Kéziben csak R-alapú triggernél. A főképernyőre csak az "
-                           "eredeti rr eredménye íródik vissza.)", bg=BG, fg=FG_GRAY_DIM,
-                 font=self._sf, justify="left", wraplength=620).pack(
-                 anchor="w", padx=12, pady=(1, 4))
+        _rrnote = tk.Label(body, text=(
+            "(feltáró — nem ment; az Építés Auto módban BÁRMELY presettel "
+            "modelleződik (a kockázatmentes runnerre is, mint élesben), "
+            "Kéziben csak R-alapú triggernél. A főképernyőre csak az "
+            "eredeti rr eredménye íródik vissza.)"), bg=BG, fg=FG_GRAY_DIM,
+            font=self._sf, justify="left", wraplength=620)
+        if self._host is None:
+            _rrnote.pack(anchor="w", padx=12, pady=(1, 4))
 
         # ── Progress ────────────────────────────────────────────────────────
         pf = tk.Frame(body, bg=BG)
@@ -713,9 +755,20 @@ class BacktestDialog:
             self._btn_apply.pack(side="left", padx=6)
         # Építés CSV — a ráépítések TÉTELESEN (mint a Trials CSV). Csak akkor él,
         # ha a futásban volt ráépítés (a fájl ilyenkor készül el).
-        self._btn_build_csv = tk.Button(btns, text="Építés CSV", bg=BTN_BT_BG,
+        # ⚠ A NÉV PONTOSÍTVA: „Építés CSV" alapján ésszerű volt azt hinni, hogy az
+        # optimalizálás eredményét menti — NEM azt teszi. A pozícióépítés
+        # (ráépítés) tételes sorait írja ki: egy sor = egy ÉPÍTETT kötés, a lábak
+        # bontásával. Az optimalizálás trial-listája a Kísérletek lapon van.
+        self._btn_build_csv = tk.Button(btns, text="Ráépítések CSV", bg=BTN_BT_BG,
                                         fg=BTN_BT_FG, relief="flat", font=self._sf,
                                         state="disabled", command=self._open_build_csv)
+        _attach_tooltip(self._btn_build_csv,
+                        "A pozícióépítés (ráépítés) TÉTELES sorai Excelbe: egy sor "
+                        "= egy épített kötés, a lábak (piramis) bontásával, és hogy "
+                        "a ráépítés MENNYIT tett hozzá R-ben és $-ban. "
+                        "Csak akkor él, ha a futásban volt ráépítés (Építés ≠ Ki). "
+                        "⚠ Ez NEM az optimalizálás eredménye — az a Kísérletek lapon "
+                        "van (trials CSV).")
         self._btn_build_csv.pack(side="left", padx=6)
         # ⚠ Beágyazva NINCS „Bezárás": az a befoglaló ablakot zárná be, nem a
         # lapot — a felhasználó pedig azt hinné, csak a backtestet csukja be.
@@ -1106,7 +1159,12 @@ class BacktestDialog:
         build_cfg = self._current_build_cfg()      # az ablakban választott (feltáró) építés
         allowed = self._allowed_hours()            # None = minden óra; különben trade_hours
         tcfg = self._run_trading_cfg()             # a `Slotok` mezővel felülírt méretezés
-        _exec_gates = bool(self._exec_gates_var.get())  # él-paritású végrehajtási kapuk
+        # ⚠ Beágyazva MINDIG BE: a „modellezze-e" döntés kapunként a Kapuk
+        # szakaszban él (`gates_backtest`), és a `effects_for(for_backtest=True)`
+        # ott dönti el. Egy fölérendelt mester-kapcsoló elnyomhatná — olyankor a
+        # kapu-tábla pipái némán hatástalanok lennének.
+        _exec_gates = (True if self._host is not None
+                       else bool(self._exec_gates_var.get()))
 
         # Kényelmi beállítások megjegyzése (per stratégia+pár): időszak + nyitó
         # összeg + slotok. A következő megnyitáskor visszatöltődnek.
