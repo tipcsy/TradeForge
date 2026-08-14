@@ -196,11 +196,21 @@ check("_live2_rows atadja az enabled_of-ot a row_source-nak",
 
 # ══ 7. P0 — a Play megtagadja a nem engedelyezett strategiat ══════════════
 
-_start = src.split("def _start_strategy")[1][:1200]
+# ⚠ A teljes fuggvenytorzs (a kovetkezo `def`-ig): a rogzitett karakter-ablak
+# a magyarazo kommentektol elcsuszott, es a teszt NEM a hosszra kivancsi.
+_NEXT_DEF = chr(10) + "    def "
+_start = src.split("def _start_strategy")[1].split(_NEXT_DEF)[0]
+
 check("_start_strategy: ellenorzi az engedelyezettseget",
       "if not self._strategy_enabled(symbol, name):" in _start)
-check("_start_strategy: a kapu a params-ellenorzes ELOTT van (nem futhat le a mentes)",
-      _start.index("_strategy_enabled") < _start.index("params_file(symbol, name).exists()"))
+# ⚠ A kapu az ALLAPOT-IRAS elott legyen: kulonben a `run_state` `live`-ban
+# ragadna a configban egy olyan strategiara, amit a motor sosem futtat.
+# (A params-ellenorzes MEGSZUNT: mentett keszlet nelkul a strategia SAJAT
+# alapertekeivel indul — lasd `live_trader.default_params`.)
+check("_start_strategy: a kapu az allapot-iras ELOTT van (nem ragad be a run_state)",
+      _start.index("_strategy_enabled") < _start.index("_rs.set_state"))
+check("_start_strategy: NINCS tobbe params-fajl tiltas",
+      "nincs paraméterkészlet" not in _start, _start[:200])
 check("_start_strategy: beszedes uzenetet ad (nem nema no-op)",
       "nincs engedélyezve ezen az" in _start)
 

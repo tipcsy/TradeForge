@@ -117,7 +117,11 @@ check("legalabb egy par atmegy a kozos keplettel", bool(_fixed), str(_fixed))
 print("== A ket ut UGYANAZT hasznalja ==")
 _src = pathlib.Path(lt.__file__).read_text(encoding="utf-8")
 check("az el-ut a kozos fuggvenyt hivja",
-      "_params = strategy_params(symbol, strat.name, cfg)" in _src)
+      "_params = strategy_params(symbol, strat.name, cfg," in _src)
+# ⚠ ES A TARTALEKKAL: mentett keszlet nelkul a strategia SAJAT alapertekeivel
+# indul, nem marad ki nemán a par.
+check("...es atadja a strategia alapertelmezeset tartalekkent",
+      "fallback=default_params(strat, cfg)" in _src)
 check("a viz NEM a nyers json-t reszesiti elonyben",
       "load_pair_params(symbol, st.name) or params_by_strat" not in _src,
       "a regi `or` mintat kivettuk")

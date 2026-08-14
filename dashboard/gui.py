@@ -4492,7 +4492,7 @@ class DashboardWindow:
     def _start_strategy(self, symbol: str, name: str):
         """Egy stratégia indítása ezen a páron."""
         from core import run_state as _rs
-        from core.params_store import params_file
+        from trading import live_trader as _lt
         # A stratégiának ENGEDÉLYEZVE kell lennie ezen a páron, különben a motor
         # (`_active = _enabled & _intent`) sosem futtatná — a sor viszont futónak
         # mutatta volna, a `run_state` pedig `live`-ban ragadt volna a configban.
@@ -4502,16 +4502,25 @@ class DashboardWindow:
                              f"instrumentumon — kapcsold be az instrumentum "
                              f"beállításainál (kattints a nevére).")
             return
-        # Paraméterek nélkül nincs mit futtatni — a motor amúgy is kihagyná
-        # (`_make_state` → None), csak épp NÉMÁN. Itt megmondjuk, miért.
-        if not params_file(symbol, name).exists():
-            self._set_status(f"{symbol}/{name}: nincs paraméterkészlet — "
-                             f"előbb futtasd az OPT-ot.")
-            return
+        # ⚠ MENTETT KÉSZLET NÉLKÜL IS INDULHAT — a stratégia SAJÁT alapértékeivel
+        # (`live_trader.default_params`). Korábban itt egy tiltás állt („előbb
+        # futtasd az OPT-ot"), ami egy ÚJ stratégiát minden páron használhatatlanná
+        # tett, amíg le nem futott rá egy több órás optimalizálás — akkor is, ha az
+        # alapértékek épp jók. A doksi kérése az ellenkezője: „az alapértelmezett
+        # paramétereket vegye alapul, és azzal helyből engedjen kereskedni".
+        #
+        # ⚠ De NEM NÉMÁN: kiírjuk, hogy hangolatlanul indul, és az Áttekintés lap
+        # figyelmeztetése is fennmarad, amíg le nem fut rá egy optimalizálás.
+        # Egy hangolt és egy hangolatlan pár ránézésre egyforma volna.
+        _untuned = _lt.params_source(symbol, name) == "default"
         if _opt_activity.busy(symbol, name):
             self._set_status(f"{symbol}/{name}: optimalizálás fut — "
                              f"előbb állítsd le (OPT).")
             return
+        if _untuned:
+            self._set_status(f"{symbol}/{name}: indul a stratégia "
+                             f"ALAPÉRTELMEZETT paramétereivel (nincs "
+                             f"optimalizálva ezen a páron).")
         _rs.set_state(self.cfg, symbol, name, _rs.LIVE)
         _saved = self._save_main_config()
         # A pár szintjén is engedni kell, különben a motor hozzá sem nyúl.

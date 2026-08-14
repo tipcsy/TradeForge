@@ -100,10 +100,18 @@ def warnings(cfg: dict, symbol: str, strategy_name: str, data: dict,
     ts = data.get("test_summary") or {}
     has_params = bool(data.get("params"))
 
+    # ⚠ MOSTANTÓL EZ NEM AKADÁLY, HANEM ÁLLAPOT. Mentett készlet híján a motor a
+    # stratégia SAJÁT alapértékeivel fut (`live_trader.default_params`) — tehát
+    # kereskedik, csak hangolatlanul. Épp ezért kell KIÍRNI: egy hangolt és egy
+    # hangolatlan pár különben ránézésre egyforma, és a mentett minősítés helyén
+    # sem áll semmi, ami elárulná.
     if not has_params:
         out.append({"sev": SEV_RISK if state == "live" else SEV_WARN,
-                    "text": ("Nincs mentett paraméter ehhez a stratégiához"
-                             + (" — miközben a pár ÉL." if state == "live" else "."))})
+                    "text": ("A stratégia ALAPÉRTELMEZETT paramétereivel fut "
+                             "(nincs optimalizálva ezen a páron)"
+                             + (" — miközben a pár ÉL. Az alapértékek nem erre "
+                                "az instrumentumra vannak hangolva."
+                                if state == "live" else "."))})
 
     # ⚠ Kézi szerkesztés az optimalizálás UTÁN: a mentett minősítés (minőség,
     # kötésszám, PF) MÁS paraméterekhez tartozik, mint amivel kereskedsz. A

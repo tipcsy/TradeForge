@@ -90,6 +90,48 @@ def load_pair_params(symbol: str, strategy_name: str | None = None) -> Optional[
     return data.get("params")
 
 
+def default_params(strategy, cfg: dict) -> Optional[dict]:
+    """A stratégia SAJÁT alapértelmezett paraméterei — optimalizálás NÉLKÜL is
+    van mivel elindulni.
+
+    ⚠ A doksi kérése (Dashboard/Live szakasz): „minden stratégiának van egy
+    alapértelmezett paramétere. Ha betöltünk egy instrumentumot, az
+    alapértelmezett paramétereket vegye alapul, és azzal helyből engedjen
+    kereskedni, ne kelljen optimalizálni."
+
+    Eddig ez nem működött: mentett `optimized_params/<strat>/<SYM>.json` nélkül a
+    `strategy_params` `None`-t adott, a motor kihagyta a párt, a Play gomb pedig
+    megtagadta az indítást („előbb futtasd az OPT-ot"). Egy ÚJ stratégia így
+    minden páron használhatatlan volt, amíg le nem futott rá egy több órás
+    optimalizálás — akkor is, ha a stratégia alapértékei épp jók.
+
+    ⚠ A `config_for_strategy` KELL: a futásidejű cfg az ELSŐDLEGES stratégia
+    szekcióival van merge-elve. Nyers `cfg`-vel a bollinger a `wpr_sma`
+    indikátor-blokkját kapná meg (wpr_m15_period, sma_period…) — a saját
+    `bb_period`/`kc_*` kulcsai helyett.
+
+    A `_`-kezdetű kulcsok (kommentek) kimaradnak: a mentett készletekben sincsenek
+    benne, és a paraméter-űrlap is szűri őket."""
+    try:
+        from strategy.settings import config_for_strategy
+        base = strategy.base_params(config_for_strategy(cfg, strategy.name))
+    except Exception:
+        return None
+    if not base:
+        return None
+    return {k: v for k, v in base.items() if not str(k).startswith("_")}
+
+
+def params_source(symbol: str, strategy_name: str) -> str:
+    """`"tuned"` (van mentett készlet) vagy `"default"` (a stratégia alapértékei).
+
+    ⚠ A KETTŐT MEG KELL TUDNI KÜLÖNBÖZTETNI. Ha az alapértelmezés némán
+    beugrik, egy hangolt és egy hangolatlan pár ránézésre EGYFORMA — a felület
+    ugyanúgy „él"-t mutat, a mentett minősítés helyén meg semmi. Ez pontosan az
+    a fajta láthatatlan állapot, amit a projekt máshol következetesen kigyomlál."""
+    return "tuned" if params_file(symbol, strategy_name).exists() else "default"
+
+
 def strategy_params(symbol: str, strategy_name: str, cfg: dict,
                     fallback: dict = None) -> Optional[dict]:
     """A paraméter-készlet, AHOGY A STRATÉGIA LÁTJA: mentett params + a KÖZÖS
@@ -2694,9 +2736,19 @@ def run(cfg: dict, slot_mgr: SlotManager):
     pair_states: dict = {}
 
     def _make_state(symbol, pair_cfg, strat, is_display):
-        _params = strategy_params(symbol, strat.name, cfg)
+        # ⚠ Optimalizálás nélkül is indulhat: mentett készlet híján a stratégia
+        # SAJÁT alapértékeivel. (A felület kiírja, hogy hangolatlanul fut — lásd
+        # `params_source` és a Áttekintés figyelmeztetése.)
+        _params = strategy_params(symbol, strat.name, cfg,
+                                  fallback=default_params(strat, cfg))
         if _params is None:
+            log.error("%s/%s — KIHAGYVA: se mentett paraméter, se használható "
+                      "alapértelmezés (a stratégia `base_params`-a üres).",
+                      symbol, strat.name)
             return None
+        if params_source(symbol, strat.name) == "default":
+            log.warning("%s/%s — a stratégia ALAPÉRTELMEZETT paramétereivel fut "
+                        "(nincs optimalizálva ezen a páron).", symbol, strat.name)
         # ⚠ A `point_size` NÉLKÜL nincs mit méretezni. Egy frissen felvett
         # instrumentumnál ez hiányozhat — és a `pair_cfg["point_size"]` KeyError-je
         # 2026-08-08-án MEGÖLTE a teljes LiveTrader szálat: onnantól EGYETLEN pár
