@@ -417,19 +417,44 @@ class InstrumentParamsDialog:
                            "optimalizáló mutatott. Futtasd újra az OPT-ot.")
                      ).pack(anchor="w", padx=10, pady=(0, 4))
 
+        # ── A LAP TELJES SZÉLESSÉGŰ, ÖSSZECSUKHATÓ SZAKASZOKBÓL áll ────────
+        # Sorrend az ÁLTALÁNOSTÓL a KONKRÉTIG: mikor kereskedhet · mi engedi be ·
+        # milyen számokkal · mi történik belépés után. Napi munkában legfeljebb
+        # kettő-három kell nyitva; a becsukott fejléc ÖSSZEGZÉST mutat, tehát a
+        # becsukás a szerkesztést rejti el, nem az információt.
+        from dashboard import section as _sec
+        _sec_def = {"orak": False, "kapuk": True, "parameterek": True,
+                    "kockazat": False}
+        _open = _sec.load_open(self.symbol, self.strategy.name, _sec_def)
+        self._sections = {}
+
+        def _mk(key, title):
+            sc = _sec.Section(body, key, title, {"header": self._hf,
+                                                 "small": self._sf},
+                              open_=_open.get(key, True),
+                              on_toggle=self._on_section_toggle)
+            sc.pack()
+            self._sections[key] = sc
+            return sc.body
+
         # ── Óra-rács (trade_hours) — a config.json-ba ment ──────────────────
-        self._build_hours(body, ts)
+        self._build_hours(_mk("orak", "Kereskedési órák"), ts)
+
+        # ── Kapuk: mit tegyenek EZZEL a stratégiával ezen a páron ───────────
+        self._build_gates(_mk("kapuk", "Kapuk"))
+
+        _pbody = _mk("parameterek", "Paraméterek")
 
         # ── Kézi paraméter-űrlap ────────────────────────────────────────────
-        tk.Label(body, text="Kézi módosítás — a következő Play-nél lép életbe:",
+        tk.Label(_pbody, text="Kézi módosítás — a következő Play-nél lép életbe:",
                  bg=BG, fg=FG_GRAY, font=self._sf).pack(anchor="w", padx=10)
 
         # ── Sorszám-választó (csak ha van trials CSV) ───────────────────────
         self.lbl_rank = None
         if self._ranks:
-            self._build_rank_selector(body)
+            self._build_rank_selector(_pbody)
 
-        form = tk.Frame(body, bg=BG)
+        form = tk.Frame(_pbody, bg=BG)
         form.pack(fill="both", expand=True, padx=10, pady=6)
         self.entries = {}
         self._comment_entries = {}
@@ -559,10 +584,10 @@ class InstrumentParamsDialog:
                 _r += 1
 
         # A tartomány-szerkesztés visszajelzése (mentve / hibás → visszaállt).
-        self._range_err = tk.Label(body, text="", bg=BG, fg=FG_RED, font=self._sf,
+        self._range_err = tk.Label(_pbody, text="", bg=BG, fg=FG_RED, font=self._sf,
                                    anchor="w", justify="left")
         self._range_err.pack(anchor="w", padx=10)
-        tk.Label(body, bg=BG, fg=FG_GRAY_DIM, font=self._sf, anchor="w",
+        tk.Label(_pbody, bg=BG, fg=FG_GRAY_DIM, font=self._sf, anchor="w",
                  justify="left", text=(
                      "A pipa: bevonjuk-e a paramétert a keresésbe (pár+stratégia "
                      "szintű). A -tól/-ig/lépés a STRATÉGIA közös tartománya — "
@@ -572,8 +597,6 @@ class InstrumentParamsDialog:
                  )).pack(anchor="w", padx=10, pady=(2, 0))
 
         # ── Kapuk: mit tegyenek EZZEL a stratégiával ezen a páron ───────────
-        self._build_gates(body)
-
         # A hibaüzenet a RÖGZÍTETT alsó sávba kerül (a görgethető törzsben
         # elgörgetve nem látszana — pedig épp a Mentés hibáját mondja).
         self.lbl_err = tk.Label(footer, text="", bg=BG, fg=FG_RED, font=self._sf)
@@ -602,7 +625,10 @@ class InstrumentParamsDialog:
             "div_pivot": "Pivot-szélesség — hány gyertya erősíti meg a csúcsot/mélyet.",
         }
 
-        ctl = tk.Frame(body, bg=BG)
+        # A kockázatcsökkentés SAJÁT, teljes szélességű szakaszt kap: preset-
+        # váltáskor MÁS mezők jelennek meg (runner, hányad, trigger R…), tehát
+        # egy keskeny oldalsávba nem fér be kiszámíthatóan.
+        ctl = tk.Frame(_mk("kockazat", "Kockázatcsökkentés"), bg=BG)
         ctl.pack(anchor="w", fill="x", padx=10, pady=(6, 0))
 
         # ── 1. csoport: Kockázatcsökkentés (ha már bent vagy) ────────────────
@@ -859,6 +885,7 @@ class InstrumentParamsDialog:
                   font=self._sf, command=popup.destroy).pack(side="left", padx=6)
 
         self._fit_to_screen(popup, body, footer)
+        self._refresh_section_summaries()
         # Az ELSŐ lap feltöltése — most már van `self._shell` (lásd `_on_tab`).
         self._build_overview_tab()
 
@@ -1293,6 +1320,60 @@ class InstrumentParamsDialog:
             if h.get("count"):
                 cv.create_text(x + bw / 2, self._HOUR_H + 19, text=str(h["count"]),
                                fill=FG_GRAY_DIM, font=self._sf)
+
+    # ── A szakaszok nyitott/csukott állapota ───────────────────────────────
+
+    def _on_section_toggle(self, key: str, is_open: bool):
+        """A becsukás/kinyitás MEGJEGYZŐDIK (pár + stratégia szinten).
+
+        ⚠ Nem a config.json-ba: ez pusztán megjelenítési kényelem, a motor
+        viselkedésére nincs hatása — a config csak az ELTÉRÉST rögzítheti."""
+        from dashboard import section as _sec
+        _sec.save_open(self.symbol, self.strategy.name, key, is_open)
+
+    def _refresh_section_summaries(self):
+        """A becsukott szakasz EGYETLEN információja a fejléc-összegzés.
+
+        ⚠ Enélkül a becsukás épp azt a kérdést szülné, amit az egész átalakítás
+        megszüntetni próbál: „most akkor mi van beállítva?" — és ki kellene
+        nyitni, hogy megtudd."""
+        secs = getattr(self, "_sections", None) or {}
+        if not secs:
+            return
+        try:
+            from core import gates as _gt
+            eff = _gt.effects_for(self.root_cfg, self.symbol, self.strategy.name)
+            n_on = sum(1 for e in eff.values() if e != _gt.EFFECT_NONE)
+            if "kapuk" in secs:
+                secs["kapuk"].set_summary(
+                    f"{n_on} aktív" if n_on else "egyik sem aktív")
+        except Exception:
+            pass
+        try:
+            hrs = sorted(int(h) for h, on in (self._hour_on or {}).items() if on)
+            if "orak" in secs:
+                if len(hrs) == 24 or not hrs:
+                    secs["orak"].set_summary("mind a 24 óra" if hrs else "egy óra sincs engedve")
+                else:
+                    secs["orak"].set_summary(
+                        f"{hrs[0]:02d}–{hrs[-1]:02d} · {len(hrs)} óra engedve")
+        except Exception:
+            pass
+        try:
+            rows = [dict(r, skipped=not self._skip_vars[r["key"]].get())
+                    for r in (self._opt_rows or []) if r["key"] in self._skip_vars]
+            tuned = [r for r in rows if not r["skipped"]]
+            if "parameterek" in secs:
+                secs["parameterek"].set_summary(
+                    f"{len(tuned)} hangolt a {len(self._opt_rows)}-ból"
+                    if self._opt_rows else "")
+        except Exception:
+            pass
+        try:
+            if "kockazat" in secs:
+                secs["kockazat"].set_summary(self._rr_name.get())
+        except Exception:
+            pass
 
     # ── „Kapcsolat” lap — MT4 / MT5 ────────────────────────────────────────
     # A doksi kérése: az indikátorok kimásolása a megfelelő MetaTrader mappába,
@@ -1946,6 +2027,7 @@ class InstrumentParamsDialog:
             self.lbl_err.config(text=f"Mentési hiba: {ex}", fg=FG_RED)
             return
         self._refresh_opt_space()
+        self._refresh_section_summaries()
 
     def _fit_to_screen(self, popup, body, footer):
         """Az ablak méretezése a KÉPERNYŐHÖZ, majd a méret RÖGZÍTÉSE.
@@ -2180,6 +2262,7 @@ class InstrumentParamsDialog:
         def _toggle(h):
             hour_on[h] = not hour_on[h]
             _paint(h)
+            self._refresh_section_summaries()
 
         for h in range(24):
             colf = tk.Frame(hours_frame, bg=BG)
@@ -2258,6 +2341,7 @@ class InstrumentParamsDialog:
             self._gate_vars[key] = var
             self._gate_src_lbl[key] = lbl
             self._refresh_gate_source(key)
+        self._refresh_section_summaries()
         tk.Label(box, text="A „csak jelzés” NEM kapu-hatás: az a stratégia "
                            "kötés-módja (a soron állítható).",
                  bg=BG, fg=FG_GRAY_DIM, font=self._sf, anchor="w").pack(
@@ -2608,6 +2692,7 @@ class InstrumentParamsDialog:
         Frissíti a vezérlők láthatóságát + az Óvatos méret alapértékét."""
         preset = self._preset_from_name(name)
         self._rrs.set_preset(self.symbol, preset)
+        self._refresh_section_summaries()
         try:
             from core import risky_mode, risk_reduction as _rr
             risky_mode.set_risky(self.symbol, preset == _rr.PRESET_RISKY)
