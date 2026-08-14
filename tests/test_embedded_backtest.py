@@ -120,13 +120,22 @@ if TK_OK:
                                     fonts["small"], lambda: None,
                                     root_cfg=copy.deepcopy(cfg))
     root.update_idletasks()
-    check("van „Futtatás” lap", "Futtatás" in d._shell.names(), str(d._shell.names()))
-    d._shell.show("Futtatás"); root.update_idletasks()
-    check("a lap beagyazott backtestet epit", d._run_tab is not None)
+    # ⚠ A „Futtatas" mar NEM LAP, hanem a Parameter oldal SZAKASZA. Kulon lapon
+    # oda kellett lapozni megnezni, MILYEN ertekkel fut — es pont ez volt a panasz.
+    check("nincs kulon „Futtatás” lap", "Futtatás" not in d._shell.names(),
+          str(d._shell.names()))
+    check("van „Futtatás” SZAKASZ", "futtatas" in d._sections)
+    check("van „Eredmény” SZAKASZ", "eredmeny" in d._sections)
+    d._shell.show("Paraméter"); root.update_idletasks()
+    check("a szakasz beagyazott backtestet epit", d._run_tab is not None)
     check("...ami NEM sajat ablak", d._run_tab.win is d.popup)
+    # ⚠ LAPOS beagyazas: az oldal MAGA gorget. Sajat gorgetheto terulet ide
+    # osszelapulna, es az egergorgo MINDKETTOT mozditana.
+    check("beagyazva NINCS sajat gorgetheto terulet",
+          d._run_tab._body_canvas is None)
 
     _first = d._run_tab
-    d._shell.show("Paraméter"); d._shell.show("Futtatás"); root.update_idletasks()
+    d._shell.show("Áttekintés"); d._shell.show("Paraméter"); root.update_idletasks()
     check("valtozatlan parameternel NEM epul ujra (nem vesz el az allapot)",
           d._run_tab is _first)
 
@@ -137,9 +146,9 @@ if TK_OK:
     if _key:
         d.entries[_key].delete(0, "end")
         d.entries[_key].insert(0, "123")
-        d._shell.show("Paraméter"); d._shell.show("Futtatás")
+        d._shell.show("Áttekintés"); d._shell.show("Paraméter")
         root.update_idletasks()
-        check("parameter-valtozas utan UJRAEPUL a lap",
+        check("parameter-valtozas utan UJRAEPUL a szakasz",
               d._run_tab is not _first)
         check("...es az UJ erteket viszi", d._run_tab.params.get(_key) == 123,
               str(d._run_tab.params.get(_key)))
@@ -178,7 +187,7 @@ if TK_OK:
             _walk(c)
 
     root.update_idletasks()
-    _walk(d._shell.page("Futtatás"))
+    _walk(d._sections["futtatas"].body)
     check("EGYETLEN indito gomb latszik a lapon",
           sum(1 for t in _vis if "indít" in t.lower()) == 1, str(_vis))
     check("...es a beagyazott sajat gombja nincs kicsomagolva",
@@ -186,7 +195,7 @@ if TK_OK:
     # A widget viszont LETEZIK: a belso allapotvaltasok ra hivatkoznak.
     check("...de a widget letezik (a belso allapotvaltasokhoz)",
           d._run_tab._btn_start is not None)
-    check("a terv-sáv a FUTTATÁS lapon él", d._tuned_lbl is not None)
+    check("a terv-sáv a FUTTATÁS szakaszban él", d._tuned_lbl is not None)
     check("...és EGYETLEN Indítás gomb van", getattr(d, "_plan_btn", None) is not None)
 
     # ⚠ A terv a PILLANATNYI pipakat tukrozze: ha a felulet mast mond, mint ami
@@ -202,7 +211,7 @@ if TK_OK:
         _k = sorted(d._skip_vars)[0]
         d._skip_vars[_k].set(True)
         d._refresh_opt_space()
-        check("1 hangolt -> SÖPRÉS", "SÖPRÉS" in d._tuned_lbl.cget("text"),
+        check("1 hangolt -> VEGIGPROBALAS", "VÉGIGPRÓBÁLÁS" in d._tuned_lbl.cget("text"),
               d._tuned_lbl.cget("text").split("\n")[0])
         _k2 = sorted(d._skip_vars)[1]
         d._skip_vars[_k2].set(True)

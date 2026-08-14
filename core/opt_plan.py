@@ -157,7 +157,13 @@ def search_space(rows: list) -> int:
 
 
 # ---------------------------------------------------------------------------
-# MI LESZ EBBŐL: egyetlen futás, söprés, rács vagy optimalizálás?
+# MI LESZ EBBŐL: egyetlen futás, végigpróbálás, rács vagy optimalizálás?
+#
+# ⚠ A FELÜLETEN NEM SZEREPEL a „söprés" szó. A felhasználó szó szerint: „A
+# söprés szót mellőzzük, egyszerűen nem értem, hogy ebben a kontextusban mit
+# jelent." Igaza volt: szakmai jövevényszó (parameter sweep), ami semmit nem
+# mond arról, MI történik. A „végigpróbálás" magától érthető. A KÓDBAN a
+# `KIND_SWEEP`/`sweep` név megmarad — az a modul neve, nem felirat.
 # ---------------------------------------------------------------------------
 # A felhasználói doksi felismerése:
 #
@@ -194,12 +200,13 @@ def run_plan(rows: list, trials: int = 500) -> dict:
     if len(tuned) == 1:
         n = tuned[0]["values"]
         return {"kind": KIND_SWEEP, "runs": n, "tuned": keys, "exhaustive": True,
-                "text": f"1 hangolt paraméter → SÖPRÉS: {n} futás "
-                        f"({keys[0]} végigpróbálva)."}
+                "text": f"1 hangolt paraméter → VÉGIGPRÓBÁLÁS: {n} futás "
+                        f"({keys[0]} minden értéke, egyesével)."}
     if len(tuned) == 2:
         a, b = tuned[0]["values"], tuned[1]["values"]
         return {"kind": KIND_GRID, "runs": a * b, "tuned": keys, "exhaustive": True,
-                "text": f"2 hangolt paraméter → RÁCS: {a} × {b} = {a * b} futás."}
+                "text": f"2 hangolt paraméter → RÁCS: minden párosítás "
+                        f"({a} × {b} = {a * b} futás)."}
     return {"kind": KIND_OPTIMIZE, "runs": int(trials), "tuned": keys,
             "exhaustive": False,
             "text": f"{len(tuned)} hangolt paraméter → OPTIMALIZÁLÁS "

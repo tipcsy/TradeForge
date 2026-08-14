@@ -140,6 +140,51 @@ def default_params(cfg: dict, strategy) -> dict:
     return base
 
 
+def _autowrap(lbl, source=None, min_px: int = 360):
+    """A címke tördelése KÖVESSE a lap szélességét.
+
+    ⚠ Nem kényelmi finomítás. A `wraplength` alapból 0 = „ne törd" — egy hosszú,
+    összefűzött szöveg (pl. „Hangolva: " + 14 paraméternév) EGYETLEN sorban
+    2 220 px-et kért, és mivel az oldal a legszélesebb gyereke szerint méretezi
+    magát, EMIATT lógott ki a teljes lap: a vízszintes csúszka 1 900 px-es
+    ablakon sem tűnt el, és az órák sem nyúltak, mert a tartalom szélessége
+    fixen a címkéé maradt.
+
+    A máshol használt `wraplength=820` ezt megoldaná, de egy 4K képernyőn a hely
+    kétharmadát eldobná.
+
+    ⚠⚠ A `source` NEM a szülő, hanem a GÖRGETŐ VÁSZON — és ez nem stílus, hanem
+    a helyes működés feltétele. A szülőhöz kötve VÉGTELEN CIKLUS keletkezik a
+    vízszintes görgetéssel:
+
+        wraplength ← szülő szélessége → a címke igényelt szélessége változik
+                  → a lap igényelt szélessége változik
+                  → a `scroll_area` átméretezi a belső keretet (`max(w, need)`)
+                  → a szülő szélessége változik → vissza az elejére
+
+    (Mérve: a Tk `update()` nem tért vissza — az ablak befagyott.) A vászon
+    szélessége viszont az ABLAK mérete, tehát FÜGGETLEN bemenet: nem a tartalom
+    állítja. Így a tördelt címke soha nem hízlalja a lapot — ami egyben azt is
+    jelenti, hogy nem ő szabja meg, mikor kell vízszintes csúszka.
+    """
+    src = source if source is not None else lbl.master
+
+    def _on(ev, _l=lbl):
+        w = max(min_px, int(ev.width) - 40)
+        try:
+            if abs(int(_l.cget("wraplength") or 0) - w) > 8:
+                _l.config(wraplength=w)
+        except tk.TclError:
+            pass
+
+    src.bind("<Configure>", _on, add="+")
+    try:                       # induláskor is (a Configure csak változáskor jön)
+        _on(type("E", (), {"width": src.winfo_width() or 900})())
+    except tk.TclError:
+        pass
+    return lbl
+
+
 def _style_om(om, font):
     """OptionMenu egységes sötét stílusa (a sok ismételt config kiemelve)."""
     om.config(bg=BG_HEADER, fg=FG_WHITE, font=font, relief="flat",
@@ -367,8 +412,18 @@ class InstrumentParamsDialog:
         # kérésére ugyanennek a formnak a lapja lett: a paraméterek MELLETT kell
         # tudni olvasni, mit is állítunk.
         from dashboard.tab_shell import TabShell
-        self._shell = TabShell(popup, ("Áttekintés", "Paraméter", "Futtatás",
-                                "Eredmények", "Kapcsolat", "Leírás"),
+        # ⚠ A „Futtatás" lap MEGSZŰNT: a futtatás és az eredmény a Paraméter
+        # oldal két SZAKASZA lett. A felhasználó észrevétele — „a Paraméter,
+        # Futtatás, Optimalizálás igazából egy és ugyanaz, de valahogy mégsem" —
+        # addig nem oldódott meg, amíg LAPOKON ültek: külön lapon nem látszik,
+        # MILYEN értékkel fog futni, tehát oda kellett lapozni ellenőrizni.
+        #
+        # A „Kísérletek" a volt „Eredmények": az optimalizálás trial-listája.
+        # Egy lapon „Eredmények" ÉS egy szakaszon „Eredmény" kibírhatatlanul
+        # összekeverhető lett volna — a kettő nem ugyanaz: a szakasz a MOST
+        # lefuttatott futásé, a lap az összes korábbi PRÓBÁLKOZÁSÉ.
+        self._shell = TabShell(popup, ("Áttekintés", "Paraméter",
+                                "Kísérletek", "Kapcsolat", "Leírás"),
                                on_show=self._on_tab, notify_every_show=True)
 
         # Görgethető törzs — innentől MINDEN tartalom ide (`body`) megy.
@@ -429,7 +484,7 @@ class InstrumentParamsDialog:
         # becsukás a szerkesztést rejti el, nem az információt.
         from dashboard import section as _sec
         _sec_def = {"orak": False, "kapuk": True, "parameterek": True,
-                    "kockazat": False}
+                    "kockazat": False, "futtatas": True, "eredmeny": True}
         _open = _sec.load_open(self.symbol, self.strategy.name, _sec_def)
         self._sections = {}
 
@@ -854,6 +909,14 @@ class InstrumentParamsDialog:
                  bg=BG, fg=FG_GRAY_DIM, font=self._sf, justify="left",
                  wraplength=560).pack(anchor="w", padx=10, pady=(1, 0))
 
+        # ── FUTTATÁS + EREDMÉNY: a lap utolsó két szakasza ──────────────────
+        # ⚠ A sorrend a MUNKA sorrendje: mikor · mi engedi be · milyen számokkal ·
+        # mi történik belépés után · FUTTASD · MI LETT BELŐLE. A futtatás nem
+        # külön lap: külön lapon oda kellene lapozni megnézni, MILYEN értékkel
+        # fut — és pont ez volt a panasz.
+        _mk("futtatas", "Futtatás")
+        _mk("eredmeny", "Eredmény")
+
         # ── Backtest-eredmény sor (a Backtest gomb tölti) — a rögzített sávban,
         #    hogy a futás állapota („Backtest fut…", letöltés) mindig látszódjon.
         self.lbl_bt = tk.Label(footer, text="", bg=BG, fg=FG_GRAY_DIM, font=self._sf,
@@ -873,8 +936,9 @@ class InstrumentParamsDialog:
                                    command=self._save)
         self._btn_save.pack(side="left", padx=6)
         # ⚠ A GOMBSOR MEGTISZTÍTVA. A „Backtest", a „Trials CSV" és az „MT4
-        # visszajátszás" mind LEKERÜLT: mindháromnak van saját lapja
-        # (Futtatás / Eredmények / Kapcsolat→MT4), és a lapos változat többet
+        # visszajátszás" mind LEKERÜLT: az első kettő a Paraméter lap Futtatás /
+        # Eredmény szakasza, a harmadik a Kapcsolat→MT4 lap — és a lapos
+        # változat többet
         # tud — megjegyzett időszakot, szűrést, naptárat, élő tervet.
         #
         # Két belépési pont ugyanahhoz a művelethez nem kényelem, hanem kérdés:
@@ -893,6 +957,20 @@ class InstrumentParamsDialog:
         self._refresh_section_summaries()
         # Az ELSŐ lap feltöltése — most már van `self._shell` (lásd `_on_tab`).
         self._build_overview_tab()
+        self._maybe_build_run()
+
+    def _maybe_build_run(self):
+        """A futtatás-szakasz LUSTÁN épül: csak ha NYITVA van.
+
+        ⚠ Nem óvatoskodás. A beágyazott backtest felépülésekor NEKIÁLL betölteni
+        az M1 előzményt (több százezer gyertya) — ez korábban azért nem
+        látszott, mert külön lapon ült, és csak akkor futott le, ha odalapoztál.
+        Ha becsukva tartod a szakaszt, ez a költség sem jelentkezik."""
+        try:
+            if self._sections["futtatas"].is_open:
+                self._build_run_sections()
+        except (KeyError, AttributeError, tk.TclError):
+            pass
 
     def _on_tab(self, name):
         # ⚠ A TabShell a KONSTRUKTORÁBAN megmutatja az első lapot — vagyis ez a
@@ -913,8 +991,10 @@ class InstrumentParamsDialog:
             # éppen a figyelmeztetéseket mutatná elavultan.
             self._build_overview_tab()
             return
-        if name == "Futtatás":
-            self._build_run_tab()
+        if name == "Paraméter":
+            # A futtatás-szakasz újraépül, ha a paraméterek közben változtak —
+            # a `_build_run_sections` maga dönti el, kell-e (értékre hasonlít).
+            self._maybe_build_run()
             return
         if name == "Kapcsolat":
             # MINDIG friss: a terminál-mappák állapota (mi van kint, mi elavult)
@@ -922,7 +1002,7 @@ class InstrumentParamsDialog:
             # azt takarná el, amiért készült.
             self._build_link_tab()
             return
-        if name == "Eredmények":
+        if name == "Kísérletek":
             # LUSTA: az 500 soros CSV beolvasása és a tábla felépítése nem
             # kell minden ablak-megnyitáskor. Minden megjelenítéskor ÚJRAOLVAS:
             # futó optimalizálás alatt a CSV 10 trialonként frissül, tehát a
@@ -948,8 +1028,15 @@ class InstrumentParamsDialog:
     # abban térne el, ami ritkán fut (megszakítás, hibaág, MT5-export), és az
     # nem derülne ki.
 
-    def _build_run_tab(self):
-        page = self._shell.page("Futtatás")
+    def _build_run_sections(self):
+        """A FUTTATÁS és az EREDMÉNY szakasz — ugyanazon az oldalon, mint a
+        paraméterek.
+
+        ⚠ Miért nem maradt külön lap. Egy másik lapon futtatni azt jelenti, hogy
+        oda kell lapozni MEGNÉZNI, milyen értékkel fut — és pont ez volt a
+        panasz. Itt a beállítás és az indítás EGY görgetésnyire van, a becsukott
+        szakaszok fejléce pedig összegzést mutat, tehát a hosszú oldal nem ár."""
+        page = self._sections["futtatas"].body
         if getattr(self, "_run_tab", None) is not None:
             # ⚠ ÚJRAÉPÍTÉS, ha a paraméterek közben változtak. A backtest a
             # MEGNYITÁSKORI paraméterekkel dolgozik; ha a Paraméter lapon
@@ -961,6 +1048,9 @@ class InstrumentParamsDialog:
             self._run_tab.shutdown()
             self._run_tab = None
         for w in page.winfo_children():
+            w.destroy()
+        _res = self._sections["eredmeny"].body
+        for w in _res.winfo_children():
             w.destroy()
 
         params = self._collect_params()
@@ -982,16 +1072,22 @@ class InstrumentParamsDialog:
         bt_host.pack(side="top", fill="both", expand=True)
 
         self._build_plan_strip(plan_box)
+        self._build_result_section(_res)
 
         from dashboard.backtest_dialog import BacktestDialog
         self._run_params = dict(params)
+        # ⚠ `host_scroll=False`: ez az oldal MAGA görget. Egy második görgethető
+        # terület beleépítve összelapulna (a belső vászonnak nincs természetes
+        # magassága), az egérgörgő pedig MINDKETTŐT mozdítaná.
         self._run_tab = BacktestDialog(
             self.popup, self.symbol, self.cfg, self.strategy, params, pair_cfg,
             self._rr_spec_from_ui(), self._hf, self._sf,
             on_result=self._on_bt_window_result,
             preset_name=self._rr_name.get(),
             on_apply_params=self._apply_params_from_bt,
-            host=bt_host, on_state=self._on_run_state)
+            host=bt_host, on_state=self._on_run_state, host_scroll=False,
+            on_run_done=self._on_run_done)
+        self._refresh_section_summaries()
 
     # ── A TERV-SÁV: mi fog történni, ha elindítod ──────────────────────────
     # A felhasználó észrevétele: „a Paraméter, Futtatás, Optimalizálás igazából
@@ -1036,12 +1132,15 @@ class InstrumentParamsDialog:
                                    command=self._start_planned)
         self._plan_btn.pack(side="right", padx=(8, 0))
 
-        self._tuned_lbl = tk.Label(box, bg=BG, fg=FG_GRAY, font=self._sf,
-                                   anchor="w", justify="left")
-        self._tuned_lbl.pack(anchor="w", padx=12)
-        self._space_lbl = tk.Label(box, bg=BG, fg=FG_GRAY_DIM, font=self._sf,
-                                   anchor="w", justify="left")
-        self._space_lbl.pack(anchor="w", padx=12, pady=(0, 4))
+        self._tuned_lbl = _autowrap(tk.Label(box, bg=BG, fg=FG_GRAY, font=self._sf,
+                                             anchor="w", justify="left"),
+                                    self._body_canvas)
+        self._tuned_lbl.pack(anchor="w", fill="x", padx=12)
+        self._space_lbl = _autowrap(tk.Label(box, bg=BG, fg=FG_GRAY_DIM,
+                                             font=self._sf, anchor="w",
+                                             justify="left"),
+                                    self._body_canvas)
+        self._space_lbl.pack(anchor="w", fill="x", padx=12, pady=(0, 4))
 
         # ── A FELTÉTELEK: időszakok és kapuk (a volt Optimalizálás lapról) ──
         if plan:
@@ -1084,7 +1183,16 @@ class InstrumentParamsDialog:
                            "számol. A paramétereket és a tartományokat a "
                            "Paraméter lapon állítod.")).pack(anchor="w")
 
-        # ── SÖPRÉS: a rajz és a mércéje (1–2 hangolt paraméternél) ──────────
+        self._refresh_opt_space()
+
+    # ── AZ EREDMÉNY-SZAKASZ ───────────────────────────────────────────────
+    # ⚠ Miért KÜLÖN szakasz a futtatástól. A kettő különböző életciklusú: a
+    # futtatás beállításai a következő indításról szólnak, az eredmény az
+    # ELŐZŐRŐL. Egy szakaszban a friss szám és a most átállított kapcsoló
+    # egymás mellett azt sugallná, hogy a szám ehhez a beállításhoz tartozik.
+
+    def _build_result_section(self, box):
+        # ── A rajz és a mércéje (1–2 hangolt paraméternél a végigmérés) ─────
         self._sweep_box = tk.Frame(box, bg=BG)
         self._sweep_box.pack(anchor="w", fill="x", padx=12, pady=(4, 0))
         _sb = tk.Frame(self._sweep_box, bg=BG)
@@ -1107,9 +1215,64 @@ class InstrumentParamsDialog:
         self._sw_best = tk.Label(self._sweep_box, text="", bg=BG, fg=FG_GRAY,
                                  font=self._sf, anchor="w", justify="left")
         self._sw_rows, self._sw_axes = [], []
-        # A söprés IDŐSZAKA a backtest mezőiből jön (egy helyen állítod) — a
-        # `_start_sweep` onnan olvassa, ezért itt nincs külön dátum-mező.
-        self._refresh_opt_space()
+        # A végigmérés IDŐSZAKA a futtatás mezőiből jön (egy helyen állítod).
+
+        # ── KÖTÉS-LISTA: a futás kötései TÉTELESEN ─────────────────────────
+        # ⚠ Ez az, ami eddig hiányzott. A futás egyetlen sorban végződött
+        # („42 kötés, +1 234$, PF 1,31"), és ha a szám nem tetszett, nem volt
+        # hova továbbmenni: nem derült ki, hogy egy rossz átlagot két
+        # katasztrofális kötés húz-e le vagy negyven közepes, és hogy a
+        # nyereség a célárból jön-e vagy a trailingből.
+        from dashboard import trade_list as _tl
+        tk.Label(box, text="Kötések", bg=BG, fg=FG_WHITE, font=self._hf,
+                 anchor="w").pack(anchor="w", padx=12, pady=(10, 2))
+        self._trades = _tl.build(box, {"small": self._sf},
+                                 on_export=self._export_trades)
+        self._trade_rows = []
+
+    def _export_trades(self, rows):
+        """A MEGJELENÍTETT (szűrt) kötések CSV-be — a magyar Excel formátumában.
+
+        ⚠ A szűrt halmazt írjuk, nem az összeset: ha valaki „csak Stop"-ra
+        szűrt és exportál, azt akarja tovább nézni, nem az egészet."""
+        from tkinter import filedialog, messagebox
+        from dashboard import trade_list as _tl
+        if not rows:
+            messagebox.showinfo("Kötések", "Nincs megjeleníthető kötés.",
+                                parent=self.popup)
+            return
+        path = filedialog.asksaveasfilename(
+            parent=self.popup, defaultextension=".csv",
+            initialfile=f"{self.symbol}_{self.strategy.name}_kotesek.csv",
+            filetypes=[("CSV", "*.csv")])
+        if not path:
+            return
+        try:
+            # ⚠ utf-8-SIG: a magyar Excel BOM nélkül cp1250-nek olvasná az
+            # ékezeteket („Kiszállási jel" → olvashatatlan).
+            with open(path, "w", encoding="utf-8-sig", newline="") as fh:
+                fh.write(_tl.to_csv(rows))
+            self.lbl_err.config(text=f"{len(rows)} kötés mentve: {path}",
+                                fg=FG_GREEN)
+        except OSError as ex:
+            self.lbl_err.config(text=f"Mentési hiba: {ex}", fg=FG_RED)
+
+    def _on_run_done(self, result):
+        """A backtest LEFUTOTT — a kötés-lista feltöltése.
+
+        ⚠ Ez NEM ugyanaz, mint az `on_result`. Az a MENTETT minősítést írja
+        vissza a főképernyőre, és csak akkor, ha ugyanazzal a kockázat-
+        csökkentéssel mértünk, mint a mentett — különben egy feltáró futás
+        szennyezné a nyilvántartott számot. A kötés-lista viszont a MOST
+        lefuttatott futás nézete: annak akkor is látszania kell, ha feltáró
+        beállítással mértél. Épp olyankor a legérdekesebb."""
+        from dashboard import trade_list as _tl
+        try:
+            self._trade_rows = _tl.rows_from(result)
+            self._trades.set_rows(self._trade_rows)
+            self._refresh_section_summaries()
+        except (tk.TclError, AttributeError):
+            pass
 
     def _on_run_state(self, running: bool):
         """A beágyazott backtest futás-állapota → a terv-sáv EGYETLEN gombja.
@@ -1163,7 +1326,7 @@ class InstrumentParamsDialog:
         self._sw_status.config(
             text=("Ennyi hangolt paraméternél az OPTIMALIZÁLÁS fut — azt a "
                   "főképernyő OPT gombja indítja (folytatható, külön processz). "
-                  "Söpréshez pipálj ki mindent 1–2 paraméter kivételével."),
+                  "Végigpróbáláshoz pipálj ki mindent 1–2 paraméter kivételével."),
             fg=FG_YELLOW)
 
     # ── „Áttekintés” lap — mi ennek a párnak az ÁLLAPOTA ───────────────────
@@ -1335,6 +1498,8 @@ class InstrumentParamsDialog:
         viselkedésére nincs hatása — a config csak az ELTÉRÉST rögzítheti."""
         from dashboard import section as _sec
         _sec.save_open(self.symbol, self.strategy.name, key, is_open)
+        if key == "futtatas" and is_open:
+            self._maybe_build_run()      # az első kinyitáskor épül fel
 
     def _refresh_section_summaries(self):
         """A becsukott szakasz EGYETLEN információja a fejléc-összegzés.
@@ -1379,6 +1544,32 @@ class InstrumentParamsDialog:
                 secs["parameterek"].set_summary(
                     f"{len(tuned)} hangolt a {len(self._opt_rows)}-ból"
                     if self._opt_rows else "")
+        except Exception:
+            pass
+        # ── FUTTATÁS: mi fog történni, ha most megnyomod ───────────────────
+        try:
+            if "futtatas" in secs:
+                from core import opt_plan as _op
+                rows = [dict(r, skipped=not self._skip_vars[r["key"]].get())
+                        for r in (self._opt_rows or []) if r["key"] in self._skip_vars]
+                _rp = _op.run_plan(rows, int((getattr(self, "_opt_cfg_cache", None)
+                                              or {}).get("max_trials", 500) or 500))
+                _n = len(_rp["tuned"])
+                secs["futtatas"].set_summary(
+                    "egyetlen futás (backtest)" if _n == 0 else
+                    f"{_n} hangolt · {_rp['runs']} futás")
+        except Exception:
+            pass
+        # ── EREDMÉNY: a legutóbbi futás egy sorban ─────────────────────────
+        # ⚠ Becsukva ez az EGYETLEN jele annak, hogy egyáltalán futott már —
+        # üres fejléccel a becsukott szakasz megkülönböztethetetlen volna attól,
+        # amiben eredmény VAN.
+        try:
+            if "eredmeny" in secs:
+                from dashboard import trade_list as _tl
+                _rows = getattr(self, "_trade_rows", None)
+                secs["eredmeny"].set_summary(
+                    _tl.summary_line(_rows) if _rows else "még nem futott")
         except Exception:
             pass
         try:
@@ -1758,7 +1949,7 @@ class InstrumentParamsDialog:
     # sorok színe az eredmény szerint, és ide költözik a CSV-gomb.
 
     def _build_results_tab(self):
-        page = self._shell.page("Eredmények")
+        page = self._shell.page("Kísérletek")
         # ⚠ MINDIG újraépítjük. Futó optimalizálás alatt a CSV 10 trialonként
         # frissül; egy gyorsítótárazott tábla azt sugallná, hogy nincs új
         # eredmény — pont az ellenkezőjét annak, amiért a lap készült.
@@ -1790,7 +1981,7 @@ class InstrumentParamsDialog:
         if plan["kind"] not in (_op.KIND_SWEEP, _op.KIND_GRID):
             # ⚠ Nem csendes tétlenség: megmondjuk, MIT kell tenni.
             self._sw_status.config(
-                text=("A söpréshez PONTOSAN 1 vagy 2 paraméter legyen bepipálva "
+                text=("A végigpróbáláshoz PONTOSAN 1 vagy 2 paraméter legyen bepipálva "
                       f"(most {len(plan['tuned'])}). Több dimenziónál az "
                       f"optimalizálás a helyes eszköz."), fg=FG_YELLOW)
             return
@@ -3046,17 +3237,18 @@ class InstrumentParamsDialog:
 
     # ── Backtest önálló ablak (progress + időszak + élő egyenleg) ────────────
     def _open_backtest_window(self):
-        """A „Backtest" gomb a FUTTATÁS LAPRA vált (a backtest odaköltözött).
+        """A „Backtest" a Paraméter lap FUTTATÁS szakaszához visz.
 
-        ⚠ A gomb megmarad, és nem nyit új ablakot: a doksi panasza épp az volt,
-        hogy ugyanaz a paraméter két külön kinézetben jelenik meg. A megszokott
-        gomb viszont ne tűnjön el — csak vezessen a helyére.
-        """
+        ⚠ Nem nyit új ablakot: a doksi panasza épp az volt, hogy ugyanaz a
+        paraméter két külön kinézetben jelenik meg. A megszokott hívási pont
+        viszont ne tűnjön el — csak vezessen a helyére."""
         try:
-            self._shell.show("Futtatás")
+            self._shell.show("Paraméter")
+            self._sections["futtatas"].set_open(True)
+            self._maybe_build_run()
             return
         except Exception:
-            pass          # ha valamiért nincs lap, marad a régi, ablakos út
+            pass          # ha valamiért nincs szakasz, marad a régi, ablakos út
         params = self._collect_params()
         if params is None:
             return

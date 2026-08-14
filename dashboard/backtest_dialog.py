@@ -98,7 +98,7 @@ class BacktestDialog:
     def __init__(self, parent, symbol, cfg, strategy, params, pair_cfg,
                  rr_spec, header_font, small_font, on_result=None,
                  preset_name: str = "Ki", on_apply_params=None, host=None,
-                 on_state=None):
+                 on_state=None, host_scroll: bool = True, on_run_done=None):
         # `host`: ha adott (egy Frame), a tartalom ODA épül, nem külön ablakba —
         # így ugyanez az osztály szolgálja ki a Paraméterek ablak „Futtatás"
         # lapját is. A logika (haladás, grafikon, összevetés, CSV, MT5-export)
@@ -109,10 +109,26 @@ class BacktestDialog:
         # — egy „majdnem ugyanolyan" második változat pont abban térne el, ami
         # ritkán fut (megszakítás, hibaág, MT5-export), és az nem derülne ki.
         self._host    = host
+        # ⚠ `host_scroll=False`: a gazda MAGA görget (a Paraméter lap egy
+        # görgethető oldal). Sajat gorgetheto teruletet epiteni bele KETTOS
+        # csapda volna: (1) a belso vaszonnak nincs termeszetes magassaga egy
+        # nyujtozo szuloben — osszelapulna; (2) az egergorgo mindketto
+        # kezelojet elerné (a `scroll_area` csak azt nezi, LATSZIK-e a vaszon),
+        # tehat egy gorgetes ket teruletet mozditana el egyszerre.
+        self._host_scroll = bool(host_scroll)
         # `on_state(fut: bool)` — a beágyazó ebből tudja, mikor váltson a
         # saját gombja Megszakításra és vissza. Enélkül a gazda gombja
         # futás közben is „Indítás"-t mutatna.
         self._on_state = on_state
+        # `on_run_done(result)` — a NYERS futás-eredmény (BacktestResult) a
+        # befogadónak, hogy tételes nézetet (kötés-lista) építhessen rá.
+        # ⚠ Ez SZÁNDÉKOSAN más, mint az `on_result`: azt a mentett minősítés
+        # visszaírására hívjuk, és CSAK ha ugyanazzal a kockázatcsökkentéssel
+        # mértünk, mint a mentett — különben egy feltáró futás szennyezné a
+        # nyilvántartott számot. A nyers eredményt viszont MINDIG átadjuk: az a
+        # most lefuttatott futás nézete, és épp feltáró beállításnál a
+        # legérdekesebb.
+        self._on_run_done = on_run_done
         self.parent   = parent
         self.symbol   = symbol
         self.cfg      = cfg
@@ -280,17 +296,29 @@ class BacktestDialog:
             win.title(f"{self.symbol} — {self.strategy.name} Backtest")
             win.configure(bg=BG)
 
-        # ── Rögzített alsó sáv ELŐSZÖR (side="bottom") ──────────────────────
-        # A pack-sorrend miatt a lentre kötött sáv kapja meg a helyét először, a
-        # görgethető törzs csak a maradékot → a Backtest indítása / Mentés a
-        # Paraméterekhez / Bezárás gombok kis képernyőn is MINDIG látszanak.
-        footer = tk.Frame(container, bg=BG)
-        footer.pack(side="bottom", fill="x")
+        if self._host is not None and not self._host_scroll:
+            # LAPOS beágyazás: a gazda oldal görget, mi csak egymás alá pakolunk.
+            # A „rögzített alsó sáv" itt értelmetlen volna: nincs saját ablak,
+            # amihez képest rögzülhetne — a sáv egyszerűen a tartalom VÉGÉRE
+            # kerül, és a gazda görgetője viszi.
+            body = tk.Frame(container, bg=BG)
+            body.pack(side="top", fill="both", expand=True)
+            footer = tk.Frame(container, bg=BG)
+            footer.pack(side="top", fill="x")
+            self._body_canvas = None
+            self._body = body
+        else:
+            # ── Rögzített alsó sáv ELŐSZÖR (side="bottom") ──────────────────
+            # A pack-sorrend miatt a lentre kötött sáv kapja meg a helyét először,
+            # a görgethető törzs csak a maradékot → a Backtest indítása / Mentés a
+            # Paraméterekhez / Bezárás gombok kis képernyőn is MINDIG látszanak.
+            footer = tk.Frame(container, bg=BG)
+            footer.pack(side="bottom", fill="x")
 
-        # Görgethető törzs — innentől MINDEN tartalom ide (`body`) megy.
-        holder, body, self._body_canvas = _scrollable(container)
-        holder.pack(side="top", fill="both", expand=True)
-        self._body = body
+            # Görgethető törzs — innentől MINDEN tartalom ide (`body`) megy.
+            holder, body, self._body_canvas = _scrollable(container)
+            holder.pack(side="top", fill="both", expand=True)
+            self._body = body
 
         tk.Label(body, text=f"{self.symbol}  ·  {self.strategy.name} — Backtest",
                  bg=BG, fg=FG_WHITE, font=self._hf).pack(anchor="w", padx=12, pady=(12, 2))
@@ -1270,6 +1298,11 @@ class BacktestDialog:
         self._render_metrics(summary)
         self._render_build(summary)
         self._redraw()
+        if self._on_run_done:
+            try:
+                self._on_run_done(result)
+            except Exception:
+                pass
         # Visszaírás a főképernyőre CSAK ha ugyanazt az rr-t mértük, mint a mentett
         # (fő ablak) rr — különben ez feltáró futtatás, nem szennyezi a mentendőt.
         same_rr = self._rr_key(self._current_rr_spec()) == self._opened_rr_key

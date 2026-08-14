@@ -100,13 +100,17 @@ if TK:
     d._sections["orak"].set_open(True)
     _top = _hb.winfo_toplevel()
     _top.deiconify()
-    _top.geometry("1000x800"); _top.update()
+    # ⚠ MINDKET meret legyen a tartalom TERMESZETES igenye FOLOTT (~1300 px):
+    # az alatt a lap vizszintesen gorgetheto, es a belso keret a TARTALOM
+    # szelesseget veszi fel — olyankor az ablak szelesitese joggal NEM mozdit a
+    # cellakon. A racs nyulasa ott merheto, ahol egyaltalan van szabad hely.
+    _top.geometry("1400x800"); _top.update()
     _w_keskeny = d._hour_btns[23].winfo_width()
-    _top.geometry("1800x800"); _top.update()
+    _top.geometry("1900x800"); _top.update()
     _w_szeles = d._hour_btns[23].winfo_width()
     _top.withdraw()
     check("szelesitve az ora-cellak NONEK", _w_szeles > _w_keskeny,
-          f"1000px -> {_w_keskeny}px cella; 1800px -> {_w_szeles}px cella")
+          f"1400px -> {_w_keskeny}px cella; 1900px -> {_w_szeles}px cella")
 
     # ── 2. A KOCKAZAT-SZAKASZ OSSZEGZESE ──────────────────────────────────
     from core import rr_state as _rr, risk_reduction as _rrx
@@ -147,6 +151,10 @@ if TK:
         _hb2 = _hbar[0]
         _top.deiconify()
         _top.geometry("1900x800"); _top.update()
+        # ⚠ A TORDELT cimkek nem hizlalhatjak a lapot: a `_autowrap` a VASZON
+        # szelessegehez tord, tehat a szoveg soha nem szul csuszkat. (Egy
+        # tordeletlen cimke 2 220 px-et kert — a csuszka 1 900 px-en sem tunt el,
+        # es az orak sem nyultak.)
         check("szeles ablakon a csuszka NEM latszik", not _hb2.winfo_manager(),
               f"manager={_hb2.winfo_manager()!r}")
         _top.geometry("420x800"); _top.update()
@@ -160,6 +168,31 @@ if TK:
         check("ujra szelesitve ELTUNIK", not _hb2.winfo_manager(),
               f"manager={_hb2.winfo_manager()!r}")
         _top.withdraw()
+
+    # ── 3b. A TORDELES NEM CSATOLHAT VISSZA a gorgetesre ──────────────────
+    # ⚠ Ez a teszt egy BEFAGYAST oriz. A hosszu terv-szoveget tordelni kell
+    # (tordeletlenul 2 220 px-et kert, es EMIATT logott ki a teljes lap), de ha
+    # a `wraplength` a SZULO szelessegehez kotodik, vegtelen ciklus keletkezik:
+    #
+    #   wraplength <- szulo szelessege -> a cimke igenyelt szelessege valtozik
+    #             -> a lap igenye valtozik -> a scroll_area atmeretezi a belso
+    #             keretet (max(w, need)) -> a szulo szelessege valtozik -> ...
+    #
+    # Merve: a Tk `update()` NEM tert vissza. A vaszon szelessege viszont az
+    # ABLAK merete — fuggetlen bemenet, amit nem a tartalom allit.
+    _cfg_binds = d._body_canvas.bind("<Configure>")
+    check("a tordeles a VASZON szelessegere van kotve", bool(_cfg_binds),
+          "nincs <Configure> a vaszonon")
+    check("...es a terv-cimke tenylegesen tordel",
+          int(d._tuned_lbl.cget("wraplength") or 0) > 0,
+          str(d._tuned_lbl.cget("wraplength")))
+    # ⚠ ES A KORLAT: a tordelt cimke SOHA nem lehet szelesebb a vaszonnal —
+    # kulonben megis o szulne a vizszintes csuszkat.
+    _top.deiconify(); _top.geometry("1500x800"); _top.update()
+    check("a tordelt cimke nem szelesebb a vasznanal",
+          d._tuned_lbl.winfo_reqwidth() <= d._body_canvas.winfo_width(),
+          f"cimke={d._tuned_lbl.winfo_reqwidth()} vaszon={d._body_canvas.winfo_width()}")
+    _top.withdraw()
 
     # ── 4. A SZAKASZOK TELJES SZELESSEGUEK ────────────────────────────────
     _bad = [k for k, sc in d._sections.items()
