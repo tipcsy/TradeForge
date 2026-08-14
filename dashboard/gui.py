@@ -3979,10 +3979,22 @@ class DashboardWindow:
         from dashboard.instrument_dialog import InstrumentParamsDialog
         from strategy import get_strategy_by_name
         strat = get_strategy_by_name(strategy_name) if strategy_name else self.strategy
-        InstrumentParamsDialog(
+        # ⚠ AZ OPTIMALIZÁLÁS INNEN INDUL. A sorból az OPT vezérlőt levettük (a
+        # gomb órákra indított valamit, amiről a felület semmit nem mondott) —
+        # a helyére a paraméter-ablak Futtatás szakasza lépett, ahol LÁTOD, mi
+        # fog történni. A bekötés viszont sokáig HIÁNYZOTT: a szakasz csak
+        # annyit írt ki, hogy „azt a főképernyő OPT gombja indítja", ami addigra
+        # már nem létezett — az optimalizálás így SEHONNAN nem volt indítható.
+        _dlg = InstrumentParamsDialog(
             self.root, symbol, self.cfg, strat,
             self._header_font, self._small_font, self._save_main_config,
             root_cfg=self.cfg)
+        # Ugyanaz a morph, mint a régi gombé (indít / leállít / sorból kivesz) —
+        # egy helyen él (`_live2_opt_click`), tehát a két út nem csúszhat szét.
+        _dlg.on_optimize = self._live2_opt_click
+        # A gomb ebből tudja, hogy ÉPP fut-e (akkor leállít, nem újraindít).
+        from core import opt_activity as _oa
+        _dlg.opt_state_of = _oa.state_of
 
     def _show_instrument_params(self, symbol: str):
         """Visszafelé komp.: az elsődleges stratégia paraméterei (a Pozíciók fül

@@ -958,6 +958,7 @@ class InstrumentParamsDialog:
         # Az ELSŐ lap feltöltése — most már van `self._shell` (lásd `_on_tab`).
         self._build_overview_tab()
         self._maybe_build_run()
+        self._opt_poll()
 
     def _maybe_build_run(self):
         """A futtatás-szakasz LUSTÁN épül: csak ha NYITVA van.
@@ -1324,11 +1325,71 @@ class InstrumentParamsDialog:
         except (tk.TclError, AttributeError):
             pass
 
+    _OPT_TEXT = {
+        "OPTIMIZING": ("Optimalizálás FUT. A haladás a paraméter-ablak fejlécén és "
+                       "a soron látszik; az eredmények a Kísérletek lapon "
+                       "jelennek meg, menet közben is (10 trialonként írja). "
+                       "Újra megnyomva LEÁLLÍTHATÓ.", FG_GREEN),
+        "QUEUED": ("Optimalizálás SORBAN áll (másik pár fut). Újra megnyomva "
+                   "kiveheted a sorból.", FG_YELLOW),
+    }
+
+    def _opt_poll(self):
+        """Amíg az ablak nyitva, KÖVETJÜK az optimalizáló állapotát.
+
+        ⚠ Enélkül a gomb „Optimalizálás leállítása" maradna azután is, hogy a
+        futás befejeződött — és a következő kattintás egy már nem létező futást
+        próbálna leállítani. Az állapotot MÁSIK PROCESSZ írja, tehát nincs
+        esemény, amire feliratkozhatnánk; kérdezni kell.
+
+        2 mp: elég ritka ahhoz, hogy ne látszódjon a terhelésen (fájl-stat), és
+        elég sűrű ahhoz, hogy a gomb ne mutasson elavult állapotot."""
+        if getattr(self, "_closed", False):
+            return
+        if callable(getattr(self, "opt_state_of", None)) and                 getattr(self, "_plan_btn", None) is not None:
+            # Csak akkor nyúlunk a gombhoz, ha ÉPP nem egy beágyazott backtest
+            # futása birtokolja (az `_on_run_state` állítja Megszakításra).
+            if not getattr(self, "_bt_running", False):
+                self._sync_opt_status()
+        try:
+            self.popup.after(2000, self._opt_poll)
+        except tk.TclError:
+            pass
+
+    def _sync_opt_status(self):
+        """A futás-állapot az OPTIMALIZÁLÓ TÉNYLEGES állapotából.
+
+        ⚠ Nem abból, hogy meghívtuk-e az indítót: a `_live2_opt_click` MORPH —
+        futó optimalizálást LEÁLLÍT, sorban állót KIVESZ, kereskedő stratégiát
+        el sem indít. Egy fix „elindítva" felirat ezekben hazudna."""
+        _st = ""
+        _of = getattr(self, "opt_state_of", None)
+        if callable(_of):
+            try:
+                _st = str(_of(self.symbol, self.strategy.name) or "")
+            except Exception:
+                _st = ""
+        txt, fg = self._OPT_TEXT.get(_st, (
+            "Az optimalizálás nem fut. (Ha most állítottad le, a leállás a futó "
+            "trial végén történik meg.)", FG_GRAY))
+        try:
+            self._run_status.config(text=txt, fg=fg)
+            self._plan_btn.config(
+                text=("Optimalizálás leállítása" if _st == "OPTIMIZING"
+                      else ("Kivétel a sorból" if _st == "QUEUED" else "Indítás")))
+        except tk.TclError:
+            pass
+
     def _on_run_state(self, running: bool):
         """A beágyazott backtest futás-állapota → a terv-sáv EGYETLEN gombja.
 
+        ⚠ A jelző (`_bt_running`) azért kell, hogy az optimalizáló-lekérdező
+        (`_opt_poll`) NE írja felül a „Megszakítás" feliratot egy futó backtest
+        közben: a kettő ugyanazt a gombot használja.
+
         Enélkül a gomb futás közben is „Indítás"-t mutatna, és egy második
         kattintás újraindítaná azt, ami épp fut."""
+        self._bt_running = bool(running)
         try:
             if running:
                 self._plan_btn.config(text="Megszakítás",
@@ -1336,6 +1397,7 @@ class InstrumentParamsDialog:
             else:
                 self._plan_btn.config(text="Indítás", state="normal",
                                       command=self._start_planned)
+                self._sync_opt_status()   # hátha közben optimalizálás indult
         except (tk.TclError, AttributeError):
             pass
 
@@ -1365,27 +1427,53 @@ class InstrumentParamsDialog:
                      f"szakaszban rajzolódik.", fg=FG_GRAY)
             self._start_sweep()
             return
-        # 3+ hangolt → OPTIMALIZÁLÁS. Az OPT a főképernyő vezérlője (külön
-        # processz, folytatható study) — innen csak elindítjuk, ha a hívó
-        # bekötötte; különben megmondjuk, hol van.
+        # 3+ hangolt → OPTIMALIZÁLÁS: külön processz, folytatható optuna study.
+        #
+        # ⚠ EZ AZ EGYETLEN INDÍTÁSI PONT. A sorból az OPT vezérlőt levettük (egy
+        # gomb, ami órákra indított valamit, amiről a felület semmit nem mondott)
+        # — a helyére EZ a szakasz lépett, ahol előtte látod az időszakokat, a
+        # kapukat, a hangolt dimenziókat és a keresési teret. A bekötés viszont
+        # sokáig HIÁNYZOTT: a szakasz csak annyit írt ki, hogy „azt a főképernyő
+        # OPT gombja indítja" — ami addigra már nem létezett, tehát az
+        # optimalizálás SEHONNAN nem volt indítható.
         self._sweep_box.pack_forget()
-        if callable(getattr(self, "on_optimize", None)):
+        _opt = getattr(self, "on_optimize", None)
+        if not callable(_opt):
+            self._run_status.config(
+                text=("Ennyi hangolt paraméternél OPTIMALIZÁLÁS futna, de ez az "
+                      "ablak nincs bekötve az optimalizálóhoz (fejlesztői/önálló "
+                      "megnyitás). Végigpróbáláshoz pipálj ki mindent 1–2 "
+                      "paraméter kivételével."), fg=FG_YELLOW)
+            return
+        # ⚠ ELŐBB NÉZZÜK MEG, fut-e MÁSHOL. A zárat úgyis a munkás-processz
+        # ellenőrzi, de akkor már elindult egy processz, ami rögtön el is hasal —
+        # a felhasználó pedig egy „Hiba:" sort lát a soron, nem itt, ahol
+        # megnyomta. Csak INDÍTÁS előtt kérdezünk: ha épp MI futtatjuk, a gomb
+        # LEÁLLÍT, és azt nem szabad a zárral megakadályozni.
+        _cur = ""
+        _of = getattr(self, "opt_state_of", None)
+        if callable(_of):
             try:
-                self.on_optimize(self.symbol, self.strategy.name)
+                _cur = str(_of(self.symbol, self.strategy.name) or "")
+            except Exception:
+                _cur = ""
+        if _cur not in ("OPTIMIZING", "QUEUED"):
+            from core import opt_lock as _ol
+            if _ol.is_held(self.symbol, self.strategy.name):
                 self._run_status.config(
-                    text=("Optimalizálás elindítva (külön processz). A haladás a "
-                          "főképernyő OPT gombján látszik; az eredmények a "
-                          "Kísérletek lapon jelennek meg, menet közben is."),
-                    fg=FG_GREEN)
+                    text=_ol.describe(_ol.read(self.symbol, self.strategy.name),
+                                      self.symbol, self.strategy.name), fg=FG_RED)
                 return
-            except Exception as ex:
-                self._run_status.config(text=f"Indítási hiba: {ex}", fg=FG_RED)
-                return
-        self._run_status.config(
-            text=("Ennyi hangolt paraméternél az OPTIMALIZÁLÁS fut — azt a "
-                  "főképernyő OPT gombja indítja (folytatható, külön processz). "
-                  "Végigpróbáláshoz pipálj ki mindent 1–2 paraméter kivételével."),
-            fg=FG_YELLOW)
+        try:
+            _opt(self.symbol, self.strategy.name)
+        except Exception as ex:
+            self._run_status.config(text=f"Indítási hiba: {ex}", fg=FG_RED)
+            return
+        # ⚠ A VISSZAJELZÉS a TÉNYLEGES állapotból jön, nem abból, hogy hívtuk a
+        # függvényt. A `_live2_opt_click` MORPH: ha épp futott, LEÁLLÍTOTTA; ha
+        # a stratégia kereskedik, el sem indítja. Egy fix „elindítva" felirat
+        # ezekben az esetekben hazudna.
+        self._sync_opt_status()
 
     # ── „Áttekintés” lap — mi ennek a párnak az ÁLLAPOTA ───────────────────
     # A kérés: „az első oldalon csak egy dashboard-szerű dolog lehetne, ahol

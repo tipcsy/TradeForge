@@ -1148,6 +1148,40 @@ def optimize_symbol(symbol, df_m15, df_m1, cfg, initial_balance, progress=None,
                     strategy=None) -> dict:
     """EGYSÉGES optimalizálási belépési pont — a CLI és a GUI-processz is EZT hívja.
 
+    ⚠ EZ A BUROK CSAK A ZÁRAT KEZELI; a munka a `_optimize_symbol_locked`-ban van.
+    2026-08-04-én ÉLESBEN megtörtént, hogy egy CLI-futás és egy GUI-ból indított
+    futás PÁRHUZAMOSAN dolgozott ugyanazon a (Ger40, wpr_sma) páron: közös optuna
+    study (a „500 trial" a kettő EGYÜTTESE lett), közös kimeneti fájl (az egyik
+    felülírta volna a másikat), sőt eltérő kódverzió. A GUI saját védelme
+    (`_symbol_busy`) csak a SAJÁT sorára lát — egy külső processzről nem tud.
+
+    ITT a helye, mert ez az EGYETLEN pont, amin a CLI és a GUI is átmegy: bármely
+    FELÜLETRE tett zárat meg lehetne kerülni a másik felülettel.
+
+    ⚠ ÉS `finally`-VAL. A belső függvénynek öt visszatérési ága van, plusz a
+    kivételek; kézzel elengedni mindegyiken előbb-utóbb kimaradna egy — és egy
+    ottfelejtett zár a következő indulást tagadná meg."""
+    if strategy is None:
+        from strategy import get_strategy
+        strategy = get_strategy(cfg)
+
+    from core import opt_lock as _lock
+    _ok, _held = _lock.acquire(symbol, strategy.name)
+    if not _ok:
+        msg = _lock.describe(_held, symbol, strategy.name)
+        log.error("%s/%s — %s", symbol, strategy.name, msg)
+        return {"error": msg}
+    try:
+        return _optimize_symbol_locked(symbol, df_m15, df_m1, cfg,
+                                       initial_balance, progress, strategy)
+    finally:
+        _lock.release(symbol, strategy.name)
+
+
+def _optimize_symbol_locked(symbol, df_m15, df_m1, cfg, initial_balance,
+                            progress=None, strategy=None) -> dict:
+    """A tényleges optimalizálás — a zárat a hívó `optimize_symbol` tartja.
+
     A method-döntés (optuna | grid | random) EGYETLEN helyen él, így a két felület
     sosem csúszhat szét. Az adat szeletelése train_start-tól, a trials CSV kiírása
     (a compute-függvényekben) és az out-of-sample teszt is itt, egységesen történik.
