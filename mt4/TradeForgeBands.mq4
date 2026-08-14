@@ -38,7 +38,7 @@
 //|  specifikus MQL5-atvetelektol.                                    |
 //+------------------------------------------------------------------+
 #property copyright "TradeForge"
-#property version   "1.10"
+#property version   "1.20"
 #property strict
 #property indicator_separate_window
 #property indicator_minimum 0.0
@@ -46,7 +46,7 @@
 #property indicator_buffers 8
 
 input string InpFileSuffix    = "";     // Fajl-utotag (pl. _BT)
-input string InpStrategy      = "";     // Melyik strategia STATE sorai (ures = MIND)
+input string InpStrategy      = "";     // Melyik strategia (ures = a fajl ELSO strategiaja)
 input int    InpStateTFMin    = 15;     // A STATE sorok idosikja percben
 // ⚠ ALAPBOL KI — es ez FONTOS. A Python export MAR ELTOLTA a STATE sorokat egy
 // M15 gyertyaval (`wpr_sma.visual_objects`: `t = tl_t[k] + m15_sec`, "a jelzes az
@@ -97,6 +97,8 @@ int    g_nbands = 0;
 
 datetime g_t[];
 int      g_nt[], g_dir[], g_win[], g_gate[];
+string   g_strat = "";     // amit TENYLEGESEN mutatunk
+string   g_avail = "";     // minden strategia, ami a fajlban van
 int      g_cVol = 0, g_cSpr = 0, g_cAli = 0, g_cOth = 0, g_cOpen = 0;
 int      g_ns  = 0;
 string   g_msg = "";
@@ -158,6 +160,16 @@ bool ReadStates()
    g_cVol = 0; g_cSpr = 0; g_cAli = 0; g_cOth = 0; g_cOpen = 0;
    int skippedStrat = 0;
 
+   // ⚠ EGY SAV = EGY STRATEGIA. A fajl TOBB strategia allapotat tartalmazza
+   // (mindegyik ugyanabba a szimbolum-fajlba ir, sajat blokkban). Az `ures =
+   // MIND` alapertelmezes ertelmetlen volt: egy sav nem tud ket strategiat
+   // egyszerre mutatni, es a ket sorozat OSSZEKEVEREDVE keszult.
+   // Merve (Ger40, 2026-08-14 11:30-15:00, 211 M1 gyertya): a rajzolt allapot
+   // 0%-ban egyezett a wpr_sma valos allapotaval — 55% NEM RAJZOLT SEMMIT (ez
+   // volt a "szaggatas"), 45% pedig a MASIK strategia orankenti sorait mutatta.
+   // Ures input eseten a fajl ELSO strategiajat visszuk, es KIIRJUK, melyiket.
+   string names[]; int nn = 0;
+
    while(!FileIsEnding(h))
    {
       string ln = FileReadString(h);
@@ -165,7 +177,14 @@ bool ReadStates()
       string f[];
       int n = StringSplit(ln, ';', f);
       if(n < 6) continue;
-      if(InpStrategy != "" && f[1] != InpStrategy) { skippedStrat++; continue; }
+
+      // A fajlban levo NEVEK gyujtese (a fejlecben kiirjuk, mit lehet valasztani)
+      bool known = false;
+      for(int j = 0; j < nn; j++) if(names[j] == f[1]) { known = true; break; }
+      if(!known) { ArrayResize(names, nn + 1); names[nn] = f[1]; nn++; }
+
+      if(g_strat == "") g_strat = (InpStrategy != "" ? InpStrategy : f[1]);
+      if(f[1] != g_strat) { skippedStrat++; continue; }
 
       ArrayResize(g_t,   g_ns + 1); g_t[g_ns]   = (datetime)StringToInteger(f[2]);
       ArrayResize(g_nt,  g_ns + 1); g_nt[g_ns]  = (int)StringToInteger(f[3]);
@@ -175,22 +194,53 @@ bool ReadStates()
       // Regi fajlban nincs -> 0 (= nyitva), tehat visszafele kompatibilis.
       int gc = (n >= 8) ? (int)StringToInteger(f[7]) : 0;
       ArrayResize(g_gate, g_ns + 1); g_gate[g_ns] = gc;
+      g_ns++;
+   }
+   FileClose(h);
+
+   g_avail = "";
+   for(int j = 0; j < nn; j++) g_avail = g_avail + (j > 0 ? "," : "") + names[j];
+
+   if(g_ns == 0)
+   {
+      g_msg = "0 STATE sor (" + file + ")" +
+              (skippedStrat > 0 ? "  — a fajlban: " + g_avail +
+                                  " ; allitsd az InpStrategy-t!" : "");
+      Print("[TFBands] ", g_msg);
+      return(false);
+   }
+
+   // ⚠ IDOREND KIKENYSZERITVE. A `FindState` binaris keresest hasznal, az pedig
+   // RENDEZETT tombot felteteleze — a fajl viszont strategia-BLOKKONKENT keszul,
+   // tehat a nyers sorrend visszaugorhat az idoben. Egy strategiara szurve ez
+   // ma nem fordul elo, de a keresés helyessege NEM fugghet attol, hogy a
+   // Python milyen sorrendben irja ki a blokkokat: ott egy artalmatlan
+   // atrendezes nemam elrontana ezt a savot.
+   // Beszuro rendezes: mar rendezett bemeneten O(n), tehat ingyen van.
+   int swaps = 0;
+   for(int i = 1; i < g_ns; i++)
+   {
+      datetime kt = g_t[i]; int kn = g_nt[i], kd = g_dir[i], kw = g_win[i], kg = g_gate[i];
+      int j2 = i - 1;
+      while(j2 >= 0 && g_t[j2] > kt)
+      {
+         g_t[j2+1]=g_t[j2]; g_nt[j2+1]=g_nt[j2]; g_dir[j2+1]=g_dir[j2];
+         g_win[j2+1]=g_win[j2]; g_gate[j2+1]=g_gate[j2];
+         j2--; swaps++;
+      }
+      g_t[j2+1]=kt; g_nt[j2+1]=kn; g_dir[j2+1]=kd; g_win[j2+1]=kw; g_gate[j2+1]=kg;
+   }
+
+   for(int i = 0; i < g_ns; i++)
+   {
+      int gc = g_gate[i];
       if(gc == 1)      g_cSpr++;
       else if(gc == 2) g_cAli++;
       else if(gc == 6) g_cVol++;
       else if(gc != 0) g_cOth++;
       else             g_cOpen++;
-      g_ns++;
    }
-   FileClose(h);
 
-   if(g_ns == 0)
-   {
-      g_msg = "0 STATE sor (" + file + ")" +
-              (skippedStrat > 0 ? "  — mind MAS strategiae, allitsd az InpStrategy-t!" : "");
-      Print("[TFBands] ", g_msg);
-      return(false);
-   }
    // A KAPU-osszegzes: melyik kapu hanyszor zart. Enelkul a szines sav "valami
    // blokkol" maradna; igy szammal is olvashato, mi tartja vissza a motort.
    string gsum = "nyitva " + IntegerToString(g_cOpen);
@@ -198,9 +248,15 @@ bool ReadStates()
    if(g_cSpr > 0) gsum = gsum + " | spread "      + IntegerToString(g_cSpr);
    if(g_cAli > 0) gsum = gsum + " | egyuttallas " + IntegerToString(g_cAli);
    if(g_cOth > 0) gsum = gsum + " | egyeb "       + IntegerToString(g_cOth);
-   g_msg = StringFormat("%s | STATE=%d | %s -> %s | KAPU: %s", file, g_ns,
+   // ⚠ A MUTATOTT STRATEGIA KIIRVA. Ket strategias fajlnal eddig semmi nem
+   // arulta el, hogy melyiket latod — es epp az volt a baj, hogy a masikét.
+   string who = "STRAT=" + g_strat;
+   if(nn > 1) who = who + " (a fajlban: " + g_avail + ")";
+   g_msg = StringFormat("%s | %s | STATE=%d | %s -> %s | KAPU: %s", file, who, g_ns,
                         TimeToString(g_t[0], TIME_DATE | TIME_MINUTES),
                         TimeToString(g_t[g_ns - 1], TIME_DATE | TIME_MINUTES), gsum);
+   if(swaps > 0)
+      g_msg = g_msg + " | rendezve (" + IntegerToString(swaps) + " csere)";
    Print("[TFBands] ", g_msg);
    return(true);
 }
@@ -282,7 +338,10 @@ int OnInit()
       if(w > 0) ChartSetInteger(0, CHART_HEIGHT_IN_PIXELS, w, g_nbands * InpBandHeightPx);
    }
 
-   IndicatorShortName("TF Bands");
+   // ⚠ A MUTATOTT STRATEGIA A SAV NEVEBEN: ket strategias fajlnal eddig SEMMI
+   // nem arulta el, melyiket latod — es pont az volt a baj, hogy a masikét.
+   string _sn = "TF Bands" + (g_strat != "" ? " " + g_strat : "");
+   IndicatorShortName(_sn);
    IndicatorDigits(2);
    Status("TFBands: " + g_msg, ok ? clrNavy : clrRed);
    return(INIT_SUCCEEDED);

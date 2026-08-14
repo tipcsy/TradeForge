@@ -11,7 +11,7 @@ Verziószámozás (Semantic Versioning): MAJOR.MINOR.PATCH
 """
 
 APP_NAME    = "TradeForge"
-APP_VERSION = "2.44.0"
+APP_VERSION = "2.44.1"
 APP_TITLE   = f"{APP_NAME} v{APP_VERSION}"
 
 

@@ -19,7 +19,7 @@
 //|  küldő végzi). A bufferbe töltés a gyertya-idő → állapot leképzés  |
 //|  alapján megy, így M1 és M15 charton is illeszkedik.             |
 //+------------------------------------------------------------------+
-#property version   "2.40"        // TradeForge v2.40; utolso tartalmi modositas: 2026-08-09
+#property version   "2.44"        // TradeForge v2.44; utolso tartalmi modositas: 2026-08-14
 #property indicator_separate_window
 #property indicator_buffers 12
 #property indicator_plots   4
@@ -28,7 +28,7 @@
 
 input int    TimerSeconds = 1;      // fájl-újraolvasás (mp)
 input string FilePrefix   = "TFV_"; // ugyanaz, mint a TradeForgeViz-nél
-input string InpStrategy  = "";     // Melyik STRATÉGIA sávjait mutassa (üres = MIND)
+input string InpStrategy  = "";     // Melyik STRATÉGIA sávjait (üres = a fájl ELSŐ stratégiája)
 input int    BarWidth     = 3;      // a per-gyertya oszlop vastagsága (px)
 input int    BandHeightPx = 27;     // EGY sáv magassága px (az al-ablak = sávszám × ez)
 
@@ -55,6 +55,8 @@ int      g_st_dir[];
 int      g_st_window[];
 int      g_st_mstate[];               // piac-állapot kód (-1 = nincs sáv; 0..8 = kód)
 int      g_nstate = 0;
+string   g_strat  = "";   // amit TÉNYLEGESEN mutatunk
+string   g_avail  = "";   // minden stratégia, ami a fájlban van
 int      g_step   = 900;              // állapot-lépésköz mp-ben (a state-időkből)
 bool     g_market_on = false;         // van-e piac-sáv (bármely STATE sor kódja >= 0)
 int      g_nbands    = 3;             // aktív sávok száma (3 vagy 4)
@@ -156,7 +158,7 @@ int OnInit()
    for(int p = 0; p < 4; p++)
       PlotIndexSetDouble(p, PLOT_EMPTY_VALUE, EMPTY_VALUE);
 
-   IndicatorSetString(INDICATOR_SHORTNAME, "TFBANDS");
+   IndicatorSetString(INDICATOR_SHORTNAME, "TFBANDS");   // a STRATÉGIA nevével bővül, amint a fájl beolvasva
    IndicatorSetInteger(INDICATOR_DIGITS, 2);
    IndicatorSetDouble(INDICATOR_MINIMUM, 0.0);
    IndicatorSetDouble(INDICATOR_MAXIMUM, 1.0);
@@ -211,6 +213,14 @@ void RefreshFromFile()
    datetime tms[];
    int nt[], dr[], wn[], ms[];
    int cnt = 0;
+   // ⚠ EGY SÁV = EGY STRATÉGIA. A fájl TÖBB stratégia állapotát tartalmazza
+   // (mindegyik ugyanabba a szimbólum-fájlba ír, saját blokkban). Az „üres =
+   // MIND" alapértelmezés értelmetlen volt: egy sáv nem tud két stratégiát
+   // egyszerre mutatni, és a két sorozat ÖSSZEKEVEREDVE került a tömbbe.
+   // Mérve (Ger40, 2026-08-14 11:30–15:00, 211 M1 gyertya): a rajzolt állapot
+   // 0%-ban egyezett a wpr_sma valós állapotával — 55% NEM RAJZOLT SEMMIT (ez
+   // volt a „szaggatás"), 45% a MÁSIK stratégia óránkénti sorait mutatta.
+   string names[]; int nn = 0;
    while(!FileIsEnding(h))
    {
       string ln = FileReadString(h);
@@ -218,7 +228,8 @@ void RefreshFromFile()
          continue;
       if(StringFind(ln, "CLEAR") == 0)   // V-off → az összes állapot törlése
       {
-         cnt = 0;
+         cnt = 0; nn = 0; g_strat = "";
+         ArrayResize(names, 0);
          ArrayResize(tms, 0); ArrayResize(nt, 0); ArrayResize(dr, 0);
          ArrayResize(wn, 0);  ArrayResize(ms, 0);
          continue;
@@ -229,8 +240,13 @@ void RefreshFromFile()
       int n = StringSplit(ln, ';', f);
       if(n < 6)                          // STATE;<strat>;t;notrade;dir;window[;market]
          continue;
-      // Több-stratégia szűrő: csak a MI stratégiánk STATE sorai (f[1] = stratégia).
-      if(InpStrategy != "" && f[1] != InpStrategy)
+      // A fájlban lévő NEVEK gyűjtése (a fejlécben kiírjuk, mi választható)
+      bool known = false;
+      for(int j = 0; j < nn; j++) if(names[j] == f[1]) { known = true; break; }
+      if(!known) { ArrayResize(names, nn + 1); names[nn] = f[1]; nn++; }
+      // Több-stratégia szűrő: csak EGY stratégia sorai. Üres input → az ELSŐ.
+      if(g_strat == "") g_strat = (InpStrategy != "" ? InpStrategy : f[1]);
+      if(f[1] != g_strat)
          continue;
       ArrayResize(tms, cnt + 1); ArrayResize(nt, cnt + 1);
       ArrayResize(dr,  cnt + 1); ArrayResize(wn, cnt + 1); ArrayResize(ms, cnt + 1);
@@ -243,7 +259,38 @@ void RefreshFromFile()
    }
    FileClose(h);
 
-   // Az új állapot átvétele (a Python idő szerint növekvő sorrendben írja).
+   // ⚠ IDŐREND KIKÉNYSZERÍTVE. A `FindState` bináris keresést használ, az pedig
+   // RENDEZETT tömböt feltételez — a fájl viszont stratégia-BLOKKONKÉNT készül,
+   // tehát a nyers sorrend visszaugorhat az időben (a Ger40-fájlban pontosan ez
+   // történt: a wpr_sma teljes blokkja után a bollinger blokkja ÚJRAKEZDTE az
+   // időt). Egy stratégiára szűrve ez ma nem fordul elő, de a keresés
+   // helyessége NEM függhet attól, milyen sorrendben írja ki a Python a
+   // blokkokat. Beszúró rendezés: már rendezett bemeneten O(n), tehát ingyen van.
+   for(int i = 1; i < cnt; i++)
+   {
+      datetime kt = tms[i]; int kn = nt[i], kd = dr[i], kw = wn[i], km = ms[i];
+      int j2 = i - 1;
+      while(j2 >= 0 && tms[j2] > kt)
+      {
+         tms[j2+1]=tms[j2]; nt[j2+1]=nt[j2]; dr[j2+1]=dr[j2];
+         wn[j2+1]=wn[j2];   ms[j2+1]=ms[j2];
+         j2--;
+      }
+      tms[j2+1]=kt; nt[j2+1]=kn; dr[j2+1]=kd; wn[j2+1]=kw; ms[j2+1]=km;
+   }
+
+   g_avail = "";
+   for(int j = 0; j < nn; j++) g_avail = g_avail + (j > 0 ? "," : "") + names[j];
+
+   // ⚠ A MUTATOTT STRATÉGIA A SÁV NEVÉBEN. Két stratégiás fájlnál eddig SEMMI
+   // nem árulta el, melyiket látod — és pont az volt a baj, hogy a másikét.
+   if(g_strat != "")
+   {
+      string sn = "TFBANDS " + g_strat;
+      if(nn > 1) sn = sn + "  (+" + IntegerToString(nn - 1) + " a fájlban)";
+      IndicatorSetString(INDICATOR_SHORTNAME, sn);
+   }
+
    ArrayResize(g_st_time, cnt); ArrayResize(g_st_notrade, cnt);
    ArrayResize(g_st_dir,  cnt); ArrayResize(g_st_window,  cnt);
    ArrayResize(g_st_mstate, cnt);
