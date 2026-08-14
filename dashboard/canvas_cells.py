@@ -29,10 +29,11 @@ class Cell:
     """Egy megrajzolandó cella. `key` az oszlop kulcsa (`"wpr_sma|opt"` alakban is)."""
 
     __slots__ = ("key", "kind", "text", "fg", "anchor", "font", "on_click",
-                 "dots", "frame", "parts")
+                 "dots", "frame", "parts", "tip")
 
     def __init__(self, key, kind="text", text="", fg=FG_WHITE, anchor="w",
-                 font="mono", on_click=None, dots=None, frame="", parts=None):
+                 font="mono", on_click=None, dots=None, frame="", parts=None,
+                 tip=""):
         self.key = key
         self.kind = kind
         self.text = text
@@ -43,6 +44,10 @@ class Cell:
         self.dots = list(dots or [])      # [(szín, ), …] — a pöttyök színei
         self.frame = frame                 # "" | "blocked" | "reduced"
         self.parts = list(parts or [])     # ctrl: [(alkulcs, szöveg, szín, cb, aktív)]
+        # Buborék: a cella MAGA mondja meg, miért olyan, amilyen. Üres → nincs
+        # buborék (a legtöbb cella magától értetődő, és egy mindenhol felugró
+        # súgó ugyanolyan zaj, mint egy mindig látszó „nincs hiba" felirat).
+        self.tip = tip
 
     def visual(self) -> tuple:
         """A cella LÁTHATÓ állapota — a frissítés ezt hasonlítja össze.
@@ -150,7 +155,18 @@ def cells_for(d: dict, collapsed: dict, on_close=None) -> dict:
         # Egy sorbeli gomb ezt mind atugrotta — orakra inditott valamit, amirol
         # a felulet semmit nem mondott.
         run_txt, run_fg = _lr._run_text(st)
-        out[f"{n}|ctrl"] = Cell(f"{n}|ctrl", kind="ctrl", parts=[
+        # ⚠ A HALVÁNY VEZÉRLŐ MOSTANTÓL MAGÁTÓL MEGMONDJA, MIÉRT AZ.
+        # Eddig a `–` csak KATTINTÁSRA árulta el az okot (az állapotsorban) — egy
+        # gondolatjelnek látszó jel viszont a szemnek „nincs itt semmi", nem „ez
+        # ki van kapcsolva". Így a stratégiát nem lehetett elindítani, és az sem
+        # derült ki, mi az akadály: a sor közben jelzést ÉS minősítést is
+        # mutatott, tehát késznek látszott.
+        _tip = ""
+        if not st.get("enabled", True):
+            _tip = (f"A(z) „{n}” nincs bekapcsolva ezen a páron — a motor "
+                    f"sosem futtatja." + chr(10) + "Bekapcsolás: kattints az "
+                    f"instrumentum NEVÉRE a sor elején, majd pipáld be a stratégiát.")
+        out[f"{n}|ctrl"] = Cell(f"{n}|ctrl", kind="ctrl", tip=_tip, parts=[
             ("run", run_txt, run_fg, st.get("on_toggle"),
              bool(st.get("enabled", True))),
         ])

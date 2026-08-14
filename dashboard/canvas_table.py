@@ -204,6 +204,12 @@ class CanvasTable:
         # ellenőrizhető (a teszt közvetlenül a `fire()`-t hívja, nem szintetikus
         # egéreseményt kerget), és nem szóródnak szét closure-ök a rajzolóban.
         self._clicks = {}
+        # ⚠ Mely tagek kapnak KÉZ-KURZORT. Nem dísz: a halvány (tétlen) vezérlőn
+        # tilos kéz-kurzor — az azt ígérné, hogy most tenni fog valamit —, a
+        # BUBORÉK viszont ott is kell. A kettő ugyanazt az `<Enter>` eseményt
+        # hallgatja, tehát a kötés PUSZTA LÉTÉBŐL nem lehet a kurzorra
+        # következtetni; ez a halmaz teszi mérhetővé.
+        self._hand_tags = set()
         self.frame = tk.Frame(parent, bg=BG)
         self._build()
 
@@ -214,6 +220,7 @@ class CanvasTable:
         self._items.clear()
         self._visual.clear()
         self._clicks.clear()
+        self._hand_tags.clear()
         rows = self._visible()
         strategies = self._strategy_names()
         self._cols = _cols.layout(self._f, strategies, self._collapsed)
@@ -461,6 +468,7 @@ class CanvasTable:
                     # KÉZ-KURZOR csak az AKTÍV vezérlőn — a halványon nem, mert
                     # az azt ígérné, hogy most tenni fog valamit.
                     if active:
+                        self._hand_tags.add(f"{tag}_{sub}")
                         bc.tag_bind(f"{tag}_{sub}", "<Enter>",
                                     lambda _e, b=bc: b.configure(cursor="hand2"))
                         bc.tag_bind(f"{tag}_{sub}", "<Leave>",
@@ -487,8 +495,19 @@ class CanvasTable:
             self._clicks[(i, cell.key)] = cell.on_click
             bc.tag_bind(tag, "<Button-1>",
                         lambda _e, a=(i, cell.key): self.fire(*a))
+            self._hand_tags.add(tag)
             bc.tag_bind(tag, "<Enter>", lambda _e, b=bc: b.configure(cursor="hand2"))
             bc.tag_bind(tag, "<Leave>", lambda _e, b=bc: b.configure(cursor=""))
+        # ⚠ BUBORÉK — MINDEN cellafajtára. A `ctrl` a RÉSZ-tagjeire köt, mert ott
+        # a szöveg nem a cella-tagen ül. `add="+"`, hogy a kéz-kurzor kötése
+        # (ami ugyanezt az eseményt hallgatja) ne vesszen el.
+        if getattr(cell, "tip", ""):
+            _tags = ([f"{tag}_{p[0]}" for p in (cell.parts or [])]
+                     if cell.kind == "ctrl" else [tag])
+            for _tg in _tags:
+                bc.tag_bind(_tg, "<Enter>",
+                            lambda e, t=cell.tip: self._tip_show(e, t), add="+")
+                bc.tag_bind(_tg, "<Leave>", self._tip_hide, add="+")
         self._items[(i, cell.key)] = ids
         self._visual[(i, cell.key)] = cell.visual()
         if cell.kind == "dots" and cell.frame:
@@ -503,6 +522,41 @@ class CanvasTable:
                 bc.itemconfigure(rects[-1],
                                  outline=(_FRAME_STYLE.get(cell.frame) or {}).get(
                                      "outline", ""))
+
+    # ── Buborék ───────────────────────────────────────────────────────────
+    # ⚠ A vászon-táblának eddig NEM volt súgója. Ez pont ott fájt, ahol egy cella
+    # nem magától értetődő: a HALVÁNY vezérlő csak KATTINTÁSRA árulta el, miért
+    # tétlen — egy gondolatjel viszont a szemnek „nincs itt semmi", nem „ez ki
+    # van kapcsolva". Aki nem kattintott rá, elakadt.
+    #
+    # EGYETLEN ablakot használunk újra (nem cellánként egyet): a tábla több száz
+    # cellát rajzol, és annyi Toplevel létrehozása mérhetően akadna.
+
+    def _tip_show(self, ev, text: str):
+        import tkinter as tk
+        w = getattr(self, "_tipwin", None)
+        if w is None or not w.winfo_exists():
+            w = tk.Toplevel(self._parent)
+            w.overrideredirect(True)           # nincs keret/címsor
+            try:
+                w.attributes("-topmost", True)
+            except tk.TclError:
+                pass
+            lbl = tk.Label(w, text="", bg=BG_HEADER, fg=FG_WHITE,
+                           font=self._f["small"], justify="left", anchor="w",
+                           padx=8, pady=5, bd=0)
+            lbl.pack()
+            self._tipwin, self._tiplbl = w, lbl
+        self._tiplbl.config(text=text)
+        # A kurzor ALÁ és JOBBRA — így nem takarja el azt, amire mutat.
+        self._tipwin.geometry(f"+{ev.x_root + 14}+{ev.y_root + 18}")
+        self._tipwin.deiconify()
+        self._tipwin.lift()
+
+    def _tip_hide(self, _ev=None):
+        w = getattr(self, "_tipwin", None)
+        if w is not None and w.winfo_exists():
+            w.withdraw()
 
     def fire(self, row_index: int, key: str, sub: str = None) -> bool:
         """Egy cella kattintásának KIVÁLTÁSA. Minden `tag_bind` ide mutat, tehát

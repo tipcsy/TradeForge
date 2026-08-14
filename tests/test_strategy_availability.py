@@ -299,8 +299,13 @@ if _tkok:
           str(sorted(k for k in _t.clickable() if "ctrl" in str(k))))
     _bc = _t._bc["mid"]
 
+    # ⚠ A KEZ-KURZORT MERJUK, NEM A KOTES LETET. A halvany vezerlon MOSTANTOL
+    # VAN `<Enter>` kotés — a BUBOREK-e, ami kattintas nelkul kiirja, miert
+    # tetlen. Kez-kurzor viszont tovabbra sem jar neki: az azt igerne, hogy most
+    # tenni fog valamit. A ket dolog ugyanazt az esemenyt hallgatja, ezert a
+    # tabla KULON nyilvantartja, mely tagek kaptak kurzort (`_hand_tags`).
     def _has_cursor(n):
-        return bool(_bc.tag_bind(f"c0_{n}|ctrl_run", "<Enter>"))
+        return f"c0_{n}|ctrl_run" in _t._hand_tags
 
     check("a nem engedelyezett Play-en NINCS kez-kurzor", not _has_cursor(_n0))
     check("...az engedelyezetten viszont VAN", _has_cursor(_n1))
