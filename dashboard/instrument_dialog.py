@@ -917,8 +917,33 @@ class InstrumentParamsDialog:
         _mk("futtatas", "Futtatás")
         _mk("eredmeny", "Eredmény")
 
-        # ── Backtest-eredmény sor (a Backtest gomb tölti) — a rögzített sávban,
-        #    hogy a futás állapota („Backtest fut…", letöltés) mindig látszódjon.
+        # ── FUTÁS-SÁV a RÖGZÍTETT gombsorban ────────────────────────────────
+        # ⚠ Az Indítás gomb korábban a Futtatás SZAKASZBAN ült, az oldal alján.
+        # Mérve (Ger40, wpr_sma): a lap tartalma 3112 px, az ablak a képernyő
+        # 88%-án 1520 px — a Futtatás szakasz 1495 px-nél KEZDŐDIK, tehát a gomb
+        # pont az alsó él alá esett. Nagyobb ablak ezt NEM oldja meg: nincs az a
+        # képernyő, amin egy 3000 px-es lap elfér.
+        #
+        # A gomb tehát oda került, ahol ennek az ablaknak MINDEN cselekvése van
+        # (Mentés · Mégse) — és vele a futás ÁLLAPOTA is, mert a visszajelzés
+        # ugyanúgy nem lehet a lap aljára rejtve. A TERV részletes szövege marad
+        # a szakaszban; ide a rövid összefoglaló kerül.
+        _runbar = tk.Frame(footer, bg=BG)
+        _runbar.pack(fill="x", padx=10, pady=(4, 0))
+        self._plan_btn = tk.Button(_runbar, text="Indítás", bg=BTN_PLAY_BG,
+                                   fg=BTN_PLAY_FG, relief="flat", font=self._sf,
+                                   state="disabled", command=self._start_planned)
+        self._plan_btn.pack(side="left")
+        self._plan_short = tk.Label(_runbar, text="", bg=BG, fg=FG_GRAY,
+                                    font=self._sf, anchor="w", justify="left")
+        self._plan_short.pack(side="left", padx=(10, 0), fill="x", expand=True)
+        self._run_status = tk.Label(footer, text="", bg=BG, fg=FG_GRAY,
+                                    font=self._sf, anchor="w", justify="left",
+                                    wraplength=900)
+        self._run_status.pack(anchor="w", fill="x", padx=10, pady=(1, 0))
+
+        # ── Backtest-eredmény sor (a Mentés-ág tölti) — szintén a rögzített
+        #    sávban, hogy a futás állapota („Backtest fut…", letöltés) látszódjon.
         self.lbl_bt = tk.Label(footer, text="", bg=BG, fg=FG_GRAY_DIM, font=self._sf,
                                justify="left", wraplength=560)
         self.lbl_bt.pack(anchor="w", padx=10, pady=(0, 2))
@@ -1131,20 +1156,13 @@ class InstrumentParamsDialog:
         head.pack(anchor="w", fill="x", padx=12, pady=(10, 0))
         tk.Label(head, text="Mi fog történni", bg=BG, fg=FG_WHITE,
                  font=self._hf).pack(side="left")
-        self._plan_btn = tk.Button(head, text="Indítás", bg=BTN_PLAY_BG,
-                                   fg=BTN_PLAY_FG, relief="flat", font=self._sf,
-                                   command=self._start_planned)
-        self._plan_btn.pack(side="right", padx=(8, 0))
-        # ⚠ A FUTÁS ÁLLAPOTA IDE KERÜL, a gomb mellé — és nem a rajz dobozába.
-        # Az korábban a `_sweep_box`-ban ült, amit az OPTIMALIZÁLÁS ág épp
-        # `pack_forget()`-tel elrejt: az Indítás gomb tehát elindított egy órákig
-        # tartó optimalizálást, és SEMMI visszajelzést nem adott róla. Pontosan
-        # így néz ki egy „beragadt" program.
-        self._run_status = _autowrap(tk.Label(box, text="", bg=BG, fg=FG_GRAY,
-                                              font=self._sf, anchor="w",
-                                              justify="left"),
-                                     self._body_canvas)
-        self._run_status.pack(anchor="w", fill="x", padx=12)
+        # ⚠ AZ INDÍTÁS GOMB NINCS ITT — a rögzített gombsorban ül (lásd ott az
+        # indoklást: ez a lap 3000 px magas, a gomb itt a képernyő alá esne).
+        # Innentől a szakasz CSAK magyaráz; a cselekvés egy helyen van.
+        try:
+            self._plan_btn.config(state="normal", command=self._start_planned)
+        except (tk.TclError, AttributeError):
+            pass
 
         self._tuned_lbl = _autowrap(tk.Label(box, bg=BG, fg=FG_GRAY, font=self._sf,
                                              anchor="w", justify="left"),
@@ -1486,6 +1504,49 @@ class InstrumentParamsDialog:
 
     _HOUR_H = 74            # az óra-sáv magassága képpontban
 
+    def _build_stage_legend(self, body):
+        """A jelölő-körök MAGYARÁZATA — a stratégia saját stádium-listájából.
+
+        Az `n.` sorszám a soron látható BALRÓL JOBBRA sorrend: a kör helye a
+        táblán pontosan ez, tehát össze lehet párosítani ránézésre.
+
+        ⚠ A SZÍNEK jelentése is ide tartozik. Egy zöld és egy piros kör NEM
+        ugyanaz a stádium két állapota: az IRÁNYT mondja (BUY/SELL). Enélkül a
+        piros kör „hibának" látszik, holott egy kész SELL-szetup."""
+        try:
+            _stages = list(self.strategy.columns()[0].stages)
+        except (AttributeError, IndexError, TypeError):
+            return
+        if not _stages:
+            return
+        tk.Label(body, text="Mit jelentenek a karikák", bg=BG, fg=FG_WHITE,
+                 font=self._hf, anchor="w").pack(anchor="w", padx=12, pady=(12, 2))
+        tk.Label(body, bg=BG, fg=FG_GRAY_DIM, font=self._sf, anchor="w",
+                 text=(f"A soron {len(_stages)} kör jelzi, hol tart a belépő "
+                       f"szetupja — balról jobbra:")
+                 ).pack(anchor="w", padx=12)
+        grid = tk.Frame(body, bg=BG)
+        grid.pack(anchor="w", fill="x", padx=12, pady=(2, 0))
+        for i, (_key, _label) in enumerate(_stages, start=1):
+            row = tk.Frame(grid, bg=BG)
+            row.pack(anchor="w", fill="x")
+            tk.Label(row, text=f"{i}.", bg=BG, fg=FG_GRAY_DIM, font=self._sf,
+                     width=3, anchor="e").pack(side="left")
+            tk.Label(row, text="●", bg=BG, fg=FG_GREEN,
+                     font=self._sf).pack(side="left", padx=(4, 6))
+            tk.Label(row, text=_label, bg=BG, fg=FG_WHITE, font=self._sf,
+                     anchor="w").pack(side="left")
+            tk.Label(row, text=f"({_key})", bg=BG, fg=FG_GRAY_DIM,
+                     font=self._sf, anchor="w").pack(side="left", padx=(6, 0))
+        tk.Label(body, bg=BG, fg=FG_GRAY, font=self._sf, anchor="w",
+                 justify="left", wraplength=820, text=(
+                     "A KÖR SZÍNE az irány: zöld = BUY-szetup, piros = "
+                     "SELL-szetup, halvány = ez a feltétel még nem teljesül. "
+                     "Egy piros kör tehát NEM hiba — kész eladási szetup." +
+                     chr(10) + "A körök ELŐTTI betű a kötés-mód: „V” = valódi "
+                     "kötést nyit, „J” = csak jelez az MT5 chartra.")
+                 ).pack(anchor="w", padx=12, pady=(4, 0))
+
     def _build_overview_tab(self):
         page = self._shell.page("Áttekintés")
         for w in page.winfo_children():
@@ -1554,6 +1615,19 @@ class InstrumentParamsDialog:
                          wraplength=820,
                          text=f"{_ic.get(w['sev'], '·')}  {w['text']}"
                          ).pack(anchor="w")
+
+        # ── MIT JELENTENEK A KARIKÁK ──────────────────────────────────────
+        # ⚠ A soron stádiumonként egy kör mutatja, hol tart a szetup — de eddig
+        # SEHOL nem volt kiírva, MELYIK kör mit jelent. A jelölő maga a napi
+        # használat legfontosabb eleme; egy meg nem magyarázott jelrendszert a
+        # felhasználónak kellett kikövetkeztetnie a viselkedésből.
+        #
+        # A lista a STRATÉGIA SAJÁT deklarációjából épül (`columns()[0].stages`),
+        # nem bedrótozott szövegből: így egy új stratégia ingyen megkapja, és
+        # nem csúszhat el a valóságtól. (A wpr_sma-nak és a bollingernek 3
+        # stádiuma van, az ml_ai-nak KETTŐ — egy „három karika" felirat máris
+        # hazudna.)
+        self._build_stage_legend(body)
 
         # ── MIKOR kereskedik ──────────────────────────────────────────────
         tk.Label(body, text="Mikor kereskedik", bg=BG, fg=FG_WHITE,
@@ -2303,6 +2377,12 @@ class InstrumentParamsDialog:
             rp = _op.run_plan(rows, trials)
             self._tuned_lbl.config(
                 text=rp["text"] + chr(10) + "Hangolva: " + (", ".join(rp["tuned"]) or "—"))
+            # ⚠ A gomb MELLETT is ott a lényeg: a gombsor a képernyő alján ül, a
+            # részletes terv viszont a lap közepén — enélkül vakon nyomnál.
+            try:
+                self._plan_short.config(text=rp["text"])
+            except (tk.TclError, AttributeError):
+                pass
         except (tk.TclError, AttributeError):
             pass
 

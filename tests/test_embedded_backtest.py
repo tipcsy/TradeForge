@@ -188,8 +188,19 @@ if TK_OK:
 
     root.update_idletasks()
     _walk(d._sections["futtatas"].body)
-    check("EGYETLEN indito gomb latszik a lapon",
-          sum(1 for t in _vis if "indít" in t.lower()) == 1, str(_vis))
+    # ⚠ A SZAKASZBAN NINCS inditogomb. Merve: a lap tartalma 3112 px, az ablak a
+    # kepernyo 88%-an 1520 px — a Futtatas szakasz 1495 px-nel kezdodik, tehat az
+    # ott ulo gomb az also el ala esett. A gomb a ROGZITETT gombsorba kerult.
+    check("a szakaszban NINCS inditogomb (a lap tul hosszu hozza)",
+          not any("indít" in t.lower() for t in _vis), str(_vis))
+    _all_vis = []
+    _vis = _all_vis
+    _walk(d.popup)
+    check("...de az EGESZ ablakban PONTOSAN EGY van",
+          sum(1 for t in _all_vis if "indít" in t.lower()) == 1,
+          str([t for t in _all_vis if "indít" in t.lower()]))
+    check("...es az a ROGZITETT savban ul (nem a gorgetheto lapon)",
+          str(d._body) not in str(d._plan_btn), str(d._plan_btn))
     check("...es a beagyazott sajat gombja nincs kicsomagolva",
           not d._run_tab._btn_start.winfo_ismapped())
     # A widget viszont LETEZIK: a belso allapotvaltasok ra hivatkoznak.
@@ -263,10 +274,13 @@ if TK_OK:
     # `_sweep_box`-ban ult, amit az OPTIMALIZALAS ag epp elrejt (`pack_forget`):
     # az Indítás gomb elinditott egy orakig tarto optimalizalast, es SEMMI
     # visszajelzest nem adott. Pontosan igy nez ki egy „beragadt" program.
-    check("a futas-allapot a FUTTATAS szakaszban van",
+    # ⚠ A FUTAS ALLAPOTA a ROGZITETT savban — a visszajelzes ugyanugy nem
+    # rejtozhet a lap aljara, mint a gomb. (Korabban a `_sweep_box`-ban ult, amit
+    # az OPTIMALIZALAS ag epp elrejt: az Inditas elinditott egy orakig tarto
+    # munkat, es SEMMI visszajelzest nem adott.)
+    check("a futas-allapot a ROGZITETT savban van",
           getattr(d, "_run_status", None) is not None
-          and str(d._run_status.winfo_parent()).startswith(
-              str(d._sections["futtatas"].body)),
+          and str(d._body) not in str(d._run_status),
           str(getattr(d, "_run_status", None)))
     check("...NEM a rajz dobozaban (amit az OPT ag elrejt)",
           not str(d._run_status).startswith(str(d._sweep_box)),
