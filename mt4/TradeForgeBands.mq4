@@ -38,7 +38,10 @@
 //|  specifikus MQL5-atvetelektol.                                    |
 //+------------------------------------------------------------------+
 #property copyright "TradeForge"
-#property version   "1.20"
+// ⚠ A verzio az MT5-os parjaval KOZOS (nem sajat 1.x sorozat): a ket fajl
+// UGYANAZT a savot rajzolja ugyanabbol a fajlbol, tehat ha elcsusznak,
+// annak LATSZANIA kell — kulon szamozassal az eltéres nem tunt volna fel.
+#property version   "2.44"        // TradeForge v2.44; utolso tartalmi modositas: 2026-08-14
 #property strict
 #property indicator_separate_window
 #property indicator_minimum 0.0

@@ -179,6 +179,30 @@ for _f, _lbl in ((ROOT / "mt4" / "TradeForgeBands.mq4", "MQL4"),
           "üres = MIND" not in src and "ures = MIND" not in src)
 
 
+# ── 5. A KET BANDS-FAJL VERZIOJA KOZOS ──────────────────────────────────
+# ⚠ Ugyanazt a savot rajzoljak, ugyanabbol a fajlbol. Kulon szamozassal egy
+# elcsuszas NEM latszana — es pont ez tortent: a .mq5 2.44-re ment, a .mq4 a
+# sajat 1.x soraban maradt, tehat a ket telepitett indikator kulonbozo kodot
+# futtathatott volna ugyanazzal a "friss" latszattal.
+import re as _re
+_vers = {}
+for _f, _lbl in ((ROOT / "mt4" / "TradeForgeBands.mq4", "MQL4"),
+                 (ROOT / "mt5" / "TradeForgeBands.mq5", "MQL5")):
+    _m = _re.search(r'#property\s+version\s+"([\d.]+)"',
+                    _f.read_text(encoding="utf-8", errors="replace"))
+    _vers[_lbl] = _m.group(1) if _m else None
+check("a ket Bands-indikator verzioja AZONOS",
+      _vers["MQL4"] == _vers["MQL5"] and _vers["MQL4"] is not None, str(_vers))
+
+# ...es kovesse az app verziojat (a javitas csak akkor ér valamit, ha a
+# felhasznalo latja, hogy ujra kell forditania).
+sys.path.insert(0, str(ROOT))
+from version import APP_VERSION
+check("...es az app verziojanak fo-szamait viszi",
+      _vers["MQL5"] and APP_VERSION.startswith(_vers["MQL5"]),
+      f"indikator={_vers['MQL5']}  app={APP_VERSION}")
+
+
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")
 sys.exit(0 if all(results) else 1)
