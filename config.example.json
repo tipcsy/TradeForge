@@ -78,8 +78,8 @@
     "deviation_points": 10,
     "_comment_risky": "Risky mód (data/risky_mode.json) újraolvasási gyakorisága mp-ben — külső program is írhatja a fájlt. A gombnyomás azonnal ment.",
     "risky_reload_sec": 3600,
-    "_comment_auto_risky": "Portfólió-backtest: a Közepes/Gyenge/Rossz minősítésű pár automatikusan RISKY módban fut (felezett kockázat, azonnali BE, azonnali+felezett trailing) — mint élőben. false = csak a kézi kapcsoló számít.",
-    "auto_risky_weak": true,
+    "_comment_auto_risky": "FELTÁRÓ kapcsoló a portfólió-backtesthez: a Közepes/Gyenge/Rossz minősítésű pár RISKY módban fut (felezett méret, azonnali BE). ⚠ AZ ÉLŐ MOTOR EZT NEM CSINÁLJA — ott kizárólag a per-pár választott preset (data/risk_mode.json) számít. A korábbi „mint élőben” megjegyzés TÉVES volt. Bekapcsolva a backtest MÁST modellez, mint ami történne: mérve (10 pár, 2026-06-01→08-14, kapukkal) 460 vs 248 kötés és +325$ vs +177$ — a RISKY azonnali BE-je felszabadítja a slotot, ezért 1,85x annyi belépő fér be. Alap: false (él-paritás).",
+    "auto_risky_weak": false,
     "_comment_position_records": "Meddig őrizzük a LEZÁRT pozíciók ticket-szintű bejegyzéseit (data/adopted_positions.json = melyik stratégiához tartozott, data/position_meta.json = mekkora volt a belépéskori kockázat, azaz 1 R). NAPBAN; 0 = soha ne takarítson. A bejegyzések aprók (~170 byte) és csak nyitáskor/kézi hozzárendeléskor keletkeznek, tehát a 0 is biztonságos. Rövid érték mellett a régebbi lezárt kötések elvesztik a stratégia- és R-adatukat.",
     "position_record_keep_days": 3
   },

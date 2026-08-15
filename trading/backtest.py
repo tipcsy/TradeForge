@@ -1819,8 +1819,11 @@ def run_portfolio_backtest(
     Optimalizált params betöltése: data/optimized_params/<strategy>/<SYMBOL>.json
 
     rr: ha adott (pl. {"preset":"shield",...}), MINDEN pár erre a preset-re fut →
-    így a GUI-ból összevethetők a technikák. None → a jelenlegi per-pár auto-risky
-    (gyenge minősítés → risky).
+    így a GUI-ból összevethetők a technikák. None → a per-pár VÁLASZTOTT preset
+    (`data/risk_mode.json`), azaz pontosan az, amit az élő motor is használ.
+
+    ⚠ Az `auto_risky_weak` (alapból KI) ettől ELTÉRÍT: a gyenge minősítésű párokat
+    RISKY-re váltja, amit az él NEM csinál. Bekapcsolva a futás figyelmeztet.
     strategy_name: a portfólió ezen a stratégián fut (a párok params-fájljai is
     ebből az almappából jönnek). None → a config elsődleges stratégiája.
     max_slots: az egyidejűleg nyitott (nem risk-free) pozíciók max. száma. None →
@@ -1851,10 +1854,33 @@ def run_portfolio_backtest(
     from core import risk_reduction as _rrm2
     risky_mode.load()
     _rr_state.load()
-    auto_risky = bool(trading_cfg.get("auto_risky_weak", True))
+    # ⚠ ÉL-PARITÁS: alapból KI. Az élő motor NEM ismer „auto-risky"-t — ott
+    # kizárólag a per-pár választott preset (`data/risk_mode.json`) számít. A
+    # config korábbi megjegyzése („mint élőben") TÉVES volt.
+    #
+    # Mérve (10 pár, 2026-06-01→08-14, végrehajtási kapukkal):
+    #     bekapcsolva : 460 kötés | +325,0$ | nyerő 29,6%
+    #     kikapcsolva : 248 kötés | +176,6$ | nyerő 57,3%
+    # Nem csak a MÉRET változik: a RISKY azonnali BE-je kockázatmentessé teszi a
+    # pozíciót, az pedig FELSZABADÍTJA a slotot — ezért fér be 1,85× annyi
+    # belépő. A portfólió-BT tehát bekapcsolva 1,84×-esre fújta az eredményt egy
+    # olyan viselkedéshez képest, ami élesben nem létezik.
+    #
+    # A kapcsoló MEGMARAD (feltáró összevetéshez), de bekapcsolva NEM NÉMA.
+    auto_risky = bool(trading_cfg.get("auto_risky_weak", False))
+    if auto_risky:
+        log.warning("Portfolio BT: auto_risky_weak BE — a gyenge minősítésű párok "
+                    "RISKY módban futnak, amit az ÉLŐ MOTOR NEM csinál. Az "
+                    "eredmény NEM az él modellje.")
 
     def _pair_auto_rr(sym: str, weak_risky: bool) -> dict:
         spec = _rr_state.spec_for(sym)                     # per-pár preset + runner + cautious
+        # ⚠ NÉV-CSAPDA: a `PRESET_OFF` értéke `"off"`, de a FELIRATA
+        # „BE + trailing" — az az AKTÍV alapértelmezés, nem a „semmi". A „Ki
+        # (semmi)" a `PRESET_NONE` (`"none"`). A feltétel tehát MINDEN
+        # alapbeállítású páron elsül, nem csak azokon, ahol nincs
+        # kockázatcsökkentés. (Mérve: 10-ből 6 pár.) Ezért is nem szabad
+        # alapból bekapcsolva hagyni.
         if spec.get("preset") == _rrm2.PRESET_OFF and weak_risky:  # gyenge → risky
             spec = {**spec, "preset": _rrm2.PRESET_RISKY, "cautious": True}
         return spec
