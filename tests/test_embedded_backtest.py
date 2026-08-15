@@ -14,6 +14,7 @@ gomb (az a BEFOGLALO ablakot zarna be — a felhasznalo pedig azt hinne, csak a
 backtestet csukja be).
 """
 import copy
+import pathlib
 import sys
 from pathlib import Path
 
@@ -22,6 +23,27 @@ sys.path.insert(0, str(ROOT))
 
 from core import applog
 applog.harden_console()
+# ⚠ A TESZT SOHA NEM IRHAT A VALODI BEALLITAS-TARBA. Az elso valtozatom a
+# `run_mode`-ot a valodi `data/backtest_prefs.json`-ba mentette, es onnan a
+# KOVETKEZO teszt is beolvasta — attol egy MASIK teszt bukott el. A tar
+# fajljat temp mappara teritjuk, es a vegen visszaadjuk.
+import tempfile as _tf
+from core import backtest_prefs as _bp
+_PREFS_TMP = pathlib.Path(_tf.mkdtemp(prefix="prefs_"))
+_PREFS_ORIG = _bp._FILE
+_bp._FILE = _PREFS_TMP / "backtest_prefs.json"
+import atexit as _ax
+import shutil as _sh
+
+
+def _restore_prefs():
+    _bp._FILE = _PREFS_ORIG
+    _sh.rmtree(_PREFS_TMP, ignore_errors=True)
+
+
+_ax.register(_restore_prefs)
+
+
 
 results = []
 
@@ -188,19 +210,17 @@ if TK_OK:
 
     root.update_idletasks()
     _walk(d._sections["futtatas"].body)
-    # ⚠ A SZAKASZBAN NINCS inditogomb. Merve: a lap tartalma 3112 px, az ablak a
-    # kepernyo 88%-an 1520 px — a Futtatas szakasz 1495 px-nel kezdodik, tehat az
-    # ott ulo gomb az also el ala esett. A gomb a ROGZITETT gombsorba kerult.
-    check("a szakaszban NINCS inditogomb (a lap tul hosszu hozza)",
-          not any("indít" in t.lower() for t in _vis), str(_vis))
+    # ⚠ EGYETLEN inditogomb, a FUTTATAS szakaszban — a magyarazata mellett. A
+    # lathatosagot nem a helye oldja meg (a lap 3000 px magas), hanem az, hogy a
+    # szakasz kinyitasa RAGORDUL.
+    check("a szakaszban OTT az inditogomb",
+          any(t.strip() == "Indítás" for t in _vis), str(_vis))
     _all_vis = []
     _vis = _all_vis
     _walk(d.popup)
-    check("...de az EGESZ ablakban PONTOSAN EGY van",
-          sum(1 for t in _all_vis if "indít" in t.lower()) == 1,
-          str([t for t in _all_vis if "indít" in t.lower()]))
-    check("...es az a ROGZITETT savban ul (nem a gorgetheto lapon)",
-          str(d._body) not in str(d._plan_btn), str(d._plan_btn))
+    check("...es PONTOSAN EGY van belole az ablakban",
+          sum(1 for t in _all_vis if t.strip() == "Indítás") == 1,
+          str([t for t in _all_vis if "ndít" in t]))
     check("...es a beagyazott sajat gombja nincs kicsomagolva",
           not d._run_tab._btn_start.winfo_ismapped())
     # A widget viszont LETEZIK: a belso allapotvaltasok ra hivatkoznak.
@@ -274,13 +294,12 @@ if TK_OK:
     # `_sweep_box`-ban ult, amit az OPTIMALIZALAS ag epp elrejt (`pack_forget`):
     # az Indítás gomb elinditott egy orakig tarto optimalizalast, es SEMMI
     # visszajelzest nem adott. Pontosan igy nez ki egy „beragadt" program.
-    # ⚠ A FUTAS ALLAPOTA a ROGZITETT savban — a visszajelzes ugyanugy nem
-    # rejtozhet a lap aljara, mint a gomb. (Korabban a `_sweep_box`-ban ult, amit
-    # az OPTIMALIZALAS ag epp elrejt: az Inditas elinditott egy orakig tarto
-    # munkat, es SEMMI visszajelzest nem adott.)
-    check("a futas-allapot a ROGZITETT savban van",
+    # ⚠ A FUTAS ALLAPOTA a gomb MELLETT — de NEM a rajz dobozaban, amit az
+    # OPTIMALIZALAS ag epp elrejt (`pack_forget`). Korabban ott ult: az Inditas
+    # elinditott egy orakig tarto munkat, es SEMMI visszajelzest nem adott.
+    check("a futas-allapot a FUTTATAS szakaszban van",
           getattr(d, "_run_status", None) is not None
-          and str(d._body) not in str(d._run_status),
+          and str(d._sections["futtatas"].body) in str(d._run_status),
           str(getattr(d, "_run_status", None)))
     check("...NEM a rajz dobozaban (amit az OPT ag elrejt)",
           not str(d._run_status).startswith(str(d._sweep_box)),
@@ -296,9 +315,14 @@ if TK_OK:
         for _v in d._skip_vars.values():
             _v.set(False)
         d._refresh_opt_space()
+        # ⚠ 0 hangolt -> a TENYLEGES mod automatikusan „Backtest" (a
+        # „Hangolas" ures igeret volna), tehat a terv a backtest szoveget
+        # mondja. A lenyeg valtozatlan: EGYETLEN futas indul.
         check("0 hangolt -> a terv EGYETLEN futast mond",
-              "EGYETLEN futás" in d._tuned_lbl.cget("text"),
-              d._tuned_lbl.cget("text").split("\n")[0])
+              "gyetlen futás" in d._tuned_lbl.cget("text"),
+              d._tuned_lbl.cget("text").split(chr(10))[0])
+        check("...es a tenyleges mod is backtest",
+              d._effective_mode() == d.RUN_BACKTEST)
         _k = sorted(d._skip_vars)[0]
         d._skip_vars[_k].set(True)
         d._refresh_opt_space()

@@ -917,31 +917,6 @@ class InstrumentParamsDialog:
         _mk("futtatas", "Futtatás")
         _mk("eredmeny", "Eredmény")
 
-        # ── FUTÁS-SÁV a RÖGZÍTETT gombsorban ────────────────────────────────
-        # ⚠ Az Indítás gomb korábban a Futtatás SZAKASZBAN ült, az oldal alján.
-        # Mérve (Ger40, wpr_sma): a lap tartalma 3112 px, az ablak a képernyő
-        # 88%-án 1520 px — a Futtatás szakasz 1495 px-nél KEZDŐDIK, tehát a gomb
-        # pont az alsó él alá esett. Nagyobb ablak ezt NEM oldja meg: nincs az a
-        # képernyő, amin egy 3000 px-es lap elfér.
-        #
-        # A gomb tehát oda került, ahol ennek az ablaknak MINDEN cselekvése van
-        # (Mentés · Mégse) — és vele a futás ÁLLAPOTA is, mert a visszajelzés
-        # ugyanúgy nem lehet a lap aljára rejtve. A TERV részletes szövege marad
-        # a szakaszban; ide a rövid összefoglaló kerül.
-        _runbar = tk.Frame(footer, bg=BG)
-        _runbar.pack(fill="x", padx=10, pady=(4, 0))
-        self._plan_btn = tk.Button(_runbar, text="Indítás", bg=BTN_PLAY_BG,
-                                   fg=BTN_PLAY_FG, relief="flat", font=self._sf,
-                                   state="disabled", command=self._start_planned)
-        self._plan_btn.pack(side="left")
-        self._plan_short = tk.Label(_runbar, text="", bg=BG, fg=FG_GRAY,
-                                    font=self._sf, anchor="w", justify="left")
-        self._plan_short.pack(side="left", padx=(10, 0), fill="x", expand=True)
-        self._run_status = tk.Label(footer, text="", bg=BG, fg=FG_GRAY,
-                                    font=self._sf, anchor="w", justify="left",
-                                    wraplength=900)
-        self._run_status.pack(anchor="w", fill="x", padx=10, pady=(1, 0))
-
         # ── Backtest-eredmény sor (a Mentés-ág tölti) — szintén a rögzített
         #    sávban, hogy a futás állapota („Backtest fut…", letöltés) látszódjon.
         self.lbl_bt = tk.Label(footer, text="", bg=BG, fg=FG_GRAY_DIM, font=self._sf,
@@ -1130,6 +1105,50 @@ class InstrumentParamsDialog:
     # kell külön beállítani, kiderül abból, hány paramétert pipáltál be
     # (`core.opt_plan.run_plan`). Ezért lett a három lapból kettő.
 
+    # A futás MÓDJA — a felhasználó kérése: „ne kelljen állandóan kivenni a
+    # pipát, ha csak egy paramétert akarok megvizsgálni".
+    RUN_BACKTEST = "backtest"     # egyetlen futás a MOSTANI értékekkel
+    RUN_PLANNED = "planned"       # a bepipált dimenziók szerint (söprés/rács/opt)
+
+    def _load_run_mode(self) -> str:
+        try:
+            from core import backtest_prefs as _bp
+            v = (_bp.get(self.symbol, self.strategy.name) or {}).get("run_mode")
+            if v in (self.RUN_BACKTEST, self.RUN_PLANNED):
+                return v
+        except Exception:
+            pass
+        return self.RUN_PLANNED
+
+    def _save_run_mode(self, v: str):
+        try:
+            from core import backtest_prefs as _bp
+            _bp.save(self.symbol, self.strategy.name, run_mode=v)
+        except Exception:
+            pass
+
+    def _on_run_mode(self):
+        self._save_run_mode(self._run_mode.get())
+        self._refresh_opt_space()
+        self._refresh_section_summaries()
+
+    def _tuned_rows(self) -> list:
+        """A paraméter-sorok a PILLANATNYI pipákkal (egy helyen, hogy a terv és
+        az indítás ugyanabból dolgozzon)."""
+        return [dict(r, skipped=not self._skip_vars[r["key"]].get())
+                for r in (self._opt_rows or []) if r["key"] in self._skip_vars]
+
+    def _effective_mode(self) -> str:
+        """A TÉNYLEGES mód. ⚠ Ha nincs mit hangolni, a „Hangolás" üres ígéret
+        volna — ilyenkor magától Backtest, ahogy kérted."""
+        _m = getattr(self, "_run_mode", None)
+        _m = _m.get() if _m is not None else self.RUN_PLANNED
+        if _m == self.RUN_PLANNED and not any(
+                not r.get("skipped") and r.get("values", 0) > 0
+                for r in self._tuned_rows()):
+            return self.RUN_BACKTEST
+        return _m
+
     def _build_plan_strip(self, box):
         from core import opt_plan as _op
         from core import gates as _gt
@@ -1156,13 +1175,48 @@ class InstrumentParamsDialog:
         head.pack(anchor="w", fill="x", padx=12, pady=(10, 0))
         tk.Label(head, text="Mi fog történni", bg=BG, fg=FG_WHITE,
                  font=self._hf).pack(side="left")
-        # ⚠ AZ INDÍTÁS GOMB NINCS ITT — a rögzített gombsorban ül (lásd ott az
-        # indoklást: ez a lap 3000 px magas, a gomb itt a képernyő alá esne).
-        # Innentől a szakasz CSAK magyaráz; a cselekvés egy helyen van.
-        try:
-            self._plan_btn.config(state="normal", command=self._start_planned)
-        except (tk.TclError, AttributeError):
-            pass
+
+        # ── MI FUSSON: választó + Indítás, közvetlenül a cím alatt, BALRA ───
+        # ⚠ A VÁLASZTÓ nem kényelmi elem. A futás típusát eddig KIZÁRÓLAG a
+        # paraméterek pipái döntötték el — ha egyetlen paramétert akartál
+        # megnézni egy sima backteszttel, előbb ki kellett venni MINDEN pipát,
+        # utána vissza. A „Backtest" mód ezt megkerüli: az AKTUÁLIS értékekkel
+        # fut egyszer, akkor is, ha minden be van pipálva.
+        mode_box = tk.Frame(box, bg=BG)
+        mode_box.pack(anchor="w", fill="x", padx=12, pady=(6, 0))
+        self._run_mode = tk.StringVar(value=self._load_run_mode())
+        for _val, _txt, _tip in (
+                (self.RUN_BACKTEST, "Backtest — egyetlen futás a mostani értékekkel",
+                 "Egyszer fut le, PONTOSAN a Paraméterek szakaszban látható "
+                 "értékekkel. A hangolás-pipák ilyenkor NEM számítanak — nem kell "
+                 "kiszedni őket egyetlen próbához."),
+                (self.RUN_PLANNED, "Hangolás — a bepipált paraméterek szerint",
+                 "A bepipált dimenziók számából adódik: 1 → végigpróbálás, "
+                 "2 → rács, 3+ → optimalizálás. A pontos tervet a fenti sor írja.")):
+            _rb = tk.Radiobutton(mode_box, text=_txt, value=_val,
+                                 variable=self._run_mode, bg=BG, fg=FG_GRAY,
+                                 selectcolor=BG_HEADER, font=self._sf,
+                                 activebackground=BG, activeforeground=FG_WHITE,
+                                 anchor="w", command=self._on_run_mode)
+            _rb.pack(anchor="w")
+            _attach_tooltip(_rb, _tip)
+            if _val == self.RUN_PLANNED:
+                self._rb_planned = _rb
+
+        act = tk.Frame(box, bg=BG)
+        act.pack(anchor="w", fill="x", padx=12, pady=(6, 0))
+        self._plan_btn = tk.Button(act, text="Indítás", bg=BTN_PLAY_BG,
+                                   fg=BTN_PLAY_FG, relief="flat", font=self._sf,
+                                   command=self._start_planned)
+        self._plan_btn.pack(side="left")
+        self._plan_short = tk.Label(act, text="", bg=BG, fg=FG_GRAY,
+                                    font=self._sf, anchor="w", justify="left")
+        self._plan_short.pack(side="left", padx=(10, 0), fill="x", expand=True)
+        self._run_status = _autowrap(tk.Label(box, text="", bg=BG, fg=FG_GRAY,
+                                              font=self._sf, anchor="w",
+                                              justify="left"),
+                                     self._body_canvas)
+        self._run_status.pack(anchor="w", fill="x", padx=12, pady=(2, 0))
 
         self._tuned_lbl = _autowrap(tk.Label(box, bg=BG, fg=FG_GRAY, font=self._sf,
                                              anchor="w", justify="left"),
@@ -1428,9 +1482,13 @@ class InstrumentParamsDialog:
         → teljes futtatás → kiértékelés) HÁROM helyen indult, más-más néven, és
         a felhasználónak kellett fejben tartania, melyik mit jelent."""
         from core import opt_plan as _op
-        rows = [dict(r, skipped=not self._skip_vars[r["key"]].get())
-                for r in self._opt_rows if r["key"] in self._skip_vars]
-        kind = _op.run_plan(rows, 0)["kind"]
+        rows = self._tuned_rows()
+        # ⚠ A MÓD-VÁLASZTÓ ELSŐBBSÉGET ÉLVEZ. „Backtest" módban egyetlen futás
+        # megy a mostani értékekkel, AKKOR IS, ha minden paraméter be van
+        # pipálva — épp ezért van a választó: hogy egyetlen próbához ne kelljen
+        # kiszedni, majd visszatenni az összes pipát.
+        kind = (_op.KIND_SINGLE if self._effective_mode() == self.RUN_BACKTEST
+                else _op.run_plan(rows, 0)["kind"])
         if kind == _op.KIND_SINGLE:
             # 0 hangolt → EGYETLEN futás: ez maga a backtest.
             if self._run_tab is not None:
@@ -1758,6 +1816,36 @@ class InstrumentParamsDialog:
         _sec.save_open(self.symbol, self.strategy.name, key, is_open)
         if key == "futtatas" and is_open:
             self._maybe_build_run()      # az első kinyitáskor épül fel
+        if is_open:
+            # ⚠ A KINYITOTT SZAKASZ GÖRDÜLJÖN A LÁTÓTÉRBE. A lap 3000 px magas —
+            # a Futtatás szakasz 1495 px-nél kezdődik, tehát az Indítás gomb
+            # kinyitás után is a képernyő alatt maradna, és a felhasználó nem
+            # látná, mit nyitott ki. A `after_idle` kell: a görgetés csak azután
+            # helyes, hogy a Tk újraszámolta az elrendezést.
+            try:
+                self.popup.after_idle(lambda k=key: self._scroll_section_into_view(k))
+            except (tk.TclError, AttributeError):
+                pass
+
+    def _scroll_section_into_view(self, key: str):
+        """A szakasz FEJLÉCE kerüljön a látható terület tetejére.
+
+        A vászon `yview_moveto` arányt vár (0..1), ezért a widget helyét a törzs
+        TELJES magasságához viszonyítjuk. Ha a tartalom elfér, nincs mit
+        görgetni — akkor nem is nyúlunk hozzá."""
+        sc = (getattr(self, "_sections", None) or {}).get(key)
+        cv = getattr(self, "_body_canvas", None)
+        if sc is None or cv is None:
+            return
+        try:
+            cv.update_idletasks()
+            total = max(1, self._body.winfo_reqheight())
+            if total <= cv.winfo_height():
+                return                       # elfér, nincs görgetés
+            y = sc.frame.winfo_y()
+            cv.yview_moveto(max(0.0, min(1.0, y / total)))
+        except (tk.TclError, AttributeError, ZeroDivisionError):
+            pass
 
     def _refresh_section_summaries(self):
         """A becsukott szakasz EGYETLEN információja a fejléc-összegzés.
@@ -2413,12 +2501,29 @@ class InstrumentParamsDialog:
             # `core.opt_plan.run_plan`-ban van (tesztelhető, és a jövőbeli
             # Futtatás lap ugyanazt hívja majd) — itt csak megjelenítjük.
             rp = _op.run_plan(rows, trials)
+            # ⚠ A KIÍRT TERV a TÉNYLEGES módot tükrözze. Backtest módban a pipák
+            # NEM számítanak — ha ilyenkor is az optimalizálás tervét írnánk ki,
+            # a felület mást ígérne, mint ami elindul.
+            _mode = self._effective_mode()
+            _bt_txt = ("Egyetlen futás a mostani paraméter-értékekkel "
+                       "(a hangolás-pipák most nem számítanak).")
             self._tuned_lbl.config(
-                text=rp["text"] + chr(10) + "Hangolva: " + (", ".join(rp["tuned"]) or "—"))
-            # ⚠ A gomb MELLETT is ott a lényeg: a gombsor a képernyő alján ül, a
-            # részletes terv viszont a lap közepén — enélkül vakon nyomnál.
+                text=(_bt_txt if _mode == self.RUN_BACKTEST else
+                      rp["text"] + chr(10) + "Hangolva: "
+                      + (", ".join(rp["tuned"]) or "—")))
             try:
-                self._plan_short.config(text=rp["text"])
+                self._plan_short.config(
+                    text=(_bt_txt if _mode == self.RUN_BACKTEST else rp["text"]))
+                # ⚠ Ha nincs mit hangolni, a „Hangolás" ÜRES ÍGÉRET — letiltjuk,
+                # és a választó magától Backtestre áll (nem némán: a felirat is
+                # megmondja, miért).
+                _has = bool(rp["tuned"])
+                _rb = getattr(self, "_rb_planned", None)
+                if _rb is not None:
+                    _rb.config(state=("normal" if _has else "disabled"),
+                               text=("Hangolás — a bepipált paraméterek szerint"
+                                     if _has else
+                                     "Hangolás — nincs bepipált paraméter"))
             except (tk.TclError, AttributeError):
                 pass
         except (tk.TclError, AttributeError):

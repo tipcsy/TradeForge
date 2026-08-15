@@ -18,6 +18,7 @@ ahol ennek az ablaknak MINDEN cselekvese van (Mentes · Megse) — es vele a fut
 ALLAPOTA is, mert a visszajelzes ugyanugy nem lehet a lap aljara rejtve.
 """
 import copy
+import pathlib
 import sys
 from pathlib import Path
 
@@ -26,6 +27,27 @@ sys.path.insert(0, str(ROOT))
 
 from core import applog
 applog.harden_console()
+# ⚠ A TESZT SOHA NEM IRHAT A VALODI BEALLITAS-TARBA. Az elso valtozatom a
+# `run_mode`-ot a valodi `data/backtest_prefs.json`-ba mentette, es onnan a
+# KOVETKEZO teszt is beolvasta — attol egy MASIK teszt bukott el. A tar
+# fajljat temp mappara teritjuk, es a vegen visszaadjuk.
+import tempfile as _tf
+from core import backtest_prefs as _bp
+_PREFS_TMP = pathlib.Path(_tf.mkdtemp(prefix="prefs_"))
+_PREFS_ORIG = _bp._FILE
+_bp._FILE = _PREFS_TMP / "backtest_prefs.json"
+import atexit as _ax
+import shutil as _sh
+
+
+def _restore_prefs():
+    _bp._FILE = _PREFS_ORIG
+    _sh.rmtree(_PREFS_TMP, ignore_errors=True)
+
+
+_ax.register(_restore_prefs)
+
+
 
 results = []
 
@@ -129,7 +151,11 @@ if TK:
               str({k: d._legend_dots[k].cget("fg") for k in _keys}))
         d.popup.destroy()
 
-    # ── 2. AZ INDITAS GOMB a ROGZITETT gombsorban ────────────────────────
+    # ── 2. AZ INDITAS GOMB: a FUTTATAS szakaszban, BALRA ─────────────────
+    # ⚠ A felhasznalo kerése: „az lenne a jo, ha a futtatasnal lenne, de akkor
+    # rakjuk bal oldalra (rakhatjuk kozvetlen a mi fog tortenni ala)". A gomb
+    # tehat ODA tartozik, ahol a magyarazata is van — a LATHATOSAGOT nem a
+    # helye oldja meg, hanem az, hogy a szakasz kinyitasa RAGORDUL.
     d = idlg.InstrumentParamsDialog(root, "Ger40", cfg,
                                     get_strategy_by_name("wpr_sma"),
                                     fonts["header"], fonts["small"], lambda: None,
@@ -138,36 +164,58 @@ if TK:
     top = d.popup
     top.deiconify(); top.update(); top.update_idletasks()
 
-    # ⚠ A LENYEG: a gomb az ABLAKON BELUL van. A lap tartalma tobb ezer px —
-    # a szakaszban ulo gomb a kepernyo ala esett.
     _btn = d._plan_btn
-    _win_bottom = top.winfo_rooty() + top.winfo_height()
-    check("az Indítás gomb LATSZIK", bool(_btn.winfo_ismapped()))
-    check("...es az ablakon BELUL van",
-          top.winfo_rooty() < _btn.winfo_rooty() < _win_bottom,
-          f"gomb y={_btn.winfo_rooty()} ablak={top.winfo_rooty()}..{_win_bottom}")
-    # NEM a gorgetheto lapon ul (kulonben megint elcsuszhatna)
-    check("...a ROGZITETT sávban, nem a görgethető lapon",
-          str(d._body) not in str(_btn), f"{_btn}")
+    check("az Indítás a FUTTATÁS szakaszban van",
+          str(d._sections["futtatas"].body) in str(_btn), str(_btn))
+    check("...és PONTOSAN EGY van belőle az ablakban",
+          sum(1 for t in _texts(top) if t.strip() == "Indítás") == 1,
+          str([t for t in _texts(top) if "ndít" in t]))
 
-    # ⚠ ES A TERV IS OTT VAN MELLETTE: a reszletes magyarazat a lap kozepen
-    # marad, de vakon nyomni ne kelljen.
-    check("a gomb mellett ott a RÖVID terv",
-          bool(d._plan_short.cget("text")), d._plan_short.cget("text")[:60])
-    check("...ami megmondja, MI fog futni",
-          any(w in d._plan_short.cget("text")
-              for w in ("EGYETLEN futás", "VÉGIGPRÓBÁLÁS", "RÁCS",
-                        "OPTIMALIZÁLÁS")), d._plan_short.cget("text"))
+    # ⚠ A LATHATOSAG: a lap 3000 px magas, a Futtatas szakasz 1495 px-nel
+    # kezdodik — kinyitas utan a gombnak a latoterbe kell kerulnie, kulonben a
+    # felhasznalo nem latja, mit nyitott ki.
+    d._sections["futtatas"].set_open(False); top.update()
+    d._sections["futtatas"].set_open(True); top.update(); top.update()
+    _bottom = top.winfo_rooty() + top.winfo_height()
+    check("a szakasz kinyitasa RAGORDUL (a gomb latoterbe kerul)",
+          top.winfo_rooty() < _btn.winfo_rooty() < _bottom,
+          f"gomb y={_btn.winfo_rooty()} ablak={top.winfo_rooty()}..{_bottom}")
 
-    # A futas ALLAPOTA is a rogzitett savban (a visszajelzes nem rejtozhet el).
-    check("a futás-állapot is a rögzített sávban",
-          str(d._body) not in str(d._run_status), str(d._run_status))
+    # ── 3. A MOD-VALASZTO ────────────────────────────────────────────────
+    # ⚠ A futas tipusat eddig KIZAROLAG a pipak dontottek el: egyetlen
+    # parameter megnezesehez ki kellett venni MINDEN pipat, utana vissza.
+    check("van mod-valaszto", getattr(d, "_run_mode", None) is not None)
+    d._run_mode.set(d.RUN_BACKTEST); d._on_run_mode(); top.update_idletasks()
+    check("Backtest modban a TENYLEGES mod is backtest",
+          d._effective_mode() == d.RUN_BACKTEST)
+    # ...AKKOR IS, ha minden be van pipalva — epp ez a lenyeg.
+    for _v in d._skip_vars.values():
+        _v.set(True)
+    d._refresh_opt_space(); top.update_idletasks()
+    check("...akkor is, ha MINDEN parameter be van pipalva",
+          d._effective_mode() == d.RUN_BACKTEST)
+    check("...es a kiirt terv is EZT mondja (nem az optimalizalast)",
+          "Egyetlen futás" in d._plan_short.cget("text"),
+          d._plan_short.cget("text")[:70])
 
-    # A terv-szakaszban NINCS masodik inditogomb (egy cselekves — egy hely).
-    _sec = " | ".join(_texts(d._sections["futtatas"].body))
-    check("a szakaszban NINCS második Indítás gomb", "Indítás" not in _sec,
-          _sec[:120])
-    check("...de a MAGYARAZAT ott maradt", "Mi fog történni" in _sec)
+    # ⚠ ES FORDITVA: ha nincs mit hangolni, a „Hangolas" URES IGERET volna —
+    # ilyenkor magatol Backtest, es a valaszto is megmondja, miert.
+    d._run_mode.set(d.RUN_PLANNED)
+    for _v in d._skip_vars.values():
+        _v.set(False)
+    d._refresh_opt_space(); top.update_idletasks()
+    check("nincs bepipalt parameter -> magatol Backtest",
+          d._effective_mode() == d.RUN_BACKTEST, d._run_mode.get())
+    check("...es a Hangolás valaszto LETILTVA",
+          str(d._rb_planned.cget("state")) == "disabled")
+    check("...a felirata megmondja, miert",
+          "nincs bepipált" in str(d._rb_planned.cget("text")),
+          str(d._rb_planned.cget("text")))
+
+    # A mod MEGJEGYZODIK (par + strategia szinten).
+    d._run_mode.set(d.RUN_BACKTEST); d._on_run_mode()
+    check("a valasztott mod megjegyzodik",
+          d._load_run_mode() == d.RUN_BACKTEST, d._load_run_mode())
 
     top.withdraw()
     root.destroy()

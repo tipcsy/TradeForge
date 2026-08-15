@@ -88,33 +88,58 @@ check("az elo motor tovabbra sem ismer auto-riskyt",
       "auto_risky" not in _lt, "megjelent az elo uton!")
 
 
-# ── 5. MERES: a ket ag TENYLEG mast ad ──────────────────────────────────
-# Rovid ablak, hogy a teszt gyors maradjon — a LENYEG az, hogy az eltérés
-# NEM nulla, es hogy a KOTESSZAM is valtozik (nem csak a meret).
+# ── 5. MERES: a ket ag TENYLEG mast futtat ──────────────────────────────
+# ⚠ A MECHANIZMUST merjuk, nem a kotesszamot. Az elso valtozatom azt allitotta,
+# hogy a kotesszam is elter — ez a TELJES keszleten igaz (460 vs 248), egy 4
+# paros reszhalmazon viszont veletlenul egyezhet, es a teszt attol bukott. Amit
+# viszont a kapcsolo DEFINICIO SZERINT csinal: a gyenge parokat RISKY presetre
+# valtja. Ez determinisztikus.
 try:
     import logging
     logging.disable(logging.WARNING)
     from strategy.settings import load_config
+    from core import risky_mode, rr_state
     cfg = load_config("config.json")
-    syms = [p for p in cfg["pairs"] if not p.startswith("_")][:4]
-    _res = {}
+    rr_state.load(); risky_mode.load()
+    from strategy import get_strategy_by_name
+    from core.params_store import params_file
+    import json as _js
+    _st = get_strategy_by_name("wpr_sma")
+
+    def _weak(sym):
+        f = params_file(sym, "wpr_sma")
+        if not f.exists():
+            return False
+        g, _, _ = _st.grade(_js.load(open(f, encoding="utf-8"))
+                            .get("test_summary", {}), cfg)
+        return 1 <= _st.grade_rank(g) <= 3
+
+    _syms = [p for p in cfg["pairs"] if not p.startswith("_")]
+    _affected = [s for s in _syms
+                 if _weak(s) and rr_state.spec_for(s).get("preset") == _rr.PRESET_OFF]
+    check("van olyan par, amit a kapcsolo ERINT (a meres ertelmes)",
+          bool(_affected), str(_affected))
+
+    _use = (_affected[:2] + [s for s in _syms if s not in _affected][:1]) or _syms[:3]
+    # A futas MAGA jelenti, mely parokat tette RISKY-re (`risky_pairs`) — ez a
+    # kapcsolo kozvetlen, determinisztikus megfigyelhetoje.
+    _risky = {}
     for _auto in (False, True):
         c = dict(cfg)
         c["trading"] = dict(cfg["trading"], auto_risky_weak=_auto)
-        r = bt.run_portfolio_backtest(c, syms, "2026-07-15", "2026-08-14",
+        r = bt.run_portfolio_backtest(c, _use, "2026-07-15", "2026-08-14",
                                       exec_gates=True)
-        _tr = [x for x in (r.get("trades") or []) if x.close_time is not None]
-        _res[_auto] = (len(_tr), sum(x.pnl_usd for x in _tr))
+        _risky[_auto] = set(r.get("risky_pairs") or [])
     logging.disable(logging.NOTSET)
-    check("a ket ag KULONBOZO eredmenyt ad (tehat a kapcsolo szamit)",
-          _res[True] != _res[False], str(_res))
-    # ⚠ EZ A LENYEG: nem csak a MERET valtozik. A RISKY azonnali BE-je
-    # felszabaditja a slotot -> TOBB belepo fer be.
-    check("...es a KOTESSZAM is elter (nem csak a meret)",
-          _res[True][0] != _res[False][0],
-          f"auto=BE {_res[True][0]} kotes, auto=KI {_res[False][0]} kotes")
+
+    # ⚠ EZ A LENYEG: kikapcsolva EGYETLEN part sem tesz RISKY-re — pontosan ugy,
+    # ahogy az elo motor csinalja.
+    check("KIKAPCSOLVA egyetlen par sem lesz RISKY", not _risky[False],
+          str(_risky[False]))
+    check("BEKAPCSOLVA viszont a gyenge parok igen (a kapcsolo tenyleg hat)",
+          bool(_risky[True] & set(_affected)), str(_risky[True]))
 except Exception as ex:
-    check(f"a meres kihagyva ({type(ex).__name__}: {str(ex)[:60]})", True)
+    check(f"a meres kihagyva ({type(ex).__name__}: {str(ex)[:70]})", True)
 
 
 print()
