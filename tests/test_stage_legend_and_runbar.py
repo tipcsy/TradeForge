@@ -104,6 +104,29 @@ if TK:
         check(f"[{name}] a SZINEK jelentese is ott van",
               "zöld = BUY" in blob and "piros = SELL" in blob
               and "NEM hiba" in blob)
+
+        # ⚠ A KOROK AZ ELO ALLAPOTOT MUTATJAK, nem disz-zoldet. Egy statikus
+        # pelda-kor mellett a magyarazat elolvashato, de nem hasznalhato: a
+        # kerdes nem az, hogy „mit jelentene, ha zold volna", hanem hogy MOST
+        # melyik feltetel all.
+        from dashboard import live_row as _lr
+        _keys = [k for k, _ in st.columns()[0].stages]
+        check(f"[{name}] provider NELKUL halvany (nem hazudunk zoldet)",
+              all(d._legend_dots[k].cget("fg") == _lr._stage_color("muted")
+                  for k in _keys),
+              str({k: d._legend_dots[k].cget("fg") for k in _keys}))
+        _fake = {"green": 0, "red": 1, "muted": 2}
+        _want = {k: ["green", "red", "muted"][i % 3] for i, k in enumerate(_keys)}
+        d.stage_cells_of = lambda sym, nm, _w=_want: {k: ("●", v) for k, v in _w.items()}
+        d._refresh_legend_dots()
+        root.update_idletasks()
+        # ⚠ UGYANAZ A SZIN-FUGGVENY, mint a soron: ket kepletbol elobb-utobb ket
+        # kulonbozo kep lenne, es itt epp az volna a baj, ha a magyarazat mast
+        # mutatna, mint amit magyaraz.
+        check(f"[{name}] elo allapotbol szinez (a sorral EGYEZO fuggvennyel)",
+              all(d._legend_dots[k].cget("fg") == _lr._stage_color(v)
+                  for k, v in _want.items()),
+              str({k: d._legend_dots[k].cget("fg") for k in _keys}))
         d.popup.destroy()
 
     # ── 2. AZ INDITAS GOMB a ROGZITETT gombsorban ────────────────────────

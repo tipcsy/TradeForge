@@ -3995,6 +3995,12 @@ class DashboardWindow:
         # A gomb ebből tudja, hogy ÉPP fut-e (akkor leállít, nem újraindít).
         from core import opt_activity as _oa
         _dlg.opt_state_of = _oa.state_of
+        # ⚠ AZ ÉLŐ STÁDIUM-CELLÁK: az Áttekintés karika-magyarázata ebből
+        # színezi a köreit. UGYANAZ a forrás, amiből a sor dolgozik — egy külön
+        # képlet előbb-utóbb mást mutatna, mint amit magyaráz.
+        _dlg.stage_cells_of = lambda sym, nm: (
+            getattr(self.dashboard_ref.get(sym), "strategy_cells", {}) or {}
+        ).get(nm) or {}
 
     def _show_instrument_params(self, symbol: str):
         """Visszafelé komp.: az elsődleges stratégia paraméterei (a Pozíciók fül

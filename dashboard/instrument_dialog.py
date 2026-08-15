@@ -1369,6 +1369,8 @@ class InstrumentParamsDialog:
             # futása birtokolja (az `_on_run_state` állítja Megszakításra).
             if not getattr(self, "_bt_running", False):
                 self._sync_opt_status()
+        # A legenda körei az ÉLŐ állapotot mutatják — velük is lépést tartunk.
+        self._refresh_legend_dots()
         try:
             self.popup.after(2000, self._opt_poll)
         except tk.TclError:
@@ -1527,17 +1529,25 @@ class InstrumentParamsDialog:
                  ).pack(anchor="w", padx=12)
         grid = tk.Frame(body, bg=BG)
         grid.pack(anchor="w", fill="x", padx=12, pady=(2, 0))
+        # ⚠ A KÖRÖK AZ ÉLŐ ÁLLAPOTOT MUTATJÁK, nem egy dísz-zöldet. Egy statikus
+        # példa-kör mellett a magyarázat elolvasható, de nem használható: a
+        # kérdés nem az, hogy „mit jelentene, ha zöld volna", hanem hogy MOST
+        # melyik feltétel áll. A színt UGYANABBÓL a forrásból vesszük, amiből a
+        # sor (`ds.strategy_cells`) — így a két nézet nem csúszhat szét.
+        self._legend_dots = {}
         for i, (_key, _label) in enumerate(_stages, start=1):
             row = tk.Frame(grid, bg=BG)
             row.pack(anchor="w", fill="x")
             tk.Label(row, text=f"{i}.", bg=BG, fg=FG_GRAY_DIM, font=self._sf,
                      width=3, anchor="e").pack(side="left")
-            tk.Label(row, text="●", bg=BG, fg=FG_GREEN,
-                     font=self._sf).pack(side="left", padx=(4, 6))
+            _dot = tk.Label(row, text="●", bg=BG, fg=FG_GRAY_DIM, font=self._sf)
+            _dot.pack(side="left", padx=(4, 6))
+            self._legend_dots[_key] = _dot
             tk.Label(row, text=_label, bg=BG, fg=FG_WHITE, font=self._sf,
                      anchor="w").pack(side="left")
             tk.Label(row, text=f"({_key})", bg=BG, fg=FG_GRAY_DIM,
                      font=self._sf, anchor="w").pack(side="left", padx=(6, 0))
+        self._refresh_legend_dots()
         tk.Label(body, bg=BG, fg=FG_GRAY, font=self._sf, anchor="w",
                  justify="left", wraplength=820, text=(
                      "A KÖR SZÍNE az irány: zöld = BUY-szetup, piros = "
@@ -1546,6 +1556,34 @@ class InstrumentParamsDialog:
                      chr(10) + "A körök ELŐTTI betű a kötés-mód: „V” = valódi "
                      "kötést nyit, „J” = csak jelez az MT5 chartra.")
                  ).pack(anchor="w", padx=12, pady=(4, 0))
+
+    def _refresh_legend_dots(self):
+        """A legenda köreinek színe az ÉLŐ stádium-cellákból.
+
+        ⚠ UGYANAZ A FORRÁS, mint a soré (`ds.strategy_cells` → `_stage_color`):
+        két képlet ugyanarra a kérdésre mindig szétcsúszik, és itt épp az volna a
+        baj, ha a magyarázat mást mutatna, mint amit magyaráz.
+
+        Ha a hívó nem adott hozzáférést az élő állapothoz (önálló/fejlesztői
+        megnyitás), a körök HALVÁNYAK maradnak — nem hazudunk zöldet."""
+        _dots = getattr(self, "_legend_dots", None)
+        if not _dots:
+            return
+        cells = {}
+        _get = getattr(self, "stage_cells_of", None)
+        if callable(_get):
+            try:
+                cells = _get(self.symbol, self.strategy.name) or {}
+            except Exception:
+                cells = {}
+        from dashboard import live_row as _lr
+        for key, lbl in _dots.items():
+            _c = cells.get(key)
+            _color = _c[1] if isinstance(_c, (tuple, list)) and len(_c) > 1 else                 getattr(_c, "color", None)
+            try:
+                lbl.config(fg=_lr._stage_color(_color or "muted"))
+            except tk.TclError:
+                pass
 
     def _build_overview_tab(self):
         page = self._shell.page("Áttekintés")

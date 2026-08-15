@@ -1,5 +1,6 @@
 import MetaTrader5 as mt5
 import logging
+import os
 import threading
 from pathlib import Path
 from typing import Optional
@@ -413,7 +414,7 @@ def server_today():
     dátuma a szerver-éjfél környékén MÁS napot adna, és akkor a „Ma" nézet más
     trade-eket mutatna, mint a folyamatosan frissülő napi összesítő."""
     from datetime import datetime, timezone
-    off = _server_offset["v"] or 0.0
+    off = _load_offset() or 0.0
     return datetime.fromtimestamp(
         datetime.now(timezone.utc).timestamp() + off, tz=timezone.utc).date()
 
@@ -886,6 +887,80 @@ def is_connected() -> bool:
 # BRÓKER napjához igazodik, ha épp nincs friss tick (pl. hétvégén).
 _server_offset = {"v": None}
 
+# ── A MÉRÉS ÉRVÉNYESSÉGE ────────────────────────────────────────────────────
+# ⚠ AZ ELTOLÁS IDŐZÓNA-TULAJDONSÁG, NEM A TICK KORA. A mérés `tick.time − most`,
+# ami CSAK friss tick mellett adja az időzóna-eltolást; egy ELAVULT tick esetén
+# azt méri, mennyi ideje nem jött árajánlat.
+#
+# Mérve (2026-08-15, SZOMBAT 09:14 UTC): az utolsó tick pénteki (bróker 22:59),
+# a nyers különbség −10,24 óra. Ebből:
+#   • a fejlécben a „bróker-óra" pénteken 22:59-en ÁLLT,
+#   • a `server_day_bounds` szerint a „mai" nap PÉNTEK volt,
+#   • a napi P&L a PÉNTEKI −14,88$-t mutatta újraindítás után is,
+#   • és — ez a súlyos — a NAPI VESZTESÉGLIMIT kapuja ugyanezt a számot nézi:
+#     hétfő reggel az első tick előtt a pénteki veszteséggel indult volna.
+#
+# A védelem: egy bróker időzóna-eltolása EGÉSZ ÓRA. Egy friss tickből a nyers
+# különbség percre pontosan egész óra; egy elavultból tetszőleges. Csak akkor
+# fogadjuk el, ha egész órához közel esik — és a jó értéket ELTESSZÜK, hogy egy
+# hétvégi újraindítás se veszítse el.
+_OFF_MAX = 14 * 3600          # a Föld legszélső időzónái
+_OFF_QUANT = 3600             # bróker-eltolás: egész óra
+_OFF_TOL = 180                # ennyi mp-en belül még „friss" a tick
+
+
+def _offset_file():
+    from version import BASE_DIR
+    return BASE_DIR / "data" / "server_offset.json"
+
+
+def _quantize_offset(raw: float):
+    """A nyers különbségből ÉRVÉNYES eltolás, vagy `None`.
+
+    `None`, ha (a) irreálisan nagy, vagy (b) nem esik egész óra közelébe — az
+    utóbbi azt jelenti, hogy a tick ELAVULT, tehát nem eltolást mértünk."""
+    if abs(raw) > _OFF_MAX:
+        return None
+    q = round(raw / _OFF_QUANT) * _OFF_QUANT
+    return None if abs(raw - q) > _OFF_TOL else float(q)
+
+
+def _load_offset():
+    """A legutóbbi ÉRVÉNYES eltolás a lemezről (indulás után is tudjuk).
+
+    ⚠ Enélkül egy hétvégi/ünnepnapi indulás sosem jutna érvényes méréshez — épp
+    akkor nem, amikor a legtöbb ideje van elromlani."""
+    if _server_offset["v"] is not None:
+        return _server_offset["v"]
+    try:
+        import json as _j
+        with open(_offset_file(), encoding="utf-8") as fh:
+            v = float((_j.load(fh) or {}).get("offset_sec"))
+        if abs(v) <= _OFF_MAX:
+            _server_offset["v"] = v
+            return v
+    except Exception:
+        pass
+    return None
+
+
+def _save_offset(v: float):
+    try:
+        import json as _j
+        p = _offset_file()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(".json.tmp")
+        tmp.write_text(_j.dumps({"offset_sec": v, "saved_at": _t_now()}),
+                       encoding="utf-8")
+        os.replace(tmp, p)
+    except Exception:
+        pass
+
+
+def _t_now() -> float:
+    import time as _t
+    return _t.time()
+
 
 def server_offset_sec(symbols) -> Optional[float]:
     """A bróker/szerver-idő eltolása a valós UTC-hez képest, MÁSODPERCben.
@@ -906,12 +981,32 @@ def server_offset_sec(symbols) -> Optional[float]:
                     latest = int(tick.time)
         if latest is not None:
             from datetime import datetime, timezone
-            off = float(latest - datetime.now(timezone.utc).timestamp())
-            _server_offset["v"] = off
-            return off
+            raw = float(latest - datetime.now(timezone.utc).timestamp())
+            off = _quantize_offset(raw)
+            # ⚠ EGY UTOLSÓ RÉS: hétvégén MINDEN tick elavult, és a kor VÉLETLENÜL
+            # is eshet egész óra közelébe — akkor egy hamis értéket fogadnánk el,
+            # és felülírnánk vele a jót. Egy bróker időzónája viszont legfeljebb
+            # ÓRAVÁLTÁSKOR mozdul, azaz PONTOSAN 1 órát. Ennél nagyobb ugrást csak
+            # akkor hiszünk el, ha még nincs korábbi értékünk.
+            _prev = _load_offset()
+            if off is not None and _prev is not None and abs(off - _prev) > 3600:
+                log.warning("szerver-eltolás: a mért %+.0f óra túl messze az eddigi "
+                            "%+.0f órától (elavult tick?) — a régit tartjuk meg",
+                            off / 3600.0, _prev / 3600.0)
+                return _prev
+            if off is not None:
+                if off != _server_offset["v"]:
+                    _server_offset["v"] = off
+                    _save_offset(off)          # a hétvégi indulás is tudja majd
+                return off
+            # ⚠ ELAVULT TICK (zárt piac): NEM mérés. A korábbi, érvényes értéket
+            # visszük tovább — az időzóna nem változott attól, hogy áll a piac.
+            log.debug("szerver-eltolás: elavult tick (%.2f óra), a mért érték "
+                      "eldobva", raw / 3600.0)
+            return _load_offset()
     except Exception:
         pass
-    return None
+    return _load_offset()
 
 
 def server_day_bounds():
@@ -929,7 +1024,7 @@ def server_day_bounds():
     határt a szerver-eltolással számoljuk. Ha az eltolás ismeretlen (nincs még
     tick), a valós UTC-napra esünk vissza — az is helyesebb a helyi dátumnál."""
     from datetime import datetime, timedelta, timezone
-    off = _server_offset["v"] or 0.0
+    off = _load_offset() or 0.0
     now_srv = datetime.now(timezone.utc).timestamp() + off      # a bróker faliórája
     day_start = (now_srv // 86400) * 86400                      # szerver-éjfél
     return (datetime.fromtimestamp(day_start, tz=timezone.utc),
