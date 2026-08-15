@@ -58,8 +58,20 @@ cfg = load_config("config.json")
 _pairs = [s for s in cfg["pairs"] if not s.startswith("_")]
 _restricted = [s for s in _pairs
                if opt._opt_allowed_hours(s, st, cfg["pairs"][s]) is not None]
-check("a javitas ma EGYETLEN mentett parametert sem erint",
-      not _restricted, f"szukitett parok: {_restricted}")
+# ⚠ EZ NEM ALLITAS, HANEM TENYKOZLES. Az elso valtozatom azt allitotta, hogy
+# „ma egyetlen par sincs szukitve" — az a config PILLANATNYI allapota volt, nem
+# invarians. Amint a felhasznalo leszukitette a Ger40 orait, a teszt elbukott,
+# holott a KOD helyesen mukodott. Egy teszt sose rogzitse a felhasznalo adatait.
+print(f"     (tajekoztatasul: {len(_restricted)}/{len(_pairs)} paron van "
+      f"ora-szukites: {_restricted or '—'})")
+# Amit VISZONT allitunk: a feloldas KOVETKEZETES — a szukitett par halmazt kap,
+# a teljes pedig None-t, es a ketto nem keveredhet.
+_bad = []
+for _s in _pairs:
+    _h = opt._opt_allowed_hours(_s, st, cfg["pairs"][_s])
+    if _h is not None and (not _h or len(_h) >= 24):
+        _bad.append(f"{_s}: {len(_h)} ora, megis halmaz")
+check("a feloldas kovetkezetes minden paron", not _bad, "; ".join(_bad))
 
 
 # ── 3. MINDEN run_pair hivas atadja ──────────────────────────────────────

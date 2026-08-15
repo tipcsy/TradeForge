@@ -261,7 +261,13 @@ if TK_OK:
     # ⚠ ES AZ ERTEK A SZAKASZBOL JON, FUTASKOR lekerdezve. A beagyazott peldany
     # csak PARAMETER-valtozasra epul ujra; egy atadott pillanatkep elavulna, es a
     # futas neman a regivel menne.
-    check("mind a 24 ora -> nincs ora-szuro", d._run_tab._allowed_hours() is None)
+    # ⚠ A TESZT ALLITSA BE, amit mer — ne a felhasznalo configjara tamaszkodjon.
+    # Az elso valtozat feltetelezte, hogy mind a 24 ora engedve van; amint a
+    # Ger40 orait leszukitettek, elbukott, holott a kod helyes volt.
+    for _h in range(24):
+        d._hour_on[_h] = True
+    check("mind a 24 ora -> nincs ora-szuro", d._run_tab._allowed_hours() is None,
+          str(d._run_tab._allowed_hours()))
     d._hour_on[3] = False
     check("a szakaszban kikapcsolt ora AZONNAL hat (nincs ujraepites)",
           d._run_tab._allowed_hours() is not None

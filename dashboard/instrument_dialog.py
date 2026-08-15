@@ -1543,9 +1543,15 @@ class InstrumentParamsDialog:
                                       self.symbol, self.strategy.name), fg=FG_RED)
                 return
         try:
-            _opt(self.symbol, self.strategy.name)
+            _refused = _opt(self.symbol, self.strategy.name)
         except Exception as ex:
             self._run_status.config(text=f"Indítási hiba: {ex}", fg=FG_RED)
+            return
+        # ⚠ AZ ELUTASÍTÁST ITT KELL KIÍRNI, a gomb mellett. A hívó eddig a
+        # FŐABLAK állapotsorába írta az okot — az a paraméter-ablak alatt van,
+        # tehát a felhasználó szemszögéből a gomb egyszerűen nem csinált semmit.
+        if _refused:
+            self._run_status.config(text=str(_refused), fg=FG_YELLOW)
             return
         # ⚠ A VISSZAJELZÉS a TÉNYLEGES állapotból jön, nem abból, hogy hívtuk a
         # függvényt. A `_live2_opt_click` MORPH: ha épp futott, LEÁLLÍTOTTA; ha

@@ -3186,7 +3186,10 @@ class DashboardWindow:
 
         A morph ugyanaz, mint a classicban: fut → leállítás, sorban → törlés,
         egyébként indítás. Csak a hatókör szűkebb (egy stratégia, nem az egész
-        szimbólum)."""
+        szimbólum).
+
+        VISSZAAD: `""` ha megtörtént, különben az ELUTASÍTÁS OKA (a hívó ablak
+        kiírhatja ott, ahol a gomb van)."""
         from core import opt_activity as _oa
         st = _oa.state_of(symbol, name)
         if st == "OPTIMIZING":
@@ -3199,14 +3202,23 @@ class DashboardWindow:
         # felülíródna a paraméterfájlja, és egy nyíló belépő a RÉGI paraméterekkel
         # menne. (Ugyanaz a szabály, mint a classic menüjében — ott tiltott
         # tételként, indoklással látszik.)
+        # ⚠ AZ ELUTASÍTÁS OKA VISSZATÉR a hívónak. Eddig csak a FŐABLAK
+        # állapotsorába íródott — a paraméter-ablakból indítva tehát a felhasználó
+        # megnyomta az Indítást, és a saját ablakában SEMMI nem történt; a
+        # magyarázat egy takarásban lévő sorban ült. („Nem indult el, vagy nem
+        # látszódik, hogy történt volna bármi.")
         try:
             if self._opt_ctrl._strategy_live(symbol, name):
-                self.lbl_status.config(
-                    text=f"{symbol}/{name}: kereskedik — előbb állítsd meg (▶/■).")
-                return
+                _msg = (f"{symbol}/{name}: kereskedik — előbb állítsd meg (▶/■). "
+                        f"Futó stratégiát nem optimalizálunk: a végén felülíródna "
+                        f"a paraméterfájlja, és egy nyíló belépő a RÉGI "
+                        f"paraméterekkel menne.")
+                self.lbl_status.config(text=_msg)
+                return _msg
         except Exception:
             pass
         self._opt_ctrl.request_optimize(symbol, name)
+        return ""
 
     def _live2_opt(self, symbol: str, name: str) -> str:
         """Az Opt cella PER STRATÉGIA — rövid, cellába férő alak.

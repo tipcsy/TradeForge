@@ -428,11 +428,26 @@ class BacktestDialog:
                        activeforeground=FG_WHITE).pack(side="left")
 
         # ── Slotok ──────────────────────────────────────────────────────────
-        # FIGYELEM: egy páron amúgy is legfeljebb EGY pozíció fut (a ráépítés
-        # ugyanannak a kötésnek a lábai), így itt a slot-szám NEM a pozíciók
-        # számát korlátozza, hanem a MÉRETEZÉST: a kockázat slotonként oszlik
-        # (risk_per_slot = egyenleg × account_risk_pct / slotok), lásd
-        # core.risk_manager.calc_lot. Több slot → arányosan kisebb lot.
+        # ⚠ A KORÁBBI MEGJEGYZÉS ITT TÉVES VOLT. Azt állította, hogy „egy páron
+        # amúgy is legfeljebb EGY pozíció fut", tehát a slot-szám csak a MÉRETET
+        # állítja. A motor viszont EGY PÁRON IS annyi pozíciót nyithat, ahány
+        # szabad slot van (`free_slots = max_open_slots − occupied`, ahol az
+        # `occupied` csak a NEM kockázatmentes pozíciókat számolja) — élesben
+        # ugyanígy.
+        #
+        # A slot-szám tehát KÉT dolgot állít egyszerre, és a kettő ellentétes
+        # irányba húz. Mérve (Ger40, 2026-06-01→08-14, kapukkal):
+        #
+        #     slot   kötés     P&L     átlag lot   max egyszerre
+        #        1      84    −827$        3,97          1
+        #        2     180    −569$        2,11          2
+        #        4     252    −217$        1,09          4
+        #        8     298    −279$        0,47          4
+        #
+        # 1 slot = egyszerre EGY pozíció, de NÉGYSZERES lottal: a jelek nagy része
+        # kimarad, mert nyitott pozíció mellett nincs hova belépni. A teljes
+        # kockázat nagyjából állandó marad — a slot-szám azt osztja szét
+        # (`risk_per_slot = egyenleg × account_risk_pct / slotok`, `calc_lot`).
         tk.Label(hrow, text="Slotok:", bg=BG, fg=FG_GRAY,
                  font=self._sf).pack(side="left", padx=(16, 2))
         self._slots_var = tk.StringVar(

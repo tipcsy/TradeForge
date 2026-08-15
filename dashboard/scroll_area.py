@@ -75,7 +75,21 @@ def scrollable(parent, horizontal: bool = False):
     inner.bind("<Configure>", _fit)
     canvas.bind("<Configure>", _fit)
 
+    # ⚠ A KÖTÉS A TOPLEVELRE megy (lásd a modul fejlécét), a VÁSZON viszont
+    # meghalhat előtte: az Áttekintés lap MINDEN megjelenítéskor újraépül, tehát
+    # minden lapváltás egy újabb görgethető területet hoz létre és a régit
+    # eldobja. A régi kötés ilyenkor egy MÁR NEM LÉTEZŐ vászonra hivatkozott, és
+    # minden egérgörgetés `TclError`-t dobott — élesben tucatnyi tracebacket
+    # egyetlen görgetésre („bad window path name … !canvas").
+    #
+    # A `bind` VISSZAADJA a kezelő azonosítóját, tehát PONTOSAN ezt az egy
+    # kötést le tudjuk venni — nem `unbind(seq)`-kel, mert az a testvér
+    # görgethető területek kötéseit is letörölné.
+    _fid = {"wheel": None, "wheel_x": None}
+
     def _wheel(e):
+        if not canvas.winfo_exists():
+            return
         if not canvas.winfo_ismapped():   # másik fül van elöl — nem a miénk
             return
         # Csak ha van mit görgetni (különben „ugrik" a rövid tartalom)
@@ -85,14 +99,29 @@ def scrollable(parent, horizontal: bool = False):
 
     def _wheel_x(e):
         """Shift+görgő = vízszintes — a Windows-on megszokott mozdulat."""
-        if hsb is None or not canvas.winfo_ismapped():
+        if hsb is None or not canvas.winfo_exists() or not canvas.winfo_ismapped():
             return
         lo, hi = canvas.xview()
         if lo > 0.0 or hi < 1.0:
             canvas.xview_scroll(int(-e.delta / 120), "units")
 
     top = parent.winfo_toplevel()
-    top.bind("<MouseWheel>", _wheel, add="+")
+    _fid["wheel"] = top.bind("<MouseWheel>", _wheel, add="+")
     if horizontal:
-        top.bind("<Shift-MouseWheel>", _wheel_x, add="+")
+        _fid["wheel_x"] = top.bind("<Shift-MouseWheel>", _wheel_x, add="+")
+
+    def _unbind(ev):
+        # ⚠ A `<Destroy>` a GYEREKEKRE is elsül — csak a saját vászonra reagálunk.
+        if ev.widget is not canvas:
+            return
+        for _seq, _key in (("<MouseWheel>", "wheel"),
+                           ("<Shift-MouseWheel>", "wheel_x")):
+            if _fid.get(_key):
+                try:
+                    top.unbind(_seq, _fid[_key])
+                except tk.TclError:
+                    pass                     # az ablak is épp megszűnik
+                _fid[_key] = None
+
+    canvas.bind("<Destroy>", _unbind, add="+")
     return holder, inner, canvas
