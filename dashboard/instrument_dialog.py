@@ -807,7 +807,39 @@ class InstrumentParamsDialog:
             ("trail_distance_atr", "Trail táv",
              "Ennyi ATR-rel követi a stop az árat.\n"
              "Riskynél a motor még felezi is ezt a távolságot."),
+            # ── Részleges zárás (Felező / Pajzs) ─────────────────────────
+            # ⚠ Eddig CSAK fájlból volt állítható. A `trigger_R` dönti el,
+            # MIKOR zár a Pajzs — és ha a TP ugyanoda esik, SOHA nem hat.
+            ("trigger_R", "Trigger R",
+             "HÁNY R-nél zárja a részt (Felező/Pajzs)." + chr(10) +
+             "⚠ Ha a célár ugyanide esik (tp_rr_ratio = ez), a részleges" + chr(10) +
+             "zárás SOHA nem hat: a célár ér oda előbb, és a TELJES pozíciót" + chr(10) +
+             "zárja. Tegyél ide kisebbet (pl. 0,8), mint a tp_rr_ratio."),
+            ("halving_fraction", "Zárt hányad",
+             "A Felező ekkora RÉSZT zár a triggernél (0,5 = fele)."),
+            ("shield_fraction", "Zárt hányad",
+             "A Pajzs ekkora RÉSZT zár a triggernél (0,75 = háromnegyed)."),
         ]
+        # ⚠ A FIGYELMEZTETÉS HELYE: ha a részleges zárás triggere a TP-re (vagy
+        # azon túlra) esik, a Pajzs/Felező SOHA nem hat — a célár előbb zár. A
+        # felületen ez eddig SEHOL nem látszott: a preset „Pajzs"-t mutatott, a
+        # kötések meg egytől egyig teljes zárással, 1R-en.
+        self._trig_warn = tk.Label(rrg, text="", bg=BG, fg=FG_YELLOW,
+                                   font=self._sf, anchor="w", justify="left",
+                                   wraplength=820)
+        self._trig_warn.pack(anchor="w", padx=6, pady=(0, 4))
+        # ⚠ A figyelmeztetés a `tp_rr_ratio`-tól is függ — az a PARAMÉTER
+        # szakaszban él, tehát oda is be kell kötni, különben a mező átírása
+        # után elavult képet mutatna.
+        try:
+            _tpe = (getattr(self, "entries", None) or {}).get("tp_rr_ratio")
+            if _tpe is not None:
+                _tpe.bind("<KeyRelease>",
+                          lambda _e: self._warn_trigger_vs_tp(), add="+")
+                _tpe.bind("<FocusOut>",
+                          lambda _e: self._warn_trigger_vs_tp(), add="+")
+        except tk.TclError:
+            pass
         _spec0 = _rrs.spec_for(self.symbol)
         for _k, _lbl, _tip in _BT_META:
             _f = tk.Frame(_bt_row, bg=BG)
@@ -1038,6 +1070,15 @@ class InstrumentParamsDialog:
         panasz. Itt a beállítás és az indítás EGY görgetésnyire van, a becsukott
         szakaszok fejléce pedig összegzést mutat, tehát a hosszú oldal nem ár."""
         page = self._sections["futtatas"].body
+        # ⚠ FUTÁS KÖZBEN SOSEM ÉPÍTÜNK ÚJRA. Az újraépítés eldobja a szakasz
+        # tartalmát és NULLÁZZA a végigpróbálás tengelyeit (`_sw_axes`) — a
+        # háttérszál viszont fut tovább, és a végén az ÚJ (csomagolatlan)
+        # vászonra próbálna rajzolni üres tengelyekkel. Élesben pontosan ez
+        # történt: „546 futás kész." kiíródott, rajz sehol.
+        # (A beágyazott backtestre ugyanez áll: egy futó példány `shutdown()`-ja
+        # a szál alól húzná ki a widgeteket.)
+        if self._sw_stop is not None or getattr(self, "_bt_running", False):
+            return
         if getattr(self, "_run_tab", None) is not None:
             # ⚠ ÚJRAÉPÍTÉS, ha a paraméterek közben változtak. A backtest a
             # MEGNYITÁSKORI paraméterekkel dolgozik; ha a Paraméter lapon
@@ -1125,6 +1166,25 @@ class InstrumentParamsDialog:
             from core import backtest_prefs as _bp
             _bp.save(self.symbol, self.strategy.name, run_mode=v)
         except Exception:
+            pass
+
+    def _sync_run_params(self):
+        """A Paraméter szakasz MOSTANI értékei → a beágyazott backtest.
+
+        Nem újraépítés: az eldobná a betöltött adatot, az időszakot és az előző
+        eredményt. Csak az értékeket cseréljük — a jel-gyorsítótár magától
+        érvénytelenít, ha a JEL-oldal változott (`signal_series_cached`)."""
+        bt = getattr(self, "_run_tab", None)
+        if bt is None:
+            return
+        cur = self._collect_params()
+        if cur is None or cur == getattr(bt, "params", None):
+            return
+        bt.params = dict(cur)
+        self._run_params = dict(cur)
+        try:
+            self.lbl_err.config(text="", fg=FG_GRAY_DIM)
+        except (tk.TclError, AttributeError):
             pass
 
     def _on_run_mode(self):
@@ -1481,6 +1541,19 @@ class InstrumentParamsDialog:
         ⚠ Ez nem kényelmi összevonás. Eddig ugyanaz a művelet (paraméter beállít
         → teljes futtatás → kiértékelés) HÁROM helyen indult, más-más néven, és
         a felhasználónak kellett fejben tartania, melyik mit jelent."""
+        # ⚠ A PARAMÉTEREK FRISSÍTÉSE AZ INDÍTÁS ELŐTT. A beágyazott backtest a
+        # FELÉPÍTÉSKORI pillanatképpel dolgozik (`self.params`); az újraépítés
+        # eddig csak lapváltáskor vagy a szakasz kinyitásakor futott le. A
+        # leggyakoribb munkamenetben viszont — átírod a mezőt, és RÖGTÖN
+        # Indítást nyomsz ugyanazon a lapon — egyik sem történik meg, tehát a
+        # futás a RÉGI értékkel ment. A felület közben azt írta ki, hogy „ha ott
+        # átírsz valamit, ez a lap magától frissül".
+        #
+        # Mérve: a `tp_rr_ratio` 1,0 → 2,0 átírása után minden kötés továbbra is
+        # ±1,00R-en zárt — a célár nem mozdult, mert a futás nem is látta az új
+        # értéket.
+        self._sync_run_params()
+
         from core import opt_plan as _op
         rows = self._tuned_rows()
         # ⚠ A MÓD-VÁLASZTÓ ELSŐBBSÉGET ÉLVEZ. „Backtest" módban egyetlen futás
@@ -2432,13 +2505,31 @@ class InstrumentParamsDialog:
             return
         self._sw_rows = rows
         self._sw_status.config(text=f"{len(rows)} futás kész.", fg=FG_GREEN)
+        # ⚠ A RAJZ LEGYEN LÁTHATÓ, akkor is, ha közben bármi átrendezte a
+        # szakaszt. Az `pack` ismételve ártalmatlan (a Tk nem duplikál).
+        try:
+            self._sw_canvas.pack(fill="x", pady=(4, 2))
+            self._sw_best.pack(anchor="w", pady=(0, 8))
+        except tk.TclError:
+            pass
         self._redraw_sweep()
 
     def _redraw_sweep(self):
         from core import sweep as _sw
         from dashboard import sweep_view as _sv
         from dashboard import theme as _th
-        if not getattr(self, "_sw_rows", None) or not self._sw_axes:
+        if not getattr(self, "_sw_rows", None):
+            return
+        if not self._sw_axes:
+            # ⚠ Volt eredmény, de nincs tengely — a rajz némán elmaradna, és a
+            # felhasználó egy „kész" feliratot látna üres hely fölött.
+            try:
+                self._sw_status.config(
+                    text=(f"{len(self._sw_rows)} futás kész, de a rajz tengelyei "
+                          f"elvesztek (a szakasz közben újraépült). Indítsd újra."),
+                    fg=FG_YELLOW)
+            except tk.TclError:
+                pass
             return
         metric = self._sw_metric.get()
         try:
@@ -3407,11 +3498,23 @@ class InstrumentParamsDialog:
         NEM stratégia-paraméterek, tehát nincs közük a paraméter-űrlap
         mentéséhez. Érvénytelen szám → visszaírjuk a ténylegesen ható értéket,
         hogy a mező ne mutasson mást, mint amivel a motor dolgozik."""
+        # ⚠ HATÁROK KULCSONKÉNT. A hányadok ARÁNYOK (0..1): egy beírt „75" nem
+        # 75%-ot jelentene, hanem 75-szörös méretet — a motor a lot ennyiszeresét
+        # zárná. Az elutasított érték nem tűnik el némán: visszaírjuk a
+        # ténylegesen hatót, tehát a mező sosem mutat mást, mint amivel fut.
         v = _num(self._bt_vars[key].get())
-        if v is not None and v >= 0:
+        _ok = v is not None
+        if _ok and key in ("halving_fraction", "shield_fraction"):
+            _ok = 0.0 < v < 1.0
+        elif _ok and key == "trigger_R":
+            _ok = v > 0.0
+        elif _ok:
+            _ok = v >= 0.0
+        if _ok:
             self._rrs._set(self.symbol, **{key: float(v)})
         cur = self._rrs.spec_for(self.symbol).get(key, 0)
         self._bt_vars[key].set(f"{float(cur):g}")
+        self._warn_trigger_vs_tp()      # a trigger/TP viszony változhatott
 
     def _on_cautious_change(self):
         self._rrs.set_cautious(self.symbol, bool(self._cautious_var.get()))
@@ -3499,12 +3602,13 @@ class InstrumentParamsDialog:
         # BE/trailing: CSAK azok, amelyek ezen a preset+runner páron TÉNYLEG hatnak.
         # Sorrend-tartó (mind elrejt, majd a látókat sorban pack) — mint az
         # építés-vezérlőknél; enélkül a mezők sorrendje váltogatna.
-        _act = _rr.be_trail_active(preset, runner)
+        _act = _rr.be_trail_active(preset, runner) | _rr.partial_active(preset)
         for _k, _f in self._bt_frames.items():
             _f.pack_forget()
-        for _k in _rr.BE_TRAIL_KEYS:
+        for _k in tuple(_rr.BE_TRAIL_KEYS) + tuple(_rr.PARTIAL_KEYS):
             if _k in _act:
                 self._bt_frames[_k].pack(side="left", padx=(0, 10))
+        self._warn_trigger_vs_tp()
         # ── Építés-vezérlők (sorrend-tartó: mind elrejt, majd a látókat sorban pack) ──
         for f in (self._build_faktor_frame, self._build_trig_frame,
                   self._build_rstep_frame, self._build_rshrink_frame):
@@ -3521,6 +3625,45 @@ class InstrumentParamsDialog:
                 self._build_rshrink_frame.pack(side="left", padx=(8, 0))
         self._refit_width()
         self._rr_summary_changed()
+
+    def _warn_trigger_vs_tp(self):
+        """⚠ „A Pajzs be van kapcsolva, mégsem csinál semmit."
+
+        Ha a részleges zárás triggere (`trigger_R`) NEM ESIK a célár ELÉ, a
+        célár ér oda előbb, és a TELJES pozíciót zárja — a Pajzs/Felező tehát
+        néma marad. Élesben pontosan ez történt: `tp_rr_ratio` 1,0, `trigger_R`
+        1,0, és minden kötés ±1,00R-en, teljes zárással végződött.
+
+        A számokat nem hasonlítjuk, ha a preset nem részleges zárású — ott a
+        `trigger_R`-nek nincs szerepe, és egy felirat csak zavarna."""
+        lbl = getattr(self, "_trig_warn", None)
+        if lbl is None:
+            return
+        from core import risk_reduction as _rr
+        preset = self._preset_from_name(self._rr_name.get())
+        if "trigger_R" not in _rr.partial_active(preset):
+            try:
+                lbl.config(text="")
+            except tk.TclError:
+                pass
+            return
+        _trig = _num((self._bt_vars.get("trigger_R").get()
+                      if self._bt_vars.get("trigger_R") is not None else ""))
+        _tp = None
+        _e = (getattr(self, "entries", None) or {}).get("tp_rr_ratio")
+        if _e is not None:
+            _tp = _num(_e.get())
+        txt = ""
+        if _trig is not None and _tp is not None and _trig >= _tp:
+            txt = (f"⚠ A részleges zárás SOHA nem fog életbe lépni: a trigger "
+                   f"{_trig:g} R, a célár (tp_rr_ratio) viszont {_tp:g} R — a "
+                   f"célár ér oda előbb, és a TELJES pozíciót zárja. Tegyél a "
+                   f"triggerbe kisebb értéket (pl. {max(0.1, _tp * 0.8):g}), vagy "
+                   f"told feljebb a tp_rr_ratio-t.")
+        try:
+            lbl.config(text=txt)
+        except tk.TclError:
+            pass
 
     def _rr_summary_changed(self):
         """A kockázat-vezérlők LÁTHATÓSÁGA befolyásolja az összegzést (a runner

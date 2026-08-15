@@ -76,6 +76,28 @@ _EPS = 1e-9
 # a stratégia-paraméterek közt.
 BE_TRAIL_KEYS = ("breakeven_pct", "trail_activation_atr", "trail_distance_atr")
 
+# ── A RÉSZLEGES ZÁRÁS paraméterei (Felező / Pajzs) ──────────────────────────
+# ⚠ Ezek eddig CSAK a fájlból voltak állíthatók, a felületről nem — pedig a
+# `trigger_R` dönti el, MIKOR zár a Pajzs. Ha a TP ugyanoda esik (tp_rr_ratio ==
+# trigger_R), a részleges zárás SOHA nem hat: a célár előbb ér oda, és a teljes
+# pozíciót zárja. Élesben pontosan ez történt (tp_rr_ratio = 1,0, trigger_R =
+# 1,0): a Pajzs be volt kapcsolva, és semmit nem csinált.
+PARTIAL_KEYS = ("trigger_R", "halving_fraction", "shield_fraction")
+
+
+def partial_active(preset: str) -> set:
+    """MELY részleges-zárás kulcsok hatnak ezen a preseten?
+
+    Ugyanaz az elv, mint a `be_trail_active`-nál: a felület ez alapján dönti el,
+    mit MUTAT, így egy hatástalan mező nem kelti azt a látszatot, hogy állítható.
+    A Felező a `halving_fraction`-t használja, a Pajzs a `shield_fraction`-t —
+    mindkettő a `trigger_R`-nél lép életbe."""
+    if preset == PRESET_HALVING:
+        return {"trigger_R", "halving_fraction"}
+    if preset in (PRESET_SHIELD, PRESET_SHIELD_FIBO):
+        return {"trigger_R", "shield_fraction"}
+    return set()
+
 
 def be_trail_active(preset: str, runner_stop: str = RUNNER_TRAILING) -> set:
     """MELY BE/trailing kulcsok hatnak ezen a preset+runner kombináción?
