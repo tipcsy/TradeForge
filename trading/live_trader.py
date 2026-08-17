@@ -1190,6 +1190,21 @@ def pair_visual_lines(symbol: str, params: dict, strategy, point_size: float,
             symbol, int(m1.index[0].timestamp()), strategy.name)
     # + a TF-együttállás figyelő SMA-vonalai (a bekapcsolt idősíkokra) — #4.
     objects = objects + tf_align_visual_objects(symbol)
+    # ⚠ IDOSIK-KAPU: a strategia rajza csak a DONTESI idosikon jelenjen meg.
+    # A fajlbol MINDEN nyitott chart olvas, tehat a H1-en szamolt szalag eddig
+    # M1-en es M5-on is kirajzolodott — ugyanaz a gorbe rossz felbontasban,
+    # ami nem azt mutatja, amit a dontés hasznal. A `signal_bar_seconds` 0-t ad
+    # ott, ahol a vegrehajtasi idosik dont (wpr_sma) -> nincs korlat.
+    try:
+        _sig_sec = int(strategy.signal_bar_seconds(params) or 0)
+    except Exception:
+        _sig_sec = 0
+    if _sig_sec >= 60:
+        # ⚠ A DEKLARACIO a sajat objektumai ELE kerul: az indikator igy egy
+        # menetben is helyesen dont (az MT4-valtozat nem pufferel).
+        from strategy.visual import TfOnly as _TfOnly
+        objects = [_TfOnly(minutes=_sig_sec // 60)] + objects
+
     from strategy.visual import tag_line
     return [tag_line(o.line(), strategy.name) for o in objects]
 

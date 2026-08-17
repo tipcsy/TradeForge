@@ -11,7 +11,7 @@
 //|  (F7), majd húzd a kívánt chartra. A fájlt a Python az MT5 közös  |
 //|  (Common) mappájába írja, ezért FILE_COMMON-nal olvassuk.        |
 //+------------------------------------------------------------------+
-#property version   "2.41"        // TradeForge v2.41; eletjel-fajl (chart nyitva?) 2026-08-13
+#property version   "2.62"        // TradeForge v2.62; idosik-kapu (TFONLY) 2026-08-17
 #property indicator_chart_window
 #property indicator_plots 0
 
@@ -24,6 +24,21 @@ string g_file;                    // TFV_<Symbol>.csv
 string g_objpref;                 // szűrő-prefix: TFV_ (mind) VAGY TFV_<InpStrategy>@
 string g_ind_sig  = "";           // az utoljára felrakott IND-halmaz aláírása
 string g_ma_names[];              // MINDEN általunk felrakott MA rövidneve (leszedéshez)
+
+// IDŐSÍK-KAPU (TFONLY;<stratégia>;<perc>)
+//
+// A viz-fájl egy SZIMBÓLUM teljes pillanatképe, és a szimbólum MINDEN nyitott
+// chartja UGYANABBÓL olvas — a rajz tehát M1-en, M5-ön és H1-en is megjelent.
+// Egy H1-en számolt Bollinger-szalag viszont M1-en FÉLREVEZETŐ: nem az látszik,
+// amit a döntés használ, csak ugyanaz a görbe rossz felbontásban.
+//
+// A Python most megmondja, melyik stratégia rajza melyik chart-idősíkra való.
+// Ahol a stratégia a VÉGREHAJTÁSI gyertyán dönt (wpr_sma), ott nem küld sort —
+// az mindenhol látszik, ahogy eddig.
+string g_tf_strat[];              // stratégia-nevek, amikre van idősík-kikötés
+int    g_tf_min[];                // …és a hozzájuk tartozó perc
+int    g_ntf = 0;
+int    g_ntf_notes = 0;           // hány „…a H1 charton látszik" felirat van kint
 
 // Már LEFUTTATOTT riasztások — GLOBÁLIS VÁLTOZÓBAN, nem a memóriában.
 //
@@ -219,6 +234,83 @@ void WriteHeartbeat()
 }
 
 //+------------------------------------------------------------------+
+//| IDŐSÍK-KAPU: TFONLY;<stratégia>;<perc>                           |
+//+------------------------------------------------------------------+
+void TfReset()
+{
+   ArrayResize(g_tf_strat, 0);
+   ArrayResize(g_tf_min, 0);
+   g_ntf = 0;
+}
+
+void TfAdd(string ln)
+{
+   string f[];
+   if(StringSplit(ln, ';', f) < 3)
+      return;
+   ArrayResize(g_tf_strat, g_ntf + 1);
+   ArrayResize(g_tf_min,   g_ntf + 1);
+   g_tf_strat[g_ntf] = f[1];
+   g_tf_min[g_ntf]   = (int)StringToInteger(f[2]);
+   g_ntf++;
+}
+
+// Objektum-névből a stratégia: TFV_<stratégia>@<név>. Ha nincs „@", a sor egy
+// régi (nem címkézett) formátumú név → nincs mihez kötni, tehát nem kapuzunk.
+string StratOfName(string name)
+{
+   int at = StringFind(name, "@");
+   if(at < 0 || StringFind(name, FilePrefix) != 0)
+      return "";
+   int p = StringLen(FilePrefix);
+   return StringSubstr(name, p, at - p);
+}
+
+// Igaz, ha EZ a chart nem a stratégia döntési idősíkján áll.
+bool TfBlocked(string strat)
+{
+   if(strat == "")
+      return false;
+   // ⚠ MT5-ben a `Period()` ENUM-ot ad (PERIOD_H1 == 16385), NEM percet — az
+   // összehasonlítás azzal MINDEN idősíkon igazat adna, és a rajz sehol sem
+   // jelenne meg. A percet a `PeriodSeconds()` mondja meg.
+   int cur = (int)(PeriodSeconds() / 60);
+   for(int i = 0; i < g_ntf; i++)
+      if(g_tf_strat[i] == strat)
+         return (g_tf_min[i] > 0 && cur != g_tf_min[i]);
+   return false;   // nincs kikötés → mindenhol látszik (visszafelé kompatibilis)
+}
+
+string TfName(int minutes)
+{
+   if(minutes % 1440 == 0) return "D" + IntegerToString(minutes / 1440);
+   if(minutes % 60   == 0) return "H" + IntegerToString(minutes / 60);
+   return "M" + IntegerToString(minutes);
+}
+
+// ⚠ A KAPU NEM LEHET NÉMA. Ha egy stratégia rajzát elrejtettük, egy apró
+// felirat megmondja, HOL nézhető meg — enélkül a felhasználó azt látná, hogy a
+// stratégia „nem rajzol semmit", és hibát keresne ott, ahol nincs.
+string TfNote(string strat, int minutes)
+{
+   string nm = FilePrefix + strat + "@zz_tfnote";
+   if(StringFind(nm, g_objpref) != 0)
+      return "";                       // ez a chart nem ezt a stratégiát mutatja
+   if(ObjectFind(0, nm) < 0)
+      ObjectCreate(0, nm, OBJ_LABEL, 0, 0, 0);
+   ObjectSetInteger(0, nm, OBJPROP_CORNER, CORNER_LEFT_LOWER);
+   ObjectSetInteger(0, nm, OBJPROP_XDISTANCE, 6);
+   ObjectSetInteger(0, nm, OBJPROP_YDISTANCE, 18 + 14 * g_ntf_notes);
+   ObjectSetInteger(0, nm, OBJPROP_COLOR, clrGray);
+   ObjectSetInteger(0, nm, OBJPROP_FONTSIZE, 8);
+   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+   ObjectSetString(0, nm, OBJPROP_TEXT,
+                   strat + ": a rajza a " + TfName(minutes) + " charton látszik");
+   g_ntf_notes++;
+   return nm;
+}
+
+//+------------------------------------------------------------------+
 //| Fájl felolvasása és minden sor alkalmazása (upsert)              |
 //+------------------------------------------------------------------+
 void RefreshFromFile()
@@ -227,16 +319,41 @@ void RefreshFromFile()
    if(h == INVALID_HANDLE)
       return;   // még nincs fájl — nem hiba
 
+   // ⚠ KÉT MENET. Az idősík-kikötést (TFONLY) a stratégia MINDEN objektuma előtt
+   // ismernünk kell — egy menetben az a sorrendtől függene, ami a fájlformátum
+   // néma függősége lenne. Ezért előbb BEOLVASSUK a fájlt (pár száz sor), és
+   // csak utána rajzolunk.
+   string raw[];
+   int nraw = 0;
+   while(!FileIsEnding(h))
+   {
+      string ln0 = FileReadString(h);
+      if(StringLen(ln0) == 0)
+         continue;
+      ArrayResize(raw, nraw + 1, 256);   // foglalással: soronkénti újrafoglalás nélkül
+      raw[nraw] = ln0;
+      nraw++;
+   }
+   FileClose(h);
+
+   TfReset();
+   for(int r = 0; r < nraw; r++)
+      if(StringFind(raw[r], "TFONLY;") == 0)
+         TfAdd(raw[r]);
+
    string inds[];
    int nind = 0;
    string seen[];        // a MOSTANI fájlban szereplő objektum-nevek (mark)
    int nseen = 0;
    bool cleared = false;
-   while(!FileIsEnding(h))
+   g_ntf_notes = 0;
+   string noted[];       // melyik elrejtett stratégiáról írtunk már feliratot
+   int nnoted = 0;
+   for(int r = 0; r < nraw; r++)
    {
-      string ln = FileReadString(h);
-      if(StringLen(ln) == 0)
-         continue;
+      string ln = raw[r];
+      if(StringFind(ln, "TFONLY;") == 0)
+         continue;                       // már feldolgozva
       if(StringFind(ln, "CLEAR") == 0)   // V-off: a saját objektumok törlése
       {
          ObjectsDeleteAll(0, g_objpref);
@@ -245,15 +362,51 @@ void RefreshFromFile()
       }
       if(StringFind(ln, "ALERT;") == 0)  // „csak jelzés" mód riasztása
       {
+         // ⚠ A RIASZTÁS NEM RAJZ: azt akkor is meg kell kapni, ha ez a chart
+         // épp más idősíkon áll. Egy elrejtett rajz mellett elnémított jelzés
+         // csendben elvinne egy belépőt.
          HandleAlert(ln);
          continue;
       }
       if(StringFind(ln, "IND;") == 0)   // indikátor-leírás — külön kezeljük
       {
+         string fi[];
+         if(StringSplit(ln, ';', fi) >= 2 && TfBlocked(fi[1]))
+            continue;
          ArrayResize(inds, nind + 1);
          inds[nind] = ln;
          nind++;
          continue;
+      }
+      // IDŐSÍK-KAPU: a más idősíkra szánt rajzot kihagyjuk — de EGYSZER
+      // kiírjuk, hol nézhető meg (a kapu nem lehet néma).
+      string fs[];
+      if(StringSplit(ln, ';', fs) >= 2)
+      {
+         string st = StratOfName(fs[1]);
+         if(TfBlocked(st))
+         {
+            bool done = false;
+            for(int k = 0; k < nnoted; k++)
+               if(noted[k] == st) { done = true; break; }
+            if(!done)
+            {
+               ArrayResize(noted, nnoted + 1);
+               noted[nnoted] = st;
+               nnoted++;
+               int mm = 0;
+               for(int q = 0; q < g_ntf; q++)
+                  if(g_tf_strat[q] == st) { mm = g_tf_min[q]; break; }
+               string note = TfNote(st, mm);
+               if(note != "")
+               {
+                  ArrayResize(seen, nseen + 1);
+                  seen[nseen] = note;
+                  nseen++;
+               }
+            }
+            continue;
+         }
       }
       string nm = ApplyLine(ln);
       if(nm != "")
@@ -263,7 +416,6 @@ void RefreshFromFile()
          nseen++;
       }
    }
-   FileClose(h);
 
    // MARK-AND-SWEEP: a fájl a kívánt állapot TELJES pillanatképe → a SAJÁT (TFV_)
    // objektumokból leszedjük azokat, amik NEM voltak a mostani fájlban (árvák: pl.

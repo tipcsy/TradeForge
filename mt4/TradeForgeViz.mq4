@@ -19,7 +19,7 @@
 //|  olvassa, es PORTABLE modban sem koltozik.                        |
 //+------------------------------------------------------------------+
 #property copyright "TradeForge"
-#property version   "1.00"
+#property version   "2.62"        // idosik-kapu (TFONLY)
 #property strict
 #property indicator_chart_window
 #property indicator_buffers 0
@@ -47,6 +47,33 @@ input bool   InpShowNextTime  = false;  // Kovetkezo jel IDEJE is (spoiler!)
 
 string g_file;        // TFV_<Symbol><suffix>.csv
 string g_objpref;     // szuro-prefix: TFV_  VAGY  TFV_<InpStrategy>@
+
+// IDOSIK-KAPU (TFONLY;<strategia>;<perc>)
+//
+// A viz-fajl egy SZIMBOLUM teljes pillanatkepe, es a szimbolum MINDEN nyitott
+// chartja UGYANABBOL olvas — a rajz igy M1-en, M5-on es H1-en is megjelent. Egy
+// H1-en szamolt Bollinger-szalag viszont M1-en FELREVEZETO: nem az latszik, amit
+// a dontes hasznal, csak ugyanaz a gorbe rossz felbontasban.
+//
+// A Python a strategia objektumai ELE irja a kikotest; ahol a vegrehajtasi
+// gyertya dont (wpr_sma), ott nincs sor -> mindenhol latszik, mint eddig.
+string g_tf_strat[];
+int    g_tf_min[];
+int    g_ntf = 0;
+
+// ⚠ MT4-ben a `Period()` PERCET ad (az MT5-ben ENUM-ot!) — itt kozvetlenul jo.
+bool TfBlocked(string name)
+{
+   int at = StringFind(name, "@");
+   if(at < 0 || StringFind(name, FilePrefix) != 0)
+      return(false);
+   int p = StringLen(FilePrefix);
+   string strat = StringSubstr(name, p, at - p);
+   for(int i = 0; i < g_ntf; i++)
+      if(g_tf_strat[i] == strat)
+         return(g_tf_min[i] > 0 && Period() != g_tf_min[i]);
+   return(false);   // nincs kikotes -> valtozatlan viselkedes
+}
 
 // A beolvasott rekordok. A tesztelo miatt CACHE-eljuk: a fajl ott nem valtozik,
 // viszont bar-onkent ujra kell donteni, mi lathato mar.
@@ -146,6 +173,7 @@ bool LoadFile()
    ArrayResize(g_isSig, 0); ArrayResize(g_sigDir, 0);
    g_n = 0;
    g_sigTotal = 0; g_sigBuy = 0; g_sigSell = 0; g_sigLast = 0;
+   ArrayResize(g_tf_strat, 0); ArrayResize(g_tf_min, 0); g_ntf = 0;
 
    while(!FileIsEnding(h))
    {
@@ -161,6 +189,19 @@ bool LoadFile()
       //  - STATE + RECT -> TradeForgeBands (al-ablak)
       //  - IND          -> TradeForgeWPR   (al-ablak, sajat parameterekkel)
       //  - ALERT        -> a teszteloben ertelmetlen (nincs valos ido)
+      if(StringFind(ln, "TFONLY;") == 0)   // idosik-kikotes: a KOVETKEZO objektumokra
+      {
+         string ft[];
+         if(StringSplit(ln, ';', ft) >= 3)
+         {
+            ArrayResize(g_tf_strat, g_ntf + 1);
+            ArrayResize(g_tf_min,   g_ntf + 1);
+            g_tf_strat[g_ntf] = ft[1];
+            g_tf_min[g_ntf]   = (int)StringToInteger(ft[2]);
+            g_ntf++;
+         }
+         continue;
+      }
       if(StringFind(ln, "ALERT;") == 0) continue;
       if(StringFind(ln, "IND;")   == 0) continue;
       if(StringFind(ln, "STATE;") == 0) continue;
@@ -173,6 +214,8 @@ bool LoadFile()
       string type = f[0];
       string name = f[1];
       if(StringFind(name, g_objpref) != 0)   // masik strategia
+         continue;
+      if(TfBlocked(name))                    // mas idosikra szant rajz
          continue;
 
       datetime t1 = 0, t2 = 0;

@@ -73,7 +73,7 @@ def tag_line(line: str, strategy: str) -> str:
     typ, sep, rest = line.partition(";")
     if typ == "CLEAR":
         return line
-    if typ in ("STATE", "IND", "ALERT"):
+    if typ in ("STATE", "IND", "ALERT", "TFONLY"):
         return f"{typ};{strategy};{rest}" if sep else f"{typ};{strategy}"
     fields = line.split(";")
     if len(fields) >= 2 and fields[1].startswith(PREFIX):
@@ -235,6 +235,27 @@ class BarState:
             str(int(self.market_state)),
             str(int(self.gate)),
         ])
+
+
+@dataclass
+class TfOnly:
+    """A strategia rajza CSAK ezen a chart-idosikon jelenjen meg (percben).
+
+    ⚠ MIERT KELL. A viz-fajl egy szimbolum TELJES pillanatkepe, es MINDEN nyitott
+    chart ugyanabbol olvas — a rajz tehat M1-en, M5-on es H1-en is megjelent.
+    Egy H1-en szamolt Bollinger-szalag viszont egy M1-charton FELREVEZETO: nem
+    az latszik, amit a dontés hasznal, csak ugyanaz a gorbe rossz felbontasban.
+
+    A sor NEVTELEN (mint a STATE/IND/ALERT), a strategia-tag a TIPUS UTAN all
+    (`tag_line`). `0` = nincs korlat (a regi viselkedes).
+
+    ⚠ Visszafele kompatibilis: a regi indikator az ismeretlen sort atugorja, es
+    ugy rajzol, ahogy eddig.
+    """
+    minutes: int
+
+    def line(self) -> str:
+        return ";".join(["TFONLY", str(int(self.minutes))])
 
 
 @dataclass
