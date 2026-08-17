@@ -4964,17 +4964,36 @@ class DashboardWindow:
         """Örökbefogadás: a kézi pozíciót a motor ettől kezdve sajátjaként kezeli."""
         from tkinter import messagebox
         from core.params_store import params_file
-        if not params_file(symbol, strategy_name).exists():
+        # ⚠ A MENTETT PARAMÉTER HIÁNYA MÁR NEM AKADÁLY. A v2.47.0 óta a motor a
+        # stratégia SAJÁT alapértékeivel is elindul (`live_trader.default_params`),
+        # tehát a régi tiltás („nincs optimalizálva, így a motor nem tudja kezelni
+        # a pozíciót") egyszerűen NEM IGAZ többé — csak megakadályozott egy
+        # műveletet, ami működne.
+        #
+        # AMI VISZONT TÉNYLEG AKADÁLY: ha a stratégia nincs ENGEDÉLYEZVE ezen a
+        # páron, a motor sosem futtatja (`_active = _enabled & _intent`) — akkor a
+        # pozíció valóban kezeletlen maradna.
+        if not self._strategy_enabled(symbol, strategy_name):
             messagebox.showwarning(
-                "Nincs paraméter",
-                f"A(z) {symbol} / {strategy_name} nincs optimalizálva (nincs mentett "
-                f"paraméter), így a motor nem tudja kezelni a pozíciót.\n\n"
-                f"Előbb futtasd az optimalizálást (Opt), vagy mentsd el kézzel a "
-                f"paramétereket.")
+                "Nincs engedélyezve",
+                f"A(z) {strategy_name} nincs bekapcsolva a(z) {symbol} páron, így "
+                f"a motor sosem futtatja — a hozzárendelt pozíciót nem kezelné."
+                + chr(10) + chr(10) +
+                "Kapcsold be az instrumentum beállításainál (kattints a sorban az "
+                "instrumentum NEVÉRE), majd próbáld újra.")
             return
+        _untuned = not params_file(symbol, strategy_name).exists()
         pos = next((p for p in getattr(self, "_mt5_cache", {}).get("positions_detail", [])
                     if p.get("ticket") == ticket), None)
         warn = ""
+        if _untuned:
+            # ⚠ NEM tiltás, hanem TÁJÉKOZTATÁS — de kimondva. Egy hangolatlan
+            # stratégia KEZELI a pozíciót, csak nem erre az instrumentumra
+            # hangolt számokkal; ezt tudni kell, mielőtt rábízod.
+            warn += (chr(10) + chr(10) + "MEGJEGYZÉS: ez a stratégia NINCS "
+                     "optimalizálva ezen a páron, tehát a SAJÁT ALAPÉRTELMEZETT "
+                     "paramétereivel fogja kezelni a pozíciót — kezelni fogja, "
+                     "csak nem erre az instrumentumra hangolt értékekkel.")
         if pos is not None and not pos.get("sl"):
             warn = ("\n\nFIGYELEM: ennek a pozíciónak NINCS stop-lossa. A kockázat-"
                     "csökkentés (1R-es részleges zárás, Fibo/Harmados stop-lépcsők) "

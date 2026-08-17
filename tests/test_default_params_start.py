@@ -131,6 +131,26 @@ check("hangolt parnal nincs ilyen figyelmeztetes",
            if "ALAPÉRTELMEZETT" in w["text"]])
 
 
+# ── 5. A POZICIO-HOZZARENDELES sem tilthat parameter hianyaban ──────────
+# ⚠ A LELET (a felhasznalotol): a GOLD-ra rakva a bollingert egy tilto ablak
+# fogadta — „nincs optimalizalva …, igy a motor nem tudja kezelni a poziciot".
+# Ez a v2.47.0 ota NEM IGAZ: a motor a strategia sajat alapertekeivel is
+# elindul. A tiltas tehat egy MUKODO muveletet akadalyozott meg.
+_adopt = _gui.split("def _adopt_position")[1].split(chr(10) + "    def ")[0]
+check("a hozzarendeles MAR NEM tilt parameter hianyaban",
+      "nem tudja kezelni a pozíciót" not in _adopt, _adopt[:150])
+# ⚠ AMI VISZONT TENYLEG AKADALY: ha a strategia nincs ENGEDELYEZVE a paron, a
+# motor sosem futtatja — akkor a pozicio valoban kezeletlen maradna.
+check("...de az ENGEDELYEZETTSEGET ellenorzi",
+      "_strategy_enabled(symbol, strategy_name)" in _adopt)
+check("...es megmondja, hol lehet bekapcsolni",
+      "instrumentum NEVÉRE" in _adopt, "")
+# ⚠ A hangolatlansag TAJEKOZTATAS, nem tiltas — de kimondva.
+check("a hangolatlan keszletrol TAJEKOZTAT (nem tilt)",
+      "ALAPÉRTELMEZETT" in _adopt and "kezelni fogja" in _adopt,
+      _adopt[_adopt.find("MEGJEGYZ"):][:90])
+
+
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")
 sys.exit(0 if all(results) else 1)
