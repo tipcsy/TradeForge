@@ -124,6 +124,10 @@ def _to_signal_tf(df: pd.DataFrame, params: dict = None) -> pd.DataFrame:
 _CIRCLE = "●"
 
 # A körös jelölő stádiumai — a `columns()` és a cellák EZEKET használják.
+# Hany JEL-gyertyara rajzoljuk ki a szalagot a charton. A teljes viz-ablak
+# haromszor ezer objektumot jelentene; ennyi bőven lefedi a lathato reszt.
+_BAND_BARS = 300
+
 _STAGES = (("squeeze", "Összeszűkülés"),
            ("release", "Feloldás + trend"),
            ("entry",   "Kitörés (belépő)"))
@@ -365,13 +369,37 @@ class BollingerSqueezeStrategy(Strategy):
         def dot(on, color="green"):
             return Cell(_CIRCLE, color if on else "muted")
 
-        in_sq = bool(row.get("squeeze", False)) if row is not None else False
-        d = _trend_dir(row, params) if row is not None else 0
-        armed = (getattr(state, "bars_since_off", -1) >= 0) and d != 0
-        sig = getattr(state, "last_signal", "NONE")
+        # ⚠ MINDHAROM KOR A MOSTANI HELYZETET MONDJA, nem a tortenelmet.
+        #
+        # Az elso valtozat az `entry` kort a `last_signal`-bol vette — az viszont
+        # RAGADOS (sosem torlodik), tehat az elso jel utan OROKRE vilagitott.
+        # Merve (GOLD, 1500 H1-gyertya): a gyertyak 92,5%-an latszott volna. Egy
+        # allando kor nem jelzes, hanem disz.
+        #
+        # A `release` sem a nyers `bars_since_off >= 0`, hanem a TENYLEGES ABLAK
+        # (`min_bars_since_squeeze` .. `max_bars_after_squeeze`) — pontosan az az
+        # idoszak, amikor a strategia BELEPHET. Igy a harom kor egy valodi
+        # folyamat: szukul -> felfegyverkezve var -> most tor ki.
+        if row is None:
+            return {k: Cell(_CIRCLE, "muted") for k, _ in _STAGES}
+        in_sq = bool(row.get("squeeze", False))
+        lo = int(params.get("min_bars_since_squeeze", 0))
+        hi = int(params.get("max_bars_after_squeeze", 5))
+        _bso = int(getattr(state, "bars_since_off", -1))
+        in_window = _bso >= 0 and lo <= _bso <= hi
+        d = _trend_dir(row, params)
+        sig = _breakout_signal(row, params) if in_window else "NONE"
         return {
             "squeeze": dot(in_sq, "yellow"),
-            "release": dot(armed, "green" if d > 0 else "red" if d < 0 else "muted"),
+            # ⚠ A KOR A FELFEGYVERZEST mutatja, a SZIN az iranyt. A `d != 0`
+            # feltetel HIBAS volt: a `_trend_dir` KIKAPCSOLT trend-szurovel
+            # DEFINICIO SZERINT 0-t ad (`require_trend_alignment=False`, pl.
+            # GOLD-on) — a kor tehat nem azert maradt sotet, mert nem tortenik
+            # semmi, hanem mert a szuro ki van kapcsolva. Merve: GOLD 0,0%
+            # (miközben 9 belepo tuzelt ugyanabban az idoszakban).
+            # Sarga = felfegyverkezve, de az iranyt a trend-szuro nem donti el.
+            "release": dot(in_window,
+                           "green" if d > 0 else "red" if d < 0 else "yellow"),
             "entry":   dot(sig in ("BUY", "SELL"),
                            "green" if sig == "BUY" else "red"),
         }
@@ -387,8 +415,25 @@ class BollingerSqueezeStrategy(Strategy):
         except Exception as e:
             log.debug("%s — bollinger kijelzés: %s", md.symbol, e)
             return {"marks": empty}
-        st = _advance(SqueezeState(symbol=md.symbol), ind.iloc[-2], md.params)
-        return {"marks": self._marks(st, ind.iloc[-1], md.params)}
+        # ⚠ AZ ALLAPOTOT VISSZA KELL JATSZANI, nem egy friss peldanyt leptetni
+        # EGY gyertyaval. A harom korbol ketto FELHALMOZOTT allapotbol el:
+        #   release -> `bars_since_off` (hany gyertyaja oldodott a szukules)
+        #   entry   -> `last_signal`
+        # Egy uj `SqueezeState` mindkettot alaphelyzetben tartja, tehat egyetlen
+        # lepes utan szinte SOHA nem gyulladhattak ki — a felhasznalo pontosan
+        # ezt latta: „a Bollinger sosem mutat semmilyen pottyot".
+        #
+        # Merve (GOLD, 1001 jel-gyertya): friss allapottal MINDHAROM kor halvany;
+        # a sorozatot vegigjatszva `last_signal=SELL` -> az entry-kor PIROS.
+        # ⚠ `to_dict("records")` es NEM `.iloc[i]`: a kijelzes KORONKENT es
+        # PARONKENT fut, es a pandas soronkenti indexelese itt 7x lassabb
+        # (merve: 42 ms vs 6 ms 1001 gyertyara). Egy korabbi lelet epp az volt,
+        # hogy a mely ablaku kijelzes-ut megfogta a GIL-t.
+        _recs = ind.to_dict("records")
+        st = SqueezeState(symbol=md.symbol)
+        for _r in _recs[:-1]:                  # a formalodo gyertya kimarad
+            st = _advance(st, _r, md.params)
+        return {"marks": self._marks(st, _recs[-1], md.params)}
 
     def live_cells(self, state: Any, md: MarketData) -> dict:
         df = (md.bars or {}).get("M15")
@@ -502,6 +547,32 @@ class BollingerSqueezeStrategy(Strategy):
         times = [int(t.timestamp()) for t in ind.index]
         m15_sec = (int((ind.index[1] - ind.index[0]).total_seconds())
                    if len(ind) >= 2 else 900)
+
+        # ── A BOLLINGER-SZALAG a charton ───────────────────────────────────
+        # ⚠ EDDIG SEHOL NEM LATSZOTT: a strategia egyetlen `Indicator` rekordot
+        # sem kuldott (a `wpr_sma` `MA`-t es `WPR`-t igen), tehat a szalagot
+        # semelyik idosikon nem rajzolta ki semmi.
+        #
+        # ⚠ ES NEM AZ MT5 SAJAT Bollingerjet kerjuk. Az a CHART idosikjan
+        # szamolna — a strategia viszont a JEL-idosikon (alapbol H1) dont. Egy
+        # M1-charton az MT5 sajat szalagja MAST mutatna, mint amivel a motor
+        # dolgozik; itt viszont a TENYLEGES ertekeket rajzoljuk ki, tehat minden
+        # chart-idosikon ugyanaz latszik, amit a dontés hasznal.
+        #
+        # A rajz szakaszokbol all (`Trend`), es CSAK a legutobbi `_BAND_BARS`
+        # jel-gyertyara: a teljes ablak haromszor ezer objektumot jelentene.
+        _bb = ind.tail(_BAND_BARS)
+        _bt = [int(t.timestamp()) for t in _bb.index]
+        for _key, _col in (("bb_ub", "gray"), ("bb_mb", "blue"), ("bb_lb", "gray")):
+            _v = _bb[_key].tolist()
+            for i in range(len(_v) - 1):
+                a, b = _v[i], _v[i + 1]
+                if a is None or b is None or a != a or b != b:   # NaN-szuro
+                    continue
+                objs.append(viz.Trend(name=f"bb{_key}_{_bt[i]}",
+                                      t1=_bt[i], p1=float(a),
+                                      t2=_bt[i + 1], p2=float(b),
+                                      color=_col, width=1))
 
         st = SqueezeState(symbol=md.symbol)
         for i in range(len(ind) - 1):              # csak ZÁRT gyertyák
