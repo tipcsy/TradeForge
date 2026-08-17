@@ -2047,6 +2047,36 @@ class InstrumentParamsDialog:
         sub._on_show = self._build_link_pane
         sub.show("MT4")
 
+    def _send_viz(self):
+        """A chart-fájl újrarajzolása a MOSTANI beállításokkal.
+
+        ⚠ A VISSZAJELZÉS RÉSZLETES. Egy „kész" felirat itt keveset érne: ha 0
+        objektum ment ki, vagy épp az egyik stratégia kimaradt (mert a rajza ki
+        van kapcsolva), azt látni kell — különben a felhasználó a chartot nézné,
+        és nem értené, miért nem változott."""
+        lbl = getattr(self, "_viz_send_lbl", None)
+        if lbl is None:
+            return
+        try:
+            lbl.config(text="Rajzolás…", fg=FG_GRAY)
+            lbl.update_idletasks()
+            from trading.live_trader import render_symbol_viz
+            r = render_symbol_viz(self.symbol, self.root_cfg)
+        except Exception as ex:
+            lbl.config(text=f"Hiba: {ex}", fg=FG_RED)
+            return
+        if r["errors"]:
+            lbl.config(text=" · ".join(r["errors"])[:200], fg=FG_RED)
+            return
+        _who = ", ".join(f"{n} ({c})" for n, c in r["strategies"]) or "—"
+        _txt = f"Kiküldve: {r['lines']} objektum — {_who}."
+        if r["skipped"]:
+            # ⚠ NEM néma kihagyás: a kikapcsolt rajzú stratégia hiánya különben
+            # úgy nézne ki, mintha a küldés nem működne.
+            _txt += (f"  Kihagyva (a rajzuk ki van kapcsolva): "
+                     f"{', '.join(r['skipped'])}.")
+        lbl.config(text=_txt, fg=FG_GREEN)
+
     def _build_link_pane(self, name: str):
         from core import mt_deploy as _md
         pane = self._link_sub.page(name)
@@ -2115,6 +2145,35 @@ class InstrumentParamsDialog:
         self._link_status.pack(side="left", padx=(10, 0))
 
         # ── MELYIK FÁJL MICSODA ────────────────────────────────────────────
+        # ── KÜLDÉS A CHARTHOZ (csak MT5 — ott van élő kapcsolat) ───────────
+        # ⚠ A spec kérése: „ha beállítom a spread kaput, akkor rögtön reagálja le
+        # a TBAND". A viz-fájlt eddig KIZÁRÓLAG a futó motor írta, a saját
+        # ütemében: egy leállított páron egyáltalán nem lehetett megnézni, mit
+        # csinálna a mostani beállításokkal, futó páron pedig várni kellett a
+        # következő viz-körre.
+        #
+        # ⚠ ÉS A KÜLDÉS NEM MENTÉS — ahogy a spec külön kiköti. Ez csak KIRAJZOL:
+        # a config/paraméterek attól még változatlanok maradnak.
+        if name == _md.MT5:
+            _h("Küldés a charthoz")
+            _n("A MOSTANI beállításokkal újrarajzolja a chart-fájlt "
+               f"(TFV_{self.symbol}.csv) — a futó motor nélkül is. Így egy kapu "
+               "vagy paraméter átállítása után azonnal látod a hatását.")
+            _n("⚠ A küldés NEM mentés: a beállításokat nem írja el. És a "
+               "szimbólum MINDEN engedélyezett stratégiáját újrarajzolja — a "
+               "fájl a teljes pillanatkép, egyetlen stratégiát írva a többi "
+               "rajza eltűnne.", FG_GRAY_DIM)
+            _srow = tk.Frame(body, bg=BG)
+            _srow.pack(anchor="w", fill="x", padx=10, pady=(4, 0))
+            tk.Button(_srow, text="Küldés a charthoz", bg=BTN_BT_BG, fg=BTN_BT_FG,
+                      relief="flat", font=self._sf, cursor="hand2",
+                      command=self._send_viz).pack(side="left")
+            self._viz_send_lbl = tk.Label(_srow, text="", bg=BG, fg=FG_GRAY,
+                                          font=self._sf, anchor="w",
+                                          justify="left")
+            self._viz_send_lbl.pack(side="left", padx=(10, 0), fill="x",
+                                    expand=True)
+
         # A kérés: „nem látom, milyen fájlokat is szeretne odamásolni, és egy
         # rövid leírás sem ártana, hogy melyik mit csinál."
         _h("Mit telepít ki")
@@ -3388,6 +3447,25 @@ class InstrumentParamsDialog:
         strat_params = {k: v for k, v in params.items() if k not in _EXEC_KEYS}
         if not self._write_json(strat_params, extra=extra):
             return
+        # ⚠ A MENTÉS UTÁN A CHART IS FRISSÜL. A spec külön kiköti: „a küldés nem
+        # egyenlő a mentéssel… persze a mentéskor is le kell futnia". Enélkül a
+        # mentett érték és a charton látszó rajz szétcsúszna, amíg a motor
+        # következő viz-köre meg nem érkezik — leállított páron pedig sosem.
+        # CSENDES ág: itt nincs hova visszajelezni (az ablak bezárul), és egy
+        # sikertelen rajzolás nem akadályozhatja meg a MENTÉST.
+        try:
+            from trading.live_trader import render_symbol_viz
+            _r = render_symbol_viz(self.symbol, self.root_cfg)
+            if _r.get("errors"):
+                import logging as _lg
+                _lg.getLogger(__name__).info(
+                    "%s — mentés utáni chart-küldés: %s",
+                    self.symbol, "; ".join(_r["errors"]))
+        except Exception as _ex:
+            import logging as _lg
+            _lg.getLogger(__name__).info(
+                "%s — mentés utáni chart-küldés nem sikerült: %s",
+                self.symbol, _ex)
         self.popup.destroy()
 
     _METRIC_SAVE_COLS = ("trades", "win_rate", "total_pnl", "profit_factor",

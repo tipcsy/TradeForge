@@ -1264,6 +1264,69 @@ def _write_symbol_viz(symbol, pair_cfg, strats, params_by_strat: dict):
         log.warning("%s — viz írás hiba: %s", symbol, e)
 
 
+def render_symbol_viz(symbol: str, cfg: dict, clear_first: bool = True) -> dict:
+    """A szimbólum TELJES chart-pillanatképe a MENTETT állapotból — MOTOR NÉLKÜL.
+
+    ⚠ MIÉRT KELL. A viz-fájlt eddig KIZÁRÓLAG a futó motor írta, a saját
+    ütemében. Aki átállított egy kaput vagy egy paramétert, csak akkor látta a
+    hatását a charton, ha a pár ÉPP kereskedett — és akkor is a következő
+    viz-körben. Egy leállított páron egyáltalán nem lehetett megnézni, mit
+    csinálna. A spec kérése: „ha beállítom a spread kaput, akkor rögtön reagálja
+    le a TBAND".
+
+    ⚠ MINDEN ENGEDÉLYEZETT STRATÉGIÁT ÚJRARAJZOL, nem csak azt, amelyikből
+    hívtad. A fájl a szimbólum TELJES pillanatképe (`write_lines` felülírja) —
+    egyetlen stratégiát írva a többi rajza NÉMÁN eltűnne a chartról.
+
+    Visszaad: `{"lines", "strategies", "skipped", "errors", "path"}`. A hívó
+    ebből ír ki beszédes visszajelzést; a néma siker itt épp olyan rossz, mint a
+    néma hiba (nem derülne ki, hogy 0 objektumot küldtünk).
+    """
+    from core import viz_prefs as _vp
+    from strategy import strategies_for
+    from strategy.settings import config_for_strategy
+
+    out = {"lines": 0, "strategies": [], "skipped": [], "errors": [], "path": None}
+    pair_cfg = ((cfg.get("pairs") or {}).get(symbol) or {})
+    point_size = pair_cfg.get("point_size")
+    if not point_size:
+        out["errors"].append("hiányzik a `point_size` a pár configjából — "
+                             "enélkül nincs mit rajzolni")
+        return out
+
+    lines = []
+    for st in strategies_for(cfg, symbol):
+        if not _vp.viz_on(cfg, symbol, st.name):
+            out["skipped"].append(st.name)
+            continue
+        try:
+            _cs = config_for_strategy(cfg, st.name)
+            params = strategy_params(symbol, st.name, _cs,
+                                     fallback=default_params(st, _cs))
+            if not params:
+                out["errors"].append(f"{st.name}: nincs paraméter")
+                continue
+            _n0 = len(lines)
+            lines += pair_visual_lines(symbol, params, st, point_size, pair_cfg,
+                                       cfg=_cs)
+            out["strategies"].append((st.name, len(lines) - _n0))
+        except Exception as ex:
+            out["errors"].append(f"{st.name}: {ex}")
+
+    # ⚠ ÜRES PILLANATKÉPET CLEAR-rel SOHA nem írunk ki: az LETÖRÖLNÉ a chartot,
+    # és a felhasználó azt látná, hogy „a Küldés kiürítette a rajzot". Ugyanaz a
+    # szabály, mint a motor útján.
+    if not lines:
+        out["errors"].append("a pillanatkép ÜRES — a chart régi rajza megmarad")
+        return out
+    try:
+        out["path"] = mt5_visual.write_lines(symbol, lines, clear_first=clear_first)
+        out["lines"] = len(lines)
+    except Exception as ex:
+        out["errors"].append(f"írás: {ex}")
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Viz-szál (a rajzolás LEVÁLASZTVA a kereskedésről)
 # ---------------------------------------------------------------------------
