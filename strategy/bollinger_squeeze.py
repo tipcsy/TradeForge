@@ -310,6 +310,11 @@ class BollingerSqueezeStrategy(Strategy):
                    int(params.get("kc_ema_period", 20)),
                    int(params.get("atr_period", 14))) + 20
 
+    def signal_bar_seconds(self, params: dict) -> int:
+        """A dontes a JEL-idosikon szuletik (alapbol H1) — az M1 csak kezbesit.
+        Enelkul egy jelbol percenkent egy riasztas lett volna."""
+        return int((params or {}).get("signal_tf_min") or signal_tf_min()) * 60
+
     def _tf_ratio(self, params: dict) -> int:
         """Hány M15 gyertyából áll egy jel-idősíkú gyertya (H1 → 4)."""
         tf = int((params or {}).get("signal_tf_min") or signal_tf_min())

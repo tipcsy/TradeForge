@@ -205,6 +205,24 @@ class Strategy(ABC):
         (állapotmentes stratégiánál nincs plusz mélység)."""
         return self.warmup_bars(params, timeframe_label)
 
+    def signal_bar_seconds(self, params: dict) -> int:
+        """Hany MASODPERCES az a gyertya, ami a BELEPESI DONTEST hozza? `0` =
+        a vegrehajtasi (alacsony) idosik donti el, gyertyankent.
+
+        ⚠ MIRE KELL. A „csak jelzes" mod riasztasa alert-ID alapjan dedupal az
+        MQL5-ben, es az ID eddig MINDIG a vegrehajtasi (M1) gyertya idejebol
+        keszult. Ez a `wpr_sma`-ra helyes: ott az M1 allapotgep hozza a dontest,
+        tehat minden M1 gyertya UJ jel lehet.
+
+        A `bollinger_squeeze_breakout` viszont H1-en dont (`signal_tf_min=60`),
+        az M1 „pusztan kezbesiti" — egyetlen jelbol igy 60 riasztas lett,
+        percenkent egy, ugyanarra a szetupra. Elesben megmerve: 18:00, 18:01,
+        18:02, 18:03, 18:04 — mind ugyanaz a GOLD BUY.
+
+        Aki felulirja, a JEL-idosik hosszat adja vissza; a hivo ezzel kerekiti a
+        gyertyaidot, tehat egy jel-gyertyara pontosan EGY azonosito jut."""
+        return 0
+
     @abstractmethod
     def compute_display(self, md: MarketData) -> dict[str, Cell]:
         """A stratégia-oszlopok celláinak kiszámítása MEGJELENÍTÉSHEZ.

@@ -2598,6 +2598,19 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
                         _bt = int(df_lo.index[-2].timestamp())
                     except Exception:
                         _bt = int(time.time())
+                    # ⚠ A JEL-GYERTYÁRA kerekítünk, nem a végrehajtásira. A
+                    # `bollinger` H1-en dönt (`signal_tf_min=60`), az M1 „pusztán
+                    # kézbesíti" — az M1-alapú azonosítóból egyetlen jelre 60
+                    # riasztás lett, percenként egy. Élesben mérve (GOLD BUY):
+                    # 18:00, 18:01, 18:02, 18:03, 18:04 — mind ugyanaz a szetup.
+                    # A `wpr_sma` 0-t ad vissza (ott az M1 HOZZA a döntést),
+                    # tehát a viselkedése bitre változatlan.
+                    try:
+                        _sig_sec = int(strategy.signal_bar_seconds(params) or 0)
+                    except Exception:
+                        _sig_sec = 0
+                    if _sig_sec > 0:
+                        _bt = (_bt // _sig_sec) * _sig_sec
                     _aid = f"{symbol}|{strategy.name}|{signal}|{_bt}"
                     request_alert(
                         symbol, strategy.name, _aid,

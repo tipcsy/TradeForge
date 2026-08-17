@@ -476,6 +476,11 @@ class MlAiStrategy(Strategy):
 
     # --- Élő jelzéslogika (ZÁRT gyertyán, állapottartó) --------------------
 
+    def signal_bar_seconds(self, params: dict) -> int:
+        """A modell a JEL-idosikon dont (`signal_tf_min`) — az M1 csak kezbesit.
+        Enelkul egy jelbol percenkent egy riasztas lenne."""
+        return int((params or {}).get("signal_tf_min") or signal_tf_min()) * 60
+
     def new_signal_state(self, symbol: str) -> MlAiState:
         return MlAiState(symbol)
 
