@@ -149,6 +149,12 @@ class MarketData:
     # jel látszik). Így a charton csak az a belépő-jelölő jelenik meg, ami élesben is
     # végrehajtódott volna — nem a kapu által blokkolt.
     entry_gate: "callable | None" = None
+    # Opcionalis LOT-SZAMOLO a chart-jelolokhoz: `fn(sl_points) -> float`.
+    # A keret tolti (egyenleg x kockazat / slotok — `core.risk_manager.calc_lot`),
+    # mert az EGYENLEG es a slot-szam KERETRENDSZER-tudas, nem strategiaie. A
+    # strategia csak megkerdezi, ha ki akarja irni a jelolore.
+    # None -> a cimke lot nelkul keszul (nem talalgatunk merettet).
+    lot_of: "callable | None" = None
     # VÉGREHAJTÁSI SZŰRŐK a jel-replayben (spread-kapu + volatilitás-szűrő).
     # True (alap) = a chart csak azt mutatja, amit a motor ténylegesen megkötne.
     # False = NYERS jelzések: minden, amit a stratégia jelez, kapuk nélkül.
@@ -180,6 +186,25 @@ class Strategy(ABC):
     """A vázhoz csatlakozó stratégia szerződése."""
 
     name: str = "strategy"
+
+    # ROVID nev a SZUK helyekre: chart-jelolo es a dashboard oszlop-fejlece.
+    # A `bollinger_squeeze_breakout` 26 karakter — egy chart-cimken es egy
+    # tablazat-fejlecben egyarant hasznalhatatlan. A HOSSZU nev marad ott, ahol
+    # van hely (beallito ablakok, naplo, fajlnevek): ott az egyertelmuseg er
+    # tobbet.
+    #
+    # Ures -> a `short_name` property SZAMOLJA a nevbol (kezdobetuk).
+    short: str = ""
+
+    @property
+    def short_name(self) -> str:
+        """A rovid nev (max 10 karakter). Sajat `short` hianyaban a
+        `_`-szeletek KEZDOBETUIBOL kepzodik: `a_b_c` -> `ABC`. Igy egy uj
+        strategia is kap hasznalhato roviditest, nem a teljes nevet."""
+        if self.short:
+            return self.short[:10]
+        parts = [p for p in str(self.name).split("_") if p]
+        return ("".join(p[0] for p in parts).upper() or str(self.name))[:10]
 
     # --- Megjelenítés -----------------------------------------------------
     @abstractmethod

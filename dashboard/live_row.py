@@ -294,6 +294,30 @@ def _money_r(money, r, mode="both"):
     if mode == "money" or r is None:
         return s
     return f"{s} {r:+.2f}R"
+_SHORT_CACHE: dict = {}
+
+
+def short_of(name: str) -> str:
+    """A stratégia RÖVID neve a szűk helyekre (fejléc, chart-címke).
+
+    ⚠ MIÉRT. A `bollinger_squeeze_breakout` 26 karakter — egy táblázat-fejlécben
+    és egy chart-címkén egyaránt használhatatlan; a sor-blokkok emiatt szélesebbek
+    voltak, mint a bennük levő adat. A HOSSZÚ név ott marad, ahol van hely
+    (beállító ablakok, napló, fájlnevek): ott az egyértelműség ér többet.
+
+    Ismeretlen névre ÖNMAGÁT adja vissza — egy fejléc sosem maradhat üresen."""
+    if name in _SHORT_CACHE:
+        return _SHORT_CACHE[name]
+    out = str(name or "")
+    try:
+        from strategy import get_strategy_by_name
+        out = get_strategy_by_name(name).short_name or out
+    except Exception:
+        pass
+    _SHORT_CACHE[name] = out
+    return out
+
+
 def _stage_color(name):
     """A stádium-pötty színe SZEMANTIKUS SZÍN-NÉVBŐL (`green` / `red` / `muted`…).
 

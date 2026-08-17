@@ -78,11 +78,16 @@ def groups(strategies, collapsed: dict = None) -> list:
         if gk:
             out.append(("Kapuk", gk, "gates"))
     for n in (strategies or []):
+        # ⚠ A FELIRAT a RÖVID név, a KULCS marad a teljes név. A kettő nem
+        # ugyanaz: a kulcs azonosít (összecsukás, cella-kulcsok), a felirat csak
+        # megjelenít — a `bollinger_squeeze_breakout` 26 karaktere itt szélesebb
+        # volt, mint a blokkban levő adat.
+        _lab = _lr.short_of(n)
         if _lr.is_collapsed(collapsed, n):
-            out.append((n, [f"{n}|stages", f"{n}|ctrl"], n))
+            out.append((_lab, [f"{n}|stages", f"{n}|ctrl"], n))
         else:
-            out.append((n, [f"{n}|{k}" for k in
-                            ("stages", "position", "daily", "quality", "ctrl", "opt")], n))
+            out.append((_lab, [f"{n}|{k}" for k in
+                               ("stages", "position", "daily", "quality", "ctrl", "opt")], n))
     out.append(("Összesítő", ["total_pos", "total_daily"], None))
     return out
 

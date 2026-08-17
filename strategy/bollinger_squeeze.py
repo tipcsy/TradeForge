@@ -292,6 +292,7 @@ def _advance(state: SqueezeState, row, params: dict) -> SqueezeState:
 
 class BollingerSqueezeStrategy(Strategy):
     name = "bollinger_squeeze_breakout"
+    short = "BSB"
     default_sl_method = "atr"      # a méret ATR-ből jön (nem swing)
 
     # ── Megjelenítés ──────────────────────────────────────────────────────
@@ -529,5 +530,19 @@ class BollingerSqueezeStrategy(Strategy):
                         objs.append(viz.Trend(name=f"bsq{tag}_{t}",
                                               t1=t - 3 * 60, p1=price,
                                               t2=t + 3 * 60, p2=price, color=col))
+                    # ⚠ CIMKE a fuggoleges vonalon: MELYIK strategia es MEKKORA
+                    # merettel. Egy chartra tobb strategia rajza is kerulhet, a
+                    # vonal szine pedig csak az IRANYT mondja. A lot a keret
+                    # `md.lot_of`-jabol jon (ugyanaz a `calc_lot`, amivel a motor
+                    # kot); egyenleg hianyaban a meret KIMARAD.
+                    _lab = f"{self.short_name} {st.pending}"
+                    if callable(getattr(md, "lot_of", None)):
+                        _l = md.lot_of(sl_p)
+                        if _l and _l > 0:
+                            _lab += f" {_l:.2f} lot"
+                    objs.append(viz.Text(name=f"bsqlbl_{t}", t1=t,
+                                         p1=(tp if up else sl), text=_lab,
+                                         color="lime" if up else "red",
+                                         fontsize=9))
             st.pending = "NONE"
         return objs

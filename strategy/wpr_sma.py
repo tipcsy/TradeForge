@@ -140,6 +140,7 @@ _MARKS_EMPTY = {k: Cell(_CIRCLE, "muted") for k, _ in _STAGES}
 
 class WprSmaStrategy(Strategy):
     name = "wpr_sma"
+    short = "WPRSma"
 
     # --- Megjelenítés -----------------------------------------------------
 
@@ -596,6 +597,21 @@ class WprSmaStrategy(Strategy):
                 objects.append(viz.VLine(
                     name=f"m1sig_{t}", t1=t,
                     color="green" if sig == "BUY" else "red", width=2))
+                # ⚠ CÍMKE a függőleges vonalon: MELYIK stratégia és MEKKORA
+                # mérettel. Több stratégia rajza egy chartra kerülhet, és a
+                # vonalak színe csak az IRÁNYT mondja — a szetup gazdája eddig
+                # sehol nem látszott. A lot a keret `md.lot_of`-jából jön
+                # (ugyanaz a `calc_lot`, amivel a motor köt); ha nincs egyenleg,
+                # a méret KIMARAD, nem találgatunk.
+                _lab = f"{self.short_name} {sig}"
+                if callable(getattr(md, "lot_of", None)):
+                    _l = md.lot_of(sl_points)
+                    if _l and _l > 0:
+                        _lab += f" {_l:.2f} lot"
+                objects.append(viz.Text(
+                    name=f"m1lbl_{t}", t1=t, p1=(tp if sig == "BUY" else sl),
+                    text=_lab, color="green" if sig == "BUY" else "red",
+                    fontsize=9))
                 objects.append(viz.Trend(name=f"m1entry_{t}", t1=t0, p1=entry, t2=t_end, p2=entry,
                                          color="orange", width=2))
                 objects.append(viz.Trend(name=f"tp_{t}", t1=t0, p1=tp, t2=t_end, p2=tp,

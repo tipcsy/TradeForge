@@ -1150,6 +1150,29 @@ def pair_visual_lines(symbol: str, params: dict, strategy, point_size: float,
                                                   bars.get("M1"))
     else:
         md.entry_gate = tf_align_gate_fn(symbol, strategy.name, params)
+    # ── LOT-SZÁMOLÓ a chart-jelölőhöz ──────────────────────────────────────
+    # ⚠ A méret KERETRENDSZER-tudás (egyenleg × kockázat / slotok), nem
+    # stratégiáé — ugyanaz a `calc_lot`, amivel a motor ténylegesen köt, tehát a
+    # charton látott lot nem egy külön képlet eredménye. Ha az egyenleg nem
+    # kérdezhető le (nincs MT5), `None` marad: a címke lot NÉLKÜL készül, nem
+    # találgatunk méretet.
+    try:
+        from core.risk_manager import calc_lot as _cl, calc_effective_slots as _ces
+        _bal = mt5_connector.account_balance()
+        _tcfg = (_cfg or {}).get("trading") or {}
+        if _bal and _bal > 0 and _tcfg:
+            def _lot_of(sl_points, _b=_bal, _pc=(pair_cfg or {}), _t=_tcfg):
+                try:
+                    _sl = float(sl_points)
+                    if _sl <= 0:
+                        return 0.0
+                    return _cl(_b, _sl, _pc, _t, _ces(_b, _sl, _pc, _t))
+                except Exception:
+                    return 0.0
+            md.lot_of = _lot_of
+    except Exception as _ex:
+        log.debug("%s — lot-számoló nem építhető a vizhez: %s", symbol, _ex)
+
     objects = apply_no_trade(strategy.visual_objects(md), pair_cfg or {}, th)
     # + a GENERIKUS piac-állapot kód a per-gyertya BarState-ekhez (a per-pár
     #   kiválasztott piac-stratégiából; csak ha kérve van a charton).

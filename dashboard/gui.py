@@ -108,8 +108,10 @@ def build_columns(strategies) -> list[Column]:
     for st in strategies:
         for col in st.columns():
             if col.kind == "marker":
+                # A FEJLÉC a rövid név (szűk oszlop), a KULCS és a
+                # `strategy_name` viszont a teljes név marad — az azonosít.
                 mid.append(_replace(col, key=f"{col.key}_{st.name}",
-                                    header=st.name, strategy_name=st.name))
+                                    header=st.short_name, strategy_name=st.name))
             else:
                 mid.append(col)
     # A TF-együttállás („Együtt") oszlop a stratégia-oszlopok ELÉ kerül.

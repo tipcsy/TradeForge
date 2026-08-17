@@ -394,6 +394,7 @@ def _proba_cell(p_long: float, p_short: float, thr_long: float, thr_short: float
 
 class MlAiStrategy(Strategy):
     name = "ml_ai"
+    short = "MLAI"
 
     # A modell CÍMKÉJE ATR-alapú stopra épül (`ml_train.label_outcomes`:
     # SL = ATR14 × sl_atr_mult, TP = SL × tp_rr_ratio), és a `sl_tp_points` is ezt
