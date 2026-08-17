@@ -2047,6 +2047,50 @@ class InstrumentParamsDialog:
         sub._on_show = self._build_link_pane
         sub.show("MT4")
 
+    def _diag_viz(self):
+        """Végigkérdezi, MIÉRT nem jön létre a chart-fájl.
+
+        ⚠ Egy hiányzó fájl önmagában néma: a motor viz-írója öt ponton lép ki
+        csendben, és kívülről mind ugyanúgy néz ki. Egy MÁSIK gépen ezt kitalálni
+        reménytelen — ezért a program mondja meg."""
+        lbl = getattr(self, "_viz_send_lbl", None)
+        if lbl is None:
+            return
+        try:
+            from trading.live_trader import viz_diagnose
+            rows = viz_diagnose(self.symbol, self.root_cfg)
+        except Exception as ex:
+            lbl.config(text=f"Ellenőrzési hiba: {ex}", fg=FG_RED)
+            return
+        bad = [t for ok, t in rows if not ok]
+        _p = self._viz_diag_win if getattr(self, "_viz_diag_win", None) else None
+        if _p is not None and _p.winfo_exists():
+            _p.destroy()
+        win = tk.Toplevel(self.popup)
+        self._viz_diag_win = win
+        win.title(f"{self.symbol} — miért nincs chart-fájl?")
+        win.configure(bg=BG)
+        win.transient(self.popup)
+        tk.Label(win, bg=BG, fg=(FG_RED if bad else FG_GREEN), font=self._hf,
+                 anchor="w", text=(f"{len(bad)} feltétel NEM teljesül"
+                                   if bad else "Minden feltétel rendben")
+                 ).pack(anchor="w", padx=12, pady=(10, 4))
+        for ok, txt in rows:
+            tk.Label(win, bg=BG, fg=(FG_GRAY if ok else FG_RED), font=self._sf,
+                     anchor="w", justify="left", wraplength=760,
+                     text=("   ✓  " if ok else "   ⚠  ") + txt
+                     ).pack(anchor="w", padx=12)
+        if not bad:
+            tk.Label(win, bg=BG, fg=FG_GRAY_DIM, font=self._sf, anchor="w",
+                     justify="left", wraplength=760, pady=6,
+                     text=("Minden feltétel teljesül — ilyenkor a „Küldés a "
+                           "charthoz" + chr(0x201D) + " gomb azonnal létrehozza a "
+                           "fájlt. Ha a MOTOR mégsem írja magától: a pár nem fut "
+                           "(Play), vagy még nem telt le a viz-ütem.")
+                     ).pack(anchor="w", padx=12)
+        tk.Button(win, text="Bezárás", bg=BTN_DIS_BG, fg=BTN_DIS_FG, relief="flat",
+                  font=self._sf, command=win.destroy).pack(pady=10)
+
     def _send_viz(self):
         """A chart-fájl újrarajzolása a MOSTANI beállításokkal.
 
@@ -2168,6 +2212,12 @@ class InstrumentParamsDialog:
             tk.Button(_srow, text="Küldés a charthoz", bg=BTN_BT_BG, fg=BTN_BT_FG,
                       relief="flat", font=self._sf, cursor="hand2",
                       command=self._send_viz).pack(side="left")
+            # ⚠ Ha a fájl NEM jön létre, a motor öt ponton lép ki csendben —
+            # kívülről mind ugyanúgy néz ki (nincs ott a fájl). Ez a gomb
+            # végigkérdezi a feltételeket, és megnevezi az elsőt, ami bukik.
+            tk.Button(_srow, text="Miért nincs fájl?", bg=BG_HEADER, fg=FG_WHITE,
+                      relief="flat", font=self._sf, cursor="hand2",
+                      command=self._diag_viz).pack(side="left", padx=(6, 0))
             self._viz_send_lbl = tk.Label(_srow, text="", bg=BG, fg=FG_GRAY,
                                           font=self._sf, anchor="w",
                                           justify="left")

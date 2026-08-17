@@ -1264,6 +1264,75 @@ def _write_symbol_viz(symbol, pair_cfg, strats, params_by_strat: dict):
         log.warning("%s — viz írás hiba: %s", symbol, e)
 
 
+def viz_diagnose(symbol: str, cfg: dict) -> list:
+    """MIERT nem jon letre a `TFV_<SYM>.csv`? — `[(rendben, szoveg), ...]`.
+
+    A motor viz-iroja OT ponton lep ki csendben (nincs dashboard-allapot, egyik
+    rajz sincs bekapcsolva, throttle, hianyzo `point_size`, ures/hibas
+    pillanatkep). Kivulrol mindegyik UGYANUGY nez ki: a fajl egyszeruen nincs
+    ott. Egy masik gepen ezt kitalalni remenytelen — ezert vegigkerdezzuk a
+    felteteleket SORRENDBEN, es megnevezzuk az elsot, ami nem teljesul.
+    """
+    from core import viz_prefs as _vp
+    from core.params_store import params_file
+    from strategy import strategies_for
+
+    Q1, Q2 = "„", "”"          # magyar nyito/zaro idezojel
+    out = []
+    pc = (cfg.get("pairs") or {}).get(symbol)
+    if pc is None:
+        out.append((False, f"a(z) {Q1}{symbol}{Q2} NINCS a config.json `pairs` "
+                           f"listájában — a motor hozzá sem nyúl. Elgépelt vagy "
+                           f"más nevű szimbólum?"))
+        return out
+    out.append((True, f"a(z) {Q1}{symbol}{Q2} szerepel a config `pairs` listájában"))
+
+    _ps = pc.get("point_size")
+    out.append((bool(_ps),
+                f"van `point_size` ({_ps})" if _ps else
+                "HIÁNYZIK a `point_size` a pár configjából — enélkül a viz-író "
+                "AZONNAL kilép. Javítás: python tools/refresh_point_values.py --write"))
+
+    strats = strategies_for(cfg, symbol)
+    out.append((bool(strats),
+                "engedélyezett stratégiák: " + ", ".join(s.name for s in strats)
+                if strats else
+                "egyetlen stratégia sincs ENGEDÉLYEZVE ezen a páron"))
+
+    _on = [s.name for s in strats if _vp.viz_on(cfg, symbol, s.name)]
+    out.append((bool(_on),
+                "a RAJZ be van kapcsolva: " + ", ".join(_on) if _on else
+                "egyik stratégia RAJZA sincs bekapcsolva — enélkül a motor meg "
+                "sem nyitja az írási utat. Kattints az instrumentum NEVÉRE a "
+                "soron, és pipáld be a Vizualizáció oszlopot."))
+
+    for st in strats:
+        if st.name in _on:
+            _f = params_file(symbol, st.name)
+            out.append((True, f"{st.name}: " + ("mentett paraméterkészlet"
+                        if _f.exists() else "a stratégia ALAPÉRTELMEZETT paraméterei")))
+
+    try:
+        from core import mt5_connector as _mc
+        _ci = _mc.connection_info(cfg)
+        out.append((bool(_ci.get("connected")),
+                    f"MT5 kapcsolat: {_ci.get('server')}" if _ci.get("connected")
+                    else "NINCS MT5-kapcsolat — gyertya-adat nélkül a rajz üres "
+                         "marad, üres pillanatképet pedig nem írunk ki"))
+    except Exception as ex:
+        out.append((False, f"MT5 kapcsolat: nem ellenőrizhető ({ex})"))
+
+    try:
+        from core import mt5_visual as _mv
+        d = _mv.files_dir()
+        _ok = d is not None and d.exists()
+        out.append((_ok, f"a közös Files mappa: {d}" if _ok
+                    else f"a közös Files mappa nem található ({d})"))
+    except Exception as ex:
+        out.append((False, f"közös mappa: {ex}"))
+    return out
+
+
 def render_symbol_viz(symbol: str, cfg: dict, clear_first: bool = True) -> dict:
     """A szimbólum TELJES chart-pillanatképe a MENTETT állapotból — MOTOR NÉLKÜL.
 
@@ -1309,7 +1378,16 @@ def render_symbol_viz(symbol: str, cfg: dict, clear_first: bool = True) -> dict:
             _n0 = len(lines)
             lines += pair_visual_lines(symbol, params, st, point_size, pair_cfg,
                                        cfg=_cs)
-            out["strategies"].append((st.name, len(lines) - _n0))
+            _cnt = len(lines) - _n0
+            out["strategies"].append((st.name, _cnt))
+            # A NULLA objektum sem nema: a `pair_visual_lines` ures listat ad, ha
+            # nincs honnan gyertyat venni (nincs MT5, ismeretlen szimbolum, nincs
+            # elozmeny). A hivo kulonben csak annyit latna, hogy ures a
+            # pillanatkep — es nem tudna, MELYIK lepesnel.
+            if _cnt == 0:
+                out["errors"].append(
+                    f"{st.name}: 0 objektum — nincs gyertya-adat (fut az MT5, és "
+                    f"benne van a szimbólum a Piac-figyelőben?)")
         except Exception as ex:
             out["errors"].append(f"{st.name}: {ex}")
 
@@ -1317,7 +1395,17 @@ def render_symbol_viz(symbol: str, cfg: dict, clear_first: bool = True) -> dict:
     # és a felhasználó azt látná, hogy „a Küldés kiürítette a rajzot". Ugyanaz a
     # szabály, mint a motor útján.
     if not lines:
-        out["errors"].append("a pillanatkép ÜRES — a chart régi rajza megmarad")
+        # A leggyakoribb ok KULON nevet kap: ha egyetlen rajz sincs bekapcsolva,
+        # az "ures a pillanatkep" epp azt hallgatna el, amit tenni kell.
+        if out["skipped"] and not out["strategies"]:
+            out["errors"].append(
+                "Egyetlen stratégia RAJZA sincs bekapcsolva ezen a páron ("
+                + ", ".join(out["skipped"]) + ") — ezért nem jön létre a fájl "
+                "sem. Kattints az instrumentum NEVÉRE a soron, és pipáld be a "
+                "Vizualizáció oszlopot.")
+        else:
+            out["errors"].append(
+                "a pillanatkép ÜRES — a chart régi rajza megmarad")
         return out
     try:
         out["path"] = mt5_visual.write_lines(symbol, lines, clear_first=clear_first)

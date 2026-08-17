@@ -120,6 +120,59 @@ else:
     check("nincs MT5-kapcsolat (az eles meres kihagyva)", True)
 
 
+# ── 5. DIAGNOSZTIKA: MIERT nincs fajl ───────────────────────────────────
+# ⚠ A motor viz-iroja OT ponton lep ki csendben — kivulrol mind ugyanugy nez ki
+# (a fajl nincs ott). Egy MASIK gepen ezt kitalalni remenytelen.
+_d = inspect.getsource(lt.viz_diagnose)
+check("van diagnosztika", bool(_d))
+from strategy.settings import load_config as _lc
+_cfg = _lc("config.json")
+
+# Ismeretlen szimbolum -> ELSO sorban megmondja, es nem megy tovabb.
+_rows = lt.viz_diagnose("__NINCS_ILYEN__", _cfg)
+check("ismeretlen szimbolumra AZONNAL szol",
+      len(_rows) == 1 and not _rows[0][0] and "NINCS a config" in _rows[0][1],
+      str(_rows))
+
+# Hianyzo point_size -> nevesitve, a JAVITAS parancsaval.
+import copy as _cp
+_c2 = _cp.deepcopy(_cfg)
+_sym0 = next(s for s in _c2["pairs"] if not s.startswith("_"))
+_c2["pairs"][_sym0].pop("point_size", None)
+_bad = [t for ok, t in lt.viz_diagnose(_sym0, _c2) if not ok]
+check("hianyzo point_size-t NEVESITI", any("point_size" in t for t in _bad),
+      str(_bad)[:110])
+check("...es megmondja a JAVITAST is",
+      any("refresh_point_values" in t for t in _bad), str(_bad)[:110])
+
+# ⚠ A kikapcsolt RAJZ a leggyakoribb ok — kulon nevet kell kapnia.
+_c3 = _cp.deepcopy(_cfg)
+_pc = _c3["pairs"][_sym0]
+# ⚠ A HELYES KULCS: `strategy_viz` (per strategia) — az elso valtozatom `viz`-t
+# irt, ami nem letezik, tehat a kikapcsolas nem is tortent meg, es a teszt nem
+# azt merte, amit allitott. A modul sajat konstansat hasznaljuk, hogy egy
+# atnevezes ITT bukjon el, ne elesben.
+from core.viz_prefs import VIZ as _VIZAX
+_pc[_VIZAX[0]] = {st.name: False for st in strategies_for(_c3, _sym0)}
+_bad3 = [t for ok, t in lt.viz_diagnose(_sym0, _c3) if not ok]
+check("a kikapcsolt RAJZ kulon nevet kap",
+      any("RAJZA sincs bekapcsolva" in t for t in _bad3), str(_bad3)[:120])
+check("...es megmondja, HOL kapcsolod be",
+      any("Vizualizáció" in t or "instrumentum NEVÉRE" in t for t in _bad3),
+      str(_bad3)[:120])
+
+# A rendereles ugyanezt az okot adja vissza (nem „ures a pillanatkep").
+_r3 = lt.render_symbol_viz(_sym0, _c3)
+check("a renderelesnel is ez az ok jon vissza, nem az „ures pillanatkep”",
+      any("RAJZA sincs bekapcsolva" in e for e in _r3["errors"]),
+      str(_r3["errors"])[:120])
+
+# A feluleten is elerheto.
+_gsrc2 = inspect.getsource(idlg.InstrumentParamsDialog._diag_viz)
+check("a felulet is kinalja (gomb)", "viz_diagnose" in _gsrc2)
+check("...es a BUKOTT felteteleket emeli ki", "FG_RED" in _gsrc2)
+
+
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")
 sys.exit(0 if all(results) else 1)
