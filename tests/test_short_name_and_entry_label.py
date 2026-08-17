@@ -143,6 +143,26 @@ check("...es egyenleg nelkul NEM koti be (marad None)",
       "if _bal and _bal > 0" in _blk)
 
 
+# ── 5. A JELOLO-SZINEK STRATEGIAK KOZOTT AZONOSAK ───────────────────────
+# ⚠ A LELET (a felhasznalotol): „A BSB-nek miert mas a zold szine? Igy nagyon
+# nem lathato!" A bollinger `lime`-ot hasznalt (RGB 0,255,0), a wpr_sma
+# `green`-t (0,170,0). A lime vilagos chart-hatteren olvashatatlan — es ket
+# kulonbozo zold azt sugallja, hogy a SZIN JELENT valamit, holott csak az
+# IRANYT mondja. Egy uj strategia se talaljon ki sajat palettat.
+from strategy.visual import _rgb as _color_rgb
+check("a `green` es a `lime` TENYLEG mas", _color_rgb("green") != _color_rgb("lime"),
+      f"green={_color_rgb('green')} lime={_color_rgb('lime')}")
+
+_VIZ_SRC = {n: (ROOT / f).read_text(encoding="utf-8") for n, f in (
+    ("wpr_sma", "strategy/wpr_sma.py"),
+    ("bollinger", "strategy/bollinger_squeeze.py"))}
+for _n, _src2 in _VIZ_SRC.items():
+    check(f"{_n}: NEM hasznal `lime`-ot a jelolokon", '"lime"' not in _src2,
+          "lime maradt a forrasban")
+    check(f"{_n}: a BUY-jelolo `green`", '"green"' in _src2)
+    check(f"{_n}: a SELL-jelolo `red`", '"red"' in _src2)
+
+
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")
 sys.exit(0 if all(results) else 1)

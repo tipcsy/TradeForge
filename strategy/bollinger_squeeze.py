@@ -514,8 +514,13 @@ class BollingerSqueezeStrategy(Strategy):
                                      window=1 if st.in_squeeze else 0))
             if st.pending in ("BUY", "SELL") and getattr(md, "show_signals", True):
                 t = times[i] + m15_sec
+                # ⚠ UGYANAZ A ZOLD, mint a tobbi strategiaban (`green`,
+                # RGB 0,170,0). A `lime` (0,255,0) vilagos chart-hatteren
+                # gyakorlatilag olvashatatlan — es ket strategia ket kulonbozo
+                # zoldje azt sugallna, hogy a szin JELENT valamit, holott csak
+                # az iranyt mondja.
                 objs.append(viz.VLine(name=f"bsq_{t}", t1=t,
-                                      color="lime" if st.pending == "BUY" else "red"))
+                                      color="green" if st.pending == "BUY" else "red"))
                 plan = self.sl_tp_points(row, md.params,
                                          md.params.get("point_size", 0.0001))
                 if plan:
@@ -526,7 +531,7 @@ class BollingerSqueezeStrategy(Strategy):
                     sl = entry - sl_p * pip if up else entry + sl_p * pip
                     tp = entry + tp_p * pip if up else entry - tp_p * pip
                     for tag, price, col in (("e", entry, "orange"),
-                                            ("t", tp, "lime"), ("s", sl, "red")):
+                                            ("t", tp, "green"), ("s", sl, "red")):
                         objs.append(viz.Trend(name=f"bsq{tag}_{t}",
                                               t1=t - 3 * 60, p1=price,
                                               t2=t + 3 * 60, p2=price, color=col))
@@ -542,7 +547,7 @@ class BollingerSqueezeStrategy(Strategy):
                             _lab += f" {_l:.2f} lot"
                     objs.append(viz.Text(name=f"bsqlbl_{t}", t1=t,
                                          p1=(tp if up else sl), text=_lab,
-                                         color="lime" if up else "red",
+                                         color="green" if up else "red",
                                          fontsize=9))
             st.pending = "NONE"
         return objs
