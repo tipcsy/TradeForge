@@ -167,6 +167,26 @@ check("a renderelesnel is ez az ok jon vissza, nem az „ures pillanatkep”",
       any("RAJZA sincs bekapcsolva" in e for e in _r3["errors"]),
       str(_r3["errors"])[:120])
 
+# ⚠ A LEGGYAKRABBAN BUKO FELTETEL: a motor CSAK a FUTO parokra rajzol
+# (`_publish_viz_jobs`: `if instrument_state.get(symbol) not in ("LIVE",
+# "CLOSING"): continue`). Egy leallitott paron SOHA nem jon letre a fajl,
+# barmilyen helyes minden mas beallitas — es kivulrol ez ugyanugy nez ki, mint
+# egy hiba. Ez a feltetel az elso valtozatbol KIMARADT.
+from core import run_state as _rs2
+_c4 = _cp.deepcopy(_cfg)
+for _st4 in strategies_for(_c4, _sym0):
+    _rs2.set_state(_c4, _sym0, _st4.name, _rs2.STOPPED)
+_bad4 = [t for ok, t in lt.viz_diagnose(_sym0, _c4) if not ok]
+check("a LEALLITOTT par kulon okot kap",
+      any("ELINDÍTVA" in t for t in _bad4), str(_bad4)[:130])
+check("...es megmondja, hogy a Kuldes gomb megis megcsinalja",
+      any("Küldés a charthoz" in t for t in _bad4), str(_bad4)[:130])
+# ⚠ A forrasban is ellenorizzuk, hogy a motor tenyleg igy szur — kulonben a
+# diagnosztika egy nem letezo szabalyt magyarazna.
+_psrc2 = inspect.getsource(lt._publish_viz_jobs)
+check("a motor tenyleg csak a FUTO parokra rajzol",
+      'instrument_state.get(symbol) not in ("LIVE", "CLOSING")' in _psrc2)
+
 # A feluleten is elerheto.
 _gsrc2 = inspect.getsource(idlg.InstrumentParamsDialog._diag_viz)
 check("a felulet is kinalja (gomb)", "viz_diagnose" in _gsrc2)

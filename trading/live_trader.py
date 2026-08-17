@@ -1312,6 +1312,24 @@ def viz_diagnose(symbol: str, cfg: dict) -> list:
             out.append((True, f"{st.name}: " + ("mentett paraméterkészlet"
                         if _f.exists() else "a stratégia ALAPÉRTELMEZETT paraméterei")))
 
+    # ⚠ A HIANYZO FELTETEL, ami a leggyakrabban bukik: a motor CSAK a FUTO
+    # parokra rajzol. A `_publish_viz_jobs` elso sora:
+    #     if instrument_state.get(symbol) not in ("LIVE", "CLOSING"): continue
+    # Egy leallitott paron tehat SOHA nem jon letre a fajl, barmilyen helyes is
+    # minden mas beallitas — es kivulrol ez ugyanugy nez ki, mint egy hiba.
+    try:
+        from core import run_state as _rs
+        _live = [st.name for st in strats
+                 if _rs.get_state(cfg, symbol, st.name) == _rs.LIVE]
+    except Exception:
+        _live = []
+    out.append((bool(_live),
+                "a motor futtatja: " + ", ".join(_live) if _live else
+                "EGYETLEN stratégia sincs ELINDÍTVA ezen a páron (▶) — a motor "
+                "CSAK a futó párokra rajzol, tehát magától nem hozza létre a "
+                "fájlt. A „Küldés a charthoz” gomb viszont futó motor nélkül is "
+                "megcsinálja."))
+
     try:
         from core import mt5_connector as _mc
         _ci = _mc.connection_info(cfg)
