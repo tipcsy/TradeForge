@@ -68,6 +68,15 @@ def _dialog():
     return d
 
 
+# ⚠ A MERES NE FUGGJON A GEPTOL. Az indítás előtt megnézzük, fut-e MÁSHOL
+# optimalizálás ezen a páron (`opt_lock`) — és ha a felhasználó gépén épp fut
+# egy, a dialógus JOGGAL tagadja meg az indítást. Ilyenkor a teszt nem a
+# mód-választót mérné, hanem azt, hogy a mérés pillanatában mi futott. (Élesben
+# pontosan ez történt: „MÁR FUT egy optimalizálás 44 perce — pid 9012".)
+from core import opt_lock as _ol_guard
+_ol_guard.is_held = lambda *_a, **_k: False
+
+
 d = _dialog()
 KEYS = [r["key"] for r in d._opt_rows if r["key"] in d._skip_vars]
 check("van mit hangolni (a mérés értelmes)", len(KEYS) >= 3, f"{len(KEYS)} kulcs")
@@ -98,6 +107,18 @@ d.on_optimize = lambda s, n, all_params=False: (
 d.opt_state_of = lambda s, n: ""
 if getattr(d, "_run_tab", None) is not None:
     d._run_tab._start = lambda: CALLS.append("single")
+
+
+
+def _func_src(src: str, header: str) -> str:
+    """Egy metódus TELJES törzse. ⚠ Fix karakter-ablakkal (`src[i:i+2200]`) a
+    mérés elcsúszik, amint a függvény hosszabb lesz — és úgy néz ki, mintha a
+    kód romlott volna el, holott csak a teszt ablaka lett szűk."""
+    i = src.find(header)
+    if i < 0:
+        return ""
+    j = src.find(chr(10) + "    def ", i + len(header))
+    return src[i:j if j > 0 else len(src)]
 
 
 def _run(mode, n_ticked):
@@ -155,9 +176,8 @@ check("Hangolás pipa nélkül → megmondja, hogy így ez backtest",
 
 # A pipa átállítása FRISSÍTI a figyelmeztetést (nem csak a mód-váltás).
 _src = (ROOT / "dashboard" / "instrument_dialog.py").read_text(encoding="utf-8")
-_i = _src.find("def _on_skip_change")
 check("a pipa parancsa is frissíti a figyelmeztetést",
-      "_refresh_run_mode_ui()" in _src[_i:_i + 1200])
+      "_refresh_run_mode_ui()" in _func_src(_src, "def _on_skip_change"))
 
 
 # ── 4. A FELTÉTELEK csak OPTIMALIZÁLÁS módban ──────────────────────────
@@ -201,8 +221,7 @@ d._prog_hide()
 check("elrejthető", not d._prog_box.winfo_manager())
 
 # A gomb STOP-pá alakul, és a haladás az optimalizáló TÉNYLEGES állapotából jön.
-_i = _src.find("def _sync_opt_status")
-_blk = _src[_i:_i + 2200]
+_blk = _func_src(_src, "def _sync_opt_status")
 check("a gomb futás közben leállít", "Optimalizálás leállítása" in _blk)
 check("a % a KÖZÖS forrásból (opt_activity) jön — mint a főképernyőn",
       "progress_pct" in _blk)
@@ -250,8 +269,7 @@ d.on_optimize = lambda s, n, all_params=False: (
 
 # ⚠ ÉS AZ OK A VEZÉRLŐBŐL JÖN, nem a felület találgatásából: a három korábban
 # NÉMA `return` most mind szöveget ad.
-_i = _g.find("def request_optimize")
-_blk = _g[_i:_i + 2200]
+_blk = _func_src(_g, "def request_optimize")
 for _why in ("kivezetés alatt", "kereskedik", "már fut vagy sorban áll"):
     check(f"a vezérlő megmondja: {_why!r}", _why in _blk)
 
@@ -275,9 +293,8 @@ check("a vezérlő MÁSOLATON üríti a kihagyás-listát",
 check("...és a munkás a MÁSOLATTAL indul",
       "args = (symbol, df_m15, df_m1, job_cfg, initial_bal)" in _g)
 # A jelző a SORBA kerülést is túléli (a kérés szándéka nem veszhet el).
-_i = _g.find("def request_optimize")
 check("a kérés jelzője a sorba állításkor is megmarad",
-      "_all_params[job]" in _g[_i:_i + 3000])
+      "_all_params[job]" in _func_src(_g, "def request_optimize"))
 check("a kattintás-kezelő továbbadja",
       "all_params" in str(inspect.signature(
           __import__("dashboard.gui", fromlist=["x"]).DashboardWindow._live2_opt_click

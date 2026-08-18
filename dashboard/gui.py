@@ -796,12 +796,24 @@ class OptimizerController:
             # „elindítottam"-ot jelentett vissza, a felület pedig ugyanúgy nézett
             # ki, mint máskor — a felhasználó szemszögéből a gomb nem csinált
             # semmit.
-            if self.instrument_state.get(symbol) == "CLOSING":
+            # ⚠ A kivezetés SZIMBÓLUM-szintű, az optimalizálás viszont PER
+            # STRATÉGIA. Ha ezt a stratégiát épp most állítottuk le (a futás
+            # kedvéért), a pár attól még kivezetésben lehet egy nyitott pozíció
+            # miatt — de új belépő NEM nyílik, tehát a paraméterfájl felülírása
+            # nem szivároghat egy friss belépőbe. Csak akkor tiltunk, ha a
+            # stratégia TÉNYLEG kereskedik.
+            if (self.instrument_state.get(symbol) == "CLOSING"
+                    and self._strategy_live(symbol, strategy)):
                 return (f"{symbol}: kivezetés alatt (nyitott pozíciót kezel) — "
                         f"az optimalizálás nem indul.")
+            # ⚠ VÉGSŐ VÉDELEM: a felület (`_live2_opt_click`) már leállította a
+            # stratégiát, mielőtt idáig jutott. Ha ide MÉGIS kereskedő
+            # stratégiával érkezünk (más hívó, sikertelen leállítás), nem
+            # optimalizálunk — a paraméterfájl nem íródhat át egy futó
+            # stratégia alól.
             if self._strategy_live(symbol, strategy):
-                return (f"{symbol}/{strategy}: kereskedik — előbb állítsd meg "
-                        f"(▶/■).")
+                return (f"{symbol}/{strategy}: kereskedik — a leállítás nem "
+                        f"sikerült, ezért az optimalizálás nem indul.")
             job = (symbol, strategy)
             if job in self._running or job in self._queue:
                 return f"{symbol}/{strategy}: már fut vagy sorban áll."
@@ -3234,27 +3246,39 @@ class DashboardWindow:
         if st == "QUEUED":
             self._opt_ctrl.cancel_queued(symbol, name)
             return
-        # LIVE-ban KERESKEDŐ stratégiát nem optimalizálunk: a futás végén
-        # felülíródna a paraméterfájlja, és egy nyíló belépő a RÉGI paraméterekkel
-        # menne. (Ugyanaz a szabály, mint a classic menüjében — ott tiltott
-        # tételként, indoklással látszik.)
-        # ⚠ AZ ELUTASÍTÁS OKA VISSZATÉR a hívónak. Eddig csak a FŐABLAK
-        # állapotsorába íródott — a paraméter-ablakból indítva tehát a felhasználó
-        # megnyomta az Indítást, és a saját ablakában SEMMI nem történt; a
-        # magyarázat egy takarásban lévő sorban ült. („Nem indult el, vagy nem
-        # látszódik, hogy történt volna bármi.")
+        # ⚠ KERESKEDŐ STRATÉGIÁT LEÁLLÍTUNK — nem tagadjuk meg az indítást.
+        #
+        # A szabály oka változatlan: a futás végén felülíródna a paraméterfájlja,
+        # és egy nyíló belépő a RÉGI paraméterekkel menne. A korábbi válasz erre
+        # a tiltás volt („előbb állítsd meg"), ami egy fölösleges oda-vissza:
+        # a felhasználó úgyis leállítja, aztán elindítja az optimalizálást.
+        # A kérése szó szerint: „nyugodtan leállíthatja a stratégiát, amíg a
+        # hangolás fut… ha el van indítva, akkor állítsa le!"
+        #
+        # ⚠ A leállítás UGYANAZON az úton megy, mint a ■ gomb (`_stop_strategy`):
+        # nyitott pozícióval KIVEZETÉS lesz belőle — a pozíciót a motor tovább
+        # kezeli, új belépő viszont nem nyílik. Épp ezért biztonságos ilyenkor
+        # optimalizálni: friss belépő nem születhet a régi paraméterekkel.
+        #
+        # ⚠ ÉS NEM NÉMÁN: a válasz megmondja, hogy leállítottuk — a stratégia
+        # magától NEM indul újra a futás végén.
+        _stopped = ""
         try:
             if self._opt_ctrl._strategy_live(symbol, name):
-                _msg = (f"{symbol}/{name}: kereskedik — előbb állítsd meg (▶/■). "
-                        f"Futó stratégiát nem optimalizálunk: a végén felülíródna "
-                        f"a paraméterfájlja, és egy nyíló belépő a RÉGI "
-                        f"paraméterekkel menne.")
-                self.lbl_status.config(text=_msg)
-                return _msg
+                self._stop_strategy(symbol, name)
+                _stopped = (f"{name} LEÁLLÍTVA az optimalizálás idejére "
+                            f"(magától nem indul újra). ")
         except Exception:
-            pass
-        return self._opt_ctrl.request_optimize(symbol, name,
-                                               all_params=all_params) or ""
+            import logging as _logging
+            _logging.getLogger(__name__).exception(
+                "a stratégia leállítása nem sikerült (%s/%s)", symbol, name)
+        _refused = self._opt_ctrl.request_optimize(symbol, name,
+                                                   all_params=all_params)
+        if _refused:
+            return _stopped + _refused
+        if _stopped:
+            self.lbl_status.config(text=_stopped)
+        return _stopped
 
     def _live2_opt(self, symbol: str, name: str) -> str:
         """Az Opt cella PER STRATÉGIA — rövid, cellába férő alak.

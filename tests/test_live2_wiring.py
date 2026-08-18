@@ -8,7 +8,11 @@ kitalalt motor-allapottal.
 A `classic` marad az alapertelmezes: az 1. korben HAROM elrendezes bukott meg,
 tehat a 2.0 addig valaszthato marad, amig nem bizonyitott.
 """
+import atexit
+import pathlib
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -81,6 +85,22 @@ if TK_OK:
             "wpr_sma": {"pnl": 12.0, "r": 0.8, "r_count": 2},
             "ml_ai": {"pnl": -4.0, "r": 0.0, "r_count": 0}}
         return d
+
+    # ⚠⚠ A VALODI ABLAK VALODI FAJLBA MENTENE. A `_save_main_config` a
+    # `G.ROOT / "config.json"`-t irja — vagyis a FELHASZNALO eles configjat. Ez
+    # 2026-08-18-an MEG IS TORTENT: a kereskedo strategia automatikus
+    # leallitasa (v2.65.0) meghivja a mentest, es a teszt 2 paros dummy configja
+    # RARODOTT a 10 paros elesre. A helyreallitas csak azert sikerult, mert a
+    # program epp futott, es a memoriajabol vissza tudta irni.
+    #
+    # ⚠ A `_save_main_config` CSONKOLASA NEM VED: barmelyik uj hivasi ut
+    # (Play/Stop, slot, kapu-kapcsolo) megkerulheti. A ROOT-ot kell atteriteni —
+    # akkor a teszt fizikailag nem eri el az eles fajlt.
+    _REAL_ROOT = G.ROOT
+    _TMP_ROOT = pathlib.Path(tempfile.mkdtemp(prefix="tfv_live2_"))
+    G.ROOT = _TMP_ROOT
+    atexit.register(lambda: setattr(G, "ROOT", _REAL_ROOT))
+    atexit.register(lambda: shutil.rmtree(_TMP_ROOT, ignore_errors=True))
 
     def build_window(layout):
         """A VALODI DashboardWindow — frissito ciklus es MT5-poller nelkul."""
@@ -242,12 +262,36 @@ if TK_OK:
         finally:
             _oa.clear_symbol("Ger40")
 
-        # KERESKEDO strategiat nem optimalizalunk (a futas vegen felulirodna a
-        # parameterfajlja, es egy nyilo belepo a REGI parameterekkel menne)
+        # ⚠ KERESKEDO strategia: v2.65.0 ota LEALLITJUK, nem tagadjuk meg. A
+        # szabaly oka valtozatlan (a futas vegen felulirodna a parameterfajlja,
+        # es egy nyilo belepo a REGI parameterekkel menne) — de a valasz nem a
+        # tiltas, hanem a leallitas. A felhasznalo kerése: „nyugodtan
+        # leallithatja a strategiat, amig a hangolas fut… ha el van inditva,
+        # akkor allitsa le!"
         calls.clear()
+        _stops = []
         w4._opt_ctrl._strategy_live = lambda s, n: True
-        w4._live2_opt_click("Ger40", "wpr_sma")
-        check("kereskedo strategiat NEM indit el", calls == [], str(calls))
+        w4._stop_strategy = lambda s, n: _stops.append((s, n))
+        _ret = w4._live2_opt_click("Ger40", "wpr_sma")
+        check("kereskedo strategiat LEALLITJA", _stops == [("Ger40", "wpr_sma")],
+              str(_stops))
+        # ⚠ A LEALLITAS UTAN indul is: kulonben ket kattintas kellene ugyanahhoz.
+        check("...es utana el is inditja",
+              calls == [("start", "Ger40", "wpr_sma", False)], str(calls))
+        # ⚠ ES MEGMONDJA: a strategia magatol NEM indul ujra a futas vegen.
+        check("...es kiirja, hogy leallitotta", "LEÁLLÍTVA" in (_ret or ""),
+              repr(_ret))
+
+        # ⚠ VEGSO VEDELEM a VEZERLOBEN (nem a feluleten): ha ide megis kereskedo
+        # strategiaval erkezunk — mas hivo, vagy sikertelen leallitas —, a
+        # `request_optimize` maga tagadja meg. A parameterfajl nem irodhat at egy
+        # futo strategia alol. Itt a VALODI fuggvenyt hivjuk (a csonk helyett):
+        # a kapu a legelso sorokban dont, processzt nem indit.
+        _ctrl = w4._opt_ctrl
+        _ctrl._strategy_live = lambda s, n: True
+        _why = G.OptimizerController.request_optimize(_ctrl, "Ger40", "wpr_sma")
+        check("a vezerlo kereskedo strategiat NEM optimalizal", bool(_why), repr(_why))
+        check("...es megmondja, miert", "kereskedik" in (_why or ""), repr(_why))
     finally:
         if w4 is not None:
             w4.root.destroy()

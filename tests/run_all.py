@@ -33,6 +33,33 @@ except Exception:
     pass
 
 
+# ⚠⚠ A TESZT SOHA NE ÍRJA A FELHASZNÁLÓ ÁLLAPOTÁT.
+#
+# Ez a projektben már HÁROMSZOR megtörtént: `run_mode` a `backtest_prefs.json`-ba,
+# `shield_fraction` a `risk_mode.json`-ba, és 2026-08-18-án a legsúlyosabb — egy
+# valódi `DashboardWindow`-t építő teszt 2 páros dummy configja RÁÍRÓDOTT a 10
+# páros ÉLES `config.json`-ra. Mentés nem volt; a helyreállítás csak azért
+# sikerült, mert a program épp futott, és a memóriájából vissza tudta írni.
+#
+# Az egyes tesztekben elhelyezett csonkok NEM elég erősek: minden új hívási út
+# (Play/Stop, slot, kapu-kapcsoló, automatikus leállítás) megkerülheti őket.
+# Ezért a FUTTATÓ őrzi az éles fájlokat: lenyomat előtte, ellenőrzés utána — és
+# ha bármi megváltozott, HANGOSAN szól, a bűnös fájl nevével.
+_GUARDED = ("config.json", "data/backtest_prefs.json", "data/risk_mode.json")
+
+
+def _fingerprint() -> dict:
+    import hashlib
+    out = {}
+    for rel in _GUARDED:
+        f = ROOT / rel
+        try:
+            out[rel] = hashlib.sha1(f.read_bytes()).hexdigest() if f.exists() else None
+        except Exception:
+            out[rel] = "?"
+    return out
+
+
 def main() -> int:
     pattern = sys.argv[1] if len(sys.argv) > 1 else ""
     files = sorted(p for p in HERE.glob("test_*.py") if pattern in p.name)
@@ -40,8 +67,10 @@ def main() -> int:
         print(f"Nincs illeszkedő teszt: {pattern!r}")
         return 1
 
+    _before = _fingerprint()
     total = passed = 0
     failed: list = []
+    _dirty: dict = {}          # fájl → az a teszt, ami után elváltozott
     for f in files:
         # PYTHONIOENCODING: a gyerek-processz stdoutja cso, amit a Python a
         # LOCALE szerint kodol (Windowson cp1250) — egy ekezeten tuli karakter
@@ -64,7 +93,15 @@ def main() -> int:
         total += m
         passed += n
         ok = (r.returncode == 0)
-        print(f"{'PASS' if ok else 'FAIL'}  {f.name:<32} {n}/{m}")
+        # ⚠ AZONNAL ellenőrzünk, hogy a BŰNÖS teszt neve derüljön ki — a végén
+        # már csak azt tudnánk, hogy „valamelyik".
+        _now = _fingerprint()
+        for _rel, _h in _now.items():
+            if _h != _before[_rel] and _rel not in _dirty:
+                _dirty[_rel] = f.name
+                _before[_rel] = _h            # hogy a többi tesztre ne áradjon
+        print(f"{'PASS' if ok else 'FAIL'}  {f.name:<32} {n}/{m}"
+              + ("   ⚠ ÍRTA AZ ÉLES ÁLLAPOTOT" if f.name in _dirty.values() else ""))
         if not ok:
             failed.append(f.name)
             # A bukott ÁLLÍTÁSOK sorai — enélkül újra kellene futtatni kézzel
@@ -79,10 +116,19 @@ def main() -> int:
     # Az osszesito sor SZANDEKOSAN ekezet nelkuli: a Windows-konzol cp1250, es a
     # tobbi teszt kimenete is ezt a konvenciot koveti. Igy sehol nem torzul.
     print("-" * 52)
+    if _dirty:
+        # ⚠ Ez NEM stilisztikai kifogas: az eles config felulirasa adatvesztes.
+        print("!! A TESZTEK MEGVALTOZTATTAK A FELHASZNALO ALLAPOTAT:")
+        for _rel, _who in _dirty.items():
+            print(f"     {_rel}  <-  {_who}")
+        print("   A tesztnek a ROOT-ot ideiglenes mappara kell teritenie "
+              "(lasd test_live2_wiring.py).")
     print(f"{passed}/{total} allitas  |  {len(files) - len(failed)}/{len(files)} fajl PASS")
     if failed:
         print("BUKOTT: " + ", ".join(failed))
-    return 1 if failed else 0
+    # ⚠ Az éles állapot felülírása ÖNMAGÁBAN bukás — akkor is, ha minden
+    # állítás átment. Az adatvesztés nem „figyelmeztetés".
+    return 1 if (failed or _dirty) else 0
 
 
 if __name__ == "__main__":
