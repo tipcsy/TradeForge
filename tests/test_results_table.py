@@ -48,7 +48,7 @@ check("max_drawdown szazalek", rt.kind_of("max_drawdown") == rt.KIND_PCT)
 check("trades egesz", rt.kind_of("trades") == rt.KIND_INT)
 check("note szoveg", rt.kind_of("note") == rt.KIND_TEXT)
 check("ismeretlen (parameter-)oszlop -> szam",
-      rt.kind_of("wpr_m1_trigger") == rt.KIND_FLOAT)
+      rt.kind_of("wpr_m1_buy_trigger") == rt.KIND_FLOAT)
 
 check("DD megjelenitese SZAZALEK", rt.fmt("max_drawdown", "0,1864") == "18,6%",
       rt.fmt("max_drawdown", "0,1864"))

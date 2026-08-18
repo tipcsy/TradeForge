@@ -160,14 +160,20 @@ BASE = {"sma_period": 200, "wpr_m15_period": 21, "wpr_m1_period": 21,
         "wpr_m15_sell_extreme": -20, "wpr_m15_buy_extreme": -80,
         "wpr_m15_sell_trigger": -40, "wpr_m15_buy_trigger": -60,
         "wpr_m1_sell_extreme": -20, "wpr_m1_buy_extreme": -80,
-        "wpr_m1_trigger": -50, "sl_atr_mult": 2.0, "tp_rr_ratio": 1.0,
+        "wpr_m1_sell_trigger": -40, "wpr_m1_buy_trigger": -60,
+        "sl_atr_mult": 2.0, "tp_rr_ratio": 1.0,
         "atr_period": 14, "atr_min_pct": 0.5, "atr_max_pct": 3.0,
         "atr_avg_ref": 10.0, "atr_baseline_bars": 0}
 
 _ce = _cfg()
 op.set_skip_keys(_ce, SYM, "wpr_sma", ["sma_period", "tp_rr_ratio"])
+# ⚠ A trial-szam nem kozombos: a szintetikus adaton a kombinaciok TULNYOMO
+# resze 0 kotest ad (-inf score), es ha MINDEN trial ilyen, a fuggveny None-t ad
+# — a teszt ekkor nem a kihagyast merne, hanem a szerencset. Az M1 trigger
+# irany szerinti kettevalasa (v2.63.0) eggyel novelte a keresesi teret, es 3
+# huzas mar nem volt eleg egyetlen kotesig sem.
 _res = _opt.optimize_pair_optuna(SYM, M15, M1, OCFG, BASE, PAIR, TRADING,
-                                 10000.0, ST, n_trials=3, n_splits=2,
+                                 10000.0, ST, n_trials=10, n_splits=2,
                                  train_months=6, test_months=2, cfg=_ce)
 if _res:
     check("a KIHAGYOTT kulcs az alapertekén marad (nem sorsolta)",

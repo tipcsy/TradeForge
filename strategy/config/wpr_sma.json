@@ -24,7 +24,8 @@
     "wpr_m15_buy_trigger": -50,
     "wpr_m1_sell_extreme": -20,
     "wpr_m1_buy_extreme": -80,
-    "wpr_m1_trigger": -50
+    "wpr_m1_sell_trigger": -50,
+    "wpr_m1_buy_trigger": -50
   },
   "sltp": {
     "_comment": "ATR-alapú SL/TP: SL = ATR * sl_atr_mult, TP = SL * tp_rr_ratio. Az atr_period a közös execution configban van (core/execution_params.py) — végrehajtási/spread-kapu paraméter, nem stratégia-jelzés.",
@@ -92,10 +93,15 @@
         "category": "Indikátor – M1",
         "comment": "M1 felső extrém — SELL belépő felfegyverzés"
       },
-      "wpr_m1_trigger": {
+      "wpr_m1_sell_trigger": {
         "recompute": "signal",
         "category": "Indikátor – M1",
-        "comment": "M1 trigger — átütve tüzel a belépő"
+        "comment": "M1 SELL trigger — lefelé átütve tüzel a SELL belépő"
+      },
+      "wpr_m1_buy_trigger": {
+        "recompute": "signal",
+        "category": "Indikátor – M1",
+        "comment": "M1 BUY trigger — felfelé átütve tüzel a BUY belépő"
       },
       "sl_atr_mult": {
         "recompute": "execution",
@@ -180,7 +186,14 @@
       "max": -65,
       "step": 5
     },
-    "wpr_m1_trigger": {
+    "wpr_m1_sell_trigger": {
+      "min": -70,
+      "max": -30,
+      "step": 5,
+      "gt": "wpr_m1_buy_extreme",
+      "lt": "wpr_m1_sell_extreme"
+    },
+    "wpr_m1_buy_trigger": {
       "min": -70,
       "max": -30,
       "step": 5,
@@ -214,8 +227,10 @@
       "wpr_m15_buy_trigger < wpr_m15_sell_extreme",
       "wpr_m15_buy_extreme < wpr_m15_sell_trigger",
       "wpr_m15_sell_trigger < wpr_m15_sell_extreme",
-      "wpr_m1_buy_extreme < wpr_m1_trigger",
-      "wpr_m1_trigger < wpr_m1_sell_extreme"
+      "wpr_m1_buy_extreme < wpr_m1_buy_trigger",
+      "wpr_m1_buy_trigger < wpr_m1_sell_extreme",
+      "wpr_m1_buy_extreme < wpr_m1_sell_trigger",
+      "wpr_m1_sell_trigger < wpr_m1_sell_extreme"
     ]
   }
 }

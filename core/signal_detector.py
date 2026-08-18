@@ -23,7 +23,8 @@ A BUY és SELL trigger KÜLÖN paraméter (wpr_m15_buy_trigger / wpr_m15_sell_tr
 visszafelé kompatibilis fallback a régi közös wpr_m15_trigger-re).
 
 M1 belépő (ÁLLAPOTGÉP, mint az M15): ha a jó zóna nyitva, FELFEGYVEREZ, amikor a WPR
-eléri az M1 extrémet, és TÜZEL, amikor utána ÁTÜTI a triggert (a köztes gyertyák
+eléri az M1 extrémet, és TÜZEL, amikor utána ÁTÜTI az IRÁNYA triggerét
+(wpr_m1_buy_trigger / wpr_m1_sell_trigger; fallback a régi közös wpr_m1_trigger-re) (a köztes gyertyák
 megengedettek — a fokozatos átütést is elkapja). A régi „két szomszédos gyertyán"
 szabály (extrém→trigger egyetlen gyertyán) ennek a részhalmaza volt, és sima trenden a
 BUY-belépőt gyakorlatilag sosem engedte tüzelni.
@@ -155,14 +156,24 @@ def check_m1_entry(
 
     m1_sell_extreme = params["wpr_m1_sell_extreme"]  # felső extrém (pl. -20)
     m1_buy_extreme  = params["wpr_m1_buy_extreme"]   # alsó extrém (pl. -80)
-    m1_trigger      = params["wpr_m1_trigger"]       # pl. -50
+    # ⚠ IRÁNYONKÉNTI TRIGGER — ugyanaz a szerkezet, mint az M15-ön. Eddig EGY
+    # közös `wpr_m1_trigger` szolgálta mindkét irányt, holott a két irány nem
+    # szimmetrikus: az egyik irányban egy korábbi visszaütés is jó belépő, a
+    # másikban mélyebb megerősítés kell. Egy közös szám ezt a két igényt
+    # egyetlen kompromisszumba préselte.
+    # ⚠ A RÉGI KULCS TARTALÉK MARAD: egy még nem migrált (mentett, vagy másik
+    # gépről hozott) készlet így a RÉGI viselkedést kapja, nem esik némán
+    # vissza a modul -50-ére. Pontosan úgy, ahogy az M15-nél.
+    _m1t            = params.get("wpr_m1_trigger", -50)   # régi közös (fallback)
+    m1_sell_trigger = params.get("wpr_m1_sell_trigger", _m1t)
+    m1_buy_trigger  = params.get("wpr_m1_buy_trigger",  _m1t)
 
     if state.direction == "SELL":
         # FELFEGYVERZÉS: a WPR eléri a felső (SELL) extrémet.
         if wpr_m1_close >= m1_sell_extreme:
             state.m1_armed = True
         # TÜZELÉS: felfegyverezve a trigger LEFELÉ átütése (prev fölötte, close alatta/rajta).
-        if state.m1_armed and wpr_m1_prev > m1_trigger >= wpr_m1_close:
+        if state.m1_armed and wpr_m1_prev > m1_sell_trigger >= wpr_m1_close:
             state.m1_armed = False
             return "SELL"
 
@@ -171,7 +182,7 @@ def check_m1_entry(
         if wpr_m1_close <= m1_buy_extreme:
             state.m1_armed = True
         # TÜZELÉS: felfegyverezve a trigger FELFELÉ átütése (prev alatta, close fölötte/rajta).
-        if state.m1_armed and wpr_m1_prev < m1_trigger <= wpr_m1_close:
+        if state.m1_armed and wpr_m1_prev < m1_buy_trigger <= wpr_m1_close:
             state.m1_armed = False
             return "BUY"
 

@@ -639,8 +639,12 @@ class WprSmaStrategy(Strategy):
                       p.get("wpr_m15_sell_trigger", _m15t),
                       p.get("wpr_m15_buy_trigger",  _m15t),
                       p.get("wpr_m15_buy_extreme", -80))
+        # M1: ugyanaz a 4 szint, mint M15-ön (a TradeForgeWPR a 4-es esetet már
+        # ismeri: SELL trigger PIROS, BUY trigger ZÖLD — nem kell újrafordítani).
+        _m1t = p.get("wpr_m1_trigger", -50)          # régi közös (fallback)
         m1_levels  = (p.get("wpr_m1_sell_extreme", -20),
-                      p.get("wpr_m1_trigger", -50),
+                      p.get("wpr_m1_sell_trigger", _m1t),
+                      p.get("wpr_m1_buy_trigger",  _m1t),
                       p.get("wpr_m1_buy_extreme", -80))
         objects.append(viz.Indicator("MA",  "M15", p.get("sma_period", 200)))
         objects.append(viz.Indicator("WPR", "M15", p.get("wpr_m15_period", 21),

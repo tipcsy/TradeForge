@@ -118,7 +118,8 @@ BASE = {"sma_period": 200, "wpr_m15_period": 21, "wpr_m1_period": 21,
         "wpr_m15_sell_extreme": -20, "wpr_m15_buy_extreme": -80,
         "wpr_m15_sell_trigger": -40, "wpr_m15_buy_trigger": -60,
         "wpr_m1_sell_extreme": -20, "wpr_m1_buy_extreme": -80,
-        "wpr_m1_trigger": -50, "sl_atr_mult": 2.0, "tp_rr_ratio": 1.0,
+        "wpr_m1_sell_trigger": -50, "wpr_m1_buy_trigger": -50,
+        "sl_atr_mult": 2.0, "tp_rr_ratio": 1.0,
         "atr_period": 14, "atr_min_pct": 0.5, "atr_max_pct": 3.0,
         "atr_avg_ref": 10.0, "atr_baseline_bars": 0}
 ST = get_strategy_by_name("wpr_sma")

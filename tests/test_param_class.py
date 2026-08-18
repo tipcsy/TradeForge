@@ -60,7 +60,7 @@ for strat in ("wpr_sma", "bollinger_squeeze_breakout", "ml_ai"):
 # Ezek nem izles kerdesei: a jel-parametereket az indicator_engine/signal_detector
 # olvassa (allapotgep), a vegrehajtasiakat a risk_manager/vol_baseline (szuro+meret).
 W = json.loads((ROOT / "strategy" / "config" / "wpr_sma.json").read_text(encoding="utf-8"))
-for k in ("sma_period", "wpr_m15_period", "wpr_m1_trigger", "wpr_m15_buy_extreme",
+for k in ("sma_period", "wpr_m15_period", "wpr_m1_buy_trigger", "wpr_m15_buy_extreme",
           "no_trade_resets_signal"):
     check(f"wpr_sma/{k} = signal", param_class(W, k) == SIGNAL_PARAM, param_class(W, k))
 for k in ("sl_atr_mult", "tp_rr_ratio", "atr_min_pct", "atr_max_pct"):
@@ -73,10 +73,10 @@ for k in ("sl_atr_mult", "tp_rr"):
     check(f"bollinger/{k} = execution", param_class(B, k) == EXEC_PARAM, param_class(B, k))
 
 # ── 4. split_params: sorrend-tarto, teljes ───────────────────────────────────
-keys = ["sma_period", "sl_atr_mult", "wpr_m1_trigger", "tp_rr_ratio"]
+keys = ["sma_period", "sl_atr_mult", "wpr_m1_buy_trigger", "tp_rr_ratio"]
 sig, exe = split_params(W, keys)
 check("split_params: a jel-agra a helyesek kerulnek",
-      sig == ["sma_period", "wpr_m1_trigger"], str(sig))
+      sig == ["sma_period", "wpr_m1_buy_trigger"], str(sig))
 check("split_params: a vegrehajtasi agra a helyesek",
       exe == ["sl_atr_mult", "tp_rr_ratio"], str(exe))
 check("split_params: egyetlen kulcs sem VESZ EL",
@@ -143,7 +143,8 @@ _base = {"sma_period": 200, "wpr_m15_period": 21, "wpr_m1_period": 21,
          "wpr_m15_sell_extreme": -20, "wpr_m15_buy_extreme": -80,
          "wpr_m15_sell_trigger": -40, "wpr_m15_buy_trigger": -60,
          "wpr_m1_sell_extreme": -20, "wpr_m1_buy_extreme": -80,
-         "wpr_m1_trigger": -50, "sl_atr_mult": 2.0, "tp_rr_ratio": 1.0,
+         "wpr_m1_sell_trigger": -50, "wpr_m1_buy_trigger": -50,
+        "sl_atr_mult": 2.0, "tp_rr_ratio": 1.0,
          "atr_period": 14, "atr_min_pct": 0.5, "atr_max_pct": 3.0,
          "atr_avg_ref": 10.0, "point_size": 0.01}
 _ref = _candidates(_st, _m15, _m1, _base)
@@ -155,7 +156,7 @@ for _k, _v in (("sl_atr_mult", 4.0), ("tp_rr_ratio", 2.5),
     check(f"EXECUTION {_k}: a JELOLT-lista VALTOZATLAN",
           _candidates(_st, _m15, _m1, _p) == _ref)
 
-for _k, _v in (("sma_period", 120), ("wpr_m1_trigger", -35), ("wpr_m15_period", 9)):
+for _k, _v in (("sma_period", 120), ("wpr_m1_buy_trigger", -35), ("wpr_m15_period", 9)):
     _p = dict(_base); _p[_k] = _v
     check(f"SIGNAL {_k}: a JELOLT-lista VALTOZIK (van ertelme ujraszamolni)",
           _candidates(_st, _m15, _m1, _p) != _ref)

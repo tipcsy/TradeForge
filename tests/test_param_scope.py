@@ -32,7 +32,7 @@ from strategy.settings import config_for_strategy, apply_strategy_config
 from dashboard.instrument_dialog import default_params, _OBSOLETE_PARAM_KEYS
 
 # A `wpr_sma` SAJAT kulcsai — ezek egyike sem tartozik az `ml_ai`-hoz.
-WPR_ONLY = ("sma_period", "wpr_m15_period", "wpr_m1_period", "wpr_m1_trigger",
+WPR_ONLY = ("sma_period", "wpr_m15_period", "wpr_m1_period", "wpr_m1_buy_trigger",
             "wpr_m15_buy_extreme", "wpr_m15_sell_extreme",
             "atr_min_pct", "atr_max_pct", "no_trade_resets_signal")
 
@@ -124,7 +124,7 @@ if TK_OK:
     check("a wpr_sma ablakabol kikerult az elavult max_open_slots",
           "max_open_slots" not in wpr_keys)
     check("...de a valodi parameterei megmaradtak",
-          all(k in wpr_keys for k in ("sma_period", "wpr_m1_trigger",
+          all(k in wpr_keys for k in ("sma_period", "wpr_m1_buy_trigger",
                                       "sl_atr_mult", "atr_period")),
           str(wpr_keys))
 

@@ -66,7 +66,8 @@ wpr[1500:1510] = np.nan                 # adatlyuk a közepén
 M1 = pd.DataFrame({"wpr": wpr}, index=idx)
 
 PARAMS = {"wpr_m1_period": 8, "wpr_m1_buy_extreme": -80.0,
-          "wpr_m1_sell_extreme": -20.0, "wpr_m1_trigger": -50.0}
+          "wpr_m1_sell_extreme": -20.0,
+          "wpr_m1_sell_trigger": -50.0, "wpr_m1_buy_trigger": -50.0}
 
 
 def both(win_open_ts, upto):
