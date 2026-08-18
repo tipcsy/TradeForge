@@ -65,9 +65,9 @@ int    g_ntf = 0;
 bool TfBlocked(string name)
 {
    int at = StringFind(name, "@");
-   if(at < 0 || StringFind(name, FilePrefix) != 0)
+   if(at < 0 || StringFind(name, PFX) != 0)
       return(false);
-   int p = StringLen(FilePrefix);
+   int p = StringLen(PFX);
    string strat = StringSubstr(name, p, at - p);
    for(int i = 0; i < g_ntf; i++)
       if(g_tf_strat[i] == strat)

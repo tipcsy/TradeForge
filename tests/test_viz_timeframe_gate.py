@@ -153,6 +153,22 @@ check("mq4: ismeri a TFONLY sort", 'StringFind(ln, "TFONLY;") == 0' in _m4)
 _i4 = _m4.find("bool TfBlocked")
 _blk4 = _m4[_i4:_i4 + 800]
 check("mq4: a Period() itt MAR perc", "Period() != g_tf_min[i]" in _blk4)
+# ⚠ A LELET (fordításkor bukott ki): a mq4-be az MT5 azonosítóját másoltam át
+# (`FilePrefix` — az az MT5-változat INPUTJA; az MT4-ben `#define PFX "TFV_"`).
+# A szövegszintű teszt ezt nem látta, mert a HÍVÁST kereste, nem azt, hogy a
+# használt nevet az adott fájl DEKLARÁLJA-e. Ugyanaz a hibaosztály, mint a
+# `Period()` enum-csapda: a két nyelvjárás hasonlít, és a másolás némán elromlik.
+check("mq4: a prefixet a SAJÁT néven éri el (PFX), és az deklarált",
+      "StringFind(name, PFX)" in _m4 and '#define PFX' in _m4)
+check("mq4: nincs benne MT5-ös azonosító (FilePrefix)", "FilePrefix" not in _m4)
+check("mq5: a prefixet a SAJÁT néven éri el (FilePrefix), és az deklarált",
+      "StringFind(name, FilePrefix)" in _m5
+      and "input string FilePrefix" in _m5)
+check("mq5: nincs benne MT4-es azonosító (PFX)", "PFX" not in _m5)
+# ⚠ ...és a másik irány: az MT5-only függvény ne szivárogjon az MT4-be.
+check("mq4: nem hív MT5-only függvényt (PeriodSeconds)",
+      "PeriodSeconds" not in _m4)
+
 check("mq4: a szurot a strategia-szuro UTAN alkalmazza",
       "if(TfBlocked(name))" in _m4
       and _m4.find("g_objpref) != 0") < _m4.find("if(TfBlocked(name))"))
