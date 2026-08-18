@@ -207,14 +207,25 @@ if TK_OK:
     try:
         w4 = build_window("live2")
         calls = []
-        w4._opt_ctrl.request_optimize = lambda s, n=None: calls.append(("start", s, n))
+        # ⚠ A csonk ALAIRASA kovesse a valodit: a `request_optimize` v2.64.0 ota
+        # `all_params`-t is kap (a „teljes ter" mod). Egy szuk csonk itt olyan
+        # hibat produkal, aminek semmi koze a mert viselkedeshez.
+        w4._opt_ctrl.request_optimize = (
+            lambda s, n=None, all_params=False:
+            calls.append(("start", s, n, all_params)))
         w4._opt_ctrl.request_stop = lambda s, n=None: calls.append(("stop", s, n))
         w4._opt_ctrl.cancel_queued = lambda s, n=None: calls.append(("cancel", s, n))
         w4._opt_ctrl._strategy_live = lambda s, n: False
 
         w4._live2_opt_click("Ger40", "ml_ai")
         check("az OPT KOZVETLENUL azt a strategiat inditja (nincs menu)",
-              calls == [("start", "Ger40", "ml_ai")], str(calls))
+              calls == [("start", "Ger40", "ml_ai", False)], str(calls))
+
+        # ⚠ A SOR OPT gombja a MEGSZOKOTT futast kerje: `all_params=False`, azaz a
+        # mentett kihagyas-lista ERVENYES. A „teljes ter" kifejezett valasztas, a
+        # parameter-ablak Optimalizalas modja — nem eshet ide melle.
+        check("a sor OPT gombja a mentett kihagyas-listaval indit",
+              calls and calls[-1][3] is False, str(calls))
 
         # Futo optimalizalasnal LEALLIT — es CSAK azt a strategiat
         from core import opt_activity as _oa
@@ -227,7 +238,7 @@ if TK_OK:
             calls.clear()
             w4._live2_opt_click("Ger40", "wpr_sma")
             check("...a MASIK strategia ettol fuggetlenul indithato",
-                  calls == [("start", "Ger40", "wpr_sma")], str(calls))
+                  calls == [("start", "Ger40", "wpr_sma", False)], str(calls))
         finally:
             _oa.clear_symbol("Ger40")
 

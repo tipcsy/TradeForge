@@ -93,6 +93,9 @@ def setup(level: int = logging.INFO) -> "Path | None":
         root.addHandler(console)
 
     install_thread_excepthook()
+    install_tk_excepthook()
+    install_sys_excepthook()
+    install_error_counter()
 
     logging.getLogger(__name__).info(
         "Futásnapló: %s (max %d MB × %d példány)",
@@ -128,3 +131,108 @@ def install_thread_excepthook() -> None:
 
     setattr(_hook, _MARKER, True)
     threading.excepthook = _hook
+
+
+def install_tk_excepthook() -> None:
+    """Felület-visszahívásban dobott kivétel → a NAPLÓBA.
+
+    ⚠ EZ VOLT A LEGNAGYOBB VAK FOLT. A Tkinter minden visszahívást (gomb-parancs,
+    kötés, `after`) becsomagol, és ha az kivételt dob, a `report_callback_exception`
+    a STDERR-re írja a tracebacket. Egy ABLAKOS alkalmazásban a stderr sehol nincs:
+    a gomb egyszerűen „nem csinál semmit", a napló pedig hallgat.
+
+    Mérve (2026-08-18): a naptár-választó visszahívása `AttributeError`-t dobott
+    minden kattintásra — a dátum SOSEM íródott be, és sem a felületen, sem a
+    `tradeforge.log`-ban nem volt nyoma. A felhasználó ezt hibaként jelentette, mi
+    pedig csak forrásolvasással találtuk meg.
+
+    A hook a `Tk` OSZTÁLYRA kerül, nem egy példányra: a `Misc._report_exception`
+    mindig a GYÖKÉR ablakon hívja meg, tehát egyetlen hely lefedi az összes
+    Toplevelt és widgetet — ezt a 205 külön `except`-ág sosem tudná.
+
+    Idempotens."""
+    try:
+        import tkinter
+    except Exception:
+        return                                  # fej nélküli környezet
+    if getattr(tkinter.Tk.report_callback_exception, _MARKER, False):
+        return
+    _prev = tkinter.Tk.report_callback_exception
+
+    def _hook(self, exc, val, tb):
+        try:
+            logging.getLogger("gui").error(
+                "⛔ Kezeletlen hiba egy felület-visszahívásban (%s) — a művelet "
+                "NEM futott le, a felület viszont ugyanúgy néz ki, mint máskor.",
+                getattr(exc, "__name__", exc), exc_info=(exc, val, tb))
+        except Exception:
+            pass
+        try:
+            _prev(self, exc, val, tb)           # a konzolos traceback maradjon
+        except Exception:
+            pass
+
+    setattr(_hook, _MARKER, True)
+    tkinter.Tk.report_callback_exception = _hook
+
+
+def install_sys_excepthook() -> None:
+    """A FŐSZÁL elkapatlan kivétele → a naplóba (a szál-hook csak a többit fedi)."""
+    if getattr(sys.excepthook, _MARKER, False):
+        return
+    _prev = sys.excepthook
+
+    def _hook(exc_type, exc, tb):
+        try:
+            logging.getLogger("main").critical(
+                "⛔ A főszál elkapatlan kivétellel állt le.",
+                exc_info=(exc_type, exc, tb))
+        except Exception:
+            pass
+        _prev(exc_type, exc, tb)
+
+    setattr(_hook, _MARKER, True)
+    sys.excepthook = _hook
+
+
+# ---------------------------------------------------------------------------
+# HIBA-SZÁMLÁLÓ — hogy a napló ne csak létezzen, hanem LÁTSZÓDJON is
+# ---------------------------------------------------------------------------
+# ⚠ Egy naplófájl, amibe senki nem néz bele, majdnem annyira néma, mint a
+# semmi. A számláló abból él, hogy a felület KI TUDJA írni: „⚠ 3 hiba a
+# naplóban" — onnantól a felhasználó tudja, hogy van mit megnézni.
+
+_ERR_LOCK = threading.Lock()
+_ERR = {"count": 0, "last": ""}
+
+
+class _ErrorCounter(logging.Handler):
+    def emit(self, record):
+        try:
+            with _ERR_LOCK:
+                _ERR["count"] += 1
+                _ERR["last"] = f"{record.name}: {record.getMessage()}"[:200]
+        except Exception:
+            pass
+
+
+def install_error_counter(level: int = logging.ERROR) -> None:
+    """ERROR/CRITICAL rekordok SZÁMLÁLÁSA (a felület ebből tud szólni). Idempotens."""
+    root = logging.getLogger()
+    if any(isinstance(h, _ErrorCounter) for h in root.handlers):
+        return
+    h = _ErrorCounter(level=level)
+    setattr(h, _MARKER, True)
+    root.addHandler(h)
+
+
+def error_stats() -> tuple:
+    """`(darab, utolsó üzenet)` — az indulás óta naplózott ERROR+ rekordokból."""
+    with _ERR_LOCK:
+        return _ERR["count"], _ERR["last"]
+
+
+def reset_error_stats() -> None:
+    with _ERR_LOCK:
+        _ERR["count"] = 0
+        _ERR["last"] = ""

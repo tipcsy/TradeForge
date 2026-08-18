@@ -8,12 +8,15 @@ választhatók (a letöltött history-hoz igazítható). A stdlib `calendar` mod
 from __future__ import annotations
 
 import calendar
+import logging
 from datetime import date
 
 import tkinter as tk
 
 from dashboard.theme import (BG, BG_HEADER, FG_WHITE, FG_GRAY, FG_GRAY_DIM,
                              FG_BLUE, BTN_BT_BG, BTN_BT_FG)
+
+log = logging.getLogger(__name__)
 
 _MONTHS_HU = ["", "január", "február", "március", "április", "május", "június",
               "július", "augusztus", "szeptember", "október", "november", "december"]
@@ -102,11 +105,20 @@ class CalendarPopup(tk.Toplevel):
                           **self._f()).grid(row=r, column=c, padx=1, pady=1)
 
     def _pick(self, d):
+        """A kiválasztott nap átadása. ⚠ A visszahívás SZTRINGET kap
+        (`YYYY-MM-DD`) — nem `datetime.date`-et.
+
+        ⚠ ÉS A HIBA NEM NYELHETŐ EL. Az első változat `except Exception: pass`-t
+        írt ide, és egy hibás visszahívás (`d.isoformat()` egy sztringen) így
+        pontosan úgy nézett ki, mint egy működő naptár, amiből nem lesz semmi: a
+        nap eltűnt, a mező üres maradt, a naplóban semmi. A popup ettől még
+        bezárul — egy elszállt visszahívás ne hagyjon a képernyőn egy modális
+        ablakot —, de a napló MEGKAPJA az okot."""
         if self._on_pick:
             try:
                 self._on_pick(d.strftime("%Y-%m-%d"))
             except Exception:
-                pass
+                log.exception("dátum-visszahívás hiba (%s)", d)
         self._close()
 
     def _place(self, anchor):

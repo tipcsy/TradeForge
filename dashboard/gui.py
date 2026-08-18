@@ -777,7 +777,8 @@ class OptimizerController:
         return (any(s == symbol for s, _ in self._running)
                 or any(s == symbol for s, _ in self._queue))
 
-    def request_optimize(self, symbol: str, strategy: str | None = None):
+    def request_optimize(self, symbol: str, strategy: str | None = None,
+                         all_params: bool = False):
         """Egy (symbol, strategy) optimalizálás kérése. Ugyanarra a szimbólumra TÖBB
         stratégia is kérhető — egyszerre EGY fut, a többi sorba kerül.
 
@@ -791,13 +792,26 @@ class OptimizerController:
             # KIVEZETÉS alatt is fut a stratégia (nyitott pozíciót kezel) → nem
             # optimalizáljuk. A kivezetés a SZIMBÓLUM szintjén él, ezért azt még
             # szimbólum-szinten kérdezzük; a LIVE viszont per stratégia dől el.
+            # ⚠ MINDHÁROM ELUTASÍTÁS OKOT AD. Eddig néma `return` volt: a hívó
+            # „elindítottam"-ot jelentett vissza, a felület pedig ugyanúgy nézett
+            # ki, mint máskor — a felhasználó szemszögéből a gomb nem csinált
+            # semmit.
             if self.instrument_state.get(symbol) == "CLOSING":
-                return
+                return (f"{symbol}: kivezetés alatt (nyitott pozíciót kezel) — "
+                        f"az optimalizálás nem indul.")
             if self._strategy_live(symbol, strategy):
-                return
+                return (f"{symbol}/{strategy}: kereskedik — előbb állítsd meg "
+                        f"(▶/■).")
             job = (symbol, strategy)
             if job in self._running or job in self._queue:
-                return                       # ezt a stratégiát már kérték
+                return f"{symbol}/{strategy}: már fut vagy sorban áll."
+            # ⚠ „TELJES tér" kérés: a (pár, stratégia) kihagyás-listáját ennél az
+            # EGY futásnál figyelmen kívül hagyjuk. A jelzőt itt jegyezzük meg,
+            # mert a munka sorba is kerülhet — a kérés szándéka nem veszhet el a
+            # várakozás alatt.
+            if not hasattr(self, "_all_params"):
+                self._all_params = {}
+            self._all_params[job] = bool(all_params)
             # Elavult leállítás-marker törlése: MOST kértek friss futást — egy
             # korábbi (már lezárt futás után maradt) STOP ne szakítsa meg azonnal.
             try:
@@ -816,6 +830,7 @@ class OptimizerController:
                 _opt_activity.set_state(symbol, strategy, _opt_activity.QUEUED,
                                         f"Várakozik... ({strategy})")
                 self.optimizer_status[symbol] = f"Várakozik... ({strategy})"
+        return ""
 
     def cancel_queued(self, symbol: str, strategy: str = None):
         """Sorban álló (QUEUED) optimalizálás visszavonása.
@@ -900,6 +915,17 @@ class OptimizerController:
             opt_cfg     = self.cfg["optimizer"]
             initial_bal = self.cfg.get("ml", {}).get("starting_balance_eur", 1000.0)
 
+            # ⚠ TELJES TÉR: a kihagyás-lista csak EBBŐL a másolatból tűnik el —
+            # a lemezen lévő config VÁLTOZATLAN. A felhasználó pipái beállítások,
+            # nem egyszeri döntések: egy „mindent optimalizálj" futás nem
+            # törölheti őket csendben.
+            job_cfg = self.cfg
+            if getattr(self, "_all_params", {}).get(job):
+                import copy as _copy
+                from core import opt_plan as _oplan
+                job_cfg = _copy.deepcopy(self.cfg)
+                _oplan.set_skip_keys(job_cfg, symbol, strategy, set())
+
             # ── Adat előkészítés (háttérszálon) — a KÖZÖS letöltő úton ────
             from tools.download_history import ensure_history
 
@@ -930,7 +956,7 @@ class OptimizerController:
             stall_sec = opt_cfg.get("stall_timeout_sec", 900)   # 15 perc haladás nélkül
             hard_cap  = opt_cfg.get("hard_timeout_sec", 0)      # 0 = nincs abszolút limit
             self.optimizer_status[symbol] = "Optimalizálás indul..."
-            args = (symbol, df_m15, df_m1, self.cfg, initial_bal)
+            args = (symbol, df_m15, df_m1, job_cfg, initial_bal)
 
             if self._pool is not None:
                 from concurrent.futures import TimeoutError as _FutTimeout
@@ -2821,6 +2847,7 @@ class DashboardWindow:
             self.lbl_status = tk.Label(parent, text="Indulás...", bg=BG,
                                        fg=FG_GRAY, font=small_font)
             self.lbl_status.pack(side="bottom", pady=4)
+            self._make_error_badge(parent, small_font)
             return
 
         canvas = tk.Canvas(table_holder, bg=BG, highlightthickness=0)
@@ -2868,6 +2895,7 @@ class DashboardWindow:
             self.lbl_status = tk.Label(parent, text="Indulás...", bg=BG,
                                        fg=FG_GRAY, font=small_font)
             self.lbl_status.pack(side="bottom", pady=4)
+            self._make_error_badge(parent, small_font)
             return
 
         for idx, (symbol, pair_cfg) in enumerate(self.cfg["pairs"].items()):
@@ -2890,6 +2918,12 @@ class DashboardWindow:
         tk.Frame(parent, bg=FG_GRAY_DIM, height=1).pack(fill="x", padx=2, pady=2)
         self.lbl_status = tk.Label(parent, text="Indulás...", bg=BG, fg=FG_GRAY, font=small_font)
         self.lbl_status.pack(side="bottom", pady=4)
+        self._make_error_badge(parent, small_font)
+
+    def _make_error_badge(self, parent, font):
+        """A hiba-jelző címke (alapból REJTVE — nulla hibánál nincs mit mondani)."""
+        self.lbl_errors = tk.Label(parent, text="", bg=BG, fg=FG_RED, font=font)
+        self.lbl_errors.bind("<Button-1>", self._open_log)
 
     # ── Dashboard 2.0 tábla ──────────────────────────────────────────────
     def _layout_mode(self) -> str:
@@ -3179,7 +3213,7 @@ class DashboardWindow:
             pass
         return None
 
-    def _live2_opt_click(self, symbol: str, name: str):
+    def _live2_opt_click(self, symbol: str, name: str, all_params: bool = False):
         """A 2.0 OPT gombja — KÖZVETLENÜL erre a stratégiára hat, menü nélkül.
 
         A `classic` OPT gombja szimbólum-szintű, ezért több stratégiánál választó-
@@ -3219,8 +3253,8 @@ class DashboardWindow:
                 return _msg
         except Exception:
             pass
-        self._opt_ctrl.request_optimize(symbol, name)
-        return ""
+        return self._opt_ctrl.request_optimize(symbol, name,
+                                               all_params=all_params) or ""
 
     def _live2_opt(self, symbol: str, name: str) -> str:
         """Az Opt cella PER STRATÉGIA — rövid, cellába férő alak.
@@ -6106,9 +6140,48 @@ class DashboardWindow:
             except Exception:
                 pass
 
+        # ⚠ A NAPLÓ NE CSAK LÉTEZZEN — LÁTSZÓDJON. Egy fájl, amibe senki nem néz
+        # bele, majdnem annyira néma, mint a semmi. Ha bármi ERROR/CRITICAL
+        # keletkezett (felület-visszahívás, elhalt szál, kapcsolat), itt kiderül,
+        # hogy VAN mit megnézni — és hogy hol.
+        self._refresh_error_badge()
+
         # Heartbeat: a teljes tick lefutott → a fő szál él
         self._last_heartbeat = time.monotonic()
         self.root.after(1000, self._refresh)
+
+    def _refresh_error_badge(self):
+        """„⚠ N hiba a naplóban" — a `core.applog` számlálójából."""
+        _lbl = getattr(self, "lbl_errors", None)
+        if _lbl is None:
+            return
+        try:
+            from core import applog as _al
+            n, last = _al.error_stats()
+        except Exception:
+            return
+        try:
+            if n:
+                _lbl.config(text=f"⚠ {n} hiba a naplóban — kattints",
+                            fg=FG_RED, cursor="hand2")
+                _lbl.pack(side="bottom")
+                self._err_tip = last
+            else:
+                _lbl.pack_forget()
+        except tk.TclError:
+            pass
+
+    def _open_log(self, _e=None):
+        """A futásnapló megnyitása a rendszer alapértelmezett programjával."""
+        try:
+            from core.applog import LOG_PATH
+            import os
+            os.startfile(str(LOG_PATH))               # Windows
+        except Exception as ex:
+            try:
+                self.lbl_status.config(text=f"A napló nem nyitható meg: {ex}")
+            except tk.TclError:
+                pass
 
     # ── Fagyás-watchdog ──────────────────────────────────────────────────
     @staticmethod

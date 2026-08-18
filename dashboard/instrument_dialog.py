@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import csv
 import json
+import logging
 import threading
 import tkinter as tk
 from datetime import datetime
@@ -41,6 +42,8 @@ from core.params_store import (
 )
 from core import execution_params as _execp
 from core import risk_reduction as _rrx
+
+log = logging.getLogger(__name__)
 
 # A közös, stratégia-független "Végrehajtás" kategória (atr_period + spread-kapu)
 # — minden stratégia-configból kikerült, itt jelenik meg egységesen.
@@ -1150,12 +1153,15 @@ class InstrumentParamsDialog:
     # pipát, ha csak egy paramétert akarok megvizsgálni".
     RUN_BACKTEST = "backtest"     # egyetlen futás a MOSTANI értékekkel
     RUN_PLANNED = "planned"       # a bepipált dimenziók szerint (söprés/rács/opt)
+    RUN_OPTIMIZE = "optimize"     # TELJES optimalizálás — a pipákat FIGYELMEN KÍVÜL
+
+    _RUN_MODES = (RUN_BACKTEST, RUN_PLANNED, RUN_OPTIMIZE)
 
     def _load_run_mode(self) -> str:
         try:
             from core import backtest_prefs as _bp
             v = (_bp.get(self.symbol, self.strategy.name) or {}).get("run_mode")
-            if v in (self.RUN_BACKTEST, self.RUN_PLANNED):
+            if v in self._RUN_MODES:
                 return v
         except Exception:
             pass
@@ -1190,7 +1196,80 @@ class InstrumentParamsDialog:
     def _on_run_mode(self):
         self._save_run_mode(self._run_mode.get())
         self._refresh_opt_space()
+        self._refresh_run_mode_ui()
         self._refresh_section_summaries()
+
+    def _note(self, text: str, fg=None):
+        """RAGADÓS üzenet a gomb alatt.
+
+        ⚠ A 2 mp-es állapot-lekérdezés eddig FELÜLÍRTA minden kilépési ág
+        üzenetét az általános „Az optimalizálás nem fut."-tal — a felhasználó
+        látta felvillanni, de nem tudta elolvasni, MIÉRT nem indult el semmi.
+        Az üzenet addig marad, amíg a futás tényleg el nem indul, vagy amíg a
+        mód/pipa nem változik (az új helyzet)."""
+        self._run_note = (text, fg or FG_YELLOW)
+        try:
+            self._run_status.config(text=text, fg=fg or FG_YELLOW)
+        except tk.TclError:
+            pass
+        self._prog_hide()
+
+    def _prog_show(self, pct=None, text=""):
+        """Haladás-sáv a gomb ALATT. `pct=None` → határozatlan (fut, de nem
+        tudjuk, hol tart) — ez őszintébb, mint egy kitalált százalék."""
+        try:
+            if not self._prog_box.winfo_manager():
+                # ⚠ `before`: a `pack` alapból a doboz VÉGÉRE tenné, a feltételek
+                # és a keresési tér alá — a kérés viszont „közvetlen az indítás
+                # gomb alatt".
+                self._prog_box.pack(anchor="w", fill="x", padx=12, pady=(4, 0),
+                                    before=self._run_status)
+            if pct is None:
+                if str(self._prog.cget("mode")) != "indeterminate":
+                    self._prog.config(mode="indeterminate")
+                    self._prog.start(60)
+            else:
+                self._prog.stop()
+                self._prog.config(mode="determinate",
+                                  value=max(0.0, min(100.0, float(pct))))
+            self._prog_lbl.config(text=text)
+        except (tk.TclError, AttributeError):
+            pass
+
+    def _prog_hide(self):
+        try:
+            self._prog.stop()
+            self._prog_box.pack_forget()
+        except (tk.TclError, AttributeError):
+            pass
+
+    def _refresh_run_mode_ui(self):
+        """⚠ A mód/pipa változása ÚJ helyzet: a korábbi elutasítás oka elavult.
+
+        A mód-választáshoz igazítja, MI látszik: a konfliktus-figyelmeztetés
+        és az optimalizálás feltételei."""
+        try:
+            _m = self._run_mode.get()
+        except (AttributeError, tk.TclError):
+            return
+        self._run_note = None
+        _lbl = getattr(self, "_mode_lbl", None)
+        if _lbl is not None:
+            try:
+                _c = self._mode_conflict()
+                _lbl.config(text=_c)
+                _lbl.pack_configure(pady=(2, 0) if _c else (0, 0))
+            except tk.TclError:
+                pass
+        _cond = getattr(self, "_cond_box", None)
+        if _cond is not None:
+            try:
+                if _m == self.RUN_OPTIMIZE:
+                    _cond.pack(anchor="w", fill="x", padx=12)
+                else:
+                    _cond.pack_forget()
+            except tk.TclError:
+                pass
 
     def _tuned_rows(self) -> list:
         """A paraméter-sorok a PILLANATNYI pipákkal (egy helyen, hogy a terv és
@@ -1200,7 +1279,10 @@ class InstrumentParamsDialog:
 
     def _effective_mode(self) -> str:
         """A TÉNYLEGES mód. ⚠ Ha nincs mit hangolni, a „Hangolás" üres ígéret
-        volna — ilyenkor magától Backtest, ahogy kérted."""
+        volna — ilyenkor magától Backtest, ahogy kérted.
+
+        ⚠ Az OPTIMALIZÁLÁS mód SOSEM esik vissza: az a pipáktól FÜGGETLENÜL a
+        teljes teret járja be, tehát üres pipa-listával is értelmes."""
         _m = getattr(self, "_run_mode", None)
         _m = _m.get() if _m is not None else self.RUN_PLANNED
         if _m == self.RUN_PLANNED and not any(
@@ -1208,6 +1290,28 @@ class InstrumentParamsDialog:
                 for r in self._tuned_rows()):
             return self.RUN_BACKTEST
         return _m
+
+    def _mode_conflict(self) -> str:
+        """MIT hagy figyelmen kívül a MOSTANI mód — vagy üres, ha semmit.
+
+        ⚠ EZ VOLT A HIBA GYÖKERE (a felhasználótól, 2026-08-18): „az Opt nem
+        működik, ha egynél több paramétert választok ki… nem látszik, hogy
+        történne valami." Nem hiba volt: a mentett mód `backtest` maradt, tehát
+        a gomb HELYESEN egyetlen futást indított — a pipák pedig NÉMÁN nem
+        számítottak. A mód és a pipák ellentmondását ki KELL mondani ott, ahol a
+        gomb van; különben a felület úgy néz ki, mintha nem csinálna semmit."""
+        _m = getattr(self, "_run_mode", None)
+        _m = _m.get() if _m is not None else self.RUN_PLANNED
+        _rows = self._tuned_rows()
+        _n = sum(1 for r in _rows
+                 if not r.get("skipped") and r.get("values", 0) > 0)
+        if _m == self.RUN_BACKTEST and _n:
+            return f"⚠ A {_n} pipa most nem számít (Backtest)."
+        if _m == self.RUN_OPTIMIZE:
+            return "⚠ A pipák nem számítanak — a teljes tér megy."
+        if _m == self.RUN_PLANNED and _n == 0:
+            return "⚠ Nincs pipa — így ez egyetlen futás."
+        return ""
 
     def _build_plan_strip(self, box):
         from core import opt_plan as _op
@@ -1246,19 +1350,25 @@ class InstrumentParamsDialog:
         mode_box.pack(anchor="w", fill="x", padx=12, pady=(6, 0))
         self._run_mode = tk.StringVar(value=self._load_run_mode())
         for _val, _txt, _tip in (
-                (self.RUN_BACKTEST, "Backtest — egyetlen futás a mostani értékekkel",
+                (self.RUN_BACKTEST, "Backtest",
                  "Egyszer fut le, PONTOSAN a Paraméterek szakaszban látható "
                  "értékekkel. A hangolás-pipák ilyenkor NEM számítanak — nem kell "
                  "kiszedni őket egyetlen próbához."),
-                (self.RUN_PLANNED, "Hangolás — a bepipált paraméterek szerint",
+                (self.RUN_PLANNED, "Hangolás",
                  "A bepipált dimenziók számából adódik: 1 → végigpróbálás, "
-                 "2 → rács, 3+ → optimalizálás. A pontos tervet a fenti sor írja.")):
+                 "2 → rács, 3+ → optimalizálás A BEPIPÁLTAKON. A pontos tervet a "
+                 "fenti sor írja."),
+                (self.RUN_OPTIMIZE, "Optimalizálás",
+                 "A megszokott OPT: MINDEN hangolható paramétert keres, akkor is, "
+                 "ha kivetted a pipát. Külön processzben fut, folytatható optuna "
+                 "study-val — az ablakot be is zárhatod, a haladás a főképernyőn "
+                 "látszik.")):
             _rb = tk.Radiobutton(mode_box, text=_txt, value=_val,
                                  variable=self._run_mode, bg=BG, fg=FG_GRAY,
                                  selectcolor=BG_HEADER, font=self._sf,
                                  activebackground=BG, activeforeground=FG_WHITE,
                                  anchor="w", command=self._on_run_mode)
-            _rb.pack(anchor="w")
+            _rb.pack(side="left", padx=(0, 12))
             _attach_tooltip(_rb, _tip)
             if _val == self.RUN_PLANNED:
                 self._rb_planned = _rb
@@ -1272,11 +1382,36 @@ class InstrumentParamsDialog:
         self._plan_short = tk.Label(act, text="", bg=BG, fg=FG_GRAY,
                                     font=self._sf, anchor="w", justify="left")
         self._plan_short.pack(side="left", padx=(10, 0), fill="x", expand=True)
+
+        # ── HALADÁS-SÁV, KÖZVETLENÜL a gomb alatt ──────────────────────────
+        # ⚠ A kérés szó szerint: „elinduljon egy progress bar közvetlen az
+        # indítás gomb alatt, hogy látszódjon, hogy történik valami". A gomb
+        # felirata (Indítás → Leállítás) megmondja, hogy FUT; a sáv azt, hogy
+        # HALAD — a kettő nem ugyanaz. Egy órákig tartó optimalizálásnál az
+        # „elindult" önmagában nem nyugtat meg senkit.
+        #
+        # ⚠ Alapból NINCS kicsomagolva: egy 0%-on álló sáv tétlenségben azt
+        # sugallná, hogy fut valami, ami nem halad.
+        from tkinter import ttk as _ttk
+        self._prog_box = tk.Frame(box, bg=BG)
+        self._prog = _ttk.Progressbar(self._prog_box, mode="determinate",
+                                      maximum=100, length=260)
+        self._prog.pack(side="left")
+        self._prog_lbl = tk.Label(self._prog_box, text="", bg=BG, fg=FG_GRAY,
+                                  font=self._sf)
+        self._prog_lbl.pack(side="left", padx=(8, 0))
+
         self._run_status = _autowrap(tk.Label(box, text="", bg=BG, fg=FG_GRAY,
                                               font=self._sf, anchor="w",
                                               justify="left"),
                                      self._body_canvas)
         self._run_status.pack(anchor="w", fill="x", padx=12, pady=(2, 0))
+        # ⚠ A KONFLIKTUS a gomb KÖZVETLEN közelébe: ott nézel, amikor nyomod.
+        self._mode_lbl = _autowrap(tk.Label(box, text="", bg=BG, fg=FG_YELLOW,
+                                            font=self._sf, anchor="w",
+                                            justify="left"),
+                                   self._body_canvas)
+        self._mode_lbl.pack(anchor="w", fill="x", padx=12)
 
         self._tuned_lbl = _autowrap(tk.Label(box, bg=BG, fg=FG_GRAY, font=self._sf,
                                              anchor="w", justify="left"),
@@ -1289,9 +1424,14 @@ class InstrumentParamsDialog:
         self._space_lbl.pack(anchor="w", fill="x", padx=12, pady=(0, 4))
 
         # ── A FELTÉTELEK: időszakok és kapuk (a volt Optimalizálás lapról) ──
+        # ⚠ A FELTÉTELEK (walk-forward ablakok, kapuk, minősítés) CSAK az
+        # optimalizálásra vonatkoznak — a kérés szerint csak akkor látszódjanak.
+        # Backtest módban egy walk-forward magyarázat félrevezető: ott nincsenek
+        # tanuló/vizsga ablakok, egyetlen futás megy.
+        self._cond_box = None
         if plan:
             cond = tk.Frame(box, bg=BG)
-            cond.pack(anchor="w", fill="x", padx=12)
+            self._cond_box = cond
             w = plan["wf"]
             _txt = (f"Walk-forward: {w['splits']} ablak × ({w['train_months']} hó "
                     f"tanulás + {w['test_months']} hó vizsga)")
@@ -1330,6 +1470,7 @@ class InstrumentParamsDialog:
                            "Paraméter lapon állítod.")).pack(anchor="w")
 
         self._refresh_opt_space()
+        self._refresh_run_mode_ui()
 
     # ── AZ EREDMÉNY-SZAKASZ ───────────────────────────────────────────────
     # ⚠ Miért KÜLÖN szakasz a futtatástól. A kettő különböző életciklusú: a
@@ -1503,9 +1644,31 @@ class InstrumentParamsDialog:
                 _st = str(_of(self.symbol, self.strategy.name) or "")
             except Exception:
                 _st = ""
-        txt, fg = self._OPT_TEXT.get(_st, (
-            "Az optimalizálás nem fut. (Ha most állítottad le, a leállás a futó "
-            "trial végén történik meg.)", FG_GRAY))
+        _note = getattr(self, "_run_note", None)
+        if _st not in self._OPT_TEXT and _note:
+            txt, fg = _note          # az elutasítás oka MEGMARAD, amíg nem indul
+        else:
+            txt, fg = self._OPT_TEXT.get(_st, (
+                "Az optimalizálás nem fut. (Ha most állítottad le, a leállás a "
+                "futó trial végén történik meg.)", FG_GRAY))
+            if _st in self._OPT_TEXT:
+                self._run_note = None
+        # ⚠ A HALADÁS a MÁSIK PROCESSZ állapotából jön (`opt_activity`) — ugyanaz
+        # a forrás, amit a főképernyő Opt-cellája mutat. Így az ablakban látott
+        # százalék és a soron látott SOSEM tér el.
+        if _st == "OPTIMIZING":
+            _pct = None
+            try:
+                from core import opt_activity as _oa
+                _pct = _oa.progress_pct(self.symbol, self.strategy.name)
+            except Exception:
+                _pct = None
+            # ⚠ A trialok ELŐTT (adat-előkészítés) még nincs haladás: ilyenkor
+            # határozatlan sáv megy — nem hazudunk 0%-ot egy dolgozó futásra.
+            self._prog_show(_pct, f"{_pct}%" if _pct is not None
+                            else "előkészítés…")
+        elif not getattr(self, "_bt_running", False) and self._sw_stop is None:
+            self._prog_hide()
         try:
             self._run_status.config(text=txt, fg=fg)
             self._plan_btn.config(
@@ -1526,9 +1689,11 @@ class InstrumentParamsDialog:
         self._bt_running = bool(running)
         try:
             if running:
-                self._plan_btn.config(text="Megszakítás",
+                self._plan_btn.config(text="Leállítás",
                                       command=self._run_tab._cancel)
+                self._prog_show(None, "backtest fut…")
             else:
+                self._prog_hide()
                 self._plan_btn.config(text="Indítás", state="normal",
                                       command=self._start_planned)
                 self._sync_opt_status()   # hátha közben optimalizálás indult
@@ -1560,7 +1725,15 @@ class InstrumentParamsDialog:
         # megy a mostani értékekkel, AKKOR IS, ha minden paraméter be van
         # pipálva — épp ezért van a választó: hogy egyetlen próbához ne kelljen
         # kiszedni, majd visszatenni az összes pipát.
-        kind = (_op.KIND_SINGLE if self._effective_mode() == self.RUN_BACKTEST
+        _mode = self._effective_mode()
+        # ⚠ OPTIMALIZÁLÁS: a pipákat FIGYELMEN KÍVÜL hagyja, a TELJES teret
+        # keresi. A „Hangolás" 3+ ága ettől KÜLÖNBÖZIK: az a bepipáltakon
+        # optimalizál (a kivett kulcsok az alapértéken maradnak). A kettő
+        # ugyanazt a motort hívja, más kereséssel — ezért egy függvény.
+        if _mode == self.RUN_OPTIMIZE:
+            self._start_optimize(all_params=True)
+            return
+        kind = (_op.KIND_SINGLE if _mode == self.RUN_BACKTEST
                 else _op.run_plan(rows, 0)["kind"])
         if kind == _op.KIND_SINGLE:
             # 0 hangolt → EGYETLEN futás: ez maga a backtest.
@@ -1578,8 +1751,16 @@ class InstrumentParamsDialog:
                      f"szakaszban rajzolódik.", fg=FG_GRAY)
             self._start_sweep()
             return
-        # 3+ hangolt → OPTIMALIZÁLÁS: külön processz, folytatható optuna study.
-        #
+        # 3+ hangolt → OPTIMALIZÁLÁS a BEPIPÁLTAKON.
+        self._start_optimize(all_params=False)
+
+    def _start_optimize(self, all_params: bool = False):
+        """Az optimalizálás indítása (vagy leállítása) — külön processzben.
+
+        `all_params=True` → a kihagyás-lista FIGYELMEN KÍVÜL marad, a teljes
+        teret keressük (ez az „Optimalizálás" mód). `False` → a bepipált
+        dimenziókon (a „Hangolás" 3+ ága).
+        """
         # ⚠ EZ AZ EGYETLEN INDÍTÁSI PONT. A sorból az OPT vezérlőt levettük (egy
         # gomb, ami órákra indított valamit, amiről a felület semmit nem mondott)
         # — a helyére EZ a szakasz lépett, ahol előtte látod az időszakokat, a
@@ -1590,11 +1771,8 @@ class InstrumentParamsDialog:
         self._sweep_box.pack_forget()
         _opt = getattr(self, "on_optimize", None)
         if not callable(_opt):
-            self._run_status.config(
-                text=("Ennyi hangolt paraméternél OPTIMALIZÁLÁS futna, de ez az "
-                      "ablak nincs bekötve az optimalizálóhoz (fejlesztői/önálló "
-                      "megnyitás). Végigpróbáláshoz pipálj ki mindent 1–2 "
-                      "paraméter kivételével."), fg=FG_YELLOW)
+            self._note("Ez az ablak nincs bekötve az optimalizálóhoz "
+                       "(fejlesztői/önálló megnyitás).", FG_YELLOW)
             return
         # ⚠ ELŐBB NÉZZÜK MEG, fut-e MÁSHOL. A zárat úgyis a munkás-processz
         # ellenőrzi, de akkor már elindult egy processz, ami rögtön el is hasal —
@@ -1611,21 +1789,29 @@ class InstrumentParamsDialog:
         if _cur not in ("OPTIMIZING", "QUEUED"):
             from core import opt_lock as _ol
             if _ol.is_held(self.symbol, self.strategy.name):
-                self._run_status.config(
-                    text=_ol.describe(_ol.read(self.symbol, self.strategy.name),
-                                      self.symbol, self.strategy.name), fg=FG_RED)
+                self._note(_ol.describe(_ol.read(self.symbol, self.strategy.name),
+                                        self.symbol, self.strategy.name), FG_RED)
                 return
         try:
-            _refused = _opt(self.symbol, self.strategy.name)
+            # ⚠ A régi (2 argumentumos) bekötés is működjön: egy önállóan
+            # megnyitott ablakban a hívó lehet régebbi aláírású.
+            try:
+                _refused = _opt(self.symbol, self.strategy.name,
+                                all_params=all_params)
+            except TypeError:
+                _refused = _opt(self.symbol, self.strategy.name)
         except Exception as ex:
-            self._run_status.config(text=f"Indítási hiba: {ex}", fg=FG_RED)
+            log.exception("optimalizálás indítási hiba (%s/%s)",
+                          self.symbol, self.strategy.name)
+            self._note(f"Indítási hiba: {ex}", FG_RED)
             return
         # ⚠ AZ ELUTASÍTÁST ITT KELL KIÍRNI, a gomb mellett. A hívó eddig a
         # FŐABLAK állapotsorába írta az okot — az a paraméter-ablak alatt van,
         # tehát a felhasználó szemszögéből a gomb egyszerűen nem csinált semmit.
         if _refused:
-            self._run_status.config(text=str(_refused), fg=FG_YELLOW)
+            self._note(str(_refused), FG_YELLOW)
             return
+        self._run_note = None
         # ⚠ A VISSZAJELZÉS a TÉNYLEGES állapotból jön, nem abból, hogy hívtuk a
         # függvényt. A `_live2_opt_click` MORPH: ha épp futott, LEÁLLÍTOTTA; ha
         # a stratégia kereskedik, el sem indítja. Egy fix „elindítva" felirat
@@ -2373,8 +2559,11 @@ class InstrumentParamsDialog:
             cur = date.fromisoformat(var.get().strip())
         except (ValueError, AttributeError):
             cur = date.today()
+        # ⚠ A visszahívás SZTRINGET kap (`YYYY-MM-DD`), nem `date`-et. Az első
+        # változat `d.isoformat()`-ot hívott rajta — az `AttributeError`-t pedig
+        # a popup elnyelte, tehát a kattintás NÉMÁN nem írt vissza semmit.
         CalendarPopup(self.popup, anchor=anchor, initial=cur, font=self._sf,
-                      on_pick=lambda d: var.set(d.isoformat()))
+                      on_pick=lambda s: var.set(s))
 
     def _run_mt4_export(self):
         import threading
@@ -2536,7 +2725,8 @@ class InstrumentParamsDialog:
         axes, combos = _sw.combos(rows, self._opt_cfg_cache)
         self._sw_axes, self._sw_rows = axes, []
         self._sw_stop = threading.Event()
-        self._plan_btn.config(text="Megszakítás")
+        self._plan_btn.config(text="Leállítás")
+        self._prog_show(0.0, f"0/{len(combos)} futás")
         # ⚠ Az IDOSZAK a backtest mezoibol jon — EGY helyen allitod. Korabban a
         # sopresnek sajat datum-mezoi voltak, tehat ugyanazt ketszer kellett
         # beirni, es a ket ertek csendben elterhetett.
@@ -2586,6 +2776,9 @@ class InstrumentParamsDialog:
                 if msg[0] == "progress":
                     self._sw_status.config(text=f"{msg[1]}/{msg[2]} futás…",
                                            fg=FG_GRAY)
+                    _tot = max(1, int(msg[2]))
+                    self._prog_show(100.0 * int(msg[1]) / _tot,
+                                    f"{msg[1]}/{msg[2]} futás")
                 else:
                     self._sweep_done(msg[1], msg[2])
                     finished = True
@@ -2605,6 +2798,7 @@ class InstrumentParamsDialog:
 
     def _sweep_done(self, rows, err):
         self._sw_stop = None
+        self._prog_hide()
         try:
             self._plan_btn.config(text="Indítás", state="normal")
         except tk.TclError:
@@ -2820,6 +3014,10 @@ class InstrumentParamsDialog:
             self.lbl_err.config(text=f"Mentési hiba: {ex}", fg=FG_RED)
             return
         self._refresh_opt_space()
+        # ⚠ A pipa átállítása MEGVÁLTOZTATJA a mód-konfliktust (pl. Backtest
+        # módban most lett először bepipálva valami) — a figyelmeztetés nem
+        # maradhat elavult.
+        self._refresh_run_mode_ui()
         self._refresh_section_summaries()
 
     def _fit_to_screen(self, popup, body, footer):
