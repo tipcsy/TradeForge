@@ -366,6 +366,105 @@ _CHECKS = (
 )
 
 
+# ---------------------------------------------------------------------------
+# A CÉLÁR és a KILÉPÉSI PRESET összhangja
+# ---------------------------------------------------------------------------
+# ⚠ MÉRVE (2026-08-23), és ez a legmeglepőbb kölcsönhatás, amit eddig találtunk:
+# a kettő NEM független, és ELLENTÉTES irányba lejt. UsaInd, ugyanaz az ablak:
+#
+#     TP        BE+trailing        kockázatcsökkentés NÉLKÜL
+#     1,5R          +870                    +1870
+#     2,7R         +1991                    +1587
+#     3,0R         +2080                    +1557
+#
+# TRAILINGGEL a HOSSZÚ célár a jó: a stop követi az árat, hagyja futni a
+# nyertest, és közben véd. TRAILING NÉLKÜL a RÖVID: a távoli célárig gyakran nem
+# ér el az ár, mielőtt visszafordul. A UK100-on ugyanez.
+#
+# ⚠ EZÉRT: ha valaki kikapcsolja a kockázatcsökkentést, a célárat is CSÖKKENTENIE
+# kell — különben a távoli TP védelem nélkül marad, és a nyereség visszafolyik.
+# A fordítottja is igaz: rövid célár mellett a trailing levágja a nyertest,
+# mielőtt bármit hozna. Egy éles mérésben ez a tévedés 1121 dollárba került volna
+# (a javaslat a MÁSIK konfigurációban mért görbéből jött).
+TP_LONG = 2.0        # e fölött „hosszú" célár   — védelem nélkül kockázatos
+TP_SHORT = 1.5       # e alatt „rövid"           — trailinggel levágja a nyertest
+
+
+def tp_preset_conflict(preset: str, tp_rr) -> "str | None":
+    """A célár és a kilépési preset ellentmondása — TISZTA függvény.
+
+    `preset`: a `core.risk_reduction` preset neve; `"none"` = a stop MARAD.
+    Visszaad: az ellentmondás szövege, vagy `None`, ha összhangban vannak."""
+    try:
+        tp = float(tp_rr)
+    except (TypeError, ValueError):
+        return None
+    if tp <= 0:
+        return None
+    keeps_stop = str(preset or "").lower() == "none"
+    if keeps_stop and tp >= TP_LONG:
+        return (f"a célár {tp:.2f}R (hosszú), de a kockázatcsökkentés KI van "
+                f"kapcsolva (a stop marad a helyén) — védelem nélkül a távoli "
+                f"célárig gyakran nem ér el az ár. Mérve: trailing nélkül a "
+                f"RÖVIDEBB célár (~1,5R) a jobb.")
+    if (not keeps_stop) and tp <= TP_SHORT:
+        return (f"a célár {tp:.2f}R (rövid), miközben a kilépési preset MOZGATJA "
+                f"a stopot — a trailing így levágja a nyertest, mielőtt a célár "
+                f"hozna. Mérve: trailinggel a HOSSZABB célár (~2,5–3R) a jobb.")
+    return None
+
+
+def _check_tp_vs_preset(cfg: dict, out: list, preset_of, tp_of) -> None:
+    """A koherencia-ellenőrzés PÁRONKÉNT, a beadott állapot-olvasókkal."""
+    from strategy import enabled_strategy_names
+    for sym, pc in (cfg.get("pairs") or {}).items():
+        if not isinstance(pc, dict):
+            continue
+        try:
+            preset = preset_of(sym)
+        except Exception:
+            continue
+        for name in (enabled_strategy_names(cfg, sym) or []):
+            try:
+                tp = tp_of(sym, name)
+            except Exception:
+                continue
+            msg = tp_preset_conflict(preset, tp)
+            if msg:
+                out.append(_finding(WARN, "tp_vs_preset",
+                                    f"{sym}/{name}: {msg}", sym))
+
+
+def check_with_state(cfg: dict, preset_of=None, tp_of=None) -> list:
+    """`check()` + az ÁLLAPOT-FÜGGŐ ellenőrzések (mentett paraméterek, rr-preset).
+
+    ⚠ Miért külön függvény. A `check()` szerződése az, hogy TISZTA: dictet kap,
+    listát ad, se fájl, se MT5 — így egy sorban tesztelhető. A célár↔preset
+    összhanghoz viszont két FÁJLBÓL jövő adat kell (`data/risk_mode.json` és a
+    mentett paraméterkészlet). A szerződést nem törjük el: az olvasók
+    BEADHATÓK (a teszt így tiszta marad), és csak az alapértelmezésük nyúl
+    fájlhoz."""
+    out = list(check(cfg))
+    if preset_of is None:
+        def preset_of(sym):
+            from core import rr_state as _rs
+            return _rs.get_preset(sym)
+    if tp_of is None:
+        def tp_of(sym, name):
+            import json
+            from core.params_store import params_file
+            f = params_file(sym, name)
+            if not f.exists():
+                return None
+            return (json.loads(f.read_text(encoding="utf-8")).get("params")
+                    or {}).get("tp_rr_ratio")
+    try:
+        _check_tp_vs_preset(cfg or {}, out, preset_of, tp_of)
+    except Exception as e:
+        log.debug("célár↔preset ellenőrzés hiba: %s", e)
+    return out
+
+
 def check(cfg: dict) -> list:
     """Minden koherencia-ellenőrzés. `[{level, code, symbol, message}, …]`.
 
@@ -383,9 +482,12 @@ def check(cfg: dict) -> list:
 def log_findings(cfg: dict, logger=None) -> list:
     """Az ellenőrzés lefuttatása + KIÍRÁSA a naplóba. Visszaad: a leletek.
 
+    ⚠ A TELJES képet adja (`check_with_state`): az állapot-függő leletek — mint a
+    célár↔kilépési preset ellentmondás — épp azok, amiket senki nem venne észre.
+
     Ezt hívják a belépési pontok. A `warn` szintűek `log.warning`-gal mennek (ezek
     némán hatástalan beállítások), az `info`-k `log.info`-val."""
-    findings = check(cfg)
+    findings = check_with_state(cfg)
     lg = logger or log
     if not findings:
         return findings

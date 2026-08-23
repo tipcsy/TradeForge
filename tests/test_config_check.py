@@ -361,6 +361,68 @@ _ex = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
 check_("a pelda-config is a no_opposite-ot mutatja",
        (_ex.get("trading") or {}).get("same_symbol_policy") == _sp.NO_OPPOSITE)
 
+# ══ A CELAR es a KILEPESI PRESET osszhangja ════════════════════════════════
+# ⚠ MERVE (2026-08-23) — a ketto NEM fuggetlen, es ELLENTETES iranyba lejt.
+# UsaInd, ugyanaz az ablak:
+#     TP        BE+trailing     kockazatcsokkentes NELKUL
+#     1,5R          +870              +1870
+#     2,7R         +1991              +1587
+#     3,0R         +2080              +1557
+# Trailinggel a HOSSZU celar a jo (a stop koveti az arat, hagyja futni a
+# nyertest); trailing NELKUL a ROVID (a tavoli celarig gyakran nem er el az ar).
+#
+# ⚠ Ez a szabaly egy VALODI tevedesbol szuletett: eloszor a kockazatcsokkentes
+# NELKULI sopresbol javasoltam az UsaInd celaranak 2,7 -> 1,5 atallitasat. A par
+# viszont BE+trailinggel fut — a valtoztatas 1121 DOLLARBA kerult volna. Nem
+# overfitting volt, hanem KONFIGURACIO-ELTERES.
+from core.config_check import (tp_preset_conflict, check_with_state,
+                               TP_LONG, TP_SHORT)
+
+check_("hosszu celar VEDELEM NELKUL -> lelet",
+      bool(tp_preset_conflict("none", 2.7)), str(tp_preset_conflict("none", 2.7))[:60])
+check_("...es kimondja, hogy rovidebb kellene",
+      "RÖVIDEBB" in (tp_preset_conflict("none", 2.7) or ""))
+check_("rovid celar MOZGO stop mellett -> lelet",
+      bool(tp_preset_conflict("off", 1.0)))
+check_("...es kimondja, hogy hosszabb kellene",
+      "HOSSZABB" in (tp_preset_conflict("off", 1.0) or ""))
+
+# ⚠ Az OSSZHANGBAN levo parositasok NEM adnak leletet — kulonben a figyelmeztetes
+# mindenutt ott ulne, es pont ettol valna lathatatlanna.
+check_("hosszu celar + trailing -> NINCS lelet", tp_preset_conflict("off", 2.7) is None)
+check_("rovid celar + nincs trailing -> NINCS lelet",
+      tp_preset_conflict("none", 1.5) is None)
+for _p in ("halving", "shield", "fibo", "thirds", "risky"):
+    check_(f"a stopot mozgato preset ({_p}) is szamit annak",
+          tp_preset_conflict(_p, 1.0) is not None)
+
+# Hibas/hianyzo ertek ne dontson el egy ellenorzest.
+for _bad in (None, "abc", 0, -1):
+    check_(f"hibas celar ({_bad!r}) -> nincs lelet, nincs kivetel",
+          tp_preset_conflict("off", _bad) is None)
+
+# ⚠ A `check()` TISZTA marad: a fajlt olvaso ellenorzes KULON fuggvenyben van.
+import inspect as _insp3
+from core import config_check as _cc
+check_("a check() nem olvas fajlt (a szerzodese tiszta)",
+      "params_file" not in _insp3.getsource(_cc.check))
+check_("...a fajlt olvaso reteg kulon van", "def check_with_state" in _insp3.getsource(_cc))
+# Az olvasok BEADHATOK -> a teszt sem nyul fajlhoz.
+_cfg_t = {"pairs": {"X": {"strategies": ["wpr_sma"]}}, "strategy": {"name": "wpr_sma"},
+          "available_strategies": {"wpr_sma": True}}
+_r = check_with_state(_cfg_t, preset_of=lambda s: "none", tp_of=lambda s, n: 3.0)
+check_("beadott allapottal a lelet megjelenik",
+      any(x["code"] == "tp_vs_preset" for x in _r), str([x["code"] for x in _r]))
+_r2 = check_with_state(_cfg_t, preset_of=lambda s: "off", tp_of=lambda s, n: 3.0)
+check_("...osszhangban levo allapottal nem",
+      not any(x["code"] == "tp_vs_preset" for x in _r2))
+# Egy elszallo olvaso ne vigye el az EGESZ ellenorzest.
+def _boom(*_a):
+    raise RuntimeError("nincs fajl")
+check_("elszallo allapot-olvaso nem buktatja a tobbi ellenorzest",
+      isinstance(check_with_state(_cfg_t, preset_of=_boom, tp_of=_boom), list))
+
+
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")
 sys.exit(0 if all(results) else 1)
