@@ -23,11 +23,14 @@ igazodnia, különben a mutatott R hazudna.
 from __future__ import annotations
 
 import json
+import logging
 import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 PATH = Path(__file__).resolve().parents[1] / "data" / "position_meta.json"
+
+log = logging.getLogger(__name__)
 
 _lock = threading.Lock()
 _state: dict[str, dict] = {}
@@ -94,6 +97,10 @@ def _norm(v) -> dict | None:
             try:
                 d[k] = float(v[k])
             except (TypeError, ValueError):
+                # ⚠ JOGOSAN NÉMA: egyetlen elrontott számmező (kézi szerkesztés,
+                # régi formátum) nem teheti olvashatatlanná az EGÉSZ bejegyzést.
+                # A mező kimarad, a többi adat megmarad — a hívók amúgy is
+                # `None`-ra készülnek. Szűk kivétel, nem catch-all.
                 pass
     if v.get("closed_at"):
         d["closed_at"] = str(v["closed_at"])
@@ -115,8 +122,16 @@ def load() -> dict:
                         n = _norm(v)
                         if n is not None:
                             _state[str(k)] = n
-        except Exception:
-            pass
+        except Exception as ex:
+            # ⚠ SÉRÜLT/OLVASHATATLAN FÁJL. Üresen indulni ANNYI, mintha soha nem
+            # lett volna belépéskori kockázat (1 R) — a motor a pozíciókat
+            # gazdátlannak látná. A program fut tovább (ez a helyes: egy régi
+            # nyilvántartás nem érhet többet a kereskedésnél), de a napló
+            # MEGKAPJA az okot, mert kívülről ez semmiben nem különbözik az
+            # „még nincs bejegyzés" állapottól.
+            log.warning("%s: a nyilvántartás nem olvasható (%s) — ÜRESEN indul. "
+                        "A korábbi bejegyzések nem érvényesülnek.",
+                        PATH.name, ex)
         _loaded = True
         return dict(_state)
 
@@ -133,8 +148,13 @@ def _save_locked():
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(_state, f, indent=2, ensure_ascii=False)
         tmp.replace(PATH)
-    except Exception:
-        pass
+    except Exception as ex:
+        # ⚠ EZ A LEGROSSZABB NÉMA HIBA a modulban: a bejegyzés a MEMÓRIÁBAN
+        # megvan, tehát minden működni látszik — a lemezen viszont nincs, és ez
+        # csak a KÖVETKEZŐ INDÍTÁSKOR derülne ki, amikor a pozíció már gazdátlan.
+        log.error("%s: a nyilvántartás MENTÉSE nem sikerült (%s). A bejegyzés "
+                  "csak a memóriában él — újraindítás után elveszik.",
+                  PATH.name, ex)
 
 
 def record(ticket: int, symbol: str, strategy: str, risk_ccy: float,
@@ -270,7 +290,9 @@ def prune(open_tickets=None, keep_days: int = 3):
                         if datetime.fromisoformat(ca) < cutoff:
                             del _state[k]
                             changed = True
-                    except Exception:
-                        pass
+                    except Exception as ex:
+                        # Hibás időbélyeg → a bejegyzést MEGTARTJUK (a törlés
+                        # visszafordíthatatlan), de nem hallgatunk róla.
+                        log.debug("%s: hibás closed_at (%s): %s", PATH.name, k, ex)
         if changed:
             _save_locked()

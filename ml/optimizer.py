@@ -924,8 +924,12 @@ def optimize_pair_optuna(
     if done:
         try:
             best_score_so_far[0] = study.best_value
-        except Exception:
-            pass
+        except Exception as ex:
+            # Egyetlen trial sem ért el értékelhető eredményt (pl. mind a
+            # kötés-korlát alatt maradt) — ez ÉRVÉNYES állapot, csak tudni kell
+            # róla: a haladás-kijelző ilyenkor nem tud „eddigi legjobbat" mutatni.
+            log.debug("  %s — még nincs értékelhető trial a study-ban (%s)",
+                      symbol, ex)
     remaining = max(0, n_trials - done)
     if remaining > 0:
         if done:
@@ -946,8 +950,14 @@ def optimize_pair_optuna(
     if len(study.trials) >= n_trials:
         try:
             done_flag.touch()
-        except Exception:
-            pass
+        except Exception as ex:
+            # ⚠ A marker HIÁNYA nem kozmetika: a study „befejezetlen" marad, és a
+            # program MINDEN indításkor automatikusan újraindítja
+            # (`unfinished_studies` → auto-folytatás) — egy már kész, 500 trialos
+            # futást. Némán ez egy örökké visszatérő, órákig futó munka.
+            log.warning("  %s — a befejezés-marker nem jött létre (%s): a study "
+                        "BEFEJEZETLENNEK látszik, és a következő indításkor "
+                        "AUTOMATIKUSAN újraindul.", symbol, ex)
 
     if progress_callback:
         progress_callback(n_trials, n_trials, study.best_value)
@@ -1375,8 +1385,10 @@ def _optimize_symbol_locked(symbol, df_m15, df_m1, cfg, initial_balance,
             # a KÖVETKEZŐ Opt friss study-val indul (done+db → reset).
             try:
                 done_marker(symbol, strategy.name).touch()
-            except Exception:
-                pass
+            except Exception as ex:
+                log.warning("  %s — a done-marker nem jött létre (%s): a zárolt "
+                            "study miatt a következő OPT nem tud frissen "
+                            "indulni.", symbol, ex)
         log.info("  %s — optimalizálás MEGSZAKÍTVA (user stop), eredmény eldobva.",
                  symbol)
         return {"error": "megszakítva", "stopped": True}

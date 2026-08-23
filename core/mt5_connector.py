@@ -62,8 +62,11 @@ def margin_mode():
                 info = mt5.account_info()
             if info is not None:
                 _MARGIN_MODE = int(info.margin_mode)
-        except Exception:
-            pass
+        except Exception as ex:
+            # Ismeretlen marad → a hívók a biztonságos (hedge) ágra mennek, és a
+            # KÖVETKEZŐ hívás újrapróbálja. Nem végzetes, de tudni kell róla:
+            # netting számlán más a pozíció-kezelés.
+            log.debug("margin_mode nem olvasható (%s) — ismeretlen marad", ex)
     return _MARGIN_MODE
 
 
@@ -251,8 +254,11 @@ def ensure_connected(cfg: dict) -> bool:
     try:
         with MT5_LOCK:
             mt5.shutdown()          # a fél-holt session eltakarítása az új initialize előtt
-    except Exception:
-        pass
+    except Exception as ex:
+        # ⚠ JOGOSAN NÉMA a felületnek: takarítás egy ÚJ kapcsolat előtt. Ha nincs
+        # mit lezárni (sosem volt session), a hiba maga a normális eset — a
+        # következő `initialize` úgyis megmondja, ha tényleg baj van.
+        log.debug("MT5 shutdown az újrakapcsolás előtt: %s", ex)
     try:
         ok = connect(cfg)           # initialize + login + FIÓK-ELLENŐRZÉS
     except Exception as e:
@@ -621,8 +627,14 @@ def has_partial_close(ticket: int) -> bool:
             if (d.entry in (mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_OUT_BY)
                     and "rr_partial" in (getattr(d, "comment", "") or "")):
                 return True
-    except Exception:
-        pass
+    except Exception as ex:
+        # ⚠ EZ NEM KOZMETIKA. A függvény azt dönti el, történt-e MÁR rész-zárás
+        # ezen a pozición. Hibánál `False`-ot adunk vissza, amitől a motor
+        # MÉGEGYSZER lezárhat egy részt — valódi pénzmozgás egy elnyelt kivétel
+        # miatt. A `False` marad (a rész-zárás elmulasztása a kisebb rossz), de
+        # a napló megkapja.
+        log.warning("%s: a rész-zárás előzménye nem olvasható (%s) — a motor "
+                    "úgy veszi, hogy MÉG NEM volt rész-zárás.", ticket, ex)
     return False
 
 
@@ -939,8 +951,17 @@ def _load_offset():
         if abs(v) <= _OFF_MAX:
             _server_offset["v"] = v
             return v
-    except Exception:
-        pass
+    except FileNotFoundError:
+        pass                     # még sosem mértünk — normális, nem hiba
+    except Exception as ex:
+        # ⚠ A SZERVER-ELTOLÁS a KERESKEDÉSI NAP definíciója (napi P&L, napi
+        # veszteséglimit, óra-kapu) ÉS a piac-állapoté. Eltolás nélkül a nap
+        # határa elcsúszik — ez a projektben MÁR OKOZOTT valódi hibát (a hétvégi
+        # elavult tick befagyasztotta a napi P&L-t). Némán None-t adni tehát nem
+        # ártalmatlan.
+        log.warning("Szerver-eltolás nem olvasható (%s: %s) — a kereskedési nap "
+                    "határa a friss mérésre esik vissza.",
+                    _offset_file().name, ex)
     return None
 
 
@@ -953,8 +974,12 @@ def _save_offset(v: float):
         tmp.write_text(_j.dumps({"offset_sec": v, "saved_at": _t_now()}),
                        encoding="utf-8")
         os.replace(tmp, p)
-    except Exception:
-        pass
+    except Exception as ex:
+        # ⚠ Nem végzetes (a memóriabeli érték él tovább), de a KÖVETKEZŐ
+        # INDÍTÁSKOR nincs mire visszaesni: zárt hétvégén a friss mérés maga is
+        # egy elavult tickből jönne — épp akkor csúszna el, amikor számít.
+        log.warning("Szerver-eltolás mentése nem sikerült (%s) — újraindítás "
+                    "után újra kell mérni.", ex)
 
 
 def _t_now() -> float:
@@ -1004,8 +1029,12 @@ def server_offset_sec(symbols) -> Optional[float]:
             log.debug("szerver-eltolás: elavult tick (%.2f óra), a mért érték "
                       "eldobva", raw / 3600.0)
             return _load_offset()
-    except Exception:
-        pass
+    except Exception as ex:
+        # ⚠ A KERESKEDÉSI NAP definíciója múlik rajta (napi P&L, veszteséglimit,
+        # óra-kapu, piac-állapot). `None`-t adva a hívók a helyi időre esnek
+        # vissza — az a bróker időzónájától akár órákkal eltérhet.
+        log.warning("szerver-eltolás mérése elbukott (%s) — a hívók a korábbi "
+                    "vagy a helyi időre esnek vissza.", ex)
     return _load_offset()
 
 
@@ -1052,8 +1081,10 @@ def connection_info(cfg: dict) -> dict:
                 "margin_mode_name": margin_mode_name(),
                 "is_netting":       is_netting(),
             }
-    except Exception:
-        pass
+    except Exception as ex:
+        # A hívó „nincs kapcsolat"-ot fog látni — az MAGA a jelzés, tehát nem
+        # néma. Az OKA viszont enélkül elveszne (rossz jelszó? lezárt terminál?).
+        log.debug("connection_info: az account_info nem olvasható: %s", ex)
 
     broker = cfg.get("broker", {})
     return {
