@@ -187,6 +187,39 @@ check("a cache MÁSOLATOT ad vissza (a hívó nem tudja elrontani)",
 ml_ai.mlf.build_feature_frame = _real_build
 ml_ai.load_bundle = _real_load
 
+
+# ── A FAGYÁS-FIGYELŐ KÜSZÖBE ────────────────────────────────────────────
+# ⚠ MÉRÉS, nem érzés. A 2,0 mp-es küszöb 12 nap alatt 112 riasztást adott, és
+# MINDEGYIK ugyanaz volt: élő kereskedés mellett futó backtest/optimalizálás,
+# három pandas-nehéz szál (LiveTrader + InstrBacktest + TradeForgeViz), a fő
+# szál pedig 2,0–2,5 mp-ig nem kapta vissza a GIL-t. A leghosszabb valaha
+# mért akadás 3,0 mp — a 4,0-s küszöb tehát MINDET átengedi, és csak arra szól,
+# ami tényleg kilóg.
+#
+# ⚠ A figyelő MEGMARAD: a hallgatás nem cél. Csak a küszöb kerül oda, ahol a
+# riasztás információt hordoz, nem zajt (`data/ui_watchdog.log`).
+import inspect as _insp2
+import json as _json2
+from dashboard import gui as _g2
+_ROOT2 = Path(__file__).resolve().parents[1]
+_wsrc = _insp2.getsource(_g2.DashboardWindow._start_watchdog)
+check("a küszöb alapértelmezése 4,0 mp",
+      '"watchdog_threshold_sec", 4.0' in _wsrc, _wsrc[_wsrc.find("threshold ="):][:60])
+check("...és a mérés ott van indoklásként", "3,0 mp" in _wsrc)
+check("a figyelő megmarad (nem kapcsoltuk ki)",
+      "_watchdog_running" in _wsrc and "_stall_report" in _wsrc)
+
+# ⚠ HÁZIREND: a config csak az ELTÉRÉST rögzíti. Egy 4.0-ra írt kulcs a későbbi
+# alapérték-változást NÉMÁN hatástalanná tenné ezen a gépen.
+_cfg2 = _json2.loads((_ROOT2 / "config.json").read_text(encoding="utf-8"))
+check("az éles config NEM rögzíti külön (az alapérték hat)",
+      "watchdog_threshold_sec" not in (_cfg2.get("dashboard") or {}))
+_ex2 = _json2.loads((_ROOT2 / "config.example.json").read_text(encoding="utf-8"))
+check("a példa-config az ÚJ alapot mutatja",
+      (_ex2.get("dashboard") or {}).get("watchdog_threshold_sec") == 4.0,
+      str((_ex2.get("dashboard") or {}).get("watchdog_threshold_sec")))
+
+
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")
 sys.exit(0 if all(results) else 1)

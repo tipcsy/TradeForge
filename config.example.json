@@ -26,7 +26,7 @@
     "price_refresh_sec": 3,
     "live_refresh_sec": 7,
     "all_refresh_sec": 30,
-    "watchdog_threshold_sec": 2.0,
+    "watchdog_threshold_sec": 4.0,
     "watchdog_stacks": true,
     "_comment_gate_order": "Mely KAPUK latszanak a tablan es milyen SORRENDBEN — a Beallitasok ⚙ „Kapuk” fulen szerkesztheto (ket lista + fel/le). Ami NINCS a listaban, az KI VAN KAPCSOLVA, es ez KET dolgot jelent egyutt: (1) az oszlopa nem latszik, ES (2) a kapu EGYETLEN instrumentumon sem szol bele a kereskedesbe. A kettot szandekosan nem lehet szetvalasztani: ha csak elrejtenenk az oszlopot, a kapu LATHATATLANUL blokkolhatna tovabb. A kikapcsolas FELFUGGESZT, nem TOROL — a per-par hatasok (pairs.<SYM>.gates.…) a configban maradnak es visszakapcsolaskor ujra elnek; a kapu ablaka pedig kiirja, hogy „a Beallitasokban kikapcsolva”. A kulcs HIANYA = minden kapu bekapcsolva, a beepitett sorrendben. v2.9.0 ota NINCS automatikus elrejtes (korabban a Piac/Lendulet/Koltseg oszlop magatol eltunt, ha egy paron sem volt mert ertek — igy ket oka is lehetett annak, hogy valami nem latszik).",
     "gate_order": [

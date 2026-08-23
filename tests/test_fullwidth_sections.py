@@ -26,6 +26,21 @@ sys.path.insert(0, str(ROOT))
 from core import applog
 applog.harden_console()
 
+# ⚠⚠ AZ ELES ALLAPOTOT NEM IRJUK. Ez a teszt VALODI `InstrumentParamsDialog`-ot
+# epit, es a kockazatcsokkento vezerlok erintese a valodi `data/risk_mode.json`-ba
+# ment — vagyis atallitja a felhasznalo per-par beallitasat. A `PATH` ideiglenes
+# fajlra teritese az egyetlen biztos vedelem (a csonkolas minden uj hivasi utnal
+# megkerulheto). A `tests/run_all.py` ore fogta meg ezt is.
+import atexit as _atexit, pathlib as _pathlib, shutil as _shutil, tempfile as _tempfile
+from core import rr_state as _rrs_guard
+_RR_REAL = _rrs_guard.PATH
+_RR_TMP = _pathlib.Path(_tempfile.mkdtemp(prefix="tfv_rr_")) / "risk_mode.json"
+if _RR_REAL.exists():
+    _shutil.copy2(_RR_REAL, _RR_TMP)          # az induló állapot maradjon élethű
+_rrs_guard.PATH = _RR_TMP
+_atexit.register(lambda: setattr(_rrs_guard, "PATH", _RR_REAL))
+_atexit.register(lambda: _shutil.rmtree(_RR_TMP.parent, ignore_errors=True))
+
 results = []
 
 

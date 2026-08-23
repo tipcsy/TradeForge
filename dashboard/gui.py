@@ -6241,7 +6241,13 @@ class DashboardWindow:
             return
         self._watchdog_running = True
         _dash = self.cfg.get("dashboard", {})
-        threshold = _dash.get("watchdog_threshold_sec", 2.0)
+        # ⚠ 4,0 mp — MÉRÉS alapján, nem érzésre. A 2,0-s küszöb 112 riasztást
+        # adott 12 nap alatt, és MINDEGYIK ugyanaz volt: élő kereskedés mellett
+        # futó backtest/optimalizálás, három pandas-nehéz szál, a fő szál pedig
+        # 2,0–2,5 mp-ig nem kapta vissza a GIL-t. A leghosszabb valaha 3,0 mp.
+        # Ez tehát nem „blokkoló hívás", hanem processzor-telítettség — a
+        # 4,0-s küszöb fölött már tényleg olyasmi áll, amit meg kell nézni.
+        threshold = _dash.get("watchdog_threshold_sec", 4.0)
         # A vermek kiírása hasznos, de bőbeszédű — kapcsolható, és epizódonként
         # EGYSZER megy ki (a `warned` kapu alatt), nem félmásodpercenként.
         want_stacks = bool(_dash.get("watchdog_stacks", True))
