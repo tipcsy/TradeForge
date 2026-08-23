@@ -4650,8 +4650,19 @@ class DashboardWindow:
         from core import run_state as _rs
         _rs.set_state(self.cfg, symbol, name, _rs.STOPPED)
         _saved = self._save_main_config()
-        if any(self._strategy_live(symbol, n)
-               for n in self._live2_strategies(symbol)):
+        # ⚠ A KÉRDÉS: fut-e MÉG valami EZEN A PÁRON? A választ a MOTOR listájából
+        # kell venni (a pár `strategies` listája), nem a soron MEGJELENÍTETT
+        # listából (`available_strategy_names`) — a kettő eltérhet.
+        #
+        # ⚠ ÉLESBEN MEGTÖRTÉNT (2026-08-23): az `available_strategies` blokkban a
+        # bollinger `false` volt (nem jelenik meg oszlopként), a párokon viszont
+        # ENGEDÉLYEZVE volt és FUTOTT. A megjelenítési listát nézve a Stop arra
+        # jutott, hogy „nem maradt élő stratégia", a szimbólumot STOPPED-re tette,
+        # a motor pedig a bollingert is LEÁLLÍTOTTA — három páron, egyetlen
+        # kattintásból. A szándéka a configban közben végig `live` maradt.
+        from strategy import enabled_strategy_names as _ensn
+        _others = _ensn(self.cfg, symbol) or []
+        if any(self._strategy_live(symbol, n) for n in _others):
             # Mint az indításnál: a hibaüzenetet nem nyomjuk el. A leállítás MOST
             # érvényes, de újraindítás után a stratégia visszaindulna.
             self._set_status(

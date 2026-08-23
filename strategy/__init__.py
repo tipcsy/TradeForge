@@ -172,14 +172,35 @@ def enabled_strategy_names(cfg: dict, symbol: str) -> list[str]:
     pc = (cfg.get("pairs", {}) or {}).get(symbol, {}) or {}
     names = pc.get("strategies")
     if not names:
-        return [default_strategy_name(cfg)]
-    # Csak érvényes/ismert neveket adunk vissza, a config sorrendjében (egyediesítve).
-    out, seen = [], set()
-    for n in names:
-        if n and n not in seen:
-            out.append(n)
-            seen.add(n)
-    return out or [default_strategy_name(cfg)]
+        # Hiányzó/üres lista → az ELSŐDLEGES (egy-stratégiás viselkedés).
+        out = [default_strategy_name(cfg)]
+    else:
+        # Csak érvényes/ismert nevek, a config sorrendjében (egyediesítve).
+        out, seen = [], set()
+        for n in names:
+            if n and n not in seen:
+                out.append(n)
+                seen.add(n)
+    # ⚠ A GLOBÁLISAN KIKAPCSOLT STRATÉGIA NEM FUTHAT. Ez a lista a MOTORÉ
+    # (`strategies_for` → `live_trader`), és eddig KIZÁRÓLAG a pár `strategies`
+    # listáját nézte — az `available_strategies` kapcsolót nem.
+    #
+    # ⚠ ÉLESBEN MEGTÖRTÉNT (2026-08-23): a felhasználó KIVETTE a bollingert az
+    # aktív stratégiák közül (`available_strategies.bollinger_squeeze_breakout =
+    # false`), a motor viszont TOVÁBBRA IS futtatta 9 páron, mert a párok
+    # `strategies` listájában benne maradt. A felületen közben oszlopa sem volt,
+    # tehát sem elindítani, sem leállítani nem lehetett — „sem live, sem off,
+    # semmi", miközben kereskedhetett volna.
+    #
+    # A kikapcsolás így MOST már mindenhol ugyanazt jelenti: a per-pár lista a
+    # SZÁNDÉK, a globális kapcsoló a LEHETŐSÉG, és a motor a kettő METSZETÉN fut.
+    #
+    # ⚠ A SZŰRÉS UTÁN NINCS TARTALÉK. Ha a páron kiválasztott ÖSSZES stratégia ki
+    # van kapcsolva, az eredmény ÜRES — és ez a helyes válasz: „ezen a páron
+    # nincs mit futtatni". Az elsődlegesre visszaesni azt jelentené, hogy olyan
+    # stratégiát indítunk, amit a felhasználó erre a párra SOSEM választott ki.
+    _avail = set(available_strategy_names(cfg))
+    return [n for n in out if n in _avail]
 
 
 def strategies_for(cfg: dict, symbol: str) -> list[Strategy]:

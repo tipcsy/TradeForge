@@ -467,6 +467,64 @@ if HAS_TK:
         if w is not None:
             w.root.destroy()
 
+# ══ A KIKAPCSOLT STRATEGIA NEM FUTHAT ═══════════════════════════════════════
+# ⚠ ELESBEN MEGTORTENT (2026-08-23). A felhasznalo kivette a bollingert az aktiv
+# strategiak kozul (`available_strategies.bollinger_squeeze_breakout = false`), a
+# MOTOR viszont tovabbra is futtatta 9 paron: az `enabled_strategy_names` KIZAROLAG
+# a par `strategies` listajat nezte, a globalis kapcsolot nem. A feluleten kozben
+# oszlopa sem volt (`available_strategy_names` szurt), tehat sem elinditani, sem
+# leallitani nem lehetett — „sem live, sem off, semmi", mikozben kereskedhetett.
+#
+# A ket lista JELENTESE kulon: a per-par lista a SZANDEK, a globalis kapcsolo a
+# LEHETOSEG. A motor a kettő METSZETEN fut.
+from strategy import enabled_strategy_names as _ensn2, strategies_for as _sf2
+
+_cfg_off = {
+    "available_strategies": {"wpr_sma": True, "bollinger_squeeze_breakout": False},
+    "strategy": {"name": "wpr_sma"},
+    "pairs": {"X": {"strategies": ["wpr_sma", "bollinger_squeeze_breakout"]}},
+}
+check("a globalisan KIKAPCSOLT strategia kimarad a motor listajabol",
+      _ensn2(_cfg_off, "X") == ["wpr_sma"], str(_ensn2(_cfg_off, "X")))
+check("...a strategies_for is ezt adja",
+      [s.name for s in _sf2(_cfg_off, "X")] == ["wpr_sma"],
+      str([s.name for s in _sf2(_cfg_off, "X")]))
+
+# ⚠ Bekapcsolva viszont FUT — a szures nem tunteti el a valodi valasztast.
+_cfg_on = {**_cfg_off, "available_strategies":
+           {"wpr_sma": True, "bollinger_squeeze_breakout": True}}
+check("bekapcsolva mindketto fut",
+      _ensn2(_cfg_on, "X") == ["wpr_sma", "bollinger_squeeze_breakout"],
+      str(_ensn2(_cfg_on, "X")))
+
+# ⚠ A megjelenites es a futtatas EGYEZZEN: ami nem elerheto, az nem is futhat.
+from strategy import available_strategy_names as _asn2
+check("a motor listaja RESZHALMAZA az elerhetoknek",
+      set(_ensn2(_cfg_off, "X")) <= set(_asn2(_cfg_off)),
+      f"{_ensn2(_cfg_off,'X')} vs {_asn2(_cfg_off)}")
+
+# ⚠ HA MINDEN KIVALASZTOTT KI VAN KAPCSOLVA, az eredmeny URES — es ez a HELYES
+# valasz: „ezen a paron nincs mit futtatni". Az elsodlegesre visszaesni azt
+# jelentene, hogy olyan strategiat inditunk, amit a felhasznalo erre a parra
+# SOSEM valasztott ki. (Az elso valtozatom ezt rontotta el; a CLI tesztje fogta
+# meg: ott a „nincs mit futtatni" beszedes figyelmeztetes, nem nema helyettesites.)
+_cfg_all_off = {**_cfg_off,
+                "pairs": {"X": {"strategies": ["bollinger_squeeze_breakout"]}}}
+check("csupa kikapcsolt -> URES (nem helyettesitunk masikkal)",
+      _ensn2(_cfg_all_off, "X") == [], str(_ensn2(_cfg_all_off, "X")))
+# ...a HIANYZO lista viszont tovabbra is az elsodleges (visszafele kompatibilis).
+_cfg_none = {**_cfg_off, "pairs": {"X": {}}}
+check("hianyzo lista -> az elsodleges (valtozatlan)",
+      _ensn2(_cfg_none, "X") == ["wpr_sma"], str(_ensn2(_cfg_none, "X")))
+
+# Hianyzo `available_strategies` -> MINDEN regisztralt elerheto (visszafele komp.)
+_cfg_no_key = {"strategy": {"name": "wpr_sma"},
+               "pairs": {"X": {"strategies": ["wpr_sma", "bollinger_squeeze_breakout"]}}}
+check("hianyzo kapcsolo-blokk -> valtozatlan viselkedes",
+      _ensn2(_cfg_no_key, "X") == ["wpr_sma", "bollinger_squeeze_breakout"],
+      str(_ensn2(_cfg_no_key, "X")))
+
+
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")
 sys.exit(0 if all(results) else 1)

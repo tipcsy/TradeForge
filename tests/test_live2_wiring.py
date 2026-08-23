@@ -11,6 +11,7 @@ tehat a 2.0 addig valaszthato marad, amig nem bizonyitott.
 import atexit
 import pathlib
 import shutil
+import inspect as _insp
 import sys
 import tempfile
 from pathlib import Path
@@ -292,6 +293,20 @@ if TK_OK:
         _why = G.OptimizerController.request_optimize(_ctrl, "Ger40", "wpr_sma")
         check("a vezerlo kereskedo strategiat NEM optimalizal", bool(_why), repr(_why))
         check("...es megmondja, miert", "kereskedik" in (_why or ""), repr(_why))
+        # ══ A STOP a MOTOR listajat nezze, ne a MEGJELENITETTET ══════════
+        # ⚠ ELESBEN MEGTORTENT (2026-08-23). Az `available_strategies` blokkban a
+        # bollinger `false` volt (nem kap oszlopot a tablan), a parokon viszont
+        # ENGEDELYEZVE volt es FUTOTT. A `_stop_strategy` a MEGJELENITESI listat
+        # nezte („fut-e meg valami ezen a paron?"), arra jutott, hogy nem — a
+        # szimbolumot STOPPED-re tette, es a motor a BOLLINGERT is leallitotta.
+        # Harom paron, egyetlen kattintasbol, mikozben a szandeka vegig `live`
+        # maradt a configban. A megjelenites es a futtatas KET kulon lista.
+        _gsrc = _insp.getsource(G.DashboardWindow._stop_strategy)
+        check("a Stop a MOTOR listajabol dolgozik (enabled_strategy_names)",
+              "enabled_strategy_names" in _gsrc, "")
+        check("...NEM a megjelenitesibol (_live2_strategies)",
+              "_live2_strategies" not in _gsrc, "")
+
     finally:
         if w4 is not None:
             w4.root.destroy()
