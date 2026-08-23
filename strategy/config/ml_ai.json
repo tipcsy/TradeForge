@@ -2,7 +2,7 @@
   "_comment": "Az ml_ai (Trading-with-AI port) stratégia SAJÁT beállításai. A modell páronként tanított (data/models/ml_ai/<SYMBOL>.pkl); az Optimalizálás gomb ennél a stratégiánál TANÍTÁST futtat.",
   "quality": {
     "_comment": "Tanított instrumentum minősítési küszöbei (Minőség oszlop) — a teszt-időszaki backtest összegzőjére.",
-    "min_trades": 15,
+    "min_trades": 50,
     "maxdd_mid": 0.18,
     "maxdd_weak": 0.25,
     "maxdd_bad": 0.35,

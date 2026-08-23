@@ -119,6 +119,9 @@
     "min_spread_mult": 1.5
   },
   "optimizer": {
+    "_comment_min_trades": "Hány kötés kell ahhoz, hogy egy trial eredménye SZÁMÍTSON. MÉRVE (2026-08-23): a Ger40 998 valódi kötéséből bootstrappelve egy 1,10-es PF-ű stratégia ÖT kötésen a minták 14%-ában mutat 3 fölötti PF-et, 15-ön 4,5%-ában — a régi korlátok (ablakonként 5, összesítve 10) tehát semmitől nem védtek, és az optimalizáló a zajt választotta ki (EURGBP: PF 5,11 hat kötésen, a pár azóta nem köt). Vékony páron ez azzal jár, hogy az optimalizálás EREDMÉNY NÉLKÜL tér vissza — ez a helyes válasz: ott nincs mit hangolni.",
+    "min_trades_per_window": 15,
+    "min_trades": 50,
     "_comment_method": "Optimalizálási módszer: optuna | random | grid",
     "method": "optuna",
     "max_trials": 500,

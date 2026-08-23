@@ -153,7 +153,52 @@ def generate_grid_params(opt_cfg: dict, base_params: dict,
 # Értékelési metrika
 # ---------------------------------------------------------------------------
 
-def score(summary: dict, min_trades: int = 10) -> float:
+# ---------------------------------------------------------------------------
+# MENNYI KOTES KELL, hogy egy trial eredménye JELENTSEN valamit?
+# ---------------------------------------------------------------------------
+# ⚠ MÉRVE (2026-08-23), nem ízlésből. A Ger40 998 valódi kötéséből (igazi
+# PF = 1,10) bootstrappelve, N kötéses mintákon:
+#
+#     N kötés     PF 95%    P(PF>2)   P(PF>3)
+#         5         5,08      24,5%     14,2%
+#        15         2,89      14,8%      4,5%
+#        50         1,82       2,9%      0,1%
+#
+# A régi korlátok (ablakonként 5, összesítve 10) tehát SEMMITŐL nem védtek: egy
+# közepes stratégia öt kötésen a minták 14%-ában mutat 3 fölötti PF-et. Élesben
+# pontosan ez történt — az EURGBP „PF 5,11 HAT kötésen" alapján lett kiválasztva,
+# és a pár azóta gyakorlatilag nem köt. Az optimalizáló így megnyerheti a
+# játékot azzal, hogy NEM kereskedik: a zaj jobb pontszámot ad, mint a valódi,
+# szerényebb él.
+#
+# ⚠ AMIT CSERÉBE VÁLLALUNK: egy vékony páron előfordulhat, hogy EGYETLEN
+# paraméterkészlet sem éri el a korlátot, és az optimalizálás eredmény nélkül
+# tér vissza. Ez nem hiba, hanem a helyes válasz: „ezen az instrumentumon ezzel a
+# stratégiával nincs mit hangolni." Korábban ilyenkor egy zajból választott
+# készlet került a helyére, „Jó" minősítéssel.
+MIN_TRADES_WINDOW = 15      # egy walk-forward VIZSGA-ablakban
+MIN_TRADES_TOTAL = 50       # a teljes (train) mintán — a minősítés küszöbével egy szinten
+
+
+def min_trades_floors(cfg: "dict | None") -> tuple:
+    """`(ablakonkénti, összesített)` alsó korlát a configból (`optimizer` blokk).
+
+    A `n_splits` alap 4, tehát az ablakonkénti 15 összesítve ~60 kötést jelent —
+    a `core.quality` 50-es küszöbe fölött, vagyis a kiválasztott készlet el TUD
+    jutni értékelhető minősítésig."""
+    o = ((cfg or {}).get("optimizer") or {})
+    try:
+        w = int(o.get("min_trades_per_window", MIN_TRADES_WINDOW))
+    except (TypeError, ValueError):
+        w = MIN_TRADES_WINDOW
+    try:
+        t = int(o.get("min_trades", MIN_TRADES_TOTAL))
+    except (TypeError, ValueError):
+        t = MIN_TRADES_TOTAL
+    return max(0, w), max(0, t)
+
+
+def score(summary: dict, min_trades: int = MIN_TRADES_TOTAL) -> float:
     """
     Egyetlen szám ami maximalizálandó.
     Kevés trade esetén bünteti (nem megbízható).
@@ -214,7 +259,8 @@ def _walk_forward_windows(df_m15: pd.DataFrame, n_splits: int = 4,
     return list(reversed(windows))  # kronológiai sorrendben
 
 
-def _score_trades(trades: list, initial_balance: float, min_trades: int = 5) -> float:
+def _score_trades(trades: list, initial_balance: float,
+                  min_trades: int = MIN_TRADES_WINDOW) -> float:
     """Zárt trade lista → egyetlen score szám."""
     if len(trades) < min_trades:
         return -999999.0
@@ -691,7 +737,9 @@ def optimize_pair_optuna(
                     if t.close_time is not None and t.close_time >= w["test_start"]
                 ]
                 combined_test.extend(test_trades)
-                window_scores.append(_score_trades(test_trades, initial_balance))
+                window_scores.append(
+                    _score_trades(test_trades, initial_balance,
+                                  min_trades=min_trades_floors(cfg)[0]))
 
             except Exception as e:
                 last_err = f"{type(e).__name__}: {e}"
@@ -1047,7 +1095,7 @@ def optimize_pair(
                 "profit_factor": abs(sum(wins) / sum(losses)) if losses and sum(losses) != 0 else float("inf"),
             }
 
-            s = score(summary)
+            s = score(summary, min_trades=min_trades_floors(cfg)[1])
 
             # Sor az eredménytáblázathoz: score + metrikák + a próbált paraméterek
             row = {

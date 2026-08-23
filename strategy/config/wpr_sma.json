@@ -1,8 +1,8 @@
 {
   "_comment": "A wpr_sma stratégia SAJÁT beállításai (a vázról leválasztva). quality/indicators/sltp/position_mgmt + az optimizer paramétertér.",
   "quality": {
-    "_comment": "Optimalizált instrumentum minősítési küszöbei (Minőség oszlop). Legrosszabb-elv: a pár a legrosszabb elért kategóriát kapja.",
-    "min_trades": 15,
+    "_comment": "Optimalizált instrumentum minősítési küszöbei (Minőség oszlop). Legrosszabb-elv: a pár a legrosszabb elért kategóriát kapja. ⚠ A min_trades MÉRT érték (2026-08-23): a Ger40 998 valódi kötéséből bootstrappelve egy 1,10-es PF-ű stratégia 15 kötésen a minták 14,8%-ában mutat 2 FÖLÖTTI PF-et, 5 kötésen 14,2%-ában 3 fölöttit. A régi 15-ös küszöb tehát semmitől nem védett — az EURGBP „PF 5,11 hat kötésen” pontosan ilyen zaj volt. 50-nél a 95%-os sáv 1,82-ig ér (P(PF>2) ~ 2,9%).",
+    "min_trades": 50,
     "maxdd_mid": 0.18,
     "maxdd_weak": 0.25,
     "maxdd_bad": 0.35,

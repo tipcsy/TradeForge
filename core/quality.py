@@ -8,13 +8,32 @@ ad vissza: "green"/"yellow"/"orange"/"red"/"muted").
 
 Fő mérőszám a profit_factor (PF), mert a win_rate önmagában félrevezető:
 2:1 hozam/kockázatnál a nullszaldó ~33% win_rate.
+
+⚠ A `min_trades` NEM ízlés kérdése — MÉRVE (2026-08-23). A Ger40 998 valódi
+kötéséből (igazi PF = 1,10) bootstrappel, N kötéses mintákon:
+
+    N kötés    PF 5%   PF 50%   PF 95%    P(PF>2)   P(PF>3)
+        5       0,10     1,03     5,08      24,5%     14,2%
+       15       0,38     1,09     2,89      14,8%      4,5%
+       30       0,54     1,09     2,12       6,3%      0,7%
+       50       0,64     1,10     1,82       2,9%      0,1%
+      120       0,79     1,11     1,54       0,1%      0,0%
+
+Vagyis egy 1,10-es PF-ű stratégia 5 kötésen a minták 14%-ában 3 FÖLÖTTI PF-et
+mutat. A korábbi 15-ös küszöb tehát semmitől nem védett: az EURGBP „PF 5,11"
+értéke HAT kötésen pontosan ilyen zaj volt — mégis ez alapján választotta ki az
+optimalizáló a paramétereit, és a pár azóta gyakorlatilag nem köt.
+
+50-nél a 95%-os sáv 1,82-ig ér: egy „Jó" (PF ≥ 1,4) még mindig lehet véletlen,
+de már csak ~3% eséllyel. Ez a kompromisszum — nem az igazság, hanem egy MÉRT
+küszöb, ami a configból feljebb vihető.
 """
 
 from typing import Optional
 
 # Alapértelmezett küszöbök (a config "quality" blokkja felülírja)
 _DEFAULTS = {
-    "min_trades":   15,
+    "min_trades":   50,     # ⚠ MÉRVE (lásd a modul fejlécét) — 15-nél a PF zaj
     "maxdd_mid":    0.18,
     "maxdd_weak":   0.25,
     "maxdd_bad":    0.35,
