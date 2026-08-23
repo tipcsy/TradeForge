@@ -501,7 +501,12 @@ class BollingerSqueezeStrategy(Strategy):
 
     def param_space(self, cfg: dict, base_params: dict, method: str,
                     max_trials: int) -> list[dict]:
-        from ml.param_space import generate_grid_params, generate_random_params
+        # ⚠ `ml.param_space` NEM LÉTEZIK — a helper az `ml.optimizer`-ben van.
+        # Lappangó hiba volt: az alapértelmezett módszer az optuna, ami NEM
+        # hívja a `param_space`-t, ezért a `grid`/`random` úton hetekig
+        # ModuleNotFoundError-ral állt volna meg. (A CLB bevezetésekor
+        # derült ki, mert ugyanezt a sort másoltam át mintaként.)
+        from ml.optimizer import generate_grid_params, generate_random_params
         opt_cfg = cfg["optimizer"]
         if method == "grid":
             return generate_grid_params(opt_cfg, base_params, self.constraints_ok)

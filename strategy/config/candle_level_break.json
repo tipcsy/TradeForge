@@ -1,0 +1,104 @@
+{
+  "_comment": "Gyertyaszint-törés (CLB) — H4 szint + M15 konszolidáció-kitörés. Forrás: YouTube-videó módszere, de EZ A MI VÁLTOZATUNK: a hiányzó döntéseket mi hoztuk meg (lásd a modul fejlécét és a vault specifikációt). Idősík: a keret M15+M1 csővezetékén dolgozunk, a H4-et a stratégia BELÜL mintavételezi.",
+
+  "indicators": {
+    "_comment": "A szint és a belépő geometriája. Az idősík (H4) NEM paraméter — az idősík-váltás új stratégia lenne, nem hangolás.",
+    "swing_bars": 2,
+    "level_ttl_bars": 120,
+    "retest_atr": 0.5,
+    "cons_bars": 4,
+    "_comment_cons": "⚠ MÉRVE (2026-08-23), nem tippelve. A 4 gyertyás M15 sáv szélessége MEDIÁNBAN 1,85–1,93 ATR (négy páron feltűnően egyforma) — az első változat 0,8-as küszöbe a sorok 1,1%-át fogadta el konszolidációnak, és a stratégia 5 hónap alatt 10 kötést adott. 1,4 = a sorok ~22%-a, azaz a szokásosnál SZŰKEBB negyed.",
+    "cons_max_atr": 1.4,
+    "_comment_vol": "Volatilitás-szűrő a KÖZÖS mércéhez képest (core.vol_baseline). 0 = kikapcsolva.",
+    "atr_min_pct": 0.0,
+    "atr_max_pct": 0.0
+  },
+
+  "sltp": {
+    "_comment": "⚠ A stop a KONSZOLIDÁCIÓS SÁV alja alá kerül, nem a szint-gyertya alja alá. Mérve: a strukturális hozam/kockázat minden idősíkon 0,6–0,9 (1 ALATT), tehát az él CSAKIS a szűk stopból jöhet — ezért a stop_buffer_atr az ELSŐ mérendő paraméter. A tp_rr_ratio csak TARTALÉK: elsődlegesen a következő szintig megyünk (szinttől szintig).",
+    "stop_buffer_atr": 0.3,
+    "tp_rr_ratio": 2.0
+  },
+
+  "quality": {
+    "_comment": "Minősítési küszöbök. A min_trades MÉRT érték (2026-08-23): a Ger40 998 valódi kötéséből bootstrappelve egy 1,10-es PF-ű stratégia 15 kötésen a minták 14,8%-ában mutat 2 fölötti PF-et — a régi 15-ös küszöb tehát semmitől nem védett.",
+    "min_trades": 50,
+    "maxdd_mid": 0.18,
+    "maxdd_weak": 0.25,
+    "maxdd_bad": 0.35,
+    "pf_mid": 1.4,
+    "pf_weak": 1.2,
+    "pf_bad": 1.0,
+    "winrate_weak": 0.35,
+    "winrate_good": 0.45
+  },
+
+  "param_meta": {
+    "categories": ["Szint", "Belépő", "SL / TP", "Piac-szűrő", "Egyéb"],
+    "params": {
+      "swing_bars": {
+        "recompute": "signal",
+        "category": "Szint",
+        "comment": "H4 fraktál-félablak: ennyi gyertyán belül legyen a legmélyebb"
+      },
+      "level_ttl_bars": {
+        "recompute": "signal",
+        "category": "Szint",
+        "comment": "Meddig él egy szint (H4 gyertya) — enélkül a régi szintek halmozódnának"
+      },
+      "retest_atr": {
+        "recompute": "signal",
+        "category": "Belépő",
+        "comment": "Mekkora ATR-környezet számít visszatesztnek a szint körül"
+      },
+      "cons_bars": {
+        "recompute": "signal",
+        "category": "Belépő",
+        "comment": "A konszolidációs sáv hossza M15 gyertyában"
+      },
+      "cons_max_atr": {
+        "recompute": "signal",
+        "category": "Belépő",
+        "comment": "A sáv maximális magassága ATR-ben (ennél szélesebb már nem konszolidáció)"
+      },
+      "stop_buffer_atr": {
+        "recompute": "execution",
+        "category": "SL / TP",
+        "comment": "Ráhagyás a konszolidáció alja ALATT — a legérzékenyebb paraméter"
+      },
+      "tp_rr_ratio": {
+        "recompute": "execution",
+        "category": "SL / TP",
+        "comment": "TARTALÉK célár, ha nincs érvényes következő szint"
+      },
+      "atr_min_pct": {
+        "recompute": "signal",
+        "category": "Piac-szűrő",
+        "comment": "Alsó volatilitás-küszöb a közös mércéhez képest (0 = ki)"
+      },
+      "atr_max_pct": {
+        "recompute": "signal",
+        "category": "Piac-szűrő",
+        "comment": "Felső volatilitás-küszöb (0 = ki)"
+      }
+    }
+  },
+
+  "optimizer": {
+    "_comment": "Keresési tartományok. ⚠ A MÉRÉSI SORREND KÖTÖTT: előbb a stop_buffer_atr söprése (egyedül), és csak ha ott van értelmes eredmény, jöhet a többdimenziós hangolás. A strukturális RR 1 alatt van, tehát ha a stop nem hoz élt, nincs mit optimalizálni.",
+    "swing_bars": { "min": 2, "max": 5, "step": 1 },
+    "level_ttl_bars": { "min": 40, "max": 200, "step": 20 },
+    "retest_atr": { "min": 0.2, "max": 1.2, "step": 0.1 },
+    "cons_bars": { "min": 3, "max": 8, "step": 1 },
+    "cons_max_atr": { "min": 1.0, "max": 2.0, "step": 0.1 },
+    "stop_buffer_atr": { "min": 0.1, "max": 1.0, "step": 0.1 },
+    "tp_rr_ratio": { "min": 1.0, "max": 3.0, "step": 0.25 },
+    "atr_min_pct": { "min": 0.0, "max": 1.0, "step": 0.1 },
+    "atr_max_pct": { "min": 0.0, "max": 4.0, "step": 0.2 },
+
+    "_comment_constraints": "Paraméter-érvényességi kényszerek. Az optimizer ezzel szűr, ÉS a gt/lt metaadatból a suggeszt-tartományt eleve leszűkíti. A stop nem eshet a konszolidációs sávon BELÜLRE — különben a belépő pillanatában már ki is ütné.",
+    "constraints": [
+      "stop_buffer_atr < cons_max_atr"
+    ]
+  }
+}
