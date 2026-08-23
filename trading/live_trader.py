@@ -667,6 +667,21 @@ class LivePairState:
 SL_MOVES_DIR = ROOT / "data" / "sl_moves"
 
 
+# ⚠ EGYSZER SZÓLJ, ne minden körben. A motor ciklusa páronként 30 mp-enként fut:
+# egy tartós hiba (elrontott stratégia-hook, hibás kapu-függvény) percenként
+# tucatnyi azonos sort írna, és a naplóban pont a RITKA leletek vesznének el
+# benne. Az első előfordulás megy ki figyelmeztetésként, a többi `debug`-ra.
+_WARNED: set = set()
+
+
+def _warn_once(key, msg: str, *args) -> None:
+    if key in _WARNED:
+        log.debug("(ismételt) " + msg, *args)
+        return
+    _WARNED.add(key)
+    log.warning(msg, *args)
+
+
 def sl_journal_append(symbol: str, ticket: int, t_server: int, sl: float) -> None:
     """Egy SL-mozgás hozzáfűzése a `data/sl_moves/<SYM>.csv`-hez. Az idő a
     `pos.time_update` (a módosítás SZERVER-ideje) → egyezik a gyertya-idővel."""
@@ -674,8 +689,13 @@ def sl_journal_append(symbol: str, ticket: int, t_server: int, sl: float) -> Non
         SL_MOVES_DIR.mkdir(parents=True, exist_ok=True)
         with open(SL_MOVES_DIR / f"{symbol}.csv", "a", encoding="ascii") as fh:
             fh.write(f"{int(ticket)};{int(t_server)};{repr(float(sl))}\n")
-    except Exception:
-        pass
+    except Exception as ex:
+        # ⚠ AUDIT-NYOM. Ebből rekonstruálható utólag, MIKOR és HOVA mozgatta a
+        # motor a stopot (breakeven, trailing) — a brókernél csak a VÉGSŐ érték
+        # látszik. Ha némán elvész, egy vitatott zárás később nem visszakövethető.
+        _warn_once(("sl_journal", symbol),
+                   "%s: az SL-mozgás naplója nem írható (%s) — a stop-mozgatások "
+                   "utólag nem lesznek visszakövethetők.", symbol, ex)
 
 
 def sl_journal_read(symbol: str) -> dict:
@@ -872,8 +892,15 @@ def apply_gate_state(objects: list, bars: dict, symbol: str, strategy_name: str,
                 try:
                     if not gate_fn(t, c_by.get(t, 0.0), d):
                         code = _g_code("tf_align")
-                except Exception:
-                    pass
+                except Exception as ex:
+                    # ⚠ EZ KAPU, NEM KIJELZÉS. Hibánál a `code` beállítatlan
+                    # marad, vagyis a kapu NEM blokkol — „fail open". Ez lehet a
+                    # helyes választás (egy hibás kapu ne bénítsa meg a
+                    # kereskedést), de NÉMÁN semmiképp: kívülről ez pontosan úgy
+                    # néz ki, mint egy átengedő kapu.
+                    _warn_once(("tf_align_gate", symbol),
+                               "%s: a TF-együttállás kapu-függvénye hibázik (%s) "
+                               "— a kapu NEM blokkol (fail open).", symbol, ex)
             # 6) Volatilitás — display_only, tehát MINDIG érvényes
             if code == 0 and "volatility" in active and a > 0 and base > 0:
                 if (lo > 0 and a < lo) or (hi > 0 and a > hi):
@@ -1780,8 +1807,10 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
     # (TTL-cache), itt csak kiolvassuk a szimbólum szeletét.
     try:
         ds.daily_by_strategy = pnl_split.for_symbol(daily_split_cached(), symbol)
-    except Exception:
-        pass
+    except Exception as ex:
+        # Kijelzés: a soron a napi P&L stratégia-bontása marad üresen. A napi
+        # veszteség-KAPU nem innen dolgozik, tehát a kereskedést nem érinti.
+        log.debug("%s: napi P&L bontás nem állítható elő: %s", symbol, ex)
 
     # --- Piaci adat a stratégia időkereteire ---
     # Az ELSŐ bemelegítéskor MÉLY ablakot töltünk (signal_warmup_bars — a jelzés-
@@ -1816,8 +1845,14 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
             if _cat:
                 ds.market_state = _cat
                 ds.market_state_label, ds.market_state_color = _ms.display(_cat)
-    except Exception:
-        pass
+    except Exception as ex:
+        # ⚠ NEM csak kijelzés: a `core.gates` a `market_label`-t EBBŐL olvassa
+        # (`getattr(ds, "market_state_label", "")`). Ha ez néma marad, a Piac-kapu
+        # ÜRES címkével dönt — és kívülről ez ugyanúgy néz ki, mint egy semleges
+        # piac.
+        _warn_once(("market_state", symbol),
+                   "%s: a piac-állapot nem számolható (%s) — a Piac-kapu üres "
+                   "címkével dolgozik.", symbol, ex)
 
     # --- Jelzés a stratégiától (ZÁRT gyertyán, állapottartó) ---
     state.strat_state, signal = strategy.on_bar_close(state.strat_state, md)
@@ -1834,8 +1869,13 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
         ds.strategy_cells[strategy.name] = {k: (c.text, c.color)
                                             for k, c in cells.items()}
         ds.cells_ts = time.time()
-    except Exception:
-        pass
+    except Exception as ex:
+        # ⚠ A STRATÉGIA SAJÁT hookja (`live_cells`). Ha ez hibás, a pár sora
+        # ÖRÖKRE üres marad — és ez pontosan úgy néz ki, mint egy stratégia,
+        # ami épp nem jelez. Új stratégia bevezetésekor ez a leggyakoribb néma hiba.
+        _warn_once(("live_cells", symbol, strategy.name),
+                   "%s/%s: a stratégia live_cells hookja hibázik (%s) — a sor "
+                   "jelzés-cellái üresen maradnak.", symbol, strategy.name, ex)
 
     # --- Pozícióterv (belépés-kapu + méretezés) a STRATÉGIÁTÓL + spread-kapu ──
     # Konvenció: az első deklarált időkeret a "fő" (magasabb). A belépés-szűrőt
@@ -3060,8 +3100,11 @@ def run(cfg: dict, slot_mgr: SlotManager):
         _open_tk = {p.ticket for p in _all_now}
         adopted.prune(_open_tk, keep_days=_keep)
         position_meta.prune(_open_tk, keep_days=_keep)
-    except Exception:
-        pass
+    except Exception as ex:
+        # Induláskor EGYSZER fut, tehát nincs zaj-kockázat. Elmaradó takarítás
+        # önmagában ártalmatlan (a bejegyzések aprók), de ha az MT5-lekérdezés
+        # bukik, az sokkal többet jelent — épp indulunk.
+        log.warning("A ticket-nyilvántartások takarítása elmaradt (%s).", ex)
 
     recovered: set = set()   # (symbol, strat_name) — magic alapján stratégiához kötve
     for _m, _st in magic_to_strat.items():
@@ -3153,8 +3196,13 @@ def run(cfg: dict, slot_mgr: SlotManager):
             if time.time() - _last_srv_off >= 300:
                 try:
                     mt5_connector.server_offset_sec(list(all_pairs)[:3])
-                except Exception:
-                    pass
+                except Exception as ex:
+                    # ⚠ A KERESKEDÉSI NAP definíciója (napi P&L, veszteséglimit,
+                    # óra-kapu) és a piac-állapot is ebből dolgozik. Induláskor
+                    # egyszer fut — ha itt bukik, a nap határa a perzisztált
+                    # (esetleg tegnapi) értékre marad.
+                    log.warning("A szerver-eltolás mérése elmaradt induláskor "
+                                "(%s) — a nap határa a korábbi értékre marad.", ex)
                 _last_srv_off = time.time()
 
             # Risky állapot óránkénti újraolvasása (külső program írhatja)

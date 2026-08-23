@@ -195,10 +195,39 @@ print(f"      (néma elnyelés: {_total} — top: "
 check("a mérés lefutott (a szám a naplóban marad)", _total >= 0)
 # ⚠ A KERESKEDÉSI ÚT tiszta legyen: ezekben a modulokban a maradék NULLA vagy
 # INDOKOLT. Ha valaki új néma elnyelést tesz ide, ITT bukjon el.
-for _f in ("core/adopted.py", "core/position_meta.py", "core/mt5_connector.py"):
+for _f in ("core/adopted.py", "core/position_meta.py", "core/mt5_connector.py",
+           "trading/live_trader.py"):
     check(f"{_f}: nincs TÁG (catch-all) néma elnyelés", _broad.get(_f, 0) == 0,
           str(_broad.get(_f, 0)))
 print(f"      (ebből TÁG catch-all: {sum(_broad.values())})")
+
+
+# ── 5. A MOTOR HÉT HELYE (2. kör) ──────────────────────────────────────
+# ⚠ Kettő közülük NEM kijelzés:
+#   * a TF-együttállás kapu-függvénye — hibánál a kapu NEM blokkol („fail open").
+#     Ez lehet a helyes választás, de némán semmiképp: kívülről pontosan úgy néz
+#     ki, mint egy átengedő kapu.
+#   * a piac-állapot — a `core.gates` a `market_label`-t EBBŐL olvassa, tehát
+#     hiba esetén a Piac-kapu ÜRES címkével dönt.
+_lt = (ROOT / "trading" / "live_trader.py").read_text(encoding="utf-8")
+
+check("van egyszer-szólj segéd (a 30 mp-es ciklus miatt)",
+      "def _warn_once(" in _lt)
+# ⚠ A ZAJ ÖNMAGÁBAN IS elrejti a leletet: percenként tucatnyi azonos sor mellett
+# a ritka, fontos üzenet elveszik. Ezért az ismétlés `debug`-ra megy.
+_i = _lt.find("def _warn_once(")
+check("...és az ismétlés csak debug", "log.debug" in _lt[_i:_i + 400]
+      and "log.warning" in _lt[_i:_i + 400])
+
+for _key, _why in (("tf_align_gate", "a kapu fail-open volta"),
+                   ("market_state", "a Piac-kapu üres címkéje"),
+                   ("live_cells", "a stratégia saját hookja"),
+                   ("sl_journal", "az SL-mozgás audit-nyoma")):
+    check(f"szól: {_why}", f'"{_key}"' in _lt or f"'{_key}'" in _lt, _key)
+
+check("a kapu-hiba KIMONDJA, hogy nem blokkol", "fail open" in _lt)
+check("az SL-napló KIMONDJA, mit veszítünk",
+      "nem lesznek visszakövethetők" in _lt)
 
 
 print()
