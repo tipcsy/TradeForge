@@ -77,15 +77,29 @@ def cells_for(d: dict, collapsed: dict, on_close=None) -> dict:
     out = {}
 
     # ── bal: instrumentum ────────────────────────────────────────────────
+    # ⚠ ZÁRT PIAC: az ár HALVÁNY. Egy zárt piacú pár eddig pontosan úgy nézett
+    # ki, mint egy nyitott, amelyik épp nem talál belépőt — a leggyakoribb néma
+    # kérdés (*miért nem csinál semmit?*) megválaszolatlan maradt. A szürke ár
+    # magától elmondja, hogy amit látsz, az már nem él; a részleteket (mióta,
+    # melyik volt az utolsó árajánlat) a buborék adja. SZÖVEGET nem teszünk a
+    # sorba: a szín elég jelzés, a felirat csak zaj volna 10-30 soron át.
+    _ses = d.get("session") or {}
+    _closed = _ses.get("state") in ("closed", "unknown")
+    _tip = _ses.get("tip") or None
+    _price_fg = FG_GRAY_DIM if _closed else FG_WHITE
+
     out["symbol"] = Cell("symbol", text=d.get("symbol", "—"), font="mono_bold",
-                         on_click=d.get("on_symbol"))
-    out["bid"] = Cell("bid", text=_lr._fmt_price(d.get("bid"), dg), anchor="e")
-    out["ask"] = Cell("ask", text=_lr._fmt_price(d.get("ask"), dg), anchor="e")
+                         on_click=d.get("on_symbol"), tip=_tip)
+    out["bid"] = Cell("bid", text=_lr._fmt_price(d.get("bid"), dg), anchor="e",
+                      fg=_price_fg, tip=_tip)
+    out["ask"] = Cell("ask", text=_lr._fmt_price(d.get("ask"), dg), anchor="e",
+                      fg=_price_fg, tip=_tip)
     ch = d.get("change_pct")
-    out["change"] = Cell("change", anchor="e",
+    out["change"] = Cell("change", anchor="e", tip=_tip,
                          text=("—" if ch is None else f"{ch:+.2f}%"),
-                         fg=(FG_GRAY if ch is None
-                             else (FG_GREEN if ch >= 0 else FG_RED)))
+                         fg=(FG_GRAY_DIM if _closed else
+                             (FG_GRAY if ch is None
+                              else (FG_GREEN if ch >= 0 else FG_RED))))
 
     # ── közép: kapuk ─────────────────────────────────────────────────────
     if not (collapsed or {}).get("gates"):

@@ -204,7 +204,7 @@ def row_data(symbol: str, ds, strategy_names, cfg: dict = None,
              on_toggle=None, on_opt=None, on_stages=None,
              on_symbol=None, on_align=None, on_spread=None,
              on_market=None, on_momentum=None, on_cost=None,
-             on_volatility=None, open_charts=None) -> dict:
+             on_volatility=None, open_charts=None, market_states=None) -> dict:
     """Egy instrumentum sorának adata a `live_row.LiveRow` számára.
 
     `ds`          — `live_trader.PairDashboardState` (duck-typed).
@@ -300,8 +300,16 @@ def row_data(symbol: str, ds, strategy_names, cfg: dict = None,
             "on_stages": (lambda n=name: on_stages(symbol, n)) if on_stages else None,
         })
 
+    # ⚠ NYITVA VAN-E A PIAC. A hívó adja be (körönként EGYSZER, minden párra) —
+    # páronként lekérdezve MT5-hívás lenne minden sorra. Hiányzó bejegyzés =
+    # „ismeretlen": nem állítjuk se nyitottnak, se zártnak.
+    _ms = (market_states or {}).get(symbol) or {}
+
     return {
         "symbol": symbol,
+        "session": {"state": _ms.get("state", "unknown"),
+                    "age_sec": _ms.get("age_sec"),
+                    "tip": _ms.get("tip", "")},
         "bid": getattr(ds, "bid", None),
         "ask": getattr(ds, "ask", None),
         "change_pct": getattr(ds, "change_pct", None),

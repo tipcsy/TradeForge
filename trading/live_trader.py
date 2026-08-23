@@ -167,6 +167,10 @@ class PairDashboardState:
     ask:              Optional[float] = None   # aktuális vételi ár
     digits:           int  = 5                 # árformázás tizedesjegyek
     point:            Optional[float] = None   # 1 pont ára (MT5 symbol_info.point)
+    # ⚠ NYITVA VAN-E A PIAC ezen az instrumentumon (`core.market_state`):
+    # `{state, age_sec, tick_time, tip}`. A dashboard ár-frissítője tölti — a
+    # tick úgyis a kezében van, tehát nem kerül extra MT5-hívásba.
+    session:          Optional[dict] = None
     prev_bid:         Optional[float] = None   # előző bid (tick-színezéshez)
     prev_ask:         Optional[float] = None   # előző ask
     day_open:         Optional[float] = None   # napi nyitóár (változás% alaphoz)

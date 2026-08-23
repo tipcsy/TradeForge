@@ -2936,6 +2936,10 @@ class DashboardWindow:
         """A hiba-jelző címke (alapból REJTVE — nulla hibánál nincs mit mondani)."""
         self.lbl_errors = tk.Label(parent, text="", bg=BG, fg=FG_RED, font=font)
         self.lbl_errors.bind("<Button-1>", self._open_log)
+        # ⚠ PIAC-ÁLLAPOT: szintén csak akkor látszik, ha van mit mondani. Nyitott
+        # piacon egy állandó „minden nyitva" felirat ugyanolyan zaj volna, mint
+        # egy mindig kint lévő „nincs hiba".
+        self.lbl_market = tk.Label(parent, text="", bg=BG, fg=FG_GRAY, font=font)
 
     # ── Dashboard 2.0 tábla ──────────────────────────────────────────────
     def _layout_mode(self) -> str:
@@ -3037,6 +3041,11 @@ class DashboardWindow:
         except Exception:
             _open_charts = set()
 
+        # ⚠ NYITVA VAN-E A PIAC. A HÁTTÉRSZÁL már kiszámolta (`_refresh_price`),
+        # itt csak összeszedjük — a fő szálon EGYETLEN MT5-hívás sincs.
+        _market = {s: (getattr(ds, "session", None) or {})
+                   for s, ds in (self.dashboard_ref or {}).items()}
+
         rows = []
         for sym in syms:
             ds = self.dashboard_ref.get(sym)
@@ -3055,6 +3064,7 @@ class DashboardWindow:
                 opt_state_of=self._live2_opt_state,
                 enabled_of=self._strategy_enabled,
                 open_charts=_open_charts,
+                market_states=_market,
                 on_toggle=self._handle_run_strategy,
                 on_opt=self._live2_opt_click,
                 on_stages=self._show_strategy_params,
@@ -5547,6 +5557,18 @@ class DashboardWindow:
         if tick and tick.bid:
             ds.prev_bid, ds.prev_ask = ds.bid, ds.ask
             ds.bid, ds.ask = tick.bid, tick.ask
+        # ⚠ NYITVA VAN-E A PIAC — ITT, a HÁTTÉRSZÁLON. A tick már a kezünkben
+        # van, tehát nem kerül EGYETLEN extra MT5-hívásba sem. A fő szálon
+        # kiszámolva 10-30 hívás menne körönként a UI-szálra, ami pont az a
+        # fajta terhelés, amit a fagyás-watchdog jelez.
+        try:
+            from core import market_state as _msx
+            _mi = _msx.info_of(symbol) if tick is None else _msx.from_tick(
+                getattr(tick, "time", 0))
+            _mi["tip"] = _msx.tip_of(_mi)
+            ds.session = _mi
+        except Exception:
+            ds.session = {"state": "unknown", "age_sec": None, "tip": ""}
         if info:
             ds.digits     = info.digits
             ds.spread_pts = info.spread
@@ -6169,6 +6191,7 @@ class DashboardWindow:
         # keletkezett (felület-visszahívás, elhalt szál, kapcsolat), itt kiderül,
         # hogy VAN mit megnézni — és hogy hol.
         self._refresh_error_badge()
+        self._refresh_market_badge()
 
         # Heartbeat: a teljes tick lefutott → a fő szál él
         self._last_heartbeat = time.monotonic()
@@ -6190,6 +6213,31 @@ class DashboardWindow:
                             fg=FG_RED, cursor="hand2")
                 _lbl.pack(side="bottom")
                 self._err_tip = last
+            else:
+                _lbl.pack_forget()
+        except tk.TclError:
+            pass
+
+    def _refresh_market_badge(self):
+        """„Piac: 9/10 zárva" — a háttérszál által számolt állapotokból.
+
+        ⚠ MIÉRT KELL. Egy zárt piacú pár eddig pontosan úgy nézett ki, mint egy
+        nyitott, amelyik épp nem talál belépőt. A soron a HALVÁNY ár mondja meg
+        páronként; itt az összkép látszik — hétvégén vagy ünnepnapon egy
+        pillantás alatt kiderül, hogy nem a programmal van baj."""
+        _lbl = getattr(self, "lbl_market", None)
+        if _lbl is None:
+            return
+        try:
+            from core import market_state as _ms
+            txt = _ms.summary({s: (getattr(ds, "session", None) or {})
+                               for s, ds in (self.dashboard_ref or {}).items()})
+        except Exception:
+            return
+        try:
+            if txt:
+                _lbl.config(text=txt)
+                _lbl.pack(side="bottom")
             else:
                 _lbl.pack_forget()
         except tk.TclError:
