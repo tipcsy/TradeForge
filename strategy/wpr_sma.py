@@ -508,7 +508,14 @@ class WprSmaStrategy(Strategy):
         _sp_col = next((c for c in ("close_spread", "avg_spread", "spread")
                         if c in m1.columns), None)
         _sp_arr = m1[_sp_col].values if _sp_col else None
-        if tl_t and getattr(md, "show_signals", True):
+        # ⚠ A ciklus AKKOR IS lefut, ha a jel-replay rajza ki van kapcsolva („K"
+        # gomb): a `show_signals` a MEGJELENÍTÉST kapcsolja, nem a történést. A
+        # belépő-rekordok így a perzisztens naplóba akkor is bekerülnek
+        # (`md.on_entry_record`) — különben a chart előzménye csendben lyukas
+        # lenne minden olyan időszakon, amikor a felhasználó elrejtette a jeleket.
+        _draw_sig = getattr(md, "show_signals", True)
+        _sink = getattr(md, "on_entry_record", None)
+        if tl_t:
             p = 0
             # PERZISZTENS M1-állapot: az M1 belépő állapotgép (felfegyverez az extrémnél
             # → tüzel a trigger átütésekor) a nyitott ablakon belül ŐRZI a felfegyverzést.
@@ -588,15 +595,6 @@ class WprSmaStrategy(Strategy):
                     sl, tp = entry - sl_points * pip, entry + tp_points * pip
                 else:
                     sl, tp = entry + sl_points * pip, entry - tp_points * pip
-                # Három vízszintes trendvonal a belépőre CENTRÁLVA: −3…+3 M1
-                # gyertya → 6 hosszú. TP zöld (fent BUY-nál), belépő NARANCS az
-                # entry árszintjén, SL piros. + FÜGGŐLEGES irány-jelzés a belépő
-                # idejénél: zöld BUY / piros SELL.
-                t0    = t - 3 * 60
-                t_end = t + 3 * 60
-                objects.append(viz.VLine(
-                    name=f"m1sig_{t}", t1=t,
-                    color="green" if sig == "BUY" else "red", width=2))
                 # ⚠ CÍMKE a függőleges vonalon: MELYIK stratégia és MEKKORA
                 # mérettel. Több stratégia rajza egy chartra kerülhet, és a
                 # vonalak színe csak az IRÁNYT mondja — a szetup gazdája eddig
@@ -608,16 +606,18 @@ class WprSmaStrategy(Strategy):
                     _l = md.lot_of(sl_points)
                     if _l and _l > 0:
                         _lab += f" {_l:.2f} lot"
-                objects.append(viz.Text(
-                    name=f"m1lbl_{t}", t1=t, p1=(tp if sig == "BUY" else sl),
-                    text=_lab, color="green" if sig == "BUY" else "red",
-                    fontsize=9))
-                objects.append(viz.Trend(name=f"m1entry_{t}", t1=t0, p1=entry, t2=t_end, p2=entry,
-                                         color="orange", width=2))
-                objects.append(viz.Trend(name=f"tp_{t}", t1=t0, p1=tp, t2=t_end, p2=tp,
-                                         color="green", width=2))
-                objects.append(viz.Trend(name=f"sl_{t}", t1=t0, p1=sl, t2=t_end, p2=sl,
-                                         color="red", width=2))
+                # A BELÉPŐ-REKORD: ebből rajzolható újra a jelölő — és pontosan
+                # ez megy a perzisztens naplóba is. A rajzolás a közös
+                # `viz.entry_marks`-é (három vízszintes szegmens a belépőre
+                # centrálva + függőleges irány-vonal + címke), hogy a naplóból
+                # visszatöltött múlt BITRE ugyanúgy nézzen ki, mint a most
+                # újraszámolt jelen.
+                rec = {"t": t, "d": sig, "e": entry, "sl": sl, "tp": tp,
+                       "lab": _lab}
+                if callable(_sink):
+                    _sink(rec)
+                if _draw_sig:
+                    objects += viz.entry_marks(rec)
 
         # ── Beállítás-táblázat (bal-felső sarok) ───────────────────────────
         rows = [

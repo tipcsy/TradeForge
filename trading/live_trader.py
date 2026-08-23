@@ -49,6 +49,8 @@ from core.indicator_engine import atr as atr_indicator
 from core.risk_manager import (calc_lot, calc_effective_slots, SlotManager,
                                calc_swing_sl_tp_points)
 from strategy import get_strategy, get_strategy_by_name
+from strategy import signal_journal
+from strategy import visual as viz_mod
 from strategy.base import MarketData
 
 logging.basicConfig(
@@ -1111,7 +1113,7 @@ def actual_trade_objects(symbol: str, since_ts: int,
 def pair_visual_lines(symbol: str, params: dict, strategy, point_size: float,
                       pair_cfg: dict = None, bars: dict = None,
                       actual_trades: bool = True, cfg: dict = None,
-                      exec_gates: bool = True) -> list:
+                      exec_gates: bool = True, journal: bool = False) -> list:
     """Egy stratégia + keretrendszer rajz-objektumainak TAGELT sorai (a stratégia
     nevével — `strategy.visual.tag_line`), hogy több stratégia UGYANABBA a
     szimbólum-fájlba írhasson, az MQL5 indikátor pedig `InpStrategy` szerint szűrjön.
@@ -1127,6 +1129,12 @@ def pair_visual_lines(symbol: str, params: dict, strategy, point_size: float,
     `actual_trades`: rákerüljenek-e a VALÓS kötések nyilai. Manuális teszthez
     **False** a helyes: a bot tényleges belépői ott a MEGFEJTÉS — ha látszanak,
     nem azt méred, hogy TE beszállnál-e.
+
+    `journal`: írja-e a perzisztens belépő-naplót (`strategy.signal_journal`),
+    és töltse-e vissza belőle az ABLAKON KÍVÜLI múlt jelölőit. **Csak az ÉLŐ út
+    adja True-val.** Az export/visszajátszás egy tetszőleges múltbeli ablakot
+    számol újra a MAI paraméterekkel — ha az is írna, a napló többé nem azt
+    tartalmazná, ami megtörtént, hanem az utólagos rekonstrukciókat is.
 
     `cfg`: a TELJES config. ⚠ MUSZÁJ megadni az export-úton! A modul-globális
     `_run_cfg`-t CSAK az élő motor `run()`-ja tölti fel; egy önálló processzben
@@ -1204,6 +1212,14 @@ def pair_visual_lines(symbol: str, params: dict, strategy, point_size: float,
     except Exception as _ex:
         log.debug("%s — lot-számoló nem építhető a vizhez: %s", symbol, _ex)
 
+    # ── PERZISZTENS BELÉPŐ-NAPLÓ (gyűjtés) ─────────────────────────────────
+    # A stratégia MINDEN kiszámolt belépő-jelnél meghívja ezt — egy menetben a
+    # rajzolással, tehát nincs második visszajátszás (a kijelzés-út költsége
+    # egyszer már valós probléma volt). Az `md.show_signals` NEM némítja: a „K"
+    # gomb a rajzot kapcsolja, nem a történést.
+    _recs: list = []
+    md.on_entry_record = _recs.append
+
     objects = apply_no_trade(strategy.visual_objects(md), pair_cfg or {}, th)
     # + a GENERIKUS piac-állapot kód a per-gyertya BarState-ekhez (a per-pár
     #   kiválasztott piac-stratégiából; csak ha kérve van a charton).
@@ -1219,6 +1235,58 @@ def pair_visual_lines(symbol: str, params: dict, strategy, point_size: float,
     if actual_trades and m1 is not None and len(m1):
         objects = objects + actual_trade_objects(
             symbol, int(m1.index[0].timestamp()), strategy.name)
+    # ── PERZISZTENS BELÉPŐ-NAPLÓ (írás + a MÚLT visszatöltése) ─────────────
+    # ⚠ CSAK az ÉLŐ úton (`journal=True`). Az export/visszajátszás (`bars`
+    # megadva) egy TETSZŐLEGES múltbeli ablakot számol újra, a mai
+    # paraméterekkel — ha az is írna, a napló többé nem azt tartalmazná, amit a
+    # bot ténylegesen látott, hanem az utólagos rekonstrukciókat is. A napló
+    # attól napló, hogy megtörtént dolgok vannak benne.
+    if journal and m1 is not None and len(m1):
+        _win_start = int(m1.index[0].timestamp())
+        _fp = signal_journal.fingerprint(md.params)
+        if _recs:
+            # ⚠ ÖSSZEVETÉS az ELŐZŐ körök bejegyzéseivel, mielőtt írnánk. Az
+            # átfedő időbélyegek ZÁRT gyertyákból származnak, tehát ugyanannak a
+            # jelzésnek körről körre ugyanazt kell adnia. Ha mégsem — azonos
+            # paraméter-ujjlenyomat mellett —, az NÉMA ELTÉRÉS: utólag módosult
+            # gyertya, elcsúszott ablak, kettős adatforrás. Pontosan az az
+            # osztály, ami a warmup-mélységnél és a viz-sávnál is pénzbe került;
+            # eddig semmi nem tudta volna megmutatni.
+            _cmp = signal_journal.compare(symbol, strategy.name, _recs, _fp)
+            if _cmp["elter"]:
+                _warn_once(("journal_diff", symbol, strategy.name),
+                           "%s/%s — a belépő-napló ELTÉR az újraszámolástól %d "
+                           "jelzésnél (azonos paraméterekkel!): %s. Ez utólag "
+                           "módosult gyertyára vagy elcsúszott ablakra utal.",
+                           symbol, strategy.name, len(_cmp["elter"]),
+                           _cmp["elter"][:5])
+            _n = signal_journal.append(symbol, strategy.name, _recs, fp=_fp)
+            if _n:
+                signal_journal.prune(
+                    symbol, strategy.name,
+                    keep_records=int(((_cfg or {}).get("trading") or {}).get(
+                        "signal_journal_keep_records",
+                        signal_journal.KEEP_RECORDS)),
+                    keep_days=int(((_cfg or {}).get("trading") or {}).get(
+                        "signal_journal_keep_days", signal_journal.KEEP_DAYS)))
+        # Az ABLAKON KÍVÜLI múlt a naplóból. Az ablakon BELÜL az újraszámolás
+        # marad az igazság — így a mai viz↔backtest paritás nem sérül, a régi
+        # jelölők viszont túlélik az MT5 újraindítását és az indikátor
+        # újracsatolását (eddig CSAK az MQL-upsert mellékhatásaként maradtak meg).
+        if _show_signals:
+            try:
+                _past = signal_journal.load(
+                    symbol, strategy.name, before_t=_win_start,
+                    limit=int(((_cfg or {}).get("trading") or {}).get(
+                        "signal_journal_show_records",
+                        signal_journal.SHOW_RECORDS)))
+                for _r in _past:
+                    objects = objects + viz_mod.entry_marks(_r)
+            except Exception as _ex:
+                _warn_once(("journal_read", symbol, strategy.name),
+                           "%s/%s — a belépő-napló nem tölthető vissza (%s); a "
+                           "charton csak az aktuális ablak jelölői látszanak",
+                           symbol, strategy.name, _ex)
     # + a TF-együttállás figyelő SMA-vonalai (a bekapcsolt idősíkokra) — #4.
     objects = objects + tf_align_visual_objects(symbol)
     # ⚠ IDOSIK-KAPU: a strategia rajza csak a DONTESI idosikon jelenjen meg.
@@ -1300,7 +1368,10 @@ def _write_symbol_viz(symbol, pair_cfg, strats, params_by_strat: dict):
             _snap = params_by_strat[st.name]
             _fresh = load_pair_params(symbol, st.name)
             vparams = {**_snap, **_fresh} if _fresh else _snap
-            lines += pair_visual_lines(symbol, vparams, st, point_size, pair_cfg)
+            # journal=True: EZ az élő út — csak innen kerülhet bejegyzés a
+            # perzisztens belépő-naplóba (lásd a pair_visual_lines docstringjét).
+            lines += pair_visual_lines(symbol, vparams, st, point_size, pair_cfg,
+                                       journal=True)
         except Exception as e:
             # ⚠ WARNING, nem debug. Ez eddig `log.debug` volt — vagyis a naplóban
             # (INFO szint) NYOMA SEM VOLT, miközben a chart kiürült. Egy üres rajz

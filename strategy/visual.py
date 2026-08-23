@@ -318,3 +318,43 @@ class Label:
             str(int(self.corner)), str(int(self.x)), str(int(self.y)),
             _rgb(self.color), str(int(self.fontsize)), _clean(self.text),
         ])
+
+
+# ── Összetett jelölő: EGY belépő teljes rajza ─────────────────────────────
+def entry_marks(rec: dict, span_sec: int = 180) -> list:
+    """Egy belépő-jel öt rajz-objektuma EGY rekordból.
+
+    ⚠ MIÉRT ÖNÁLLÓ FÜGGVÉNY, és miért nem a stratégiában marad: a jelölőket
+    KÉT út állítja elő — az aktuális ablak ÚJRASZÁMOLÁSA és a perzisztens
+    `strategy.signal_journal` (az ablakon kívüli múlt). Ha a rajzolás két
+    helyen élne, a két út csendben elcsúszna egymástól (ugyanaz az osztály,
+    mint a viz-sáv és a warmup-mélység leletei). Így mindkettő UGYANEBBŐL a
+    rekordból dolgozik, tehát bitre azonos sorokat ad.
+
+    A rekord mezői: `t` (epoch), `d` ("BUY"/"SELL"), `e` belépő ár, `sl`, `tp`
+    (elhagyható), `lab` (címke; elhagyható). `span_sec`: a vízszintes
+    szegmensek fél-hossza a belépő körül (alap ±3 M1 gyertya).
+    """
+    t = int(rec["t"])
+    buy = str(rec.get("d", "")).upper() == "BUY"
+    col = "green" if buy else "red"
+    entry = float(rec["e"])
+    sl, tp = rec.get("sl"), rec.get("tp")
+    t0, t_end = t - int(span_sec), t + int(span_sec)
+    out = [VLine(name=f"m1sig_{t}", t1=t, color=col, width=2)]
+    if rec.get("lab"):
+        # A címke a nyereség-oldalon ül (BUY-nál a TP fölött, SELL-nél az SL
+        # fölött) — ha nincs ár hozzá, a belépő szintjén, hogy ne vesszen el.
+        anchor = (tp if buy else sl)
+        out.append(Text(name=f"m1lbl_{t}", t1=t,
+                        p1=float(anchor if anchor is not None else entry),
+                        text=str(rec["lab"]), color=col, fontsize=9))
+    out.append(Trend(name=f"m1entry_{t}", t1=t0, p1=entry, t2=t_end, p2=entry,
+                     color="orange", width=2))
+    if tp is not None:
+        out.append(Trend(name=f"tp_{t}", t1=t0, p1=float(tp), t2=t_end,
+                         p2=float(tp), color="green", width=2))
+    if sl is not None:
+        out.append(Trend(name=f"sl_{t}", t1=t0, p1=float(sl), t2=t_end,
+                         p2=float(sl), color="red", width=2))
+    return out

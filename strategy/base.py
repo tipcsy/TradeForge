@@ -164,6 +164,21 @@ class MarketData:
     # kérdést nem lehet feltenni — a kimaradt belépőkről semmit nem tudnál.
     # ⚠ Kikapcsolva a chart TÖBBET mutat, mint amennyit az él megkötne.
     exec_gates: bool = True
+    # Opcionális BELÉPŐ-REKORD gyűjtő: `fn(rec: dict) -> None`. A stratégia MINDEN
+    # belépő-jelnél meghívja, amit a `visual_objects` kiszámolt — a rekord az,
+    # amiből a jelölő újrarajzolható (`t`, `d`, `e`, `sl`, `tp`, `lab`; lásd
+    # `strategy.visual.entry_marks`). A keret ebből tölti a perzisztens
+    # `strategy.signal_journal`-t. None → nincs gyűjtés (a régi viselkedés).
+    #
+    # ⚠ MIÉRT EBBEN A MENETBEN, és nem külön `entry_records()` seammel: a jelek
+    # kiszámolása a teljes indikátor- és jel-visszajátszást igényli. Egy külön
+    # seam ugyanezt MÉGEGYSZER lefuttatná minden viz-körben — pontosan az a
+    # kijelzés-úti költség, ami egyszer már 7,64 mp/kör GIL-fogást okozott.
+    #
+    # ⚠ A `show_signals` NEM befolyásolja: a „K" gomb a RAJZOLÁST kapcsolja ki,
+    # nem a történést. Ha a naplózás is elnémulna tőle, a chart előzménye
+    # csendben lyukas lenne — a felhasználó pedig sosem tudná meg, miért.
+    on_entry_record: "callable | None" = None
 
     def closed(self, label: str) -> Optional[pd.Series]:
         df = self.bars.get(label)

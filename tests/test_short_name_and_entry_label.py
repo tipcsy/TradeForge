@@ -119,18 +119,27 @@ check("a MarketData-nak van lot-szamolo varrata",
 check("...es alapbol None (nem talalgatunk meretet)",
       MarketData.__dataclass_fields__["lot_of"].default is None)
 
-for _mod, _needle in (("strategy/wpr_sma.py", "m1lbl_"),
-                      ("strategy/bollinger_squeeze.py", "bsqlbl_")):
+# ⚠ A CIMKE RAJZOLASA 2026-08-24 ota a KOZOS `visual.entry_marks`-e (a
+# perzisztens belepo-naplo miatt: a naplobol visszatoltott mult es a friss
+# ujraszamolas UGYANABBOL a rekordbol rajzol, kulonben elcsusznanak). A cimke
+# SZOVEGET tovabbra is a strategia allitja ossze — az invariansok ugyanazok.
+_viz = (ROOT / "strategy" / "visual.py").read_text(encoding="utf-8")
+check("a kozos rajzolo teszi ki a cimket a belepo-vonalra",
+      "m1lbl_" in _viz and "def entry_marks(" in _viz)
+
+for _mod in ("strategy/wpr_sma.py", "strategy/bollinger_squeeze.py"):
     _src = (ROOT / _mod).read_text(encoding="utf-8")
-    check(f"{_mod}: van cimke a belepo-vonalon", _needle in _src)
+    check(f"{_mod}: a kozos rajzolot hasznalja", "viz.entry_marks(rec)" in _src)
     check(f"{_mod}: a ROVID nevet irja ki", "self.short_name" in _src)
     # ⚠ A lot CSAK akkor kerul ra, ha a keret adott szamolot ES pozitiv az ertek.
-    _i = _src.find(_needle)
-    _blk = _src[max(0, _i - 900):_i + 400]
+    _i = _src.find('_lab = f"{self.short_name}')
+    _blk = _src[max(0, _i - 200):_i + 700]
     check(f"{_mod}: a lot a keret varratabol jon",
           'getattr(md, "lot_of", None)' in _blk)
     check(f"{_mod}: egyenleg nelkul a meret KIMARAD",
           "if _l and _l > 0:" in _blk)
+    # ⚠ ES a naplozas a rajz-kapu ELOTT all (a „K" gomb nem nemithatja el).
+    check(f"{_mod}: a belepo-rekord a naploba is kimegy", "_sink(rec)" in _src)
 
 # A keret UGYANAZT a calc_lot-ot adja at, amivel a motor kot.
 _lt = (ROOT / "trading" / "live_trader.py").read_text(encoding="utf-8")

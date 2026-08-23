@@ -588,42 +588,41 @@ class BollingerSqueezeStrategy(Strategy):
             # után él (ugyanaz az igazítás, mint a `wpr_sma`-nál).
             objs.append(viz.BarState(t=times[i] + m15_sec, notrade=0, dir=d,
                                      window=1 if st.in_squeeze else 0))
-            if st.pending in ("BUY", "SELL") and getattr(md, "show_signals", True):
+            if st.pending in ("BUY", "SELL"):
                 t = times[i] + m15_sec
-                # ⚠ UGYANAZ A ZOLD, mint a tobbi strategiaban (`green`,
-                # RGB 0,170,0). A `lime` (0,255,0) vilagos chart-hatteren
-                # gyakorlatilag olvashatatlan — es ket strategia ket kulonbozo
-                # zoldje azt sugallna, hogy a szin JELENT valamit, holott csak
-                # az iranyt mondja.
-                objs.append(viz.VLine(name=f"bsq_{t}", t1=t,
-                                      color="green" if st.pending == "BUY" else "red"))
-                plan = self.sl_tp_points(row, md.params,
-                                         md.params.get("point_size", 0.0001))
+                pip = md.params.get("point_size", 0.0001)
+                entry = float(row["close"])
+                up = st.pending == "BUY"
+                plan = self.sl_tp_points(row, md.params, pip)
+                sl = tp = None
                 if plan:
-                    pip = md.params.get("point_size", 0.0001)
-                    entry = float(row["close"])
                     sl_p, tp_p = plan
-                    up = st.pending == "BUY"
                     sl = entry - sl_p * pip if up else entry + sl_p * pip
                     tp = entry + tp_p * pip if up else entry - tp_p * pip
-                    for tag, price, col in (("e", entry, "orange"),
-                                            ("t", tp, "green"), ("s", sl, "red")):
-                        objs.append(viz.Trend(name=f"bsq{tag}_{t}",
-                                              t1=t - 3 * 60, p1=price,
-                                              t2=t + 3 * 60, p2=price, color=col))
-                    # ⚠ CIMKE a fuggoleges vonalon: MELYIK strategia es MEKKORA
-                    # merettel. Egy chartra tobb strategia rajza is kerulhet, a
-                    # vonal szine pedig csak az IRANYT mondja. A lot a keret
-                    # `md.lot_of`-jabol jon (ugyanaz a `calc_lot`, amivel a motor
-                    # kot); egyenleg hianyaban a meret KIMARAD.
-                    _lab = f"{self.short_name} {st.pending}"
-                    if callable(getattr(md, "lot_of", None)):
-                        _l = md.lot_of(sl_p)
-                        if _l and _l > 0:
-                            _lab += f" {_l:.2f} lot"
-                    objs.append(viz.Text(name=f"bsqlbl_{t}", t1=t,
-                                         p1=(tp if up else sl), text=_lab,
-                                         color="green" if up else "red",
-                                         fontsize=9))
+                # ⚠ CIMKE a fuggoleges vonalon: MELYIK strategia es MEKKORA
+                # merettel. Egy chartra tobb strategia rajza is kerulhet, a
+                # vonal szine pedig csak az IRANYT mondja. A lot a keret
+                # `md.lot_of`-jabol jon (ugyanaz a `calc_lot`, amivel a motor
+                # kot); egyenleg hianyaban a meret KIMARAD.
+                _lab = f"{self.short_name} {st.pending}"
+                if plan and callable(getattr(md, "lot_of", None)):
+                    _l = md.lot_of(sl_p)
+                    if _l and _l > 0:
+                        _lab += f" {_l:.2f} lot"
+                # A BELEPO-REKORD: ebbol rajzolhato ujra a jelolo, es EZ megy a
+                # perzisztens naploba is (`strategy.signal_journal`). A gyujtes a
+                # rajz-kapu ELOTT all: a „K" gomb a RAJZOT kapcsolja ki, nem a
+                # tortenest — kulonben a chart elozmenye csendben lyukas lenne.
+                rec = {"t": t, "d": st.pending, "e": entry, "sl": sl, "tp": tp,
+                       "lab": _lab}
+                _sink = getattr(md, "on_entry_record", None)
+                if callable(_sink):
+                    _sink(rec)
+                # ⚠ A KOZOS rajzolo (`viz.entry_marks`) — ugyanaz, amit a
+                # `wpr_sma` es a naplobol visszatoltott mult is hasznal. Igy a
+                # jelolok strategiak kozott is EGYFORMAK (ugyanaz a zold, ugyanaz
+                # a vonalvastagsag), es a naplo nem tud elcsuszni a rajztol.
+                if getattr(md, "show_signals", True):
+                    objs += viz.entry_marks(rec)
             st.pending = "NONE"
         return objs

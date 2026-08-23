@@ -1,5 +1,6 @@
 """#13 — a napi limit napjanak hatara + a hianyzo OUT_BY dealek."""
 import sys
+import tempfile
 from pathlib import Path
 from datetime import datetime, timezone, timedelta, date
 
@@ -35,8 +36,18 @@ frm0, _ = mc.server_day_bounds()
 check("eltolas nelkul a valos UTC-napra esik vissza",
       frm0 == datetime.now(timezone.utc).replace(hour=0, minute=0, second=0,
                                                  microsecond=0))
+# ⚠ AZ „ISMERETLEN" ELTOLAS CSAK AKKOR ismeretlen, ha a LEMEZEN sincs. A
+# `_load_offset` a None-t ugy erti, hogy „meg nem toltottem be" — es beolvassa a
+# VALODI `data/server_offset.json`-t. Enelkul ez a sor azon a gepen PASS, ahol
+# meg sosem futott a bot, es FAIL azon, ahol igen: a teszt a felhasznalo eles
+# allapotatol fuggott. (Ugyanaz az osztaly, mint amikor egy teszt a valodi
+# configot irta — a teszt SOSEM tamaszkodhat eles adatra.)
+_real_off_file = mc._offset_file
+mc._offset_file = lambda: Path(tempfile.gettempdir()) / "tfv_nincs_ilyen_offset.json"
 mc._server_offset["v"] = None
 check("ismeretlen eltolas (None) sem szall el", mc.server_day_bounds()[0] == frm0)
+mc._offset_file = _real_off_file
+mc._server_offset["v"] = None
 
 
 # ══ 2. A VALOS hibaablak: helyi ejfel utan a regi logika a JOVOBE mutatott ═
