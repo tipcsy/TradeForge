@@ -220,6 +220,52 @@ ad.prune(keep_days=3)
 check("adopted: keep_days=3 -> a regi lezart bejegyzes torlodik",
       ad.strategy_of(601) is None)
 
+# ══ 8. A RETENCIO A CONFIGBOL jon, nem bedrotozva ══════════════════════════
+# ⚠ A viselkedes (fent) reg tesztelt volt, a FORRASA nem: ha valaki atirja a
+# hivasi helyet, a retencio NEMAN visszaesne a bedrotozott 3 napra, es semmi
+# nem bukna el. Pedig a felhasznalo kerése pont az volt, hogy a config dontsön
+# („Kerüljön a config.json-ba, 0 = soha ne takarítson").
+import json as _json
+_ROOT = Path(__file__).resolve().parents[1]
+_lt = (_ROOT / "trading" / "live_trader.py").read_text(encoding="utf-8")
+KEY = "position_record_keep_days"
+check("a motor a CONFIGBOL olvassa a retenciot", f'trading_cfg.get("{KEY}"' in _lt)
+
+_i = _lt.find(f'trading_cfg.get("{KEY}"')
+_blk = _lt[_i:_i + 400]
+# ⚠ KOZOS ERTEK: a ket ticket-szintu nyilvantartas ugyanaddig eljen. Ha
+# elcsusznanak, az egyik elveszitene a lezart kotesek adatat, a masik megtartana
+# — es a „Lezart ma" ful hol mutatna strategiat, hol nem.
+check("...es UGYANAZT adja MINDKET tarolonak",
+      "adopted.prune(_open_tk, keep_days=_keep)" in _blk
+      and "position_meta.prune(_open_tk, keep_days=_keep)" in _blk, _blk[:120])
+
+# A hivasi hely kifejezese: 0 -> 0 (soha), hianyzo -> 3, null -> 0.
+def _keep_from(cfg):
+    return int(cfg.get(KEY, 3) or 0)
+
+
+check("config 0 -> 0 (SOHA ne takaritson)", _keep_from({KEY: 0}) == 0)
+check("config 7 -> 7", _keep_from({KEY: 7}) == 7)
+check("hianyzo kulcs -> 3 (a megszokott alap)", _keep_from({}) == 3)
+check("null -> 0 (nem talalgatunk)", _keep_from({KEY: None}) == 0)
+
+# ⚠ ES LEGYEN MEGTALALHATO: egy kulcs, amirol senki nem tud, nincs is.
+_ex = (_ROOT / "config.example.json").read_text(encoding="utf-8")
+check("a pelda-config ismeri a kulcsot", f'"{KEY}"' in _ex)
+check("...es MEGMAGYARAZZA (mit veszitesz rovid ertekkel)",
+      "0 = soha ne takarítson" in _ex and "elvesztik a stratégia" in _ex)
+
+# A ket tarolo alapertelmezese IS azonos — kulonben egy kozvetlen hivas
+# (config nelkul) szethuzna oket.
+import inspect as _insp
+check("a ket tarolo alapertelmezese azonos",
+      _insp.signature(pm.prune).parameters["keep_days"].default
+      == _insp.signature(ad.prune).parameters["keep_days"].default,
+      f"{_insp.signature(pm.prune).parameters['keep_days'].default} vs "
+      f"{_insp.signature(ad.prune).parameters['keep_days'].default}")
+
+
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")
 sys.exit(0 if all(results) else 1)
