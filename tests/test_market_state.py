@@ -90,9 +90,14 @@ check("üres bemenet → üres", ms.summary({}) == "")
 # A buborék MEGMONDJA, mióta és meddig.
 ms._server_now = lambda: NOW
 try:
+    # ⚠ RÖVID, szándékosan. A felhasználó kérése: „ennyi elég: ZÁRVA — Bróker
+    # idő: 8-22: 0:59 óta. További szöveg felesleges." Aki a szürke árra
+    # rámutat, azt EGY dolog érdekli: mióta áll.
     _tip = ms.tip_of(ms.from_tick(NOW - 36 * 3600))
-    check("a buborék kiírja, mennyi ideje áll", "36 óra" in _tip, _tip[:70])
-    check("...és hogy emiatt nincs belépő", "nem születhet belépő" in _tip)
+    check("a buborék kimondja: ZÁRVA", _tip.startswith("ZÁRVA"), _tip)
+    check("...és megadja, MIKOR ÓTA (bróker idő)",
+          "bróker idő" in _tip and "óta" in _tip, _tip)
+    check("...és NEM magyaráz tovább", len(_tip) <= 45, f"{len(_tip)} karakter")
     check("nyitott piacon NINCS buborék", ms.tip_of(ms.from_tick(NOW - 5)) == "")
 finally:
     ms._server_now = _real_now

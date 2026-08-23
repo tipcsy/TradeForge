@@ -139,21 +139,20 @@ def summary(states: dict) -> str:
 
 
 def tip_of(info: dict) -> str:
-    """Buborék-szöveg a cellához: MIÉRT halvány az ár."""
+    """Buborék-szöveg a cellához: MIÉRT halvány az ár.
+
+    ⚠ RÖVID, szándékosan. Az első változat elmagyarázta azt is, hogy „amíg zárva
+    van, nem születhet belépő" — a felhasználó kérése erre: „ennyi elég: ZÁRVA —
+    Bróker idő: 8-22: 0:59 óta. További szöveg felesleges." Aki a szürke árra
+    rámutat, azt EGY dolog érdekli: mióta áll."""
     st = (info or {}).get("state")
     if st == OPEN:
         return ""
     if st == UNKNOWN:
-        return ("A piac állapota ismeretlen (nincs tick vagy szerver-eltolás). "
-                "Az ár lehet elavult.")
-    age = (info or {}).get("age_sec") or 0.0
-    when = ""
+        return "Ismeretlen — nincs friss tick."
     t = (info or {}).get("tick_time")
-    if t:
-        from datetime import datetime
-        when = datetime.fromtimestamp(t).strftime("%m-%d %H:%M")
-    h, m = int(age // 3600), int((age % 3600) // 60)
-    span = f"{h} óra {m} perce" if h else f"{m} perce"
-    return (f"A piac ZÁRVA — az utolsó árajánlat {span}"
-            + (f" ({when}, bróker-idő)." if when else ".")
-            + " Amíg zárva van, nem születhet belépő.")
+    if not t:
+        return "ZÁRVA"
+    from datetime import datetime
+    return ("ZÁRVA — bróker idő: "
+            + datetime.fromtimestamp(t).strftime("%m-%d %H:%M") + " óta.")
