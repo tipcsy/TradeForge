@@ -105,6 +105,23 @@ def cmd_live():
     if not mt5_connector.connect(cfg):
         sys.exit(1)
 
+    # ── LICENC-KAPU ───────────────────────────────────────────────────────
+    # ⚠ CSAK az élő kereskedés van kapuzva. A backtest, az optimalizálás és az
+    # adatletöltés licenc nélkül is fut: azok nem nyúlnak a brókerszámlához, és
+    # ha egy lejárt licenc a backtestet is blokkolná, épp akkor nem tudnál
+    # dolgozni a rendszeren, amikor a megújításról döntesz.
+    #
+    # ⚠ A KAPCSOLÓDÁS UTÁN van, mert a számlaszám az MT5-ből jön — a licenc
+    # ehhez a SZÁMLÁHOZ szól, nem a géphez.
+    from core.licence_gate import ensure_licence
+    from version import APP_VERSION
+    _acc = mt5_connector.connection_info(cfg)
+    if not ensure_licence(cfg, str(_acc.get("login") or ""),
+                          account_name=str(_acc.get("name") or ""),
+                          broker_server=str(_acc.get("server") or ""),
+                          app_version=APP_VERSION):
+        sys.exit(1)
+
     slot_mgr = SlotManager(cfg["trading"]["max_open_slots"])
 
     # Live trader szálban fut

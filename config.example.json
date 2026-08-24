@@ -88,6 +88,11 @@
     "signal_journal_keep_days": 60,
     "signal_journal_show_records": 200
   },
+  "_comment_licence": "A licencszerver (TradeForge.Licence) elérése. ⚠ CSAK az ÉLŐ kereskedés van kapuzva — a backtest, az optimalizálás és az adatletöltés licenc nélkül is fut, mert azok nem nyúlnak a brókerszámlához. A belépő (token) a data/licence_token.json-ban él, gépenként egy; a jelszó SEHOL nem tárolódik. Ha a szerver nem érhető el, a program a legutóbbi, ALÁÍRT válasz alapján még elindul a türelmi időn belül (a türelmi időt a szerver mondja meg) — az aláírás miatt a mentés nem hamisítható.",
+  "licence": {
+    "api_url": "https://licence-api.tipcsy.hu/api/v1"
+  },
+
   "gates": {
     "_comment": "BELÉPŐ-KAPUK és a HATÁSUK, per (instrumentum × stratégia). A hatás: 'block' (nincs belépő) | 'reduce' (belép, de FELEZETT mérettel) | 'none' (a kapu nem szól bele). Öröklés (a legszűkebb nyer): pairs.<SYM>.gates.<kapu>.<stratégia> → pairs.<SYM>.gates.<kapu>.default → gates.<kapu>.<stratégia> → gates.<kapu>.default → beépített. A v1.97.0 óta a MOTOR is eszerint dönt (él + backtest + portfólió-backtest); korábban minden bekapcsolt kapu kemény blokk volt, a 'reduce' pedig csak kijelzés.",
     "_comment_market": "A piac-kapu akkor 'bukik', ha az aktuális besorolás benne van az 'adverse' listában (core/regime.py kategóriái: clean_bull, clean_bear, volatile_bull, volatile_bear, ranging, dead, uncertain, transition). Alap: dead + uncertain. Ez CSAK akkor számít, ha a piac-kapu hatását 'block'/'reduce'-ra állítod — alapból 'none'. FIGYELEM: a hatás beállítása önmagában kevés — a páron KI IS KELL VÁLASZTANI egy piac-előszűrőt (pairs.<SYM>.market_strategy), különben a kapunak nincs mit mérnie, és sosem tüzel. A config-ellenőrző szól, ha ez az állapot előáll.",
