@@ -546,10 +546,22 @@ class WprSmaStrategy(Strategy):
                 # TF-együttállás kapu (ha a keret bekötötte): a kapu által BLOKKOLT
                 # belépő nem jelenik meg a charton (csak az látszik, ami élesben is
                 # végrehajtódott volna).
-                # A `cw` a DÖNTÉST hozó M1-gyertya záróára — a kapunak pontosan ez az
-                # „akkor ismert ár" kell (a formálódó TF-gyertya close-a), különben
-                # look-ahead lenne benne (lásd core.tf_align.build_historical_gate).
-                if md.entry_gate is not None and not md.entry_gate(t, float(cw), sig):
+                # A kapunak a DÖNTÉST hozó M1-gyertya ZÁRÓÁRA kell — ez az „akkor
+                # ismert ár" (a formálódó TF-gyertya close-a), különben look-ahead
+                # lenne benne (lásd core.tf_align.build_historical_gate). A backtest
+                # ugyanezt adja át (`_bar_c`), tehát a kettő így egyezik.
+                #
+                # ⚠ ITT VOLT EGY VALÓDI HIBA (2026-08-24): a `cw` NEM az ár, hanem a
+                # `m1_wprs[j]`, azaz a Williams %R értéke (−100…0). A kapu idősíkonként
+                # `sign(ár − SMA)`-t néz, és egy −44-es „ár" MINDEN idősík SMA-ja alatt
+                # van → a kapu válasza az értéktől FÜGGETLENÜL `BUY=False, SELL=True`
+                # volt. Következmény: a charton SOHA nem jelent meg BUY jelölő a
+                # kapuzott párokon, a SELL jelölők pedig szűrés NÉLKÜL mentek ki
+                # (olyanok is, amiket a motor blokkolt volna). Mérve a hiba napján
+                # (Ger40, 50 napos ablak): kapu nélkül 626 BUY + 330 SELL, a hibás
+                # kapuval 0 BUY + 330 SELL.
+                if md.entry_gate is not None and not md.entry_gate(
+                        t, float(m1_close[j]), sig):
                     continue
                 atr_v = tl_atr[p]
                 if math.isnan(atr_v):
