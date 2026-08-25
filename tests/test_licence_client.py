@@ -204,8 +204,25 @@ check("a licenc-kapu a `live` parancsban van",
       "ensure_licence" in _main[_i:_j if _j > 0 else len(_main)])
 check("⚠ ...és SEHOL máshol (backtest/optimize/download licenc nélkül fut)",
       _main.count("ensure_licence(") == 1, str(_main.count("ensure_licence(")))
-check("a beépített PUBLIKUS kulcs ki van töltve",
-      len(_REAL_PUB) > 20 and "=" in _REAL_PUB)
+# ⚠ A BEÉPÍTETT KULCS ÉRVÉNYESSÉGE. Egy elgépelt, csonka vagy véletlenül
+# levágott kulcstól a program MINDEN választ hamisnak látna, és soha nem
+# indulna el — a hibaüzenet pedig („a válasz nem hitelesíthető") a szerverre
+# mutatna, nem ide. Egy Ed25519 publikus kulcs pontosan 32 bájt.
+check("a beépített PUBLIKUS kulcs ki van töltve", len(_REAL_PUB) > 20)
+try:
+    import base64 as _b64
+    _nyers = _b64.b64decode(_REAL_PUB, validate=True)
+except Exception as _ex:
+    _nyers = b""
+check("...és érvényes base64", len(_nyers) > 0)
+check("...és pontosan 32 bájt (Ed25519)", len(_nyers) == 32, f"{len(_nyers)} bájt")
+try:
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey as _PK
+    _PK.from_public_bytes(_nyers)
+    _betolt = True
+except Exception:
+    _betolt = False
+check("...és a cryptography be tudja tölteni", _betolt)
 
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")

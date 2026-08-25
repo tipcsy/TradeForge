@@ -54,9 +54,13 @@ PRODUCT = "tradeforge"
 # `.env`-jében él, és sosem hagyja el azt. Ha a szerveren kulcsot cserélsz, ezt
 # is cserélni kell, különben a program MINDEN választ hamisnak lát.
 # A `GET /api/v1/pubkey` bármikor megmondja az aktuálisat.
-SERVER_PUBLIC_KEY = "3FHqTdIqWCtP3BQioZgGQONJRCOaY8pLNINcEqYs8ns="
+SERVER_PUBLIC_KEY = "OVGXNERnkCBfbbbaErAxxXNLFIkKYJA7UI4MEKQTPZg="
 
-DEFAULT_API = "https://licence-api.tipcsy.hu/api/v1"
+# ⚠ EGY hosztnév, útvonal szerint osztva a Cloudflare tunnelben:
+#   licence.tipcsy.hu  Path ^/api  → az API
+#   licence.tipcsy.hu  (üres)      → a portál
+# Így a felület és az API azonos origin-en van (nincs CORS).
+DEFAULT_API = "https://licence.tipcsy.hu/api/v1"
 
 # A csomag-formátum, amit ez a kliens ért. Ha a szerver ennél újabbat küld, NEM
 # értelmezzük félre: inkább elutasítjuk, és a felhasználó frissít.

@@ -90,7 +90,7 @@
   },
   "_comment_licence": "A licencszerver (TradeForge.Licence) elérése. ⚠ CSAK az ÉLŐ kereskedés van kapuzva — a backtest, az optimalizálás és az adatletöltés licenc nélkül is fut, mert azok nem nyúlnak a brókerszámlához. A belépő (token) a data/licence_token.json-ban él, gépenként egy; a jelszó SEHOL nem tárolódik. Ha a szerver nem érhető el, a program a legutóbbi, ALÁÍRT válasz alapján még elindul a türelmi időn belül (a türelmi időt a szerver mondja meg) — az aláírás miatt a mentés nem hamisítható.",
   "licence": {
-    "api_url": "https://licence-api.tipcsy.hu/api/v1"
+    "api_url": "https://licence.tipcsy.hu/api/v1"
   },
 
   "gates": {
