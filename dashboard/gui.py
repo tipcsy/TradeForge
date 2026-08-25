@@ -5537,7 +5537,14 @@ class DashboardWindow:
             _logging.getLogger(__name__).debug(
                 "a licenc-felhasználó nem olvasható: %s", _ex)
             _email = ""
-        self.lbl_licence.config(text=f"👤 {_email}" if _email else "")
+        # ⚠ NINCS ikon a szöveg előtt. Az „ember” jel (U+1F464) EMOJI-kódpont:
+        # a mono betűtípusból hiányzik, ezért a rendszer emoji-fontjából esik
+        # vissza, aminek MÁS az alapvonala — láthatóan lejjebb ül a szövegnél.
+        # A fejléc többi szimbóluma BMP-ből való és a SZÖVEGFONTBÓL jön (fogaskerék,
+        # körös nyíl, állapot-pont) — azok ezért ülnek jól. Pixeles korrekció nem
+        # megoldás: a betűméret a témával állítható, és minden más méreten újra
+        # elcsúszna. A #számla mellett úgyis egyértelmű, hogy az e-mail a fióké.
+        self.lbl_licence.config(text=_email)
 
     # ── Piaci adat háttérszál (egységes) ────────────────────────────────
     def _start_market_data_poll(self):

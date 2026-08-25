@@ -86,8 +86,14 @@ check("⚠ hiba esetén ÜRES a mező (nem áll meg a felület)",
       '_email = ""' in _blok and "except Exception" in _blok)
 check("...és a hiba OKA a naplóba kerül",
       "nem olvasható" in _blok)
-check("üres e-mailnél NEM írunk oda semmit",
-      'text=f"👤 {_email}" if _email else ""' in _blok)
+check("a mező az e-mailt mutatja", "self.lbl_licence.config(text=_email)" in _blok)
+
+# ⚠ NINCS emoji a címkében. A 👤 (U+1F464) emoji-kódpont a mono
+# betűtípusból hiányzik, ezért a Segoe UI Emoji-ból esik vissza, aminek MÁS az
+# alapvonala — láthatóan lejjebb ül a szövegnél (a felhasználó vette észre).
+# A fejléc többi szimbóluma BMP és a szövegfontból jön, azok ezért ülnek jól.
+check("⚠ nincs BMP-n kívüli emoji a fejléc-címkében",
+      all(ord(c) < 0x1F000 for c in _blok))
 
 # ── 3. A sorrend: a licenc-kapu a dashboard ELŐTT fut ──────────────────
 # ⚠ Enélkül a fejléc az ELSŐ indításkor üres volna: a token még nem létezne,
