@@ -16,6 +16,7 @@ Futtatás: python trading/live_trader.py
 import json
 import logging
 import sys
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -48,7 +49,7 @@ from core import opt_activity as _opt_activity
 from core.indicator_engine import atr as atr_indicator
 from core.risk_manager import (calc_lot, calc_effective_slots, SlotManager,
                                calc_swing_sl_tp_points)
-from strategy import get_strategy, get_strategy_by_name
+from strategy import get_strategy, get_strategy_by_name, strategies_for
 from strategy import signal_journal
 from strategy import visual as viz_mod
 from strategy.base import MarketData
@@ -3139,85 +3140,125 @@ def run(cfg: dict, slot_mgr: SlotManager):
     # LiveTrader szálat megölte — egy hiányos `point_size` miatt 11 pár állt le
     # némán (a hibát csak a chart üres sávjáról vettük észre, hetekkel később).
     # A hibás pár KIMARAD és MEGMONDJUK, miért; a többi fut tovább.
+    def _bring_up_pair(symbol, pair_cfg) -> None:
+        """EGY pár bekötése: dashboard-állapot, kezdeti állapot, pair_states.
+
+        ⚠ EGY HELYEN, mert KÉT hívója van: az induláskori ciklus és a MENET
+        KÖZBEN felvett instrumentum. Két másolat előbb-utóbb elcsúszna — és az
+        eltérés némán jelentkezne: az egyik úton induló pár máshogy viselkedne,
+        mint a másikon.
+        """
+        try:
+          strats = strats_by_symbol[symbol]
+          trained = any(load_pair_params(symbol, st.name) is not None for st in strats)
+          dashboard[symbol] = PairDashboardState(
+              symbol=symbol,
+              enabled=pair_cfg.get("enabled", False),
+              trained=trained,
+              enabled_strategies=[st.name for st in strats],
+          )
+          # Kezdeti állapot (restart-biztos): a KERESKEDÉS-SZÁNDÉK a config.json
+          # `run_state`-jéből (per stratégia), legacy fallback a szimbólum-szintű
+          # `enabled`-re (= az összes engedélyezett stratégia, mint eddig). Csak a
+          # "live" szándékú ÉS tanított stratégiákat indítjuk → újraindítás után a
+          # korábban futó párok maguktól folytatják a kereskedést.
+          _primary = strats[0].name if strats else None
+          _live = set(run_state.live_strategies(cfg, symbol, [st.name for st in strats]))
+          # ⚠ OPTIMALIZÁLÁS NÉLKÜL IS INDULUNK. A `_make_state` ezt már régóta
+          # támogatta (mentett készlet híján a stratégia SAJÁT alapértékeivel),
+          # de EZ A KAPU kizárta: csak a mentett paraméterű stratégiákat engedte
+          # be. Az eredmény néma volt — egy frissen felvett instrumentum
+          # `STOPPED` maradt, üres körökkel és viz-fájl nélkül, és a felhasználó
+          # nem értette, miért. (Megtörtént 2026-08-25-én: Fra40, EURHUF.)
+          #
+          # A hangolatlan futás NEM titok: a `_make_state` figyelmeztetést naplóz,
+          # a `params_source` „default"-ot ad, és a dashboard sora a
+          # BG_UNTRAINED háttérszínt kapja.
+          startable = [st for st in strats if st.name in _live]
+          if startable:
+              instrument_state[symbol] = "LIVE"
+              for st in startable:
+                  ps = _make_state(symbol, pair_cfg, st, is_display=(st.name == _primary))
+                  if ps is not None:
+                      pair_states[(symbol, st.name)] = ps
+              log.info("%s — LIVE (%d stratégia, params betöltve)", symbol, len(startable))
+          else:
+              instrument_state[symbol] = "STOPPED"
+              # ⚠ A VALÓDI OKOT mondjuk meg. A `startable` most CSAK a kereskedési
+              # szándéktól függ (paraméter már nem kell hozzá), tehát a régi
+              # „nincs params, futtatsd az optimalizálást" üzenet MEGTÉVESZTŐ
+              # lenne: a felhasználót optimalizálást indítani küldené, miközben
+              # egy Play-gomb hiányzik. Egy rossz üzenet rosszabb, mint a
+              # semmilyen — ma is ez vitt félre egy hibakeresést.
+              # ⚠ HÁROM KÜLÖNBÖZŐ OK, három különböző teendővel. Egy közös
+              # üzenet mindhármat elfedné — és pont ez vitt félre egy
+              # hibakeresést: a régi „nincs params, futtatsd az optimalizálást"
+              # akkor is ezt mondta, amikor épp FUTOTT az optimalizálás.
+              #
+              # A zárat KERESZT-PROCESSZ olvassuk (`opt_lock`), mert az
+              # optimalizálás külön folyamatban is futhat — a memóriabeli
+              # `opt_activity` arról nem tud.
+              _opt_fut = []
+              try:
+                  from core import opt_lock as _ol
+                  _opt_fut = [st.name for st in strats
+                              if _ol.is_held(symbol, st.name)]
+              except Exception as _ex:
+                  log.debug("%s — az optimalizálási zár nem olvasható: %s",
+                            symbol, _ex)
+              if _opt_fut:
+                  log.info("%s — STOPPED, mert OPTIMALIZÁLÁS fut (%s). Amíg tart, "
+                           "a pár nem kereskedik; utána a mentett paraméterekkel "
+                           "indítható.", symbol, ", ".join(_opt_fut))
+              elif not strats:
+                  log.info("%s — STOPPED (nincs engedélyezett stratégia ezen a "
+                           "páron)", symbol)
+              else:
+                  log.info("%s — STOPPED (egyik stratégia sincs elindítva — "
+                           "nyomj Play-t a felületen)%s", symbol,
+                           "" if trained else
+                           " · megjegyzés: nincs optimalizálva, tehát a "
+                           "stratégia alapértékeivel indulna")
+        except Exception:
+          instrument_state[symbol] = "STOPPED"
+          dashboard.setdefault(symbol, PairDashboardState(
+              symbol=symbol, enabled=False, trained=False, enabled_strategies=[]))
+          log.exception("%s — KIHAGYVA az indításnál (hibás pár-config). A TÖBBI pár "
+                        "fut tovább; javítsd a config.json `pairs.%s` szekcióját.",
+                        symbol, symbol)
+
+    # ── MENET KÖZBEN felvett instrumentumok ───────────────────────────────
+    # ⚠ A letöltés KÜLÖN SZÁLON fut, a bekötés viszont a FŐ szálon: a
+    # `dashboard`, az `instrument_state` és a `pair_states` szótárakat
+    # egyetlen szál írhatja. A két halmaz a kettő közti postaláda.
+    _uj_lock = threading.Lock()
+    _uj_folyamatban: set = set()      # letöltés alatt (ne induljon kétszer)
+    _uj_kesz: dict = {}               # letöltés kész → bekötésre vár
+
+    def _uj_par_elokeszit(symbol: str, pair_cfg: dict) -> None:
+        """Háttérszál: előzmény-letöltés, majd a pár átadása bekötésre."""
+        try:
+            from tools.download_history import ensure_history
+            ok, msg = ensure_history(symbol, cfg,
+                                     status=lambda t: log.info("[%s] %s", symbol, t))
+            if not ok:
+                # ⚠ NEM néma: adat nélkül a pár nem tud elindulni, és a
+                # felhasználó azt látná, hogy „felvettem, de nem csinál semmit".
+                log.error("%s — az előzmény-letöltés nem sikerült (%s). A pár "
+                          "NEM indul el; ellenőrizd, hogy a bróker ismeri-e a "
+                          "szimbólumot.", symbol, msg)
+                return
+            with _uj_lock:
+                _uj_kesz[symbol] = pair_cfg
+        except Exception:
+            log.exception("%s — az új instrumentum előkészítése elszállt. A "
+                          "TÖBBI pár fut tovább.", symbol)
+        finally:
+            with _uj_lock:
+                _uj_folyamatban.discard(symbol)
+
     for symbol, pair_cfg in all_pairs.items():
-      try:
-        strats = strats_by_symbol[symbol]
-        trained = any(load_pair_params(symbol, st.name) is not None for st in strats)
-        dashboard[symbol] = PairDashboardState(
-            symbol=symbol,
-            enabled=pair_cfg.get("enabled", False),
-            trained=trained,
-            enabled_strategies=[st.name for st in strats],
-        )
-        # Kezdeti állapot (restart-biztos): a KERESKEDÉS-SZÁNDÉK a config.json
-        # `run_state`-jéből (per stratégia), legacy fallback a szimbólum-szintű
-        # `enabled`-re (= az összes engedélyezett stratégia, mint eddig). Csak a
-        # "live" szándékú ÉS tanított stratégiákat indítjuk → újraindítás után a
-        # korábban futó párok maguktól folytatják a kereskedést.
-        _primary = strats[0].name if strats else None
-        _live = set(run_state.live_strategies(cfg, symbol, [st.name for st in strats]))
-        # ⚠ OPTIMALIZÁLÁS NÉLKÜL IS INDULUNK. A `_make_state` ezt már régóta
-        # támogatta (mentett készlet híján a stratégia SAJÁT alapértékeivel),
-        # de EZ A KAPU kizárta: csak a mentett paraméterű stratégiákat engedte
-        # be. Az eredmény néma volt — egy frissen felvett instrumentum
-        # `STOPPED` maradt, üres körökkel és viz-fájl nélkül, és a felhasználó
-        # nem értette, miért. (Megtörtént 2026-08-25-én: Fra40, EURHUF.)
-        #
-        # A hangolatlan futás NEM titok: a `_make_state` figyelmeztetést naplóz,
-        # a `params_source` „default"-ot ad, és a dashboard sora a
-        # BG_UNTRAINED háttérszínt kapja.
-        startable = [st for st in strats if st.name in _live]
-        if startable:
-            instrument_state[symbol] = "LIVE"
-            for st in startable:
-                ps = _make_state(symbol, pair_cfg, st, is_display=(st.name == _primary))
-                if ps is not None:
-                    pair_states[(symbol, st.name)] = ps
-            log.info("%s — LIVE (%d stratégia, params betöltve)", symbol, len(startable))
-        else:
-            instrument_state[symbol] = "STOPPED"
-            # ⚠ A VALÓDI OKOT mondjuk meg. A `startable` most CSAK a kereskedési
-            # szándéktól függ (paraméter már nem kell hozzá), tehát a régi
-            # „nincs params, futtatsd az optimalizálást" üzenet MEGTÉVESZTŐ
-            # lenne: a felhasználót optimalizálást indítani küldené, miközben
-            # egy Play-gomb hiányzik. Egy rossz üzenet rosszabb, mint a
-            # semmilyen — ma is ez vitt félre egy hibakeresést.
-            # ⚠ HÁROM KÜLÖNBÖZŐ OK, három különböző teendővel. Egy közös
-            # üzenet mindhármat elfedné — és pont ez vitt félre egy
-            # hibakeresést: a régi „nincs params, futtatsd az optimalizálást"
-            # akkor is ezt mondta, amikor épp FUTOTT az optimalizálás.
-            #
-            # A zárat KERESZT-PROCESSZ olvassuk (`opt_lock`), mert az
-            # optimalizálás külön folyamatban is futhat — a memóriabeli
-            # `opt_activity` arról nem tud.
-            _opt_fut = []
-            try:
-                from core import opt_lock as _ol
-                _opt_fut = [st.name for st in strats
-                            if _ol.is_held(symbol, st.name)]
-            except Exception as _ex:
-                log.debug("%s — az optimalizálási zár nem olvasható: %s",
-                          symbol, _ex)
-            if _opt_fut:
-                log.info("%s — STOPPED, mert OPTIMALIZÁLÁS fut (%s). Amíg tart, "
-                         "a pár nem kereskedik; utána a mentett paraméterekkel "
-                         "indítható.", symbol, ", ".join(_opt_fut))
-            elif not strats:
-                log.info("%s — STOPPED (nincs engedélyezett stratégia ezen a "
-                         "páron)", symbol)
-            else:
-                log.info("%s — STOPPED (egyik stratégia sincs elindítva — "
-                         "nyomj Play-t a felületen)%s", symbol,
-                         "" if trained else
-                         " · megjegyzés: nincs optimalizálva, tehát a "
-                         "stratégia alapértékeivel indulna")
-      except Exception:
-        instrument_state[symbol] = "STOPPED"
-        dashboard.setdefault(symbol, PairDashboardState(
-            symbol=symbol, enabled=False, trained=False, enabled_strategies=[]))
-        log.exception("%s — KIHAGYVA az indításnál (hibás pár-config). A TÖBBI pár "
-                      "fut tovább; javítsd a config.json `pairs.%s` szekcióját.",
-                      symbol, symbol)
+        _bring_up_pair(symbol, pair_cfg)
 
     # ── Induló helyreállítás (újraindítás után) ──────────────────────────
     # A bot a MAGIC szám alapján megtalálja a saját, már nyitott pozícióit:
@@ -3388,20 +3429,17 @@ def run(cfg: dict, slot_mgr: SlotManager):
                     log.info("%s/%s — örökbefogadott pozíció → KIVEZETÉS "
                              "(kezeljük, de új belépő nem nyílik)", _asym, _aname)
 
-            # ── ÚJONNAN FELVETT INSTRUMENTUM: legyen HANGOS ────────────
-            # ⚠ Az `all_pairs` INDULÁSKOR épül fel, és a ciklus azon megy
-            # végig. Egy futás közben felvett pár ezért megjelenik a
-            # dashboardon (az a configból olvas), de a motor SOHA nem
-            # dolgozza fel: nincs jelzés, nincs viz-fájl — és eddig semmi
-            # nem mondta meg, miért.
+            # ── ÚJONNAN FELVETT INSTRUMENTUM: BEKÖTÉS MENET KÖZBEN ─────
+            # ⚠ Az `all_pairs` INDULÁSKOR épült fel, ezért egy futás közben
+            # felvett pár korábban CSAK a dashboardon látszott — a motor soha
+            # nem dolgozta fel, és semmi nem mondta meg, miért. (Megtörtént
+            # 2026-08-25-én: Fra40, EURHUF.)
             #
-            # Megtörtént 2026-08-25-én (Fra40, EURHUF): a felhasználó felvette
-            # a párokat, feltette a chartra az indikátort, és nem értette,
-            # miért néma minden.
-            #
-            # A pár MENET KÖZBENI bekötése több volna egy lista-frissítésnél
-            # (előzmény-letöltés, állapot, slot-elszámolás), ezért egyelőre
-            # nem tesszük meg — de a némaságot megszüntetjük.
+            # ⚠ A LETÖLTÉS KÜLÖN SZÁLON MEGY. Egy új instrumentum teljes
+            # előzménye percekig tarthat; a kereskedési körben elvégezve
+            # MINDEN pár állna addig — a meglévő, nyitott pozíciók kezelése is.
+            # Ezért a ciklus csak ELINDÍTJA a letöltést, és a KÖVETKEZŐ körök
+            # egyikében köti be a párt, amikor az adat készen áll.
             try:
                 from pathlib import Path as _P
                 from strategy.settings import load_config as _lc
@@ -3413,13 +3451,34 @@ def run(cfg: dict, slot_mgr: SlotManager):
                            "az új instrumentumok keresése nem sikerült (%s)", _ex)
                 _friss = None
             if _friss:
-                _ujak = [s for s, v in (_friss.get("pairs") or {}).items()
-                         if isinstance(v, dict) and s not in all_pairs]
-                for _uj in _ujak:
-                    _warn_once(("new_pair", _uj),
-                               "%s — ÚJ instrumentum a configban, de a motor "
-                               "csak ÚJRAINDÍTÁS után kezeli. Addig nem ad "
-                               "jelzést és nem ír chart-vizualizációt sem.", _uj)
+                for _uj, _upc in (_friss.get("pairs") or {}).items():
+                    if not isinstance(_upc, dict) or _uj in all_pairs:
+                        continue
+                    with _uj_lock:
+                        if _uj in _uj_folyamatban:
+                            continue
+                        _uj_folyamatban.add(_uj)
+                    log.info("%s — ÚJ instrumentum a configban; előzmény "
+                             "letöltése indul a háttérben.", _uj)
+                    threading.Thread(
+                        target=_uj_par_elokeszit, args=(_uj, dict(_upc)),
+                        daemon=True, name=f"UjPar-{_uj}").start()
+
+                # A LETÖLTÉSSEL ELKÉSZÜLT párok bekötése — a fő szálon, hogy a
+                # dashboard/állapot szótárakat egyetlen szál írja.
+                with _uj_lock:
+                    _behuzando = list(_uj_kesz.items())
+                    _uj_kesz.clear()
+                for _uj, _upc in _behuzando:
+                    # ⚠ A `cfg["pairs"]`-be is BE KELL tenni: rengeteg segéd a
+                    # TELJES configból keresi ki a pár beállításait, és e nélkül
+                    # a bekötött pár némán hiányos maradna.
+                    cfg.setdefault("pairs", {})[_uj] = _upc
+                    all_pairs[_uj] = _upc
+                    strats_by_symbol[_uj] = strategies_for(cfg, _uj)
+                    _bring_up_pair(_uj, _upc)
+                    log.info("%s — BEKÖTVE menet közben (%s).", _uj,
+                             instrument_state.get(_uj, "?"))
 
             for symbol, pair_cfg in all_pairs.items():
                 state_now = instrument_state.get(symbol, "STOPPED")

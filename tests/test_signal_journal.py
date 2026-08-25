@@ -203,16 +203,10 @@ try:
     # csúszó ablak természetes ingadozására.
     check("az összevetés ártick-tűréssel megy",
           "price_tol=float(point_size" in _lt)
-    # ⚠ ÚJONNAN FELVETT INSTRUMENTUM. Az `all_pairs` INDULÁSKOR épül fel, tehát
-    # egy futás közben felvett pár megjelenik a dashboardon (az a configból
-    # olvas), de a motor SOHA nem dolgozza fel: nincs jelzés, nincs viz-fájl.
-    # Megtörtént 2026-08-25-én (Fra40, EURHUF) — a felhasználó nem értette,
-    # miért néma minden. A bekötés menet közben több volna egy lista-
-    # frissítésnél (előzmény, állapot, slot), de a NÉMASÁG megszüntethető.
-    check("az új instrumentum MEGSZÓLAL (nem néma)",
-          '"new_pair"' in _lt)
-    check("...és kimondja, hogy ÚJRAINDÍTÁS kell",
-          "csak ÚJRAINDÍTÁS után kezeli" in _lt)
+    # ⚠ Az ÚJONNAN FELVETT INSTRUMENTUM kezelése ÁTKERÜLT a
+    # `test_hot_add_pair.py`-ba: itt eleve rossz helyen volt (a pár-kezelésről
+    # szól, nem a naplóról), és időközben a puszta figyelmeztetésből VALÓDI
+    # menet közbeni bekötés lett.
 
     # ⚠ MINDEN élő stratégiának a KÖZÖS rajzolón kell mennie — különben a napló
     # csendben CSAK az egyikre működne. A `bollinger_squeeze` eredetileg saját
