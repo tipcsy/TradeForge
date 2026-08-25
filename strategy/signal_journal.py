@@ -217,22 +217,38 @@ def prune(symbol: str, strategy: str, keep_records: int = KEEP_RECORDS,
             keep = keep[-int(keep_records):]
         if len(keep) == len(rows):
             return 0
-        try:
-            tmp = p.with_suffix(".tmp")
-            with open(tmp, "w", encoding="utf-8") as f:
-                for n in keep:
-                    f.write(json.dumps({k: n[k] for k in _FIELDS if k in n},
-                                       ensure_ascii=False) + "\n")
-            tmp.replace(p)                     # atomikus csere
-        except OSError as ex:
-            log.warning("napló: a(z) %s nem takarítható (%s) — a fájl NŐ tovább",
-                        p.name, ex)
+        # ⚠ WINDOWS: a `replace` MEGTAGADHATÓ (`WinError 5`), ha a célfájlt épp
+        # nyitva tartja valaki — egy másik szál olvasása, egy víruskereső, vagy
+        # egy megnyitott szerkesztő. Megtörtént 2026-08-25-én. Egyetlen
+        # próbálkozásnál a takarítás kimarad, és a fájl a korlát fölé nő.
+        import time as _t
+        _hiba = None
+        for _kiserlet in range(3):
+            try:
+                tmp = p.with_suffix(".tmp")
+                with open(tmp, "w", encoding="utf-8") as f:
+                    for n in keep:
+                        f.write(json.dumps({k: n[k] for k in _FIELDS if k in n},
+                                           ensure_ascii=False) + "\n")
+                tmp.replace(p)                 # atomikus csere
+                _hiba = None
+                break
+            except OSError as ex:
+                _hiba = ex
+                _t.sleep(0.2)
+        if _hiba is not None:
+            # ⚠ `debug`, nem `warning`: a takarítás BEST-EFFORT, és a következő
+            # körben úgyis újrapróbáljuk. Egy 30 másodpercenként ismétlődő
+            # figyelmeztetés elfedné a valódi leleteket.
+            log.debug("napló: a(z) %s most nem takarítható (%s) — a következő "
+                      "körben újrapróbáljuk", p.name, _hiba)
             return 0
         _seen[str(p)] = {r["t"] for r in keep}
     return len(rows) - len(keep)
 
 
-def compare(symbol: str, strategy: str, records: list, fp: str) -> dict:
+def compare(symbol: str, strategy: str, records: list, fp: str,
+            price_tol: float = 0.0) -> dict:
     """A napló és az ÚJRASZÁMOLÁS összevetése az ÁTFEDŐ szakaszon.
 
     Ez a napló legfontosabb mellékterméke: ha az élő motor mást írt, mint amit a
@@ -241,6 +257,14 @@ def compare(symbol: str, strategy: str, records: list, fp: str) -> dict:
 
     ⚠ CSAK AZONOS `fp` (paraméter-ujjlenyomat) mellett van értelme: hangolás után
     a különbség JOGOS, nem hiba. Az eltérő ujjlenyomatú rekordokat kihagyjuk.
+
+    ⚠ `price_tol`: ENNÉL KISEBB ÁR-ELTÉRÉS NEM SZÁMÍT. Az SL/TP egy CSÚSZÓ
+    ablakon számolt indikátorból (ATR, Bollinger) jön; ahogy az ablak arrébb
+    lép, az érték a sokadik tizedesjegyen ingadozik. Mérve (EURCHF/BSB,
+    2026-08-25): napló `sl=0.92402994`, újraszámolás `0.9240299443…` — a
+    különbség a NYOLCADIK tizedesen, vagyis sokkal kisebb, mint egy ártick.
+    Ilyet jelezni ZAJ, és a zajban elvész a valódi lelet: a hívó ezért a
+    `point_size` felét adja át. `0` = pontos egyezés (a régi viselkedés).
 
     Visszaad: `{"osszevetve", "egyezik", "csak_naploban", "csak_szamolt",
     "elter"}` — az utolsó három időbélyeg-lista.
@@ -257,10 +281,22 @@ def compare(symbol: str, strategy: str, records: list, fp: str) -> dict:
         n = _norm({**r, "fp": r.get("fp") or fp})
         if n is not None:
             cr[n["t"]] = n
+    def _egyezik(a: dict, b: dict) -> bool:
+        if a.get("d") != b.get("d"):
+            return False                     # az IRÁNY sosem lehet „közel"
+        for k in ("e", "sl", "tp"):
+            x, y = a.get(k), b.get(k)
+            if x is None or y is None:
+                if x != y:
+                    return False
+                continue
+            if abs(float(x) - float(y)) > price_tol:
+                return False
+        return True
+
     same, diff = 0, []
     for t in set(jr) & set(cr):
-        a, b = jr[t], cr[t]
-        if all(a.get(k) == b.get(k) for k in ("d", "e", "sl", "tp")):
+        if _egyezik(jr[t], cr[t]):
             same += 1
         else:
             diff.append(t)

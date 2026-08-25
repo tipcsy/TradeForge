@@ -149,6 +149,33 @@ try:
     check("a csak-naplóban / csak-számolt szétválik",
           miss["csak_naploban"] == [200] and miss["csak_szamolt"] == [300],
           str(miss))
+    # ── ÁRTICK-TŰRÉS ───────────────────────────────────────────────────
+    # ⚠ EZ EGY VALÓDI, ÉLES LELETBŐL SZÜLETETT (2026-08-25). Az összevetés
+    # riasztott az EURCHF/bollinger párosnál — de az eltérés a NYOLCADIK
+    # tizedesjegyen volt (napló 0.92402994 vs újraszámolás 0.9240299443…),
+    # vagyis sokkal kisebb, mint egy ártick. Az SL/TP csúszó ablakon számolt
+    # indikátorból jön, tehát ez természetes ingadozás. Ilyet jelezni ZAJ — és
+    # a zajos figyelmeztetésben elvész a valódi lelet.
+    jo2 = rec(300, e=0.92462, sl=0.92402994, tp=0.92580011)
+    sj.append("SYM8", ST, [jo2], fp="t1")
+    apro = rec(300, e=0.92462, sl=0.92402995, tp=0.92580012)   # 8. tizedes
+    szoros = sj.compare("SYM8", ST, [apro], "t1")
+    check("tűrés NÉLKÜL a hajszálnyi eltérés is leletnek látszik",
+          szoros["elter"] == [300], str(szoros["elter"]))
+    laza = sj.compare("SYM8", ST, [apro], "t1", price_tol=0.00005)
+    check("⚠ ártick-tűréssel viszont EGYEZÉS", laza["egyezik"] == 1
+          and not laza["elter"], str(laza))
+
+    # ...de egy VALÓDI eltérés a tűréssel is átjön.
+    nagy = rec(300, e=0.92462, sl=0.9200, tp=0.92580011)
+    check("a valódi ár-eltérés a tűréssel is LELET",
+          sj.compare("SYM8", ST, [nagy], "t1", price_tol=0.00005)["elter"] == [300])
+
+    # ⚠ Az IRÁNY sosem lehet „közel": egy BUY/SELL csere mindig lelet.
+    forditva = rec(300, "SELL", e=0.92462, sl=0.92402994, tp=0.92580011)
+    check("⚠ az IRÁNY eltérése a tűréstől FÜGGETLENÜL lelet",
+          sj.compare("SYM8", ST, [forditva], "t1", price_tol=1.0)["elter"] == [300])
+
     # ⚠ Hangolás után a különbség JOGOS — az összevetés ne riasszon.
     other = sj.compare("SYM6", ST, [rec(100, e=888.0)], "MASIK_FP")
     check("MÁS ujjlenyomatnál nincs összevetés (a hangolás nem hiba)",
@@ -172,6 +199,20 @@ try:
           '"journal_diff"' in _lt and "_warn_once" in _lt)
     check("a chartra visszatöltés a SHOW korláttal megy",
           "signal_journal_show_records" in _lt)
+    # ⚠ A motor ÁRTICK-TŰRÉSSEL vet össze — különben minden körben riasztana a
+    # csúszó ablak természetes ingadozására.
+    check("az összevetés ártick-tűréssel megy",
+          "price_tol=float(point_size" in _lt)
+    # ⚠ ÚJONNAN FELVETT INSTRUMENTUM. Az `all_pairs` INDULÁSKOR épül fel, tehát
+    # egy futás közben felvett pár megjelenik a dashboardon (az a configból
+    # olvas), de a motor SOHA nem dolgozza fel: nincs jelzés, nincs viz-fájl.
+    # Megtörtént 2026-08-25-én (Fra40, EURHUF) — a felhasználó nem értette,
+    # miért néma minden. A bekötés menet közben több volna egy lista-
+    # frissítésnél (előzmény, állapot, slot), de a NÉMASÁG megszüntethető.
+    check("az új instrumentum MEGSZÓLAL (nem néma)",
+          '"new_pair"' in _lt)
+    check("...és kimondja, hogy ÚJRAINDÍTÁS kell",
+          "csak ÚJRAINDÍTÁS után kezeli" in _lt)
 
     # ⚠ MINDEN élő stratégiának a KÖZÖS rajzolón kell mennie — különben a napló
     # csendben CSAK az egyikre működne. A `bollinger_squeeze` eredetileg saját

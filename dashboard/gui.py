@@ -402,7 +402,13 @@ class PairRow:
         enabled_list = getattr(ds, "enabled_strategies", None) or []
         # Üres lista → az egyetlen/aktív stratégia engedélyezett (visszafelé komp.).
         strat_enabled = (sname in enabled_list) if enabled_list else True
-        cells = ds.strategy_cells.get(sname, {}) if (trained and strat_enabled) else {}
+        # ⚠ A CELLÁK AZ ADATOT KÖVETIK, NEM A `trained` JELZŐT. Egy hangolatlan
+        # (alapértelmezett paraméterekkel futó) pár is SZÁMOL — ha a `trained`
+        # kapuzna, a körök szürkék maradnának, miközben a motor dolgozik, és a
+        # felhasználó azt hinné, elromlott valami. Ha a motor nem számol, a
+        # `strategy_cells` úgyis üres, tehát a körök maguktól szürkék.
+        # A „nincs hangolva" tényt a SOR HÁTTÉRSZÍNE mondja el (BG_UNTRAINED).
+        cells = ds.strategy_cells.get(sname, {}) if strat_enabled else {}
         pause.config(text="⏸" if (no_trade and strat_enabled) else "", bg=bg)
         for skey, c in circles:
             if not strat_enabled:
@@ -563,7 +569,7 @@ class PairRow:
             elif col.kind == "tfalign":
                 self._render_tfalign(ds, bg)
             else:  # strategy
-                cell = ds.strategy_cells.get(key) if trained else None
+                cell = ds.strategy_cells.get(key)   # lásd `_render_marker`
                 if cell:
                     self.labels[key].config(text=cell[0], fg=sem_color(cell[1]))
                 else:

@@ -60,6 +60,33 @@ def _fingerprint() -> dict:
     return out
 
 
+def _app_fut() -> bool:
+    """Fut-e ÉPPEN a TradeForge? Ha igen, a „bepiszkolt" fájlokat NAGY
+    valószínűséggel Ő írta, nem a teszt.
+
+    ⚠ EZ NEM KOZMETIKA. Az őr azt a tesztet nevezi meg, amelyik épp FUTOTT,
+    amikor az eltérést ÉSZREVETTE — nem azt, aki írt. Ha közben él az
+    alkalmazás (ami a `config.json`-ba menti a Play/Stop állapotot és a
+    slot-számot), az őr ártatlan teszteket vádol. Megtörtént 2026-08-25-én
+    kétszer, két KÜLÖNBÖZŐ tesztre. Egy tévesen riasztó őrt pedig egy idő után
+    figyelmen kívül hagy az ember — pont azt veszítenénk el, amiért készült.
+
+    A jel: a viz-szál 30 másodpercenként ír; ha bármelyik `TFV_*.csv` frissebb
+    két percnél, az alkalmazás él. Nincs hozzá se processz-lista, se új
+    függőség."""
+    try:
+        import time
+        from core.mt5_visual import PREFIX, files_dir
+        d = files_dir()
+        if d is None:
+            return False
+        most = time.time()
+        return any(most - f.stat().st_mtime < 120
+                   for f in d.glob(PREFIX + "*.csv"))
+    except Exception:
+        return False
+
+
 def main() -> int:
     pattern = sys.argv[1] if len(sys.argv) > 1 else ""
     files = sorted(p for p in HERE.glob("test_*.py") if pattern in p.name)
@@ -118,17 +145,32 @@ def main() -> int:
     print("-" * 52)
     if _dirty:
         # ⚠ Ez NEM stilisztikai kifogas: az eles config felulirasa adatvesztes.
-        print("!! A TESZTEK MEGVALTOZTATTAK A FELHASZNALO ALLAPOTAT:")
+        _el = _app_fut()
+        if _el:
+            print("!! A FELHASZNALO ALLAPOTA MEGVALTOZOTT — de KOZBEN FUT A "
+                  "TRADEFORGE:")
+        else:
+            print("!! A TESZTEK MEGVALTOZTATTAK A FELHASZNALO ALLAPOTAT:")
         for _rel, _who in _dirty.items():
-            print(f"     {_rel}  <-  {_who}")
-        print("   A tesztnek a ROOT-ot ideiglenes mappara kell teritenie "
-              "(lasd test_live2_wiring.py).")
+            print(f"     {_rel}  <-  a(z) {_who} futasa kozben")
+        if _el:
+            print("   ⚠ A futo alkalmazas maga is irja ezeket (Play/Stop, "
+                  "slot-szam, kockazati mod), tehat a megnevezett teszt")
+            print("     VALOSZINULEG ARTATLAN. Biztos itelethez zard be a "
+                  "TradeForge-ot, es futtasd ujra a csomagot.")
+        else:
+            print("   A tesztnek a ROOT-ot ideiglenes mappara kell teritenie "
+                  "(lasd test_live2_wiring.py).")
     print(f"{passed}/{total} allitas  |  {len(files) - len(failed)}/{len(files)} fajl PASS")
     if failed:
         print("BUKOTT: " + ", ".join(failed))
     # ⚠ Az éles állapot felülírása ÖNMAGÁBAN bukás — akkor is, ha minden
     # állítás átment. Az adatvesztés nem „figyelmeztetés".
-    return 1 if (failed or _dirty) else 0
+    #
+    # ⚠ KIVÉVE, ha közben FUT az alkalmazás: akkor nem tudjuk eldönteni, ki
+    # írt, és egy ártatlan tesztre adott bukás pont a bizalmat rombolná az
+    # őrben. Ilyenkor a figyelmeztetés marad, a kilépési kód nem.
+    return 1 if (failed or (_dirty and not _app_fut())) else 0
 
 
 if __name__ == "__main__":
