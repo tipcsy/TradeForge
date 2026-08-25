@@ -69,6 +69,36 @@ PAYLOAD_VERSION = 1
 TIMEOUT_SEC = 10
 
 
+def _user_agent() -> str:
+    """A kliens BEMUTATKOZÁSA — `TradeForge/<verzió>`.
+
+    ⚠ EZ NEM UDVARIASSÁG, HANEM MŰKÖDÉSI FELTÉTEL. A Python `urllib`
+    alapértelmezett user-agentje `Python-urllib/<verzió>`, és a Cloudflare
+    bot-védelme ezt **blokkolja** — mérve az éles szerveren (2026-08-25):
+
+        User-Agent: Python-urllib/3.14   ->  403, majd időtúllépés
+        User-Agent: TradeForge/2.73.0    ->  200
+
+    Enélkül a licenc-ellenőrzés SOHA nem sikerülne éles környezetben. A kliens
+    ezt „a szerver nem érhető el"-ként látná, türelmi időbe menne, és 72 óra
+    múlva megállna — a hibaüzenet pedig a hálózatra mutatna, nem ide.
+
+    Ráadás: a szerver naplójában így látszik, melyik verzió hívott.
+    """
+    try:
+        from version import APP_VERSION
+        return f"TradeForge/{APP_VERSION}"
+    except Exception:
+        return "TradeForge"
+
+
+def _headers(extra: "dict | None" = None) -> dict:
+    h = {"Content-Type": "application/json", "User-Agent": _user_agent()}
+    if extra:
+        h.update(extra)
+    return h
+
+
 # ── Az eredmény ─────────────────────────────────────────────────────────
 class Result:
     """A licenc-ellenőrzés kimenete. `ok` → indulhat a program."""
@@ -221,7 +251,7 @@ def _post(api: str, path: str, body: dict) -> tuple:
     req = urllib.request.Request(
         api.rstrip("/") + path,
         data=json.dumps(body).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers=_headers(),
         method="POST")
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT_SEC) as r:
@@ -258,8 +288,7 @@ def login_and_get_token(email: str, password: str, api: str = DEFAULT_API,
     req = urllib.request.Request(
         api.rstrip("/") + "/auth/tokens",
         data=json.dumps({"label": label or machine_label()}).encode("utf-8"),
-        headers={"Content-Type": "application/json",
-                 "Authorization": f"Bearer {jwt}"},
+        headers=_headers({"Authorization": f"Bearer {jwt}"}),
         method="POST")
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT_SEC) as r:

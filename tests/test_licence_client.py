@@ -192,6 +192,29 @@ try:
     check("a gépnév kitöltődik (ez lesz a token címkéje)",
           bool(licence.machine_label()), licence.machine_label())
 
+    # ── 11b. A KLIENS BEMUTATKOZÁSA ────────────────────────────────────
+    # ⚠ EZ NEM UDVARIASSÁG, HANEM MŰKÖDÉSI FELTÉTEL. A Python `urllib`
+    # alapértelmezett user-agentje `Python-urllib/<verzió>`, és a Cloudflare
+    # bot-védelme ezt BLOKKOLJA. Mérve az éles szerveren (2026-08-25):
+    #   Python-urllib/3.14  -> 403, majd időtúllépés
+    #   TradeForge/2.73.0   -> 200
+    # Enélkül a licenc-ellenőrzés SOHA nem sikerülne élesben: a kliens „a
+    # szerver nem érhető el"-t látna, türelmi időbe menne, és 72 óra múlva
+    # megállna — a hibaüzenet pedig a hálózatra mutatna, nem ide.
+    _h = licence._headers()
+    check("a kérés SAJÁT user-agenttel megy", "User-Agent" in _h)
+    check("...és a TradeForge nevében mutatkozik be",
+          _h["User-Agent"].startswith("TradeForge"), _h["User-Agent"])
+    check("⚠ ...tehát NEM a Python alapértelmezettjével (azt a Cloudflare tiltja)",
+          "urllib" not in _h["User-Agent"].lower())
+    check("a verzió is benne van (a szerver naplójában látszik)",
+          any(c.isdigit() for c in _h["User-Agent"]), _h["User-Agent"])
+    _src = (ROOT / "core" / "licence.py").read_text(encoding="utf-8")
+    check("MINDEN kérés a közös fejléc-építőt használja",
+          _src.count("headers=_headers(") >= 2 and
+          '"Content-Type": "application/json"}' not in _src.split("def _headers")[1],
+          f"{_src.count('headers=_headers(')} hívás")
+
 finally:
     licence.SERVER_PUBLIC_KEY = _REAL_PUB
     shutil.rmtree(_TMP, ignore_errors=True)
