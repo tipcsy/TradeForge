@@ -76,7 +76,7 @@ def _code(txt):
 _i = _src.find("def compute_display")
 _blk = _code(_src[_i:_i + 2600])
 check("a kijelzes VEGIGJATSSZA a sorozatot (nem egy friss allapotot leptet)",
-      "for _r in _recs[:-1]:" in _blk, "")
+      "_recs[:-1]" in _blk and "_advance(st," in _blk, "")
 # ⚠ A kijelzes KORONKENT es PARONKENT fut — a pandas soronkenti indexelese itt
 # 7x lassabb (merve: 42 ms vs 6 ms 1001 gyertyara).
 check("...`records`-bol, nem `.iloc[i]`-bol (a kijelzes-ut forro)",
@@ -85,15 +85,28 @@ check("...`records`-bol, nem `.iloc[i]`-bol (a kijelzes-ut forro)",
 
 # ── 2. A HAROM KOR A MOSTANI helyzetet mondja ────────────────────────────
 _m = _code(_src[_src.find("def _marks"):_src.find("def compute_display")])
-check("az entry kor NEM a ragados `last_signal`-bol jon",
-      "last_signal" not in _m, "meg mindig a last_signal-t nezi")
+# ⚠ EZ AZ ŐR ÁTALAKULT, és a miértje fontos. Eredetileg azt tiltotta, hogy a
+# kitörés köre a `last_signal`-ból jöjjön — az RAGADÓS (sosem törlődik), tehát az
+# első jel után ÖRÖKRE világított volna (mérve: a gyertyák 92,5%-án). Egy állandó
+# kör nem jelzés, hanem dísz.
+#
+# 2026-08-25 óta a kör MÉGIS használja a `last_signal`-t — de KIZÁRÓLAG akkor, ha
+# a jel a LEGUTÓBBI zárt gyertyán tüzelt (`last_signal_time == last_bar_time`).
+# Enélkül a jelzés pillanata SOHA nem látszott: a `_advance` a jel után lezárja
+# az ablakot, a kijelzés pedig utána fut (99 jelzésből 0-szor).
+#
+# A ragadósság ellen tehát már NEM a szöveg-keresés véd, hanem a MÉRÉS lentebb:
+# „a kitores-kor RITKA (<5%)". Az a helyes őr — a viselkedést nézi, nem a betűt.
+check("a kitores kore CSAK a tuzeles gyertyajan nezi a `last_signal`-t",
+      "last_signal_time" in _m and "last_bar_time" in _m,
+      "hianyzik az idobelyeg-osszehasonlitas")
 check("...hanem a MOSTANI gyertya kitoresebol",
       "_breakout_signal(row, params)" in _m)
 # ⚠ A release a TENYLEGES ablakot nezze, ne a nyers `bars_since_off >= 0`-t.
 check("a release az ABLAKOT nezi (min..max gyertya a feloldas utan)",
       "min_bars_since_squeeze" in _m and "max_bars_after_squeeze" in _m)
 check("...es kikapcsolt trend-szuronel is vilagit (sarga)",
-      'dot(in_window,' in _m and '"yellow"' in _m)
+      'dot(in_window or _tuzelt,' in _m and '"yellow"' in _m)
 
 
 # ── 3. MERES valodi adaton ───────────────────────────────────────────────
@@ -140,6 +153,62 @@ for sym in ("GOLD", "Ger40"):
     check(f"[{sym}] ...LAPOSAN, Cell-ertekekkel",
           all(isinstance(v, _Cell) for v in _cells.values()),
           str({k: type(v).__name__ for k, v in _cells.items()}))
+
+
+# ── 3b. A három kör FOLYAMAT-JELZŐ ─────────────────────────────
+#
+# ⚠ A FELHASZNÁLÓ LELETE: „egy kör jelent meg, abból is a KÖZÉPSŐ — ami azért
+# fura, mert az első feltételnek kellett volna előbb teljesülnie".
+#
+# A megfigyelés helyes volt, de nem hibáról szólt: a `squeeze_off` DEFINÍCIÓ
+# SZERINT azon a gyertyán igaz, ahol a szűkülés VÉGET ÉR — az ablak pontosan
+# akkor nyílik, amikor az összeszűkülés megszűnik. A két kör magától SOSEM
+# éghetett együtt (mérve 9 páron: együtt 1,0%).
+#
+# A döntés: FOLYAMAT-JELZŐ. A korábbi lépcső égve marad, amíg a belőle nyílt
+# szakasz tart, és az epizód végén MIND elalszik — nem lesz „ragadós" dísz.
+#
+# ⚠ ÉS EGY HARMADIK LYUK, ami közben derült ki: a KITÖRÉS köre a jelzés
+# pillanatában SOHA nem gyulladt ki. A `_advance` a jel után lezárja az ablakot
+# (`bars_since_off = -1`), a kijelzés pedig UTÁNA fut — már zárt ablakot látott.
+# Mérve: 99 tényleges jelzésből 0-szor látszott. Pont az a pillanat volt
+# láthatatlan, amit nézni érdemes.
+
+_LEPCSOK = ("squeeze", "release", "entry")
+for sym in ("Ger40", "GOLD"):
+    d, _ = load_data(sym)
+    p = _params(sym)
+    ind = B.compute_indicators(d.tail(8000), p)
+    recs, idx = ind.to_dict("records"), ind.index
+    s = B.SqueezeState(symbol=sym)
+    n = jel = jel_lathato = nem_monoton = teljes = 0
+    for i in range(len(recs) - 1):
+        # A MOTOR sorrendje: előbb léptet, azután rajzol — a formálódó sorral.
+        s = B._advance(s, recs[i], p)
+        s.last_bar_time = idx[i]
+        tuzelt = s.pending != "NONE"
+        if tuzelt:
+            s.last_signal_time = idx[i]
+        s.pending = "NONE"
+        eg = [st._marks(s, recs[i + 1], p)[k].color != "muted" for k in _LEPCSOK]
+        n += 1
+        if all(eg):
+            teljes += 1
+        if any(eg[j] and not eg[j - 1] for j in (1, 2)):
+            nem_monoton += 1
+        if tuzelt:
+            jel += 1
+            if eg[2]:
+                jel_lathato += 1
+
+    check(f"[{sym}] ⚠ a lépcsők MONOTONOK (nincs későbbi a korábbi nélkül)",
+          nem_monoton == 0, f"{nem_monoton} kivétel {n} gyertyából")
+    check(f"[{sym}] ⚠ a jelzés pillanata LÁTSZIK (mind a 3 kör ég)",
+          jel > 0 and jel_lathato == jel, f"{jel_lathato}/{jel}")
+    # ⚠ ÉS NEM DÍSZ: a teljes hármas ritka marad. Egy állandóan világító kör
+    # nem jelzés — pontosan ezért esett ki annak idején a `last_signal`.
+    check(f"[{sym}] ...de nem is dísz (a teljes hármas < 5%)",
+          0 < 100 * teljes / n < 5, f"{100 * teljes / n:.1f}%")
 
 
 # ── 4. A SZALAG a charton ────────────────────────────────────────────────

@@ -272,6 +272,13 @@ class SqueezeState:
     # ablakon: az öt H1-gyertyás (≈50 perces) belépési ablak a valóságban
     # ~50 MÁSODPERCIG élt. `None` = még egy gyertyát sem dolgoztunk fel.
     last_bar_time: Any = None
+    # ⚠ MELYIK gyertyán tüzelt a legutóbbi jel. E nélkül a KITÖRÉS köre a
+    # jelzés pillanatában NEM gyulladhatott ki: a `_advance` a jel után
+    # LEZÁRJA az ablakot (`bars_since_off = -1`), a kijelzés pedig UTÁNA fut,
+    # tehát már zárt ablakot lát. Mérve (4 pár, 8026 gyertya): 99 tényleges
+    # jelzésből a kör 0-szor világított — pont az a pillanat volt láthatatlan,
+    # amit nézni érdemes.
+    last_signal_time: Any = None
 
 
 def _advance(state: SqueezeState, row, params: dict) -> SqueezeState:
@@ -409,6 +416,8 @@ class BollingerSqueezeStrategy(Strategy):
             state.pending = "NONE"             # a MÚLTBELI jel nem köt
         state = _advance(state, recs[-1], md.params)
         state.last_bar_time = t
+        if state.pending != "NONE":
+            state.last_signal_time = t        # a KITÖRÉS körének ez a forrása
 
         sig, state.pending = state.pending, "NONE"
         return state, sig
@@ -438,8 +447,34 @@ class BollingerSqueezeStrategy(Strategy):
         in_window = _bso >= 0 and lo <= _bso <= hi
         d = _trend_dir(row, params)
         sig = _breakout_signal(row, params) if in_window else "NONE"
+        # ⚠ A KITÖRÉS köre KÉT forrásból gyulladhat:
+        #   a) a legutóbbi ZÁRT gyertyán tényleg tüzelt a jel — ez a fontos, és
+        #      eddig SOHA nem látszott (lásd `last_signal_time`);
+        #   b) a FORMÁLÓDÓ gyertya épp kitörést mutat, még nyitott ablakban —
+        #      ez előrejelzés, a gyertya visszafordulhat.
+        _tuzelt = (getattr(state, "last_signal_time", None) is not None
+                   and getattr(state, "last_signal_time", None)
+                   == getattr(state, "last_bar_time", None))
+        _jel = state.last_signal if _tuzelt else sig
+
         return {
-            "squeeze": dot(in_sq, "yellow"),
+            # ⚠ FOLYAMAT-JELZŐ, nem pillanatkép. Az összeszűkülés köre égve
+            # marad, amíg a BELŐLE nyílt ablak tart — különben sosem látnád
+            # egyben, hogy „volt szűkülés → most az ablakában vagyunk".
+            #
+            # Ez nem esztétika: a `squeeze_off` DEFINÍCIÓ SZERINT azon a
+            # gyertyán igaz, ahol a szűkülés VÉGET ÉR, tehát a két kör magától
+            # sosem éghetett együtt. Mérve (9 pár, 13 515 gyertya):
+            # csak 1. kör 9,4% · csak 2. kör 4,0% · együtt 1,0%.
+            #
+            # Az epizód végén (az ablak lejár vagy tüzelt a jel) MIND elalszik,
+            # tehát nem lesz „ragadós" dísz — az a hiba már megvolt egyszer.
+            # ⚠ A `_tuzelt` is égve tartja: a jel gyertyáján a `_advance` már
+            # LEZÁRTA az ablakot (`bars_since_off = -1`), tehát e nélkül az
+            # első két kör pont a csúcsponton aludna el, és egyetlen magányos
+            # kör maradna jobbra. A folyamat ott teljesedik be — akkor kell a
+            # legláthatóbbnak lennie.
+            "squeeze": dot(in_sq or in_window or _tuzelt, "yellow"),
             # ⚠ A KOR A FELFEGYVERZEST mutatja, a SZIN az iranyt. A `d != 0`
             # feltetel HIBAS volt: a `_trend_dir` KIKAPCSOLT trend-szurovel
             # DEFINICIO SZERINT 0-t ad (`require_trend_alignment=False`, pl.
@@ -447,10 +482,10 @@ class BollingerSqueezeStrategy(Strategy):
             # semmi, hanem mert a szuro ki van kapcsolva. Merve: GOLD 0,0%
             # (miközben 9 belepo tuzelt ugyanabban az idoszakban).
             # Sarga = felfegyverkezve, de az iranyt a trend-szuro nem donti el.
-            "release": dot(in_window,
+            "release": dot(in_window or _tuzelt,
                            "green" if d > 0 else "red" if d < 0 else "yellow"),
-            "entry":   dot(sig in ("BUY", "SELL"),
-                           "green" if sig == "BUY" else "red"),
+            "entry":   dot(_jel in ("BUY", "SELL"),
+                           "green" if _jel == "BUY" else "red"),
         }
 
     def compute_display(self, md: MarketData) -> dict:
@@ -479,9 +514,17 @@ class BollingerSqueezeStrategy(Strategy):
         # (merve: 42 ms vs 6 ms 1001 gyertyara). Egy korabbi lelet epp az volt,
         # hogy a mely ablaku kijelzes-ut megfogta a GIL-t.
         _recs = ind.to_dict("records")
+        _idx = ind.index
         st = SqueezeState(symbol=md.symbol)
-        for _r in _recs[:-1]:                  # a formalodo gyertya kimarad
+        for _i, _r in enumerate(_recs[:-1]):   # a formalodo gyertya kimarad
             st = _advance(st, _r, md.params)
+            # ⚠ UGYANAZT a két mezőt töltjük, amit az élő út — különben a
+            # STOPPED pár (amit a dashboard rekonstruál) MÁS köröket mutatna,
+            # mint ugyanaz a pár futás közben.
+            if st.pending != "NONE":
+                st.last_signal_time = _idx[_i]
+                st.pending = "NONE"
+            st.last_bar_time = _idx[_i]
         # ⚠ LAPOS szótár: `{stádium_kulcs: Cell}`. A motor pontosan így bontja
         # szét: `{k: (c.text, c.color) for k, c in cells.items()}` — egy
         # `{"marks": {...}}` burkolótól a `c` szótár lenne, és a `c.text`
