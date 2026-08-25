@@ -213,6 +213,16 @@ def stored_token() -> str:
     return str(_read_json(TOKEN_PATH).get("token") or "")
 
 
+def stored_email() -> str:
+    """A licenchez tartozó e-mail cím — a felület KIÍRÁSÁHOZ.
+
+    ⚠ Ez CSAK tájékoztatás: azt mondja meg, melyik fiók belépője van a gépen,
+    nem azt, hogy a licenc érvényes-e. A `check()` dönt. A megkülönböztetés
+    számít: egy visszavont token mellett is itt marad az e-mail, és ilyenkor a
+    fejlécnek nem szabad azt sugallnia, hogy minden rendben."""
+    return str(_read_json(TOKEN_PATH).get("email") or "")
+
+
 def save_token(token: str, email: str = "") -> bool:
     return _write_json(TOKEN_PATH, {"token": token, "email": email,
                                     "machine": machine_label(),

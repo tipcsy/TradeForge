@@ -2663,6 +2663,16 @@ class DashboardWindow:
         self.lbl_conn.pack(side="right", padx=(0, 4))
         self.lbl_account = tk.Label(top_bar, text="", bg=BG_HEADER, fg=FG_GRAY, font=info_font)
         self.lbl_account.pack(side="right", padx=10)
+        # ── LICENC-FELHASZNÁLÓ ────────────────────────────────────────────
+        # ⚠ Melyik fiók belépője van EZEN a gépen. Több fiók / több gép mellett
+        # ez az egyetlen hely, ahol látszik — a portálon a token címkéje a gép
+        # neve, itt viszont a fordítottja kell: melyik felhasználóé a gép.
+        # A licenc ÉRVÉNYESSÉGÉT nem ez mondja meg (arról a napló és az
+        # indításkori kapu szól); ez csak azonosít.
+        self.lbl_licence = tk.Label(top_bar, text="", bg=BG_HEADER,
+                                    fg=FG_GRAY, font=info_font)
+        self.lbl_licence.pack(side="right", padx=(10, 0))
+        self._refresh_licence_label()
 
         info_bar = tk.Frame(self.root, bg=BG_HEADER, pady=2)
         info_bar.pack(fill="x", padx=4)
@@ -5504,6 +5514,30 @@ class DashboardWindow:
                 text=f"#{broker.get('login','—')}  {broker.get('server','—')}{demo_tag}",
                 fg=FG_GRAY)
             self._btn_connect.pack(side="right", padx=6)
+
+    def _refresh_licence_label(self) -> None:
+        """A licenchez tartozó e-mail a fejlécben.
+
+        ⚠ Ha nincs mentett belépő, a mező ÜRESEN marad — nem írunk oda
+        „nincs licenc"-et. A licenc-kapu az indulásnál dönt és beszél; egy
+        második, félig informált üzenet a fejlécben csak zavarna (a backtest és
+        az optimalizálás licenc NÉLKÜL is fut, ott semmi baj nincs)."""
+        try:
+            from core import licence as _lic
+            _email = _lic.stored_email()
+        except Exception as _ex:
+            # Nem néma: a fejléc üres marad, de tudjuk, miért.
+            # ⚠ LOKÁLIS import. Ebben a fájlban a `logging` SEHOL nincs
+            # modul-szinten importálva (csak függvényeken belül) — egy
+            # modul-szintűnek hitt `_logging` itt NameError-t adna, és
+            # Tk-visszahívásban az a stderr-re menne, ahol egy ablakos
+            # programban SENKI nem látja. Ugyanaz a csapda, ami a
+            # `live_trader` menet közbeni bekötésénél is előjött.
+            import logging as _logging
+            _logging.getLogger(__name__).debug(
+                "a licenc-felhasználó nem olvasható: %s", _ex)
+            _email = ""
+        self.lbl_licence.config(text=f"👤 {_email}" if _email else "")
 
     # ── Piaci adat háttérszál (egységes) ────────────────────────────────
     def _start_market_data_poll(self):
