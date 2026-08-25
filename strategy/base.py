@@ -179,6 +179,21 @@ class MarketData:
     # nem a történést. Ha a naplózás is elnémulna tőle, a chart előzménye
     # csendben lyukas lenne — a felhasználó pedig sosem tudná meg, miért.
     on_entry_record: "callable | None" = None
+    # A KAPUK HATÁSA (`core.gates`): `{kapu_kulcs: "block"|"reduce"|"none"}`.
+    # A keret tölti; ÜRES = minden kapu blokkol (a régi viselkedés, tehát a
+    # meglévő hívók bitazonosak maradnak).
+    #
+    # ⚠ MIÉRT KELL A STRATÉGIÁNAK TUDNIA. A motor v1.97.0 óta tiszteletben
+    # tartja a hatást: `none` = a kapu nem szól bele, `reduce` = belép, csak
+    # kisebb mérettel. Ha a rajz ettől függetlenül szűrne, a chart KEVESEBB
+    # belépőt mutatna, mint amennyit a motor megköt — és a felhasználó a
+    # riasztást látná jelölő nélkül. (Megtörtént 2026-08-25: a Ger40 minden
+    # kapuja `none`-on állt, 12 riasztás mellett 5 jelölő.)
+    gate_effects: dict = field(default_factory=dict)
+
+    def gate_blocks(self, key: str) -> bool:
+        """Blokkol-e ez a kapu a rajzoláskor? Csak a `block` hatás szűr."""
+        return str(self.gate_effects.get(key, "block")) == "block"
 
     def closed(self, label: str) -> Optional[pd.Series]:
         df = self.bars.get(label)

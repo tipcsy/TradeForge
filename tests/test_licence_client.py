@@ -196,14 +196,37 @@ finally:
     licence.SERVER_PUBLIC_KEY = _REAL_PUB
     shutil.rmtree(_TMP, ignore_errors=True)
 
-# ── 12. A kapu CSAK az élő kereskedést zárja ───────────────────────────
+# ── 12. A kapu CSAK az élő kereskedést zárhatja ────────────────────────
+# ⚠ A KAPU JELENLEG KI VAN VEZETVE a main.py-ból (a licencszerver még nincs
+# élesítve, és bemutatóhoz a programnak meglepetés nélkül kell indulnia). Ezért
+# a teszt NEM azt követeli, hogy be legyen kötve — hanem azt az invariánst
+# őrzi, ami MINDKÉT állapotban igaz:
+#
+#     ha a kapu be van kötve, akkor PONTOSAN EGYSZER, és csakis a cmd_live-ban.
+#
+# Így a visszakapcsoláskor nem kell tesztet átírni, viszont ha valaki a
+# backtest vagy az optimalizálás útjába tenné, itt bukik el.
 _main = (ROOT / "main.py").read_text(encoding="utf-8")
-_i = _main.find("def cmd_live")
-_j = _main.find("def cmd_", _i + 5)
-check("a licenc-kapu a `live` parancsban van",
-      "ensure_licence" in _main[_i:_j if _j > 0 else len(_main)])
-check("⚠ ...és SEHOL máshol (backtest/optimize/download licenc nélkül fut)",
-      _main.count("ensure_licence(") == 1, str(_main.count("ensure_licence(")))
+# ⚠ A KOMMENTEKET KI KELL SZŰRNI: a visszakapcsolás mintája kommentként ott van
+# a main.py-ban, és egy szöveges keresés kódnak látná.
+_kod = chr(10).join(l for l in _main.splitlines()
+                    if not l.strip().startswith("#"))
+_hivas = _kod.count("ensure_licence(")
+
+check("a licenc-kapu legfeljebb EGY helyen van bekötve", _hivas <= 1,
+      f"{_hivas} hívás")
+if _hivas:
+    _i = _kod.find("def cmd_live")
+    _j = _kod.find("def cmd_", _i + 5)
+    check("⚠ ...és csakis a `live` parancsban (a backtest/optimize NEM kapuzott)",
+          "ensure_licence(" in _kod[_i:_j if _j > 0 else len(_kod)])
+else:
+    # Nem hiba, hanem ÁLLAPOT — de legyen látható, ne csak a kód olvasásából
+    # derüljön ki. A visszakapcsolás mintája a main.py-ban, kommentben áll.
+    check("a kapu jelenleg KI VAN VEZETVE (a szerver még nem éles)",
+          "LICENC-KAPU: JELENLEG KI VAN VEZETVE" in _main)
+    check("...és a visszakapcsolás mintája ott van a main.py-ban",
+          "ensure_licence(cfg" in _main)
 # ⚠ A BEÉPÍTETT KULCS ÉRVÉNYESSÉGE. Egy elgépelt, csonka vagy véletlenül
 # levágott kulcstól a program MINDEN választ hamisnak látna, és soha nem
 # indulna el — a hibaüzenet pedig („a válasz nem hitelesíthető") a szerverre

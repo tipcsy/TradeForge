@@ -1181,8 +1181,28 @@ def pair_visual_lines(symbol: str, params: dict, strategy, point_size: float,
     #  • export (bars megadva) → a BACKTEST kiértékelője a MEGADOTT M1-ből, mert
     #    ott nincs MT5-kapcsolat (a get_candles None-t adna → néma kapu-kimaradás).
     _cfg = cfg if cfg is not None else _run_cfg
-    if not exec_gates:
-        md.entry_gate = None            # NYERS jelzesek: a TF-egyuttallas sem szur
+    # ⚠ A KAPU HATÁSA SZÁMÍT, NEM CSAK AZ, HOGY BE VAN-E KAPCSOLVA.
+    #
+    # A kapuknak három hatásuk lehet (`core.gates`): `block` (nincs belépő),
+    # `reduce` (belép, de kisebb mérettel) és `none` (nem szól bele). A MOTOR
+    # ezt v1.97.0 óta tiszteletben tartja — a viz viszont KEMÉNY TILTÁSKÉNT
+    # alkalmazta a TF-együttállást, hatástól függetlenül.
+    #
+    # ⚠ EZ MEGTÖRTÉNT (2026-08-25, a felhasználó vette észre): a Ger40 minden
+    # kapuja `none` hatáson állt, tehát a motor egyetlen jelzést sem blokkolt és
+    # sorra küldte a riasztásokat — a charton viszont NEM JELENT MEG jelölő.
+    # Mérve azon a napon: 12 riasztás, 5 jelölő; a kapu 11 jelzést nyelt el a
+    # rajzból. A `reduce` ugyanígy hibás volna: ott a motor BELÉP (fele
+    # mérettel), tehát a jelölőnek meg KELL jelennie.
+    #
+    # Csakis a `block` szűr. Ugyanez a konvenció, mint a sáv-állapotnál: „a
+    # `none` hatású kapu SOSEM zár, tehát nem is villoghat" (`visual.BarState`).
+    from core import gates as _gt
+    if _cfg:
+        md.gate_effects = _gt.effects_for(_cfg, symbol, strategy.name)
+    _tf_eff = md.gate_effects.get(_gt.TF_ALIGN, _gt.EFFECT_BLOCK)
+    if not exec_gates or _tf_eff != _gt.EFFECT_BLOCK:
+        md.entry_gate = None            # NYERS jelzesek / nem blokkoló kapu
     elif bars is not None and _cfg:
         from trading.backtest import _build_tf_align_evaluator
         md.entry_gate = _build_tf_align_evaluator(_cfg, symbol, strategy.name,

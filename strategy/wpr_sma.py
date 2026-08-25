@@ -577,7 +577,10 @@ class WprSmaStrategy(Strategy):
                                      md.params, pip) is None:
                         continue
                 # Spread-kapu (ha van spread-adat a bárokon): a közös core.spread_gate.
-                if _sp_arr is not None and getattr(md, "exec_gates", True):
+                # ⚠ CSAK `block` hatásnál szűr. `none`/`reduce` mellett a motor
+                # BELÉP (utóbbinál kisebb mérettel), tehát a jelölőnek meg kell
+                # jelennie — különben a chart kevesebbet mutat, mint a valóság.
+                if _sp_arr is not None and getattr(md, "exec_gates", True)                         and md.gate_blocks("spread"):
                     _spv = _sp_arr[j]
                     # ⚠ A `backtest_spread_points` ÁTADÁSA kötelező: abból jön a kapu
                     # RELATÍV padlója (normál spread × min_spread_mult). Nélküle a
