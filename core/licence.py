@@ -351,11 +351,83 @@ def _cache_ok(account_number: str) -> "Result | None":
                   from_cache=True, payload=payload)
 
 
+# ── Az UTOLSÓ ellenőrzés — a felület számára ────────────────────────────
+# ⚠ MIÉRT KELL. A türelmi idő eddig CSAK egy naplósorban létezett
+# („a szerver nem érhető el — a mentett ellenőrzést nézem"), egy ablakos
+# programban pedig a napló az a hely, ahova senki nem néz. A felhasználó tehát
+# napokig futott volna abban a hitben, hogy minden rendben, és a hiány pontosan
+# akkor derült volna ki, amikor a program 72 óra múlva már nem indul el.
+#
+# Ez a néma osztály: a rendszer MÁST csinál, mint amit a felhasználó hisz.
+_utolso: "Result | None" = None
+
+
+def last_result() -> "Result | None":
+    """Az utolsó `check()` eredménye ebben a futásban (`None`, ha nem futott).
+
+    ⚠ Nem futott = nem baj. A backtest és az optimalizálás licenc nélkül is
+    megy, ott sosem hívjuk a `check()`-et — ilyenkor a felületnek NEM szabad
+    semmit állítania a licencről."""
+    return _utolso
+
+
+def status() -> dict:
+    """A licenc állapota a FELÜLETNEK, nyers adatként (a szöveg a hívóé).
+
+        allapot : "nincs"  — ebben a futásban nem volt ellenőrzés
+                  "ok"     — friss, sikeres szerver-válasz
+                  "grace"  — a szerver NEM volt elérhető, mentésből futunk
+                  "nem"    — elutasítva (ilyenkor a program el sem indult)
+        turelmi_ora  : hány óra van hátra a türelmi időből (csak "grace")
+        lejar_nap    : hány nap múlva jár le a licenc (None, ha nem tudjuk)
+    """
+    r = _utolso
+    if r is None:
+        return {"allapot": "nincs", "email": stored_email()}
+
+    allapot = "ok" if r.ok else "nem"
+    if r.ok and r.from_cache:
+        allapot = "grace"
+
+    ki = {"allapot": allapot, "email": stored_email(), "ok": r.ok,
+          "reason": r.reason, "uzenet": r.message,
+          "turelmi_ora": None, "lejar_nap": None}
+
+    p = r.payload or {}
+    most = int(time.time())
+    if allapot == "grace":
+        grace = int(p.get("grace_seconds") or 0)
+        kor = most - int(p.get("issued_at") or 0)
+        # ⚠ Lefelé kerekítünk, és nem megyünk 0 alá: a „még 0 óra" őszintébb,
+        # mint egy negatív szám, és a program ilyenkor tényleg a határon van.
+        ki["turelmi_ora"] = max(0, (grace - kor) // 3600)
+
+    exp = int(p.get("expires_at") or 0)
+    if exp:
+        # ⚠ FELFELÉ kerekítünk: ha 30 óra van hátra, az „2 nap", nem „1". A
+        # lejáratnál a túl korai figyelmeztetés ártalmatlan, a késői nem.
+        ki["lejar_nap"] = max(0, -(-(exp - most) // 86400))
+    return ki
+
+
 # ── A fő belépési pont ──────────────────────────────────────────────────
 def check(account_number: str, api: str = DEFAULT_API, token: str = "",
           account_name: str = "", broker_server: str = "",
           app_version: str = "") -> Result:
     """A licenc ellenőrzése egy brókerszámlára. Ez fut a program indulásakor."""
+    r = _check(account_number, api=api, token=token, account_name=account_name,
+               broker_server=broker_server, app_version=app_version)
+    # ⚠ MINDEN ágon feljegyezzük, a sikertelent is. A felületnek a türelmi idő
+    # és az elutasítás EGYARÁNT hír; egy `return` az ellenőrzés közepén eddig
+    # nyomtalanul elvitte az információt.
+    global _utolso
+    _utolso = r
+    return r
+
+
+def _check(account_number: str, api: str = DEFAULT_API, token: str = "",
+           account_name: str = "", broker_server: str = "",
+           app_version: str = "") -> Result:
     token = token or stored_token()
     if not token:
         return Result(False, "no_token", _msg("no_token"), needs_login=True)

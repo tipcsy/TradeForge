@@ -127,9 +127,19 @@ for sym in ("GOLD", "Ger40"):
 
     # A kijelzes-ut ugyanezt adja (nem egy masodik keplet).
     md = MarketData(symbol=sym, params=p, bars={"M15": d.tail(4000)})
-    _cells = st.compute_display(md)["marks"]
+    # ⚠ LAPOS szotar: `{stadium_kulcs: Cell}`. Itt korabban
+    # `compute_display(md)["marks"]` allt — vagyis a teszt a HIBAS alakot
+    # rogzitette, es ezzel be is fagyasztotta: a strategia egy szinttel
+    # melyebben adta vissza a cellakat, a motor `c.text`-je elszallt, a sor
+    # pedig uresen maradt. A teszt az IMPLEMENTACIOT tukrozte, nem a
+    # SZERZODEST. A szerzodest most kulon meri: `test_strategy_cell_contract`.
+    _cells = st.compute_display(md)
     check(f"[{sym}] a compute_display mind a 3 kort visszaadja",
           set(_cells) == {"squeeze", "release", "entry"}, str(sorted(_cells)))
+    from strategy.base import Cell as _Cell
+    check(f"[{sym}] ...LAPOSAN, Cell-ertekekkel",
+          all(isinstance(v, _Cell) for v in _cells.values()),
+          str({k: type(v).__name__ for k, v in _cells.items()}))
 
 
 # ── 4. A SZALAG a charton ────────────────────────────────────────────────

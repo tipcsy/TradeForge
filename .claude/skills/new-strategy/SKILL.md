@@ -56,6 +56,26 @@ bt_entry(hi_row, params, point_size)     -> (sl_points, tp_points) | None   # + 
 visual_objects(md)               -> list   # `strategy.visual` OBJEKTUMOK, nem dictek
 ```
 
+> ⚠ **A cellák kulcsa a STÁDIUM, nem az OSZLOP** — és a `live_cells` sem
+> kivétel. Jelölő-oszlopnál két külön névtér van, és összekeverni őket
+> **néma** hiba:
+>
+> ```python
+> def columns(self):                 # az OSZLOP kulcsa: "marks"
+>     return [MarkerColumn("marks", self.name, stages=_STAGES)]
+>
+> def compute_display(self, md):     # a CELLÁK kulcsa: a stádiumok
+>     return {"squeeze": Cell(...), "release": Cell(...), "entry": Cell(...)}
+>     # ❌ NEM: {"marks": {...}} — egy szinttel mélyebben
+> ```
+>
+> A motor `{k: (c.text, c.color) for k, c in cells.items()}`-szel bontja szét,
+> tehát egy burkolótól a `c` szótár lesz és a `c.text` elszáll — a sor pedig
+> ÖRÖKRE üres marad, ami pontosan úgy néz ki, mint egy stratégia, ami épp nem
+> jelez. **Két stratégia is bedőlt neki** (`bollinger_squeeze`,
+> `candle_level_break`); a `tests/test_strategy_cell_contract.py` óta a
+> teszt-készlet elkapja.
+
 **`MarketData` (`md`) mezői:** `symbol`, `params`, **`bars`**, `no_trade_hours`,
 `show_signals`, `entry_gate`.
 

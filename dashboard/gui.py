@@ -5516,35 +5516,57 @@ class DashboardWindow:
             self._btn_connect.pack(side="right", padx=6)
 
     def _refresh_licence_label(self) -> None:
-        """A licenchez tartozó e-mail a fejlécben.
+        """A licenc-fiók ÉS az állapota a fejlécben.
 
-        ⚠ Ha nincs mentett belépő, a mező ÜRESEN marad — nem írunk oda
-        „nincs licenc"-et. A licenc-kapu az indulásnál dönt és beszél; egy
-        második, félig informált üzenet a fejlécben csak zavarna (a backtest és
-        az optimalizálás licenc NÉLKÜL is fut, ott semmi baj nincs)."""
+        ⚠ A TÜRELMI IDŐ EDDIG CSAK A NAPLÓBAN LÉTEZETT. Ha a licencszerver nem
+        érhető el, a program a mentett ellenőrzésből indul — és egy ablakos
+        programban a naplóba senki nem néz. A felhasználó tehát napokig futott
+        volna abban a hitben, hogy minden rendben, a hiány pedig pontosan akkor
+        derült volna ki, amikor a program 72 óra múlva már nem indul el.
+
+        ⚠ Ha ebben a futásban NEM volt ellenőrzés (backtest, optimalizálás —
+        azok licenc nélkül is mennek), a mező csak az e-mailt mutatja. Nem
+        állítunk semmit a licencről, amiről nem tudunk."""
         try:
             from core import licence as _lic
-            _email = _lic.stored_email()
+            st = _lic.status()
         except Exception as _ex:
-            # Nem néma: a fejléc üres marad, de tudjuk, miért.
             # ⚠ LOKÁLIS import. Ebben a fájlban a `logging` SEHOL nincs
             # modul-szinten importálva (csak függvényeken belül) — egy
             # modul-szintűnek hitt `_logging` itt NameError-t adna, és
             # Tk-visszahívásban az a stderr-re menne, ahol egy ablakos
-            # programban SENKI nem látja. Ugyanaz a csapda, ami a
-            # `live_trader` menet közbeni bekötésénél is előjött.
+            # programban SENKI nem látja.
             import logging as _logging
             _logging.getLogger(__name__).debug(
-                "a licenc-felhasználó nem olvasható: %s", _ex)
-            _email = ""
-        # ⚠ NINCS ikon a szöveg előtt. Az „ember” jel (U+1F464) EMOJI-kódpont:
-        # a mono betűtípusból hiányzik, ezért a rendszer emoji-fontjából esik
-        # vissza, aminek MÁS az alapvonala — láthatóan lejjebb ül a szövegnél.
-        # A fejléc többi szimbóluma BMP-ből való és a SZÖVEGFONTBÓL jön (fogaskerék,
-        # körös nyíl, állapot-pont) — azok ezért ülnek jól. Pixeles korrekció nem
-        # megoldás: a betűméret a témával állítható, és minden más méreten újra
-        # elcsúszna. A #számla mellett úgyis egyértelmű, hogy az e-mail a fióké.
-        self.lbl_licence.config(text=_email)
+                "a licenc-állapot nem olvasható: %s", _ex)
+            st = {}
+
+        _email = str(st.get("email") or "")
+        szoveg, szin = _email, FG_GRAY
+
+        if st.get("allapot") == "grace":
+            # A szerver nem válaszolt: mentésből futunk, és ez VÉGES.
+            ora = st.get("turelmi_ora")
+            szoveg = f"{_email} · nincs licencszerver: még {ora} óra"
+            szin = FG_RED if (ora is None or ora <= 12) else FG_YELLOW
+        elif st.get("allapot") == "ok":
+            # ⚠ A közelgő lejárat is ide tartozik: azt AZELŐTT kell látni, hogy
+            # megállítana. 30 nap alatt szólunk, 7 nap alatt pirosan.
+            nap = st.get("lejar_nap")
+            if nap is not None and nap <= 30:
+                szoveg = f"{_email} · licenc lejár: {nap} nap"
+                szin = FG_RED if nap <= 7 else FG_YELLOW
+
+        # ⚠ Csak VÁLTOZÁSKOR nyúlunk a widgethez: ez másodpercenként fut, és a
+        # felesleges `config` hívás fölöslegesen újrarajzoltatná a fejlécet.
+        if (szoveg, szin) != getattr(self, "_lic_utolso", None):
+            self._lic_utolso = (szoveg, szin)
+            # ⚠ NINCS ikon a szöveg előtt. Az „ember" jel (U+1F464) EMOJI-kódpont:
+            # a mono betűtípusból hiányzik, ezért a rendszer emoji-fontjából esik
+            # vissza, aminek MÁS az alapvonala — láthatóan lejjebb ül a szövegnél.
+            # A fejléc többi szimbóluma BMP-ből való és a SZÖVEGFONTBÓL jön
+            # (fogaskerék, körös nyíl, állapot-pont) — azok ezért ülnek jól.
+            self.lbl_licence.config(text=szoveg, fg=szin)
 
     # ── Piaci adat háttérszál (egységes) ────────────────────────────────
     def _start_market_data_poll(self):
@@ -5926,8 +5948,26 @@ class DashboardWindow:
                     cells = st.compute_display(smd)
                     ds.strategy_cells[sn] = {k: (c.text, c.color)
                                              for k, c in cells.items()}
-                except Exception:
-                    pass
+                except Exception as _cex:
+                    # ⚠ NEM NÉMA. Ez a hook a STRATÉGIÁÉ; ha hibás, a pár sora
+                    # ÖRÖKRE üresen marad — és az pontosan úgy néz ki, mint egy
+                    # stratégia, ami épp nem jelez. A motor útja már beszédes
+                    # volt (`_warn_once`), ez viszont `except: pass`-t
+                    # csinált, tehát ugyanannak a hibának a FELÉT elnyelte.
+                    # Így derült ki 2026-08-25-én, hogy két stratégia egy
+                    # szinttel mélyebben adta vissza a cellákat.
+                    #
+                    # Egyszer pár+stratégia párosonként: a kör másodpercenként
+                    # fut, egy ismétlődő sor elmosná a naplót.
+                    _k = ("compute_display", symbol, sn)
+                    if _k not in getattr(self, "_cell_warn", set()):
+                        self._cell_warn = getattr(self, "_cell_warn", set())
+                        self._cell_warn.add(_k)
+                        import logging as _logging
+                        _logging.getLogger(__name__).warning(
+                            "%s/%s: a stratégia compute_display hookja hibázik "
+                            "(%s) — a sor jelzés-cellái üresen maradnak.",
+                            symbol, sn, _cex)
 
         # Lendület („fordulatszám") — a mérés instrumentum-tulajdonság, ezért
         # ITT készül, nem stratégiánként. A záróárakat UGYANAZON a csatornán
@@ -6083,6 +6123,11 @@ class DashboardWindow:
             self.lbl_time.config(text=f"Bróker {bt:%H:%M:%S}  ·  UTC {now:%H:%M}")
         else:
             self.lbl_time.config(text=now.strftime("%Y-%m-%d %H:%M:%S UTC"))
+
+        # ⚠ A licenc-mező IS frissül, mert a türelmi idő FOGY: egy induláskor
+        # kiírt „még 51 óra" órákkal később hazugság volna. Olcsó — a mező csak
+        # akkor nyúl a widgethez, ha a szöveg tényleg megváltozott.
+        self._refresh_licence_label()
 
         # Visszaszámlálók a stratégia időkereteire (közös felső sáv + per-pár állapot)
         try:

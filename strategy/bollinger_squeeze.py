@@ -409,12 +409,12 @@ class BollingerSqueezeStrategy(Strategy):
         df = (md.bars or {}).get("M15")
         empty = {k: Cell(_CIRCLE, "muted") for k, _ in _STAGES}
         if df is None or len(df) < 3:
-            return {"marks": empty}
+            return empty
         try:
             ind = compute_indicators(df, md.params)
         except Exception as e:
             log.debug("%s — bollinger kijelzés: %s", md.symbol, e)
-            return {"marks": empty}
+            return empty
         # ⚠ AZ ALLAPOTOT VISSZA KELL JATSZANI, nem egy friss peldanyt leptetni
         # EGY gyertyaval. A harom korbol ketto FELHALMOZOTT allapotbol el:
         #   release -> `bars_since_off` (hany gyertyaja oldodott a szukules)
@@ -433,14 +433,19 @@ class BollingerSqueezeStrategy(Strategy):
         st = SqueezeState(symbol=md.symbol)
         for _r in _recs[:-1]:                  # a formalodo gyertya kimarad
             st = _advance(st, _r, md.params)
-        return {"marks": self._marks(st, _recs[-1], md.params)}
+        # ⚠ LAPOS szótár: `{stádium_kulcs: Cell}`. A motor pontosan így bontja
+        # szét: `{k: (c.text, c.color) for k, c in cells.items()}` — egy
+        # `{"marks": {...}}` burkolótól a `c` szótár lenne, és a `c.text`
+        # elszállna. A `marks` az OSZLOP kulcsa (`MarkerColumn`), nem a
+        # celláké. Lásd `tests/test_strategy_cell_contract.py`.
+        return self._marks(st, _recs[-1], md.params)
 
     def live_cells(self, state: Any, md: MarketData) -> dict:
         df = (md.bars or {}).get("M15")
         if df is None or len(df) < 3:
-            return {"marks": {k: Cell(_CIRCLE, "muted") for k, _ in _STAGES}}
+            return {k: Cell(_CIRCLE, "muted") for k, _ in _STAGES}
         ind = compute_indicators(df, md.params)
-        return {"marks": self._marks(state, ind.iloc[-1], md.params)}
+        return self._marks(state, ind.iloc[-1], md.params)
 
     # ── Backtest-hookok ───────────────────────────────────────────────────
 

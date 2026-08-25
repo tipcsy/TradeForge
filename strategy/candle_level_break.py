@@ -351,12 +351,12 @@ class CandleLevelBreakStrategy(Strategy):
         out = {k: Cell("○", "muted") for k, _ in _STAGES}
         df = (md.bars or {}).get("M15")
         if df is None or len(df) < 20:
-            return {"marks": out}
+            return out
         try:
             m15, _ = self.bt_indicators(df, None, md.params or {})
         except Exception as ex:
             log.debug("%s: CLB kijelzés nem számolható: %s", md.symbol, ex)
-            return {"marks": out}
+            return out
         st = self.new_signal_state(md.symbol)
         for i in range(max(0, len(m15) - 400), len(m15)):
             self._step(st, m15.iloc[i], md.params or {})
@@ -367,7 +367,12 @@ class CandleLevelBreakStrategy(Strategy):
         out["broken"] = Cell("●", "green" if (st.broke_up or st.broke_dn) else "muted")
         out["cons"] = Cell("●", "green" if (st.retested_up or st.retested_dn)
                            else "muted")
-        return {"marks": out}
+        # ⚠ LAPOS szótár: `{stádium_kulcs: Cell}`. A motor pontosan így bontja
+        # szét: `{k: (c.text, c.color) for k, c in cells.items()}` — egy
+        # `{"marks": {...}}` burkolótól a `c` szótár lenne, és a `c.text`
+        # elszállna. A `marks` az OSZLOP kulcsa (`MarkerColumn`), nem a
+        # celláké. Lásd `tests/test_strategy_cell_contract.py`.
+        return out
 
     def live_cells(self, state, md: MarketData) -> dict:
         return self.compute_display(md)
