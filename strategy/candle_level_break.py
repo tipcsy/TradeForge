@@ -206,14 +206,21 @@ class CandleLevelBreakStrategy(Strategy):
 
     # ── Élő/backtest állapotgép ──────────────────────────────────────────
     class _St:
+        # ⚠ `last_bar_time`: MELYIK ZÁRT gyertyáig jutottunk. A motor 10
+        # MÁSODPERCENKÉNT hívja az `on_bar_close`-t, a jel-gyertya viszont 15
+        # PERCES — ugyanarra a zárt sorra tucatnyi hívás jut. E nélkül
+        # mindegyik LÉPTETETT egyet, tehát a négylépcsős állapotgép
+        # (szint → törés → visszateszt → kitörés) percek alatt végigfutott
+        # ott, ahol a backtestben órák telnek el.
         __slots__ = ("symbol", "broke_up", "broke_dn", "retested_up",
-                     "retested_dn", "fire")
+                     "retested_dn", "fire", "last_bar_time")
 
         def __init__(self, symbol=""):
             self.symbol = symbol
             self.broke_up = self.broke_dn = False
             self.retested_up = self.retested_dn = False
             self.fire = "NONE"
+            self.last_bar_time = None
 
     def new_signal_state(self, symbol: str):
         return self._St(symbol)
@@ -283,11 +290,55 @@ class CandleLevelBreakStrategy(Strategy):
         return "NONE"
 
     def on_bar_close(self, state, md: MarketData):
-        """ÉLŐ: M15 záráskor. A `bars` szótárból az M15 UTOLSÓ ZÁRT sora."""
+        """ÉLŐ: M15 záráskor → (state, jel).
+
+        ⚠ KÉT HIBÁT JAVÍT EGYSZERRE (2026-08-25):
+
+        1. **A ZÁRT sort nézzük**, nem a formálódót. Korábban `df.iloc[-1]`
+           állt itt, ami a MÉG NYITOTT gyertya — a live tehát megelőzte a
+           backtestet, és a jel el is tűnhetett, ha a gyertya visszafordult.
+           A backtest hookja (`bt_on_high_close`) zárt sorokat kap.
+        2. **Egy gyertya = egy lépés.** A motor ciklusa 10 másodperc; e nélkül
+           ugyanaz a sor tucatszor lépett, és a négylépcsős állapotgép percek
+           alatt futott végig ott, ahol órák telnének el.
+
+        ⚠ Az indikátorokat is KI KELL SZÁMOLNI: a `_step` `atr`-t és
+        szint-oszlopokat olvas, amiket a `bt_indicators` állít elő. A nyers
+        `df` sorában ezek nincsenek benne — a `_step` némán `NONE`-t adott
+        volna minden hívásra.
+        """
         df = (md.bars or {}).get("M15")
-        if df is None or len(df) < 2:
+        if df is None or len(df) < 3:
             return state, "NONE"
-        sig = self._step(state, df.iloc[-1], md.params or {})
+        try:
+            m15, _ = self.bt_indicators(df, None, md.params or {})
+        except Exception as ex:
+            log.debug("%s: CLB jelzés nem számolható: %s", md.symbol, ex)
+            return state, "NONE"
+        closed = m15.iloc[:-1]                 # az utolsó sor a FORMÁLÓDÓ
+        if len(closed) == 0:
+            return state, "NONE"
+
+        t = closed.index[-1]
+        elozo = getattr(state, "last_bar_time", None)
+        if elozo is not None and t == elozo:
+            return state, "NONE"               # ezt a gyertyát már feldolgoztuk
+
+        if elozo is None:
+            kezd = 0                           # első hívás: teljes visszajátszás
+        else:
+            # ⚠ TÖBB gyertya is telhetett (hálózati szünet, torlódás).
+            try:
+                kezd = closed.index.get_loc(elozo) + 1
+            except KeyError:
+                kezd = 0
+        sig = "NONE"
+        for i in range(kezd, len(closed)):
+            # ⚠ A visszajátszás NEM KÖT: csak az UTOLSÓ zárt gyertya jele mehet
+            # ki — a múltbeliek kézbesítési pillanata (az első M1 gyertya) rég
+            # elmúlt.
+            sig = self._step(state, closed.iloc[i], md.params or {})
+        state.last_bar_time = t
         return state, sig
 
     def bt_on_high_close(self, state, hi_row, params):

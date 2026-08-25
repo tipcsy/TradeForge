@@ -265,6 +265,13 @@ class SqueezeState:
     squeeze_bars: int = 0
     pending: str = "NONE"
     last_signal: str = "NONE"
+    # ⚠ MELYIK ZÁRT GYERTYÁIG jutottunk. A motor 10 MÁSODPERCENKÉNT hívja az
+    # `on_bar_close`-t, a jel-gyertya viszont 15-60 PERCES — ugyanarra a zárt
+    # sorra tehát tucatnyi hívás jut. E nélkül a mező nélkül mindegyik LÉPTETETT
+    # egyet, és a `bars_since_off` percek alatt túlfutott a `max_bars_after_squeeze`
+    # ablakon: az öt H1-gyertyás (≈50 perces) belépési ablak a valóságban
+    # ~50 MÁSODPERCIG élt. `None` = még egy gyertyát sem dolgoztunk fel.
+    last_bar_time: Any = None
 
 
 def _advance(state: SqueezeState, row, params: dict) -> SqueezeState:
@@ -355,12 +362,54 @@ class BollingerSqueezeStrategy(Strategy):
         return SqueezeState(symbol=symbol)
 
     def on_bar_close(self, state: Any, md: MarketData) -> tuple:
-        """ZÁRT M15 gyertya → (state, jel). A motor hívja élesben."""
+        """ZÁRT jel-gyertya → (state, jel). A motor hívja élesben.
+
+        ⚠ EGY GYERTYA = EGY LÉPÉS. A motor ciklusa 10 másodperc, a jel-gyertya
+        viszont 15-60 perces — ugyanarra a zárt sorra tucatnyi hívás jut. Korábban
+        MINDEGYIK léptetett egyet, így a `bars_since_off` percek alatt túlfutott az
+        ablakon: az öt gyertyás belépési ablak ~50 MÁSODPERCIG élt. A backtest
+        hookja (`bt_on_high_close`) gyertyánként EGYSZER fut — a két út tehát
+        CSENDBEN két különböző stratégiát futtatott.
+
+        ⚠ ELSŐ HÍVÁSKOR VISSZAJÁTSZUNK (mint a `wpr_sma`). A `bars_since_off`
+        előzményfüggő: ennélkül a motor újraindítás után NEM LÁTJA a már
+        folyamatban lévő szetupot (−1-ről indul), miközben a tábla és a backtest
+        igen. Ezért kér a motor mély ablakot (`signal_warmup_bars`) — eddig
+        hiába.
+
+        ⚠ A visszajátszás NEM KÖT: a múltbeli gyertyák jelzését eldobjuk, mert a
+        kézbesítés pillanata (az első M1 gyertya) rég elmúlt. Csak az UTOLSÓ zárt
+        gyertya jele mehet ki — pontosan az, amit a backtest is most adna.
+        """
         df = (md.bars or {}).get("M15")
         if df is None or len(df) < 3:
             return state, "NONE"
         ind = compute_indicators(df, md.params)
-        state = _advance(state, ind.iloc[-2], md.params)   # az UTOLSÓ ZÁRT sor
+        closed = ind.iloc[:-1]                 # az utolsó sor a FORMÁLÓDÓ
+        if len(closed) == 0:
+            return state, "NONE"
+
+        t = closed.index[-1]
+        elozo = getattr(state, "last_bar_time", None)
+        if elozo is not None and t == elozo:
+            return state, "NONE"               # ezt a gyertyát már feldolgoztuk
+
+        recs = closed.to_dict("records")
+        if elozo is None:
+            kezd = 0                           # első hívás: teljes visszajátszás
+        else:
+            # ⚠ TÖBB gyertya is telhetett (hálózati szünet, számolási torlódás).
+            # Mindet le kell lépni, különben a számláló lemarad a valóságtól.
+            try:
+                kezd = closed.index.get_loc(elozo) + 1
+            except KeyError:
+                kezd = 0                       # kiesett az ablakból → újraépítés
+        for r in recs[kezd:-1]:
+            state = _advance(state, r, md.params)
+            state.pending = "NONE"             # a MÚLTBELI jel nem köt
+        state = _advance(state, recs[-1], md.params)
+        state.last_bar_time = t
+
         sig, state.pending = state.pending, "NONE"
         return state, sig
 
