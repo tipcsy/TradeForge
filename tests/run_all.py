@@ -1,8 +1,9 @@
 """
 Az összes teszt lefuttatása egy paranccsal:
 
-    python tests/run_all.py            # mind
-    python tests/run_all.py package    # csak a névben illeszkedők
+    python tests/run_all.py                  # mind
+    python tests/run_all.py package          # csak a névben illeszkedők
+    python tests/run_all.py --no-live-data   # az éles adatot igénylők nélkül
 
 Nincs pytest-függés: minden teszt önálló szkript, ami a végén `0`/`1` kilépési
 kóddal tér vissza, és kiírja a saját `n/m teszt PASS` sorát. Ez a futtató csak
@@ -87,12 +88,53 @@ def _app_fut() -> bool:
         return False
 
 
+def _skiplist() -> dict:
+    """A `requires_live_data.txt` tartalma: fájlnév → indok.
+
+    Ezek a tesztek a felhasználó ÉLES `config.json`-jából és `data/` mappájából
+    dolgoznak, amik a `.gitignore`-ban vannak. Egy friss klónon (tehát a CI-ben)
+    nincs mit mérniük, ezért — a projekt szabálya szerint — hangosan buknak.
+    A `--no-live-data` kapcsoló ezeket kihagyja, de KIÍRJA: a csendes kihagyás
+    pont annyira káros, mint a csendes átmenés."""
+    out = {}
+    f = HERE / "requires_live_data.txt"
+    if not f.exists():
+        return out
+    for ln in f.read_text(encoding="utf-8").splitlines():
+        ln = ln.strip()
+        if not ln or ln.startswith("#"):
+            continue
+        name, _, why = ln.partition("#")
+        out[name.strip()] = why.strip()
+    return out
+
+
 def main() -> int:
-    pattern = sys.argv[1] if len(sys.argv) > 1 else ""
+    args = [a for a in sys.argv[1:]]
+    no_live = "--no-live-data" in args
+    if no_live:
+        args.remove("--no-live-data")
+    pattern = args[0] if args else ""
     files = sorted(p for p in HERE.glob("test_*.py") if pattern in p.name)
     if not files:
         print(f"Nincs illeszkedő teszt: {pattern!r}")
         return 1
+
+    skipped: list = []
+    if no_live:
+        _skip = _skiplist()
+        keep = []
+        for f in files:
+            if f.name in _skip:
+                skipped.append((f.name, _skip[f.name]))
+            else:
+                keep.append(f)
+        files = keep
+        for _n, _w in skipped:
+            print(f"SKIP  {_n:<32} {_w}")
+        if not files:
+            print("Minden illeszkedő teszt kihagyva.")
+            return 1
 
     _before = _fingerprint()
     total = passed = 0
@@ -161,7 +203,8 @@ def main() -> int:
         else:
             print("   A tesztnek a ROOT-ot ideiglenes mappara kell teritenie "
                   "(lasd test_live2_wiring.py).")
-    print(f"{passed}/{total} allitas  |  {len(files) - len(failed)}/{len(files)} fajl PASS")
+    print(f"{passed}/{total} allitas  |  {len(files) - len(failed)}/{len(files)} fajl PASS"
+          + (f"  |  {len(skipped)} kihagyva (eles adat kell)" if skipped else ""))
     if failed:
         print("BUKOTT: " + ", ".join(failed))
     # ⚠ Az éles állapot felülírása ÖNMAGÁBAN bukás — akkor is, ha minden

@@ -126,8 +126,18 @@ for sym in ("GOLD", "Ger40"):
                 n[k] += 1
     tot = len(recs) - 1
     _pct = {k: v / tot * 100 for k, v in n.items()}
-    check(f"[{sym}] az osszeszukules-kor ESEMENY (1..25%)",
-          1 < _pct["squeeze"] < 25, f"{_pct['squeeze']:.1f}%")
+    # ⚠ A FELSŐ KORLÁT A PARAMÉTERTŐL FÜGG, nem fix. A kör 2026-08-25 óta
+    # FOLYAMAT-JELZŐ: akkor is ég, amíg a szűkülésből nyílt ABLAK tart. Az ablak
+    # hossza pedig `max_bars_after_squeeze` — ami páronként eltér.
+    #
+    # Mérve (11 pár): a `max_bars = 5` párok 10-18%, a `max_bars = 12`-esek
+    # (Ger40, UsaTec, EURGBP) 36-43%. Ez NEM kijelzési hiba, hanem a beállítás
+    # következménye: annyi ideig ég, ameddig a beállítás szerint felfegyverzett
+    # az állapot. Egy FIX 25%-os korlát ezt hibának minősítette volna.
+    _felso = 25 + 2.0 * int(p.get("max_bars_after_squeeze", 5))
+    check(f"[{sym}] az osszeszukules-kor ESEMENY (1..{_felso:.0f}%)",
+          1 < _pct["squeeze"] < _felso,
+          f"{_pct['squeeze']:.1f}% (max_bars={p.get('max_bars_after_squeeze')})")
     # ⚠ A trend-szuro allapotatol FUGGETLENUL vilagitania kell, ha az ablak nyitva.
     check(f"[{sym}] a felfegyverzes-kor is ESEMENY (>0)",
           _pct["release"] > 0, f"{_pct['release']:.1f}% "

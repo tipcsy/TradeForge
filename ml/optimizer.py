@@ -59,14 +59,59 @@ from core.params_store import (            # noqa: E402  (re-export)
 # A trials CSV formátuma: ';' elválasztó + ',' tizedesjel (magyar Excel),
 # utf-8-sig BOM. A GUI Excelben nyitja, ill. a paraméter-szerkesztő a `rank`
 # oszlop (minőségi rangsor, 1 = legjobb) szerint tölti be az egyes sorokat.
+# A sor MÉRÉS-oszlopai. Minden MÁS oszlop a keresett paramétertérhez tartozik,
+# tehát az AZONOSSÁG alapja — az `rr_*` dimenziók is (azokat is keressük).
+_MERES_OSZLOPOK = frozenset((
+    "rank", "score", "trades", "win_rate", "total_pnl", "max_drawdown",
+    "profit_factor", "note"))
+
+
+def _param_kulcs(row: dict) -> tuple:
+    """Egy trial-sor paraméter-ujjlenyomata (a mérés-oszlopok nélkül).
+
+    ⚠ A lebegőpontos értékeket KEREKÍTJÜK: a 0,3 és a 0,30000000000000004 ugyanaz
+    a készlet, de nyers összehasonlításban két külön sor lenne — és pont ilyen
+    „majdnem egyforma" sorok tennék használhatatlanná a listát."""
+    ki = []
+    for k in sorted(row):
+        if k in _MERES_OSZLOPOK:
+            continue
+        v = row[k]
+        ki.append((k, round(v, 6) if isinstance(v, float) else v))
+    return tuple(ki)
+
+
 def _write_trials_csv(rows: list[dict], out_csv: Path) -> int:
+    """A kísérlet-lista mentése — paraméterenként EGY sorral.
+
+    ⚠ MIÉRT KELL A DEDUPLIKÁLÁS. Az optuna study adatbázisa perzisztens, a
+    TPE-mintavevő pedig szűk, diszkrét térben ÚJRA ÉS ÚJRA ugyanazt a
+    kombinációt húzza. Mindegyik külön trial lett, külön sorral, AZONOS
+    eredménnyel — a felhasználó szava szerint „ugyanaz az eredmény, csak
+    sokszorosítva", ami használhatatlanná tette a listát.
+    
+    Ez a szűrő a MÁR MEGLÉVŐ, elszennyezett listákat is kitakarítja a következő
+    mentéskor: a study-ban benne maradt duplikátumok innen már nem jutnak ki.
+
+    Azonos paramétereknél a MAGASABB score-ú sort tartjuk meg. Determinisztikus
+    futásnál a kettő egyezik; ha mégsem, az azt jelenti, hogy az ADAT változott
+    két futás között (új gyertyák) — ilyenkor a frissebb, jobb mérés a hasznos."""
     if not rows:
         return 0
     df = pd.DataFrame(rows).sort_values("score", ascending=False).reset_index(drop=True)
+
+    # A rendezés után az ELSŐ előfordulás a legjobb score-ú → azt tartjuk meg.
+    _kulcsok = df.apply(lambda r: _param_kulcs(r.to_dict()), axis=1)
+    _elott = len(df)
+    df = df[~_kulcsok.duplicated()].reset_index(drop=True)
+    if _elott != len(df):
+        log.info("  a kísérlet-listából %d ismétlődő paraméter-készlet kimaradt "
+                 "(%d → %d sor)", _elott - len(df), _elott, len(df))
+
     # Explicit sorszám (rank): a score-rendezés utáni pozíció → 1 = legjobb.
     df.insert(0, "rank", range(1, len(df) + 1))
     df.to_csv(out_csv, index=False, encoding="utf-8-sig", sep=";", decimal=",")
-    return len(rows)
+    return len(df)
 
 
 # ---------------------------------------------------------------------------
@@ -653,6 +698,41 @@ def optimize_pair_optuna(
     call_count = [0]
     best_score_so_far = [-float("inf")]
 
+    # ── Ismétlődés-szűrő ────────────────────────────────────────────────────
+    # ⚠ A TPE-mintavevő szűk, diszkrét térben ÚJRA ÉS ÚJRA ugyanazt a kombinációt
+    # húzza, a study adatbázisa pedig perzisztens — folytatáskor a korábbi futás
+    # készletei is visszajöhetnek. Kiszámolni MÉGEGYSZER értelmetlen: a backtest
+    # determinisztikus, ugyanaz a bemenet ugyanazt adja.
+    #
+    # A gyorsítótár a KIÉRTÉKELÉST spórolja meg (ez a drága), a CSV-sor
+    # elhagyása pedig a listát tartja olvashatóan.
+    _mar_ertekelt: dict = {}     # ujjlenyomat -> score
+    _duplikatum = [0]
+
+    def _param_oszlopok(params, rr=None) -> dict:
+        """A trial-sor PARAMÉTER-oszlopai. ⚠ KÖZÖS építő: az ujjlenyomatot a
+        kiértékelés ELŐTT és a sor mentésekor is ez adja, tehát a kettő nem
+        csúszhat el. (Két külön másolat előbb-utóbb eltérne, és a szűrő némán
+        elkezdene átengedni duplikátumokat.)"""
+        ki = {pk: pv for pk, pv in params.items() if not pk.startswith("_")}
+        if optimize_rr and rr:
+            # A FELTÉTELES tér miatt egy dimenzió hiányozhat a specből (nem is
+            # sorsoltuk, mert ezen a preseten nem hat). Ilyenkor ÜRES cella megy
+            # a CSV-be — nem 0 és nem alapérték: az azt sugallná, hogy „ezt
+            # mértük".
+            ki["rr_preset"] = rr.get("preset", "off")
+            ki["rr_runner"] = rr.get("runner_stop", "")
+            for _k in ("trigger_R", "halving_fraction", "shield_fraction",
+                       "fibo_stop_level", "thirds_base_R",
+                       "breakeven_pct", "trail_activation_atr",
+                       "trail_distance_atr"):
+                ki[f"rr_{_k}"] = rr.get(_k, "")
+        return ki
+
+    def _ujjlenyomat(params, rr=None) -> tuple:
+        """A készlet azonossága — a kiértékelés ELŐTT."""
+        return _param_kulcs(_param_oszlopok(params, rr))
+
     def _record_trial(trial, params, score, summary=None, note="", rr=None):
         """Egy trial sora a CSV-hez — MINDEN trialról (érvénytelen/0-trade is),
         hogy az eredménytáblázat mindig létrejöjjön és lássék, mi történt.
@@ -673,20 +753,14 @@ def optimize_pair_optuna(
         else:
             row["trades"] = 0
         row["note"] = note
-        for pk, pv in params.items():
-            if not pk.startswith("_"):
-                row[pk] = pv
-        if optimize_rr and rr:
-            # A FELTÉTELES tér miatt egy dimenzió hiányozhat a specből (nem is
-            # sorsoltuk, mert ezen a preseten nem hat). Ilyenkor ÜRES cella megy a
-            # CSV-be — nem 0 és nem alapérték: az azt sugallná, hogy „ezt mértük".
-            row["rr_preset"] = rr.get("preset", "off")
-            row["rr_runner"] = rr.get("runner_stop", "")
-            for _k in ("trigger_R", "halving_fraction", "shield_fraction",
-                       "fibo_stop_level", "thirds_base_R",
-                       "breakeven_pct", "trail_activation_atr", "trail_distance_atr"):
-                row[f"rr_{_k}"] = rr.get(_k, "")
+        row.update(_param_oszlopok(params, rr))
+        sig = _param_kulcs(row)
         trial.set_user_attr("row", row)
+        # ⚠ AZ UJJLENYOMAT IS a trialra kerül, nem csak a sor. A study-ból
+        # folytatáskor EBBŐL tudjuk, mit számoltunk már ki — a `row`-ból
+        # visszafejteni törékeny volna (mérés- és paraméter-oszlopok keverednek).
+        trial.set_user_attr("sig", list(sig))
+        _mar_ertekelt[sig] = score
 
     def _progress_tick():
         # ── Haladás MINDEN trialnál, a korai return ELŐTT ──────────────────
@@ -778,10 +852,23 @@ def optimize_pair_optuna(
 
     # ── LAPOS keresés (az eddigi) — minden dimenzió EGYÜTT ──────────────────
     def _objective_flat(trial):
-        _progress_tick()
         params = _suggest_params(trial, opt_cfg, base_params)
         # rr (kockázatcsökkentés) dimenziók — csak ha opt-in (különben None → OFF).
         rr_spec = _suggest_rr(trial, opt_cfg) if optimize_rr else None
+
+        # ⚠ MÁR KISZÁMOLTUK EZT A KÉSZLETET → nem futtatjuk újra. A backtest
+        # determinisztikus; ugyanaz a bemenet ugyanazt adja. A gyorsítótár a
+        # DRÁGA részt (kiértékelés) spórolja meg, és mivel nem hívunk
+        # `_record_trial`-t, a kísérlet-listába sem kerül ismétlődő sor.
+        #
+        # A haladás-tick is kimarad: ez az ág ~azonnal lefut, tehát nincs mit
+        # jelenteni, és a GUI stall-órája sem eshet ki miatta.
+        _sig = _ujjlenyomat(params, rr_spec)
+        if _sig in _mar_ertekelt:
+            _duplikatum[0] += 1
+            return _mar_ertekelt[_sig]
+
+        _progress_tick()
         if not strategy.constraints_ok(params):
             _record_trial(trial, params, -999999.0,
                           note="paraméter-kényszer nem teljesült", rr=rr_spec)
@@ -807,8 +894,18 @@ def optimize_pair_optuna(
     # nyereség-e, az a tájképtől függ — ezért alapból KI van kapcsolva, és A/B-vel
     # kell igazolni (`tools/nested_ab.py`).
     def _objective_nested(trial):
-        _progress_tick()
         sig_params = _suggest_params(trial, opt_cfg, base_params, keys=_sig_keys)
+
+        # ⚠ A KÜLSŐ trial csak a JEL-paramétereket sorsolja — az azonosság alapja
+        # tehát ez, nem a teljes készlet. Ugyanaz a jel-készlet ugyanazt a belső
+        # söprést adná, ami itt a MUNKA JAVA (ablakonként újraépített jelölt-
+        # lista). Ez a szűrő tehát nem sorokat spórol, hanem PERCEKET.
+        _sig = _ujjlenyomat(sig_params)
+        if _sig in _mar_ertekelt:
+            _duplikatum[0] += 1
+            return _mar_ertekelt[_sig]
+
+        _progress_tick()
         if not strategy.constraints_ok(sig_params):
             # A kényszerek MIND jel-paraméterekre hivatkoznak (ellenőrizve
             # wpr_sma-n és bollingeren), tehát itt eldönthető — nem pazarolunk rá
@@ -869,6 +966,10 @@ def optimize_pair_optuna(
         _record_trial(trial, _bp, best["score"], best["summary"], rr=best["rr"],
                       note=("" if best["summary"] else
                             "a végrehajtási söprés egyetlen értékelhető trade-et sem adott"))
+        # ⚠ A `_record_trial` a TELJES nyertes készlettel jegyzett fel; a külső
+        # trial viszont a JEL-készletén azonosítódik. E nélkül a szűrő sosem
+        # találna egyezést a beágyazott módban.
+        _mar_ertekelt[_sig] = best["score"]
         if best["score"] > best_score_so_far[0]:
             best_score_so_far[0] = best["score"]
         return best["score"]
@@ -930,6 +1031,22 @@ def optimize_pair_optuna(
             # róla: a haladás-kijelző ilyenkor nem tud „eddigi legjobbat" mutatni.
             log.debug("  %s — még nincs értékelhető trial a study-ban (%s)",
                       symbol, ex)
+    # ⚠ A GYORSÍTÓTÁR FELTÖLTÉSE A STUDY-BÓL. Folytatáskor a KORÁBBI futás
+    # készleteit is ismernünk kell, különben mindet újraszámolnánk — és pont a
+    # folytatás az az eset, ahol a TPE a legszívesebben húzza elő ugyanazokat.
+    for _t in study.trials:
+        _s = _t.user_attrs.get("sig")
+        if _s and _t.value is not None:
+            try:
+                _mar_ertekelt[tuple((_p[0], _p[1]) for _p in _s)] = _t.value
+            except Exception:
+                # Régi study, `sig` nélkül vagy más alakban — nem baj, csak
+                # annyit veszítünk, hogy azt a készletet újraszámoljuk.
+                pass
+    if _mar_ertekelt:
+        log.info("  %s — %d korábbi paraméter-készlet ismert (nem számoljuk újra)",
+                 symbol, len(_mar_ertekelt))
+
     remaining = max(0, n_trials - done)
     if remaining > 0:
         if done:
@@ -937,6 +1054,12 @@ def optimize_pair_optuna(
                      symbol, done, remaining)
         study.optimize(objective, n_trials=remaining, show_progress_bar=False,
                        callbacks=[_incremental_cb])
+    if _duplikatum[0]:
+        # ⚠ NEM néma. Ez a szám mondja meg, mennyire merítette ki a keresés a
+        # teret: ha a trialok nagy része ismétlődés, a tartományok szűkek (vagy
+        # a lépésköz durva), és a további trial-szám emelése már nem hoz újat.
+        log.info("  %s — %d trial ISMÉTLŐDŐ készletet húzott (nem futott le "
+                 "újra, és nem került a kísérlet-listába)", symbol, _duplikatum[0])
     else:
         log.info("  %s — a study már kész (%d trial). Új futáshoz töröld a .db-t: %s",
                  symbol, done, study_db(symbol, strategy.name).name)

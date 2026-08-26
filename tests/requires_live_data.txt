@@ -1,0 +1,29 @@
+# Tesztek, amelyek ÉLES BEMENETET követelnek: a saját `config.json`-odat
+# (valódi párokkal, pl. GOLD) és/vagy a `data/` mappát (historikus parquet,
+# optimalizált paraméterek, mentett készletek). Mindkettő a `.gitignore`-ban
+# van — brókeradatot tartalmaz, illetve több száz megabájt.
+#
+# Ezek NEM elromlott tesztek: a projekt szabálya, hogy ha nincs mit mérni, a
+# teszt HANGOSAN bukjon, ne csendben menjen át. Egy friss klónon viszont pont
+# ezért buknak, ezért a CI a `--no-live-data` kapcsolóval kihagyja őket — a
+# kihagyás a futási naplóban SKIP sorként látszik.
+#
+# ⚠ A LISTA NEM MENEDÉK. Ha egy teszt azért kerül ide, mert „bosszantóan
+#   bukik", azzal a csomag értékét romboljuk. Csak akkor van itt a helye, ha a
+#   bukás oka bizonyítottan a hiányzó éles bemenet — ellenőrizd úgy, hogy a
+#   saját munkapéldányodon lefuttatod: ott ÁT KELL MENNIE.
+#
+# Formátum:  <fájlnév>  # <miért>
+
+test_auto_risky_parity.py         # a példa-config párjait a kapcsoló nem érinti — nincs mit mérni
+test_bollinger_display.py         # a példa-config nem ismeri a GOLD párt
+test_default_params_start.py      # data/optimized_params kell (hangolt ÉS hangolatlan pár egyszerre)
+test_display_perf.py              # az éles config explicit felülbírálását ellenőrzi
+test_entry_gate_price.py          # historikus parquet kell (EURUSD)
+test_run_modes_and_progress.py    # a párbeszédablakot az éles párkészletből építi
+test_run_params_and_partial.py    # beágyazott backtest kell, ahhoz adat
+test_signal_journal.py            # a valódi napló-útvonalra állít
+test_stage_legend_and_runbar.py   # a párbeszédablakot az éles párkészletből építi
+test_strategy_params_merge.py     # éles stratégia-paraméterek kellenek
+test_viz_send_on_demand.py        # az éles párkészletből épít vizualizációs állapotot
+test_wpr_m1_direction_triggers.py # mentett készletek kellenek (0 fájl esetén bukik)

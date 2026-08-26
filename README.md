@@ -1,5 +1,6 @@
 # TradeForge
 
+[![tests](https://github.com/tipcsy/TradeForge/actions/workflows/tests.yml/badge.svg)](https://github.com/tipcsy/TradeForge/actions/workflows/tests.yml)
 [![Licenc: GPL v3](https://img.shields.io/badge/Licenc-GPLv3-blue.svg)](LICENSE)
 
 MetaTrader 5-höz kapcsolódó, Python-alapú kereskedési keretrendszer: élő motor,
@@ -79,6 +80,13 @@ python -m venv .venv
 > környezet nélkül is működik, ilyenkor a csomagok a rendszer-Pythonba kerülnek.
 
 ### 3. Csomagok telepítése
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+Ez mindent feltesz — az alap- és az opcionális csomagokat is. Ha csak a
+minimumot szeretnéd:
 
 ```bash
 python -m pip install MetaTrader5 numpy pandas optuna pyarrow fastparquet
@@ -341,6 +349,25 @@ python tests/run_all.py
 
 Egy teszt önmagában is futtatható (`python tests/test_gates.py`), és részhalmaz is
 szűrhető névtöredékkel (`python tests/run_all.py package`).
+
+### Miért nem 110/110 a CI-ben?
+
+12 teszt a saját `config.json`-odból és a `data/` mappádból dolgozik — historikus
+parquet, optimalizált paraméterek, mentett készletek. Mindkettő a `.gitignore`-ban
+van: az egyik brókeradatot tartalmaz, a másik több száz megabájt. Egy friss klónon
+tehát nincs mit mérniük, és — a projekt szabálya szerint, miszerint a néma átmenés
+rosszabb a bukásnál — hangosan buknak.
+
+A CI ezért a `--no-live-data` kapcsolóval fut:
+
+```bash
+python tests/run_all.py --no-live-data
+```
+
+A kihagyott fájlok és az indokuk: [`tests/requires_live_data.txt`](tests/requires_live_data.txt).
+A futtató `SKIP` sorként kiírja mindet, tehát a naplóból pontosan látszik, mi maradt
+ki. **A fejlesztői gépen ezek a tesztek is futnak és átmennek** — a lista nem
+mentesítés, hanem a hiányzó bemenet könyvelése.
 
 ---
 

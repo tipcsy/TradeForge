@@ -1,0 +1,61 @@
+# TradeForge — a teljes tesztcsomag minden pusholt változáson lefut.
+#
+# ⚠ WINDOWS FUTTATÓ, SZÁNDÉKOSAN. A `MetaTrader5` csomagnak nincs Linux-kiadása,
+#   és több modul `msvcrt`-t / tkintert használ. Egy `ubuntu-latest` futtató már
+#   a `pip install`-nál elszállna, nem a teszteknél — vagyis semmit sem mérne.
+#
+# ⚠ A `config.json` a `.gitignore`-ban van (élő kereskedési beállításokat és
+#   brókeradatokat tartalmaz), ezért a checkout után nincs meg. A tesztfuttató
+#   viszont figyeli, hogy a tesztek ne írják felül — így a példányból másolunk
+#   egyet, különben a futtató „hiányzó fájl" miatt panaszkodna.
+#
+# ⚠ A `--no-live-data` 12 tesztet kihagy: ezek a felhasználó éles configjából és
+#   a `data/` mappájából dolgoznak (historikus parquet, optimalizált paraméterek,
+#   mentett készletek), amik SZÁNDÉKOSAN nincsenek a repóban. A lista és az
+#   indoklás: `tests/requires_live_data.txt`. A futtató SKIP sorként kiírja őket,
+#   tehát a naplóból látszik, mi maradt ki — a csendes kihagyás annyira káros
+#   lenne, mint a csendes átmenés. Ezek a tesztek a fejlesztői gépen FUTNAK.
+
+name: tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tesztcsomag (Windows, Python ${{ matrix.python-version }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.13']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Csomagok telepítése
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Konfiguráció előkészítése
+        run: Copy-Item config.example.json config.json
+
+      - name: Tesztcsomag futtatása
+        env:
+          # A futtató ékezetes összesítő sort ír; a GitHub-futtató konzolja
+          # különben cp1252-vel próbálná kódolni, és a teszt a HIBÁJA HELYETT
+          # UnicodeEncodeError-ral bukna.
+          PYTHONIOENCODING: utf-8
+        run: python tests/run_all.py --no-live-data

@@ -1,0 +1,25 @@
+# TradeForge futásidejű és teszt-függőségei.
+#
+# A projekt SZÁNDÉKOSAN Windows-specifikus: a MetaTrader 5 terminál csak
+# Windowson érhető el, ezért a `MetaTrader5` csomagnak sincs Linux/macOS
+# kiadása. A CI is emiatt fut `windows-latest` futtatón.
+#
+# Telepítés:  python -m pip install -r requirements.txt
+
+# --- Alap -------------------------------------------------------------------
+MetaTrader5>=5.0.45      # kommunikáció az MT5 terminállal (Windows-only)
+numpy>=2.0
+pandas>=2.2
+optuna>=4.0              # paraméter-optimalizálás (study SQLite-ban)
+pyarrow>=15.0            # historikus adatok Parquet-formátuma
+fastparquet>=2024.2.0
+
+# --- Az ml_ai stratégiához --------------------------------------------------
+scikit-learn>=1.5
+lightgbm>=4.0
+
+# --- Egyéb modulok által használt -------------------------------------------
+cryptography>=42.0       # licencfájl aláírás-ellenőrzése
+requests>=2.31
+matplotlib>=3.8          # a backtest-dialógus diagramjai
+pillow>=10.0             # felület-képernyőkép (tools/ui_preview.py)
