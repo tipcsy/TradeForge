@@ -105,6 +105,39 @@ try:
           and df2.iloc[0]["score"] == 19.0,
           f"{len(df2)} sor, score={df2.iloc[0]['score']}")
 
+    # ── ⚠ KÉT HIBA, amit egy VALÓDI takarítás közben követtem el ─────────
+    #
+    # 1. SZÖVEGES score → BETŰREND. A régebbi verzió pont-tizedessel írta a
+    #    `score`-t, míg a többi oszlopot vesszővel; visszaolvasva a `score`
+    #    `object` típus lett. A `sort_values` ilyenkor LEXIKOGRAFIKUSAN rendez:
+    #    a „97.68" nagyobb, mint a „739.55" — és a lista élére a ROSSZ készlet
+    #    kerül. Élesben megtörtént: a Ger40 rangsora elromlott (a másolatból
+    #    állt helyre).
+    sorok3 = [
+        {"score": "97.68",  "trades": 5,  "note": "", "wpr_period": 9},
+        {"score": "739.55", "trades": 10, "note": "", "wpr_period": 14},
+        {"score": "512.30", "trades": 8,  "note": "", "wpr_period": 21},
+    ]
+    ki3 = tmp / "s_trials.csv"
+    O._write_trials_csv(sorok3, ki3)
+    df3 = pd.read_csv(ki3, sep=";", decimal=",", encoding="utf-8-sig")
+    check("⚠ SZÖVEGES score esetén is SZÁM szerint rangsorol",
+          float(str(df3.iloc[0]["score"]).replace(",", ".")) == 739.55,
+          f"rank1={df3.iloc[0]['score']}")
+
+    # 2. PARAMÉTER NÉLKÜLI sorok. Ha egy sornak nincs egyetlen paraméter-
+    #    oszlopa sem (csak mérések), az ujjlenyomata ÜRES — és akkor MINDEGYIK
+    #    sor egymás duplikátumának látszik. Három sorból egy maradt: néma
+    #    adatvesztés. Ilyenkor a szűrés KIMARAD, és szólunk róla.
+    sorok4 = [
+        {"score": 739.55, "trades": 10, "note": ""},
+        {"score": -999999.0, "trades": 0, "note": "nincs értékelhető trade"},
+        {"score": 97.68, "trades": 5, "note": ""},
+    ]
+    ki4 = tmp / "p_trials.csv"
+    n4 = O._write_trials_csv(sorok4, ki4)
+    check("⚠ paraméter-oszlop NÉLKÜL egy sor sem vész el", n4 == 3, str(n4))
+
     # Üres bemenet nem hoz létre fájlt és nem hasal el.
     check("üres lista → 0, nincs kivétel",
           O._write_trials_csv([], tmp / "z.csv") == 0)

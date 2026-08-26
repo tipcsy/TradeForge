@@ -98,15 +98,33 @@ def _write_trials_csv(rows: list[dict], out_csv: Path) -> int:
     két futás között (új gyertyák) — ilyenkor a frissebb, jobb mérés a hasznos."""
     if not rows:
         return 0
-    df = pd.DataFrame(rows).sort_values("score", ascending=False).reset_index(drop=True)
+    df = pd.DataFrame(rows)
+
+    # ⚠ A RENDEZÉS SZÁM SZERINT, nem betűrend szerint. Ha a `score` oszlop
+    # bármiért `object` típusú (pl. egy régebbi verzió pont-tizedessel írta a
+    # fájlt, és onnan olvassuk vissza), a `sort_values` LEXIKOGRAFIKUSAN
+    # rendezne: a „97.68" nagyobb volna, mint a „739.55", és a lista élére a
+    # ROSSZ készlet kerülne. Élesben pontosan ez történt egy takarításkor.
+    _szam = pd.to_numeric(df["score"], errors="coerce")
+    df = (df.assign(_rendez=_szam)
+            .sort_values("_rendez", ascending=False, na_position="last")
+            .drop(columns="_rendez")
+            .reset_index(drop=True))
 
     # A rendezés után az ELSŐ előfordulás a legjobb score-ú → azt tartjuk meg.
     _kulcsok = df.apply(lambda r: _param_kulcs(r.to_dict()), axis=1)
-    _elott = len(df)
-    df = df[~_kulcsok.duplicated()].reset_index(drop=True)
-    if _elott != len(df):
-        log.info("  a kísérlet-listából %d ismétlődő paraméter-készlet kimaradt "
-                 "(%d → %d sor)", _elott - len(df), _elott, len(df))
+    # ⚠ ÜRES ujjlenyomatnál NEM deduplikálunk. Ha a soroknak nincs egyetlen
+    # paraméter-oszlopa sem (csak mérések), akkor MINDEGYIK kulcsa `()` volna,
+    # és egyetlen sor maradna az egészből — néma adatvesztés.
+    if all(len(k) == 0 for k in _kulcsok):
+        log.warning("  a kísérlet-sorokban nincs paraméter-oszlop — "
+                    "az ismétlődés-szűrés kimarad (%d sor)", len(df))
+    else:
+        _elott = len(df)
+        df = df[~_kulcsok.duplicated()].reset_index(drop=True)
+        if _elott != len(df):
+            log.info("  a kísérlet-listából %d ismétlődő paraméter-készlet "
+                     "kimaradt (%d → %d sor)", _elott - len(df), _elott, len(df))
 
     # Explicit sorszám (rank): a score-rendezés utáni pozíció → 1 = legjobb.
     df.insert(0, "rank", range(1, len(df) + 1))
