@@ -1,7 +1,13 @@
-# Tesztek, amelyek ÉLES BEMENETET követelnek: a saját `config.json`-odat
-# (valódi párokkal, pl. GOLD) és/vagy a `data/` mappát (historikus parquet,
-# optimalizált paraméterek, mentett készletek). Mindkettő a `.gitignore`-ban
-# van — brókeradatot tartalmaz, illetve több száz megabájt.
+# Tesztek, amelyek ÉLES KÖRNYEZETET követelnek — kétféle okból:
+#
+#  1. ÉLES BEMENET: a saját `config.json`-od (valódi párokkal, pl. GOLD) és/vagy
+#     a `data/` mappa (historikus parquet, optimalizált paraméterek, mentett
+#     készletek). Mindkettő a `.gitignore`-ban van — brókeradatot tartalmaz,
+#     illetve több száz megabájt.
+#
+#  2. VALÓDI KÉPERNYŐ: a GitHub Windows-futtatóján nincs ablakkezelő, ezért a Tk
+#     az átméretezés után nem számolja újra a geometriát. A tkinter maga MŰKÖDIK
+#     (a többi felületi teszt megy) — csak a méretfüggő állítások nem mérhetők.
 #
 # Ezek NEM elromlott tesztek: a projekt szabálya, hogy ha nincs mit mérni, a
 # teszt HANGOSAN bukjon, ne csendben menjen át. Egy friss klónon viszont pont
@@ -20,6 +26,7 @@ test_bollinger_display.py         # a példa-config nem ismeri a GOLD párt
 test_default_params_start.py      # data/optimized_params kell (hangolt ÉS hangolatlan pár egyszerre)
 test_display_perf.py              # az éles config explicit felülbírálását ellenőrzi
 test_entry_gate_price.py          # historikus parquet kell (EURUSD)
+test_fullwidth_sections.py        # valódi képernyő kell: fejnélküli futtatón a Tk nem frissíti a geometriát
 test_run_modes_and_progress.py    # a párbeszédablakot az éles párkészletből építi
 test_run_params_and_partial.py    # beágyazott backtest kell, ahhoz adat
 test_signal_journal.py            # a valódi napló-útvonalra állít

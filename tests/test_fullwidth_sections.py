@@ -41,6 +41,19 @@ _rrs_guard.PATH = _RR_TMP
 _atexit.register(lambda: setattr(_rrs_guard, "PATH", _RR_REAL))
 _atexit.register(lambda: _shutil.rmtree(_RR_TMP.parent, ignore_errors=True))
 
+# Ugyanez a `data/backtest_prefs.json`-ra: a valodi Backtest-ablak a bezarasakor
+# elmenti az Idoszak/Nyito osszeg/Slotok mezoket, es ezzel RAIR a felhasznalo
+# mentett beallitasaira. A `run_all.py` ore ezt is elkapta — friss klonon (CI)
+# pedig a fajl LETREHOZASA maga a valtozas, ott nincs mihez visszaterni.
+from core import backtest_prefs as _bp_guard
+_BP_REAL = _bp_guard._FILE
+_BP_TMP = _pathlib.Path(_tempfile.mkdtemp(prefix="tfv_bp_")) / "backtest_prefs.json"
+if _BP_REAL.exists():
+    _shutil.copy2(_BP_REAL, _BP_TMP)          # az indulo allapot maradjon elethu
+_bp_guard._FILE = _BP_TMP
+_atexit.register(lambda: setattr(_bp_guard, "_FILE", _BP_REAL))
+_atexit.register(lambda: _shutil.rmtree(_BP_TMP.parent, ignore_errors=True))
+
 results = []
 
 

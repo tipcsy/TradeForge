@@ -126,12 +126,33 @@ BASE = {"sma_period": 200, "wpr_m15_period": 21, "wpr_m1_period": 21,
         "atr_avg_ref": 10.0, "atr_baseline_bars": 0}
 
 
+def _wipe(f):
+    """A fajl torlese, a Windows-fajlzart kivarva.
+
+    Az optuna SQLite-kapcsolata meg foghatja a study `.db`-jet, amikor a
+    kovetkezo futas ele takaritunk — a `unlink` ilyenkor PermissionError-t dob,
+    es a teszt a MERES HELYETT takaritasi hibaval bukna (a CI-ben ez veletlenszeru
+    piros pipa). A handle-t a GC engedi el, ezert gyujtunk es rovid turelemmel
+    ujraprobalunk. Ha tiz kor utan sem sikerul, hadd bukjon el hangosan: akkor
+    tenyleg nem FRISS a futas, amit merni akarunk."""
+    import gc
+    import time
+    for _ in range(10):
+        try:
+            f.unlink()
+            return
+        except PermissionError:
+            gc.collect()
+            time.sleep(0.2)
+    f.unlink()
+
+
 def _run(nested, seed_reset=True):
     if seed_reset:
         # A study .db-t es a markereket toroljuk -> mindig FRISS futas
         for f in _TMP.rglob("*"):
             if f.is_file():
-                f.unlink()
+                _wipe(f)
     return opt.optimize_pair_optuna(
         "TEST", M15, M1, OCFG, BASE, PAIR, TRADING, 10000.0, ST,
         n_trials=4, n_splits=2, train_months=6, test_months=2, nested=nested)
