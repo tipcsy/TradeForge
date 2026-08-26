@@ -352,8 +352,9 @@ szűrhető névtöredékkel (`python tests/run_all.py package`).
 
 ### Miért nem 110/110 a CI-ben?
 
-12 teszt a saját `config.json`-odból és a `data/` mappádból dolgozik — historikus
-parquet, optimalizált paraméterek, mentett készletek. Mindkettő a `.gitignore`-ban
+13 teszt a saját `config.json`-odból, a `data/` mappádból vagy egy valódi képernyőből
+dolgozik — historikus parquet, optimalizált paraméterek, mentett készletek, illetve
+Tk-geometria. Az előbbi kettő a `.gitignore`-ban
 van: az egyik brókeradatot tartalmaz, a másik több száz megabájt. Egy friss klónon
 tehát nincs mit mérniük, és — a projekt szabálya szerint, miszerint a néma átmenés
 rosszabb a bukásnál — hangosan buknak.
