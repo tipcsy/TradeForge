@@ -777,6 +777,33 @@ def _prepare_params(symbol: str, params: dict, pair_cfg: dict) -> dict:
     return params
 
 
+def _signal_bar_delta(strategy, params: dict) -> "pd.Timedelta":
+    """A MAGAS idősíkú (jel-)gyertya HOSSZA — ebből tudja a motor, hogy egy
+    gyertya mikor ZÁRT le.
+
+    ⚠ MIÉRT NEM ELÉG a `timeframes()[0].minutes`. Az a LETÖLTÖTT keret lépése.
+    Van stratégia, amelyik a saját keretét ennél DURVÁBBRA mintázza át (a
+    `bollinger_squeeze_breakout` M15-ből H1-et csinál a `signal_tf_min` szerint),
+    és közben `timeframes()`-ben M15-öt deklarál — a `bt_indicators` viszont már
+    a H1 keretet adja vissza. A 15 perces deltával a motor a H1 gyertyát a
+    KEZDETE UTÁN 15 PERCCEL zártnak vette, vagyis 45 percnyi JÖVŐBE LÁTOTT:
+    a jelek mind :15-kor tüzeltek, és a mért „él" a spread 400–5000%-a volt.
+    Késleltetés-teszttel igazolva: a belépőt 45 perccel eltolva az él eltűnik
+    (t 8,6–17,1 → −2,6…+2,2).
+
+    A stratégia a DÖNTÉSI gyertya hosszát már ma is deklarálja
+    (`signal_bar_seconds`) — a riasztás-dedup ebből dolgozik. Itt ugyanazt az
+    egy forrást használjuk. `0` (= a végrehajtási idősík dönt, pl. `wpr_sma`)
+    esetén marad a régi képlet, tehát azok a stratégiák BITAZONOSAK."""
+    try:
+        sec = int(strategy.signal_bar_seconds(params) or 0)
+    except Exception:
+        sec = 0
+    if sec > 0:
+        return pd.Timedelta(seconds=sec)
+    return pd.Timedelta(minutes=strategy.timeframes()[0].minutes)
+
+
 def _prepare_frames(df_m15, df_m1, params, strategy, test_start, test_end):
     """Indikátorok → warmup-vágás → test_start/test_end szűkítés."""
     m15, m1 = strategy.bt_indicators(df_m15, df_m1, params)
@@ -822,7 +849,7 @@ def build_signal_series(
     state = strategy.bt_new_state(symbol)
     m15_times = m15.index.to_list()
     m15_ptr = 0
-    _m15_delta = pd.Timedelta(minutes=strategy.timeframes()[0].minutes)
+    _m15_delta = _signal_bar_delta(strategy, params)
     _reset_on_off = bool(params.get("no_trade_resets_signal", False))
 
     _cols = list(m1.columns)
@@ -989,15 +1016,14 @@ def run_pair(
     # M15 gyertyák indexe gyors kereséshez
     m15_times = m15.index.to_list()
     m15_ptr = 0  # a legutóbb LEZÁRT és feldolgozott M15 gyertya indexe
-    _m15_delta = pd.Timedelta(minutes=strategy.timeframes()[0].minutes)  # egy M15 hossza
+    _m15_delta = _signal_bar_delta(strategy, params)   # egy JEL-gyertya hossza
     _exit_at = _build_exit_evaluator(m15, rr_spec)   # kiszállási-jel (None, ha nincs)
     _bigmove_at = _build_bigmove_evaluator(m15, rr_spec)  # Pajzs↔Fibo auto (None, ha nem az)
     # Cost-cut (idő-stop, tananyag 2.6): a nyitás után N fő-tf gyertyával még
     # VESZTESÉGES trade-et piaci áron zárjuk (kanóc/zaj korai levágása töredék-R
     # veszteséggel). Bármely presettel kombinálható; default KI.
     _cc_on    = bool(rr_spec.get("cost_cut"))
-    _cc_delta = pd.Timedelta(minutes=strategy.timeframes()[0].minutes *
-                             int(rr_spec.get("cost_cut_bars", 12)))
+    _cc_delta = _signal_bar_delta(strategy, params) * int(rr_spec.get("cost_cut_bars", 12))
     # Pozícióépítés modellezése. BÁRMELY presettel (ahogy élesben is: a live minden
     # KOCKÁZATMENTES pozícióra épít — a Felező/Pajzs runnerére is, nem csak az OFF
     # preset breakeven-jére); a részleges zárás a lábakat arányosan zsugorítja.
@@ -1969,7 +1995,7 @@ def run_portfolio_backtest(
             "m1":        m1,
             "m15_times": m15.index.tolist(),
             "m15_ptr":   0,
-            "m15_delta": pd.Timedelta(minutes=strategy.timeframes()[0].minutes),
+            "m15_delta": _signal_bar_delta(strategy, params),
             "params":    params,
             "pair_cfg":  cfg["pairs"][sym],
             "risky":     pair_risky.get(sym, False),
