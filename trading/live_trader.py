@@ -48,7 +48,7 @@ from core import symbol_policy as _sym_policy
 from core import opt_activity as _opt_activity
 from core.indicator_engine import atr as atr_indicator
 from core.risk_manager import (calc_lot, calc_effective_slots, SlotManager,
-                               calc_swing_sl_tp_points)
+                               calc_swing_sl_tp_points, slot_weight)
 from strategy import get_strategy, get_strategy_by_name, strategies_for
 from strategy import signal_journal
 from strategy import visual as viz_mod
@@ -1774,6 +1774,37 @@ def _apply_be_and_trailing(symbol, pos, ticket, pstate, is_rf, risky,
 # Fő kereskedési ciklus
 # ---------------------------------------------------------------------------
 
+def _pos_risk_ccy_of(ticket: int, pos=None, pair_cfg: dict | None = None) -> float:
+    """Egy MÁR NYITOTT pozíció belépéskori kockázata (1 R) a számla devizájában.
+
+    Ebből számol a `SlotManager` súlyt (lásd `core.risk_manager` fejléc).
+    Elsődleges forrás a nyilvántartott BELÉPÉSKORI érték (`position_meta`) — ez
+    akkor is helyes, ha a BE/trailing azóta elmozgatta a stopot. Ha nincs
+    bejegyzés (a változtatás előtt nyitott vagy kézzel örökbe fogadott pozíció),
+    az ÉLŐ stop-távból számolunk. 0.0 = ismeretlen → a SlotManager egy TELJES
+    slotnak veszi (a régi, darabszám-alapú viselkedés)."""
+    try:
+        risk = position_meta.risk_of(ticket)
+        if risk and risk > 0:
+            return float(risk)
+    except Exception as ex:
+        log.debug("#%s — a nyilvántartott kockázat nem olvasható: %s", ticket, ex)
+    if pos is not None and pair_cfg:
+        try:
+            _sl = float(getattr(pos, "sl", 0.0) or 0.0)
+            if _sl:
+                r = position_meta.risk_from_prices(
+                    float(pos.volume), float(pos.price_open), _sl,
+                    pair_cfg.get("point_size", 0.0), pair_cfg.get("pv1_point", 0.0))
+                if r and r > 0:
+                    return float(r)
+        except (TypeError, ValueError, AttributeError, KeyError) as ex:
+            # SZŰK: hiányos/hibás pozíció- vagy pár-mező. Tágabb elnyelés itt
+            # elrejtené a valódi hibát, és a pozíció némán 1 teljes slotot enne.
+            log.debug("#%s — a stop-távból sem számolható kockázat: %s", ticket, ex)
+    return 0.0
+
+
 def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
                  strategy):
     """Egy LIVE pár feldolgozása.
@@ -1786,6 +1817,10 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
     pair_cfg   = state.pair_cfg
     params     = state.params
     trading_cfg = state.trading_cfg
+    # A slot-keret (egy slot mekkora kockázatot bír) az EGYENLEGGEL és a
+    # felületen állítható `account_risk_pct`/`max_open_slots`-szal is változik —
+    # ezért minden körben frissítjük, MIELŐTT bármi súly-alapú döntés születne.
+    slot_mgr.set_budget(balance, trading_cfg)
     magic      = state.magic
     point_size   = pair_cfg["point_size"]
 
@@ -2058,10 +2093,11 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
         # Örökbefogadott (kézzel nyitott) pozíció: vegyük fel a slot-kezelőbe, hogy
         # FOGLALJA a helyét — különben a motor a limit fölé nyithatna. A meglévő
         # kockázatmentes jelölést nem bántja.
-        if slot_mgr.ensure(ticket):
-            log.info("⇩ %s #%d — pozíció felvéve a slot-kezelőbe (%s%s)",
+        if slot_mgr.ensure(ticket, _pos_risk_ccy_of(ticket, pos, pair_cfg)):
+            log.info("⇩ %s #%d — pozíció felvéve a slot-kezelőbe (%s%s, %.2f slot)",
                      symbol, ticket, strategy.name,
-                     ", örökbefogadott" if adopted.is_open_adopted(ticket) else "")
+                     ", örökbefogadott" if adopted.is_open_adopted(ticket) else "",
+                     slot_mgr.weight_of(ticket))
         is_rf  = slot_mgr.is_risk_free(ticket)
 
         if _cc_on and pnl < 0 and _tick is not None \
@@ -2745,6 +2781,25 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
             eff_slots = calc_effective_slots(balance, sl_points, _sizing_cfg, ctf)
             lot = calc_lot(balance, sl_points, _sizing_cfg, ctf, eff_slots)
 
+            # ── SLOT-KERET a TÉNYLEGES kockázat ismeretében ────────────────
+            # A fenti `can_open()` csak azt nézte, van-e EGYÁLTALÁN hely. A
+            # pontos döntés csak itt hozható meg: a `min_lot` miatt a lot (és
+            # így a kockázat) eltérhet a szándékolttól — kis számlán akár
+            # többszöröse lehet egy slot keretének. A súly a PORTFÓLIÓ keretéhez
+            # mér, ezért NEM a felezett `ctf`/`risk_trading_cfg`-ből számol,
+            # hanem a `trading_cfg`-ből: egy óvatos (fél méretű) belépő így
+            # feleannyi keretet fogyaszt — nem ugyanannyit.
+            _risk_ccy = position_meta.risk_from_points(
+                lot, sl_points, _sizing_cfg.get("pv1_point", 0.0))
+            slot_mgr.set_budget(balance, trading_cfg)
+            if not slot_mgr.can_open_risk(_risk_ccy):
+                log.info("⏭ %s %s jel — belépő KIHAGYVA: nem fér a slot-keretbe "
+                         "(a pozíció %.2f slotot érne, szabad %.2f/%d | "
+                         "kockázat %.2f, lot %.2f a min_lot miatt).",
+                         symbol, signal, slot_weight(_risk_ccy, balance, trading_cfg),
+                         slot_mgr.free(), slot_mgr.max_slots, _risk_ccy, lot)
+                return
+
             with MT5_LOCK:
                 tick = mt5.symbol_info_tick(symbol)
             if tick:
@@ -2838,7 +2893,7 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
                 ticket = open_position(symbol, signal, lot, sl_price, tp_price, magic,
                                        comment=strategy.name, strategy_name=strategy.name)
                 if ticket:
-                    slot_mgr.add(ticket)
+                    slot_mgr.add(ticket, _risk_ccy)
                     # A BELÉPÉSKORI kockázat (1 R) rögzítése — a BE/trailing hamarosan
                     # felülírja az SL-t, onnantól ez a szám sehonnan nem nyerhető
                     # vissza. A TÉNYLEGES lotból számolunk (a min_lot/max_lot korlát
@@ -2967,7 +3022,8 @@ def manual_build(symbol: str, strategy_name: "str | None" = None) -> bool:
                                        _pc.get("pv1_point", 0.0)),
         lot=add_lot, entry_price=_entry)
     if _run_slot_mgr is not None:
-        _run_slot_mgr.add(ticket)   # foglalja a slotot, amíg nem bizonyítottan nulla-kockázatú
+        # foglalja a keretet, amíg nem bizonyítottan nulla-kockázatú
+        _run_slot_mgr.add(ticket, _pos_risk_ccy_of(ticket, _new_pos, _pc))
 
     # 2) FRISS pozíciólista, amiben BENNE VAN az új láb. A régi kód `or positions`
     #    tartalékkal a RÉGI listára esett vissza — abból az adalék hiányzott, így az
@@ -3285,10 +3341,21 @@ def run(cfg: dict, slot_mgr: SlotManager):
         # bukik, az sokkal többet jelent — épp indulunk.
         log.warning("A ticket-nyilvántartások takarítása elmaradt (%s).", ex)
 
+    # A helyreállítás előtt is kell a keret, különben a visszavett pozíciók
+    # mind 1-1 teljes slotnak számítanának.
+    try:
+        slot_mgr.set_budget(mt5_connector.account_balance(), trading_cfg)
+    except Exception as ex:
+        # Keret nélkül a helyreállított pozíciók 1-1 teljes slotnak számítanak
+        # (a régi viselkedés) — biztonságos tartalék, de tudni kell róla.
+        log.warning("A slot-keret induló beállítása elmaradt (%s) — a "
+                    "helyreállított pozíciók darabszám szerint foglalnak.", ex)
+
     recovered: set = set()   # (symbol, strat_name) — magic alapján stratégiához kötve
     for _m, _st in magic_to_strat.items():
         for _p in get_open_positions(_m, _st.name):
-            slot_mgr.add(_p.ticket)
+            slot_mgr.add(_p.ticket,
+                         _pos_risk_ccy_of(_p.ticket, _p, all_pairs.get(_p.symbol)))
             if _p.sl and _p.sl != 0.0:
                 if _p.type == mt5.ORDER_TYPE_BUY and _p.sl >= _p.price_open:
                     slot_mgr.set_risk_free(_p.ticket)

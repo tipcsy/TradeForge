@@ -2692,6 +2692,18 @@ class DashboardWindow:
         tk.Button(info_bar, text="▲", font=small_font, width=2,
                   bg=BG_INACTIVE, fg=FG_WHITE, relief="flat", cursor="hand2",
                   command=lambda: self._change_slots(+1)).pack(side="left", padx=(1, 10))
+        # Kockázat/számla állítása — a slotok PÁRJA: a `max_open_slots` azt mondja
+        # meg, HÁNY felé osztjuk, ez pedig azt, MENNYIT. A kettő együtt adja egy
+        # slot keretét (egyenleg × risk_pct / max_slots).
+        self.lbl_risk = tk.Label(info_bar, text="Kockázat: —",
+                                 bg=BG_HEADER, fg=FG_WHITE, font=info_font)
+        self.lbl_risk.pack(side="left", padx=(10, 2))
+        tk.Button(info_bar, text="▼", font=small_font, width=2,
+                  bg=BG_INACTIVE, fg=FG_WHITE, relief="flat", cursor="hand2",
+                  command=lambda: self._change_risk_pct(-0.001)).pack(side="left", padx=1)
+        tk.Button(info_bar, text="▲", font=small_font, width=2,
+                  bg=BG_INACTIVE, fg=FG_WHITE, relief="flat", cursor="hand2",
+                  command=lambda: self._change_risk_pct(+0.001)).pack(side="left", padx=(1, 10))
         self.lbl_limit   = tk.Label(info_bar, text="Napi limit: OK",
                                     bg=BG_HEADER, fg=FG_GREEN, font=info_font)
         self.lbl_limit.pack(side="left", padx=(10, 2))
@@ -2759,8 +2771,11 @@ class DashboardWindow:
         self._bt_tab = PortfolioBacktestTab(bt_frame, cfg, mono_font, small_font, header_font)
 
         self._balance    = 0.0
-        self._free_slots = cfg["trading"]["max_open_slots"]
+        self._free_slots = float(cfg["trading"]["max_open_slots"])
         self._max_slots  = cfg["trading"]["max_open_slots"]
+        # A lekötött keret a számla devizájában (None = ismeretlen, ilyenkor a
+        # darabszám a mérce). Ebből számoljuk a kiírt „terhelés %"-ot.
+        self._occupied_risk = None
         # A nyitott pozíciók BONTÁSA a slot-címkéhez: összes darab vs. ebből
         # ténylegesen slotot foglaló (nem kockázatmentes). Enélkül a „8 nyitott
         # pozíció 4 slot mellett" jogos gyanút kelt — pedig szabályos, ha a
@@ -5441,13 +5456,75 @@ class DashboardWindow:
         A ráépített lábak eleve kockázatmentesek (az SL az átlagáron), ezért is
         nőhet a darabszám a kockázat növekedése nélkül."""
         free = self._free_slots
-        txt  = f"Szabad slotok: {free}/{self._max_slots}"
+        # A szabad keret TÖRT lehet (a slot kockázati keret, nem darabszám) —
+        # egész értéknél ne írjunk ki felesleges tizedest.
+        _f = f"{free:.0f}" if abs(free - round(free)) < 0.05 else f"{free:.1f}"
+        txt  = f"Szabad slotok: {_f}/{self._max_slots}"
         if self._open_total:
             rf = self._open_total - self._open_occupied
             txt += (f"  ·  nyitva {self._open_total} "
                     f"({self._open_occupied} kockázatos"
                     + (f" + {rf} biztosított)" if rf else ")"))
-        self.lbl_slots.config(text=txt, fg=FG_GREEN if free > 0 else FG_RED)
+        # Tényleges terhelés: a lekötött keret a számla %-ában. Ha ez a beállított
+        # risk_pct fölé megy, azt LÁTNI kell — a `min_lot` kis számlán fölé viheti,
+        # és korábban ez sehol nem látszott.
+        _load = self._risk_load_pct()
+        _cfg_pct = float(self.cfg.get("trading", {}).get("account_risk_pct", 0.0))
+        over = _load > _cfg_pct * 100 + 1e-9
+        if _load > 0:
+            txt += f"  ·  terhelés {_load:.2f}%"
+        self.lbl_slots.config(
+            text=txt, fg=FG_RED if (free <= 0 or over) else FG_GREEN)
+
+    def _per_slot_risk(self) -> float:
+        """EGY slot kockázati kerete a számla devizájában
+        (egyenleg × account_risk_pct / max_open_slots)."""
+        t = self.cfg.get("trading", {})
+        try:
+            pct = float(t.get("account_risk_pct", 0.0))
+            slots = int(t.get("max_open_slots", 0))
+        except (TypeError, ValueError):
+            return 0.0
+        if slots <= 0 or pct <= 0 or self._balance <= 0:
+            return 0.0
+        return self._balance * pct / slots
+
+    def _risk_load_pct(self) -> float:
+        """A ténylegesen lekötött kockázat a számla százalékában. 0.0, ha nem
+        mérhető (nincs nyitott pozíció, vagy a kockázatuk ismeretlen)."""
+        occ = getattr(self, "_occupied_risk", None)
+        if not occ or self._balance <= 0:
+            return 0.0
+        return occ / self._balance * 100.0
+
+    def _render_risk_label(self):
+        """A kockázat-címke — EGY igazságforrás (a ▼/▲ és a periodikus frissítés
+        is ezt hívja). A slot kerete azért látszik, mert a `max_open_slots`-szal
+        EGYÜTT adja meg, mekkora egy pozíció szánt kockázata."""
+        if not hasattr(self, "lbl_risk"):
+            return
+        pct = float(self.cfg.get("trading", {}).get("account_risk_pct", 0.0))
+        per_slot = self._per_slot_risk()
+        txt = f"Kockázat: {pct * 100:.1f}%"
+        if per_slot > 0:
+            txt += f" ({per_slot:.2f}/slot)"
+        self.lbl_risk.config(text=txt, fg=FG_WHITE)
+
+    def _change_risk_pct(self, delta: float):
+        """A számla-kockázat állítása a felületről (0,1%-os lépés, 0,1%–10%).
+
+        Ez az ÖSSZES slot EGYÜTTES kockázata — nem per-kötés. A live motor
+        UGYANEZT a cfg-dictet olvassa, tehát a következő belépőnél már él; a
+        MÁR NYITOTT pozíciókra nem hat visszamenőleg."""
+        t = self.cfg.setdefault("trading", {})
+        cur = float(t.get("account_risk_pct", 0.01))
+        new = round(cur + delta, 4)
+        if new < 0.001 or new > 0.10:
+            return
+        t["account_risk_pct"] = new
+        self._save_main_config()
+        self._render_risk_label()
+        self._render_slots_label()
 
     def _change_slots(self, delta: int):
         """Max slotszám növelése/csökkentése a felületről.
@@ -5469,6 +5546,7 @@ class DashboardWindow:
         self.cfg["trading"]["max_open_slots"] = new_max
         self._save_main_config()
         self._render_slots_label()
+        self._render_risk_label()   # egy slot kerete = risk_pct / max_slots
 
     def _change_daily_limit(self, delta: int):
         """A napi veszteség-limit állítása a felületről (10$-os lépés, min. 10$).
@@ -6207,9 +6285,11 @@ class DashboardWindow:
         self.lbl_daily.config(text=f"Napi P&L: {daily_total:+.2f}${pnl_src}",
                               fg=FG_GREEN if daily_total >= 0 else FG_RED)
 
-        free = max(0, self._free_slots)
-        self.lbl_slots.config(text=f"Szabad slotok: {free}/{self._max_slots}",
-                              fg=FG_GREEN if free > 0 else FG_RED)
+        # EGY igazságforrás: a címkét mindig a `_render_slots_label` rajzolja
+        # (korábban itt egy második, formázásban eltérő út is volt).
+        self._free_slots = max(0.0, self._free_slots)
+        self._render_slots_label()
+        self._render_risk_label()
 
         total_daily = sum(ds.daily_pnl for ds in self.dashboard_ref.values())
         # A limit értéke EGY igazságforrásból (mint a live kapué): abszolút $
@@ -6225,14 +6305,27 @@ class DashboardWindow:
         if mt5_positions is not None:
             # Csak a NEM kockázatmentes pozíciók foglalnak slotot (a kockázatmentes
             # felszabadítja) — egyezik a motor SlotManager-ének logikájával.
-            occupied = sum(p.get("occupied", p.get("count", 1))
+            # SÚLYOZOTT foglaltság: egy pozíció annyi slotot fogyaszt, ahányszorosa
+            # a kockázata egy slot keretének (core.risk_manager). A darabszám csak
+            # akkor a mérce, ha a kockázat ismeretlen (régi/örökbefogadott pozíció).
+            occupied_n = sum(p.get("occupied", p.get("count", 1))
+                             for p in mt5_positions.values())
+            per_slot = self._per_slot_risk()
+            risk_sum = sum(float(p.get("risk_ccy", 0.0) or 0.0)
                            for p in mt5_positions.values())
-            self._free_slots = max(0, self._max_slots - occupied)
+            if per_slot > 0 and risk_sum > 0:
+                occupied = risk_sum / per_slot
+                self._occupied_risk = risk_sum
+            else:
+                occupied = occupied_n
+                self._occupied_risk = None
+            self._free_slots = max(0.0, self._max_slots - occupied)
             # A bontáshoz az ÖSSZES nyitott darab is kell (a `count` a
             # kockázatmenteseket is tartalmazza) — lásd `_render_slots_label`.
             self._open_total    = sum(p.get("count", 1) for p in mt5_positions.values())
-            self._open_occupied = occupied
+            self._open_occupied = occupied_n
             self._render_slots_label()
+            self._render_risk_label()
 
         live_count = 0
         if hasattr(self, "rows"):

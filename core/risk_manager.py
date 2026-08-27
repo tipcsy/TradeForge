@@ -4,9 +4,54 @@ Portfólió szintű kockázatkezelés.
 Alapelv: account × risk_pct = az összes slot EGYÜTTES kockázata.
   - Normál eset: lot = (teljes_cél / max_slots) / (sl_points × point_value)  → FLOOR-ra kerekítve
   - Kis számla (min_lot kényszer): effective_slots = ROUND(cél / tényleges_kockázat × max_slots)
+
+⚠ A SLOT KOCKÁZATI KERET, NEM DARABSZÁM
+---------------------------------------
+A `SlotManager` sokáig minden pozíciót PONTOSAN 1 slotnak számolt, függetlenül
+attól, mekkora kockázat volt benne. Kis számlán ez lyuk: ha a bróker `min_lot`-ja
+nagyobb lotot kényszerít, mint amennyi a slot kockázati keretébe férne, a
+pozíció túlkockáztat — és mégis csak 1 slotot foglal. Mért példa (981 EUR
+egyenleg, `account_risk_pct` 1%, 4 slot → egy slot = 2,45 EUR):
+
+    UsaTec  min_lot 0,2 → 12,36 EUR kockázat = a slot-keret 5,04-szerese
+    GOLD    min_lot 0,01 → 10,91 EUR         = 4,45 slot
+    Ger40   min_lot 0,25 →  9,00 EUR         = 3,67 slot
+
+Négy ilyen UsaTec-pozíció szabályosnak LÁTSZOTT, és közben 5% volt kockázatban
+1% helyett. Ezért a foglaltság mostantól SÚLYOZOTT:
+
+    súly = pozíció_kockázata / (egyenleg × risk_pct / max_slots)
+
+A `can_open(súly)` akkor enged, ha `foglalt_súly + súly ≤ max_slots`. Egyetlen
+kivétel: ha egy pozíció súlya EGYMAGA nagyobb a teljes keretnél (a `min_lot`
+miatt), akkor is nyitható — de csak ÜRES kerettel, vagyis elviszi az összes
+slotot. E nélkül a UsaTec ezen a számlán soha nem lenne kereskedhető.
+
+A súly TÖRT, nem egészre kerekített: a UsaInd 1,08-as súlya felfelé kerekítve
+2 slotot enne el egy 8%-os túllépésért, ami feleslegesen szigorú.
+
+A kockázatmentesre állított pozíció (`set_risk_free`) a TELJES súlyát
+felszabadítja — ez már korábban is így volt, és pontosan illik a keret-modellhez
+(nulla kockázat = nulla keret-fogyasztás).
+
+⚠ A KÉT KORLÁT EGYÜTT ÉL — a keret SZŰKÍT, nem tágít
+----------------------------------------------------
+A súly-modell önmagában SZIMMETRIKUS lenne: ahol a `min_lot` a szándékoltnál
+KISEBB kockázatot ad (UK100 0,60 · Fra40 0,67 slot), ott hatot is engedne négy
+helyett. Ez nem cél — a `max_open_slots` a DARABSZÁMRA is korlát marad:
+
+    nyitható  ⟺  darabszám < max_slots   ÉS   foglalt_súly + súly ≤ max_slots
+
+Így a változtatás CSAK a túlkockáztatást zárja ki; ahol eddig is belefért a
+kockázat, ott a viselkedés (és minden korábbi backteszt eredménye) változatlan.
 """
 
 import math
+
+# Lebegőpontos összeadás miatt a keret-ellenőrzés apró tűrést kap: e nélkül négy
+# 0,25-ös súly összege 1,0000000000000002 lehet, és a negyedik belépő némán
+# elmaradna.
+_EPS = 1e-9
 
 
 def calc_sl_tp_points(atr_value: float, params: dict) -> tuple[float, float]:
@@ -109,29 +154,117 @@ def calc_effective_slots(
     return max(1, min(slots, max_slots))
 
 
+def slot_weight(risk_ccy: float, balance: float, trading_cfg: dict) -> float:
+    """Egy pozíció SÚLYA slot-egységben: a kockázata / egy slot kockázati kerete.
+
+    1.0 = pontosan annyit kockáztat, amennyit egy slot elbír. Ismeretlen/hibás
+    bemenetnél 1.0 (a régi, darabszám-alapú viselkedés) — soha nem 0, mert az
+    korlátlan nyitást engedne."""
+    try:
+        risk_pct = float(trading_cfg["account_risk_pct"])
+        max_slots = int(trading_cfg["max_open_slots"])
+    except (KeyError, TypeError, ValueError):
+        return 1.0
+    per_slot = float(balance) * risk_pct / max_slots if max_slots > 0 else 0.0
+    if not (per_slot > 0) or not (risk_ccy > 0):
+        return 1.0
+    return float(risk_ccy) / per_slot
+
+
+def fits_budget(occupied_weight: float, new_weight: float, max_slots: float) -> bool:
+    """Belefér-e az új súly a keretbe? Lásd a modul fejlécét a szabályokért."""
+    if new_weight <= 0:
+        return True                      # nulla kockázat nem fogyaszt keretet
+    if new_weight > max_slots:
+        # A `min_lot` miatt egymaga túllóg a teljes kereten → csak ÜRES kerettel,
+        # és akkor elviszi az összeset.
+        return occupied_weight <= _EPS
+    return occupied_weight + new_weight <= max_slots + _EPS
+
+
 class SlotManager:
     """
     Globális slot kezelés: nyomon követi a nyitott és kockázatmentes pozíciókat.
+
+    A foglaltság SÚLYOZOTT (lásd a modul fejlécét). ⚠ Nem a SÚLYT tároljuk, hanem
+    a pozíció KOCKÁZATÁT a számla devizájában — a súly ebből és az ÉPPEN aktuális
+    keretből számolódik. Enélkül a felületen állított `account_risk_pct` (vagy a
+    növekvő egyenleg) után a már nyitott pozíciók súlya elavulna, és a motor
+    máshogy számolna, mint amit a felület mutat.
+
+    A kockázatot nem ismerő hívó (vagy a `set_budget` elmaradása) esetén a súly
+    1.0 — vagyis a korábbi, darabszám-alapú viselkedés.
     """
 
     def __init__(self, max_slots: int):
         self.max_slots = max_slots
-        self._positions: dict[int, bool] = {}  # ticket → risk_free
+        self._positions: dict[int, bool] = {}   # ticket → risk_free
+        self._risk: dict[int, float] = {}       # ticket → belépéskori 1R (deviza)
+        self._per_slot: float = 0.0             # egy slot kerete (deviza)
 
-    def occupied(self) -> int:
-        """Valóban foglalt (nem kockázatmentes) slotok száma."""
+    # ── keret ────────────────────────────────────────────────────────────────
+    def set_budget(self, balance: float, trading_cfg: dict) -> float:
+        """Egy slot kockázati keretének frissítése. Rendszeresen hívandó (az
+        egyenleg változik), és MINDIG a súly-alapú döntések előtt."""
+        try:
+            pct = float(trading_cfg["account_risk_pct"])
+            slots = int(trading_cfg["max_open_slots"])
+        except (KeyError, TypeError, ValueError):
+            return self._per_slot
+        if slots > 0 and pct > 0 and balance > 0:
+            self._per_slot = float(balance) * pct / slots
+        return self._per_slot
+
+    def weight_of(self, ticket: int) -> float:
+        """A ticket súlya slot-egységben. 1.0, ha a kockázata vagy a keret
+        ismeretlen — soha nem 0, mert az korlátlan nyitást engedne."""
+        r = self._risk.get(ticket, 0.0)
+        if r > 0 and self._per_slot > 0:
+            return r / self._per_slot
+        return 1.0
+
+    def risk_of(self, ticket: int) -> float:
+        return self._risk.get(ticket, 0.0)
+
+    # ── foglaltság ───────────────────────────────────────────────────────────
+    def occupied(self) -> float:
+        """A ténylegesen lekötött keret slot-egységben (a nem kockázatmentes
+        pozíciók súly-összege). TÖRT lehet."""
+        return sum(self.weight_of(t)
+                   for t, rf in self._positions.items() if not rf)
+
+    def occupied_count(self) -> int:
+        """A nem kockázatmentes pozíciók DARABSZÁMA — a `max_open_slots` erre is
+        korlát marad (lásd a modul fejlécét)."""
         return sum(1 for rf in self._positions.values() if not rf)
 
-    def free(self) -> int:
+    def occupied_risk(self) -> float:
+        """A lekötött kockázat a számla devizájában (a felület ezt írja ki)."""
+        return sum(self._risk.get(t, 0.0)
+                   for t, rf in self._positions.items() if not rf)
+
+    def free(self) -> float:
         return self.max_slots - self.occupied()
 
-    def can_open(self) -> bool:
-        return self.free() > 0
+    def can_open(self, weight: float = 1.0) -> bool:
+        """Mindkét korlát: darabszám ÉS kockázati keret."""
+        if self.occupied_count() >= self.max_slots:
+            return False
+        return fits_budget(self.occupied(), weight, self.max_slots)
 
-    def add(self, ticket: int):
+    def can_open_risk(self, risk_ccy: float) -> bool:
+        """Kényelmi alak: a kockázatból maga számolja a súlyt (a `set_budget`
+        által beállított kerettel)."""
+        w = (risk_ccy / self._per_slot
+             if risk_ccy > 0 and self._per_slot > 0 else 1.0)
+        return self.can_open(w)
+
+    # ── nyilvántartás ────────────────────────────────────────────────────────
+    def add(self, ticket: int, risk_ccy: float = 0.0):
         self._positions[ticket] = False
+        self._risk[ticket] = float(risk_ccy or 0.0)
 
-    def ensure(self, ticket: int) -> bool:
+    def ensure(self, ticket: int, risk_ccy: float = 0.0) -> bool:
         """Nyomon követésbe vétel, ha még nem ismert — a MEGLÉVŐ kockázatmentes
         jelölést nem írja felül (ellentétben az `add`-del). Az utólag stratégiához
         rendelt (kézzel nyitott) pozíciók így nem maradnak ki a slot-számlálásból.
@@ -139,6 +272,7 @@ class SlotManager:
         if ticket in self._positions:
             return False
         self._positions[ticket] = False
+        self._risk[ticket] = float(risk_ccy or 0.0)
         return True
 
     def set_risk_free(self, ticket: int):
@@ -147,6 +281,7 @@ class SlotManager:
 
     def remove(self, ticket: int):
         self._positions.pop(ticket, None)
+        self._risk.pop(ticket, None)
 
     def is_risk_free(self, ticket: int) -> bool:
         return self._positions.get(ticket, False)

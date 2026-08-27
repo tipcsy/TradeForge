@@ -28,7 +28,10 @@ RESULTS_DIR = Path(__file__).resolve().parents[1] / "data" / "backtest_results"
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from core.risk_manager import calc_lot, calc_effective_slots, calc_swing_sl_tp_points
+from core.risk_manager import (calc_lot, calc_effective_slots,
+                               calc_swing_sl_tp_points,
+                               slot_weight as _rm_slot_weight,
+                               fits_budget as _rm_fits)
 from core import risky_mode
 from core import trade_costs as _costs
 from strategy import get_strategy, get_strategy_by_name
@@ -72,6 +75,9 @@ class Trade:
     entry_balance: float = 0.0
     risk_usd: float = 0.0
     risk_pct: float = 0.0
+    # Hány SLOT keretét fogyasztja (kockázat / egy slot kerete). Kis számlán a
+    # `min_lot` miatt 1-nél több is lehet — lásd `core.risk_manager` fejléc.
+    slot_weight: float = 1.0
     # ── Kockázatcsökkentés (Felező/Pajzs) — részleges zárás modellezése ──
     booked_pnl: float = 0.0     # a részleges zárás(ok)ból már realizált P&L
     reduced: bool = False       # megtörtént-e a részleges zárás (1R-nél, egyszer)
@@ -1430,8 +1436,12 @@ def run_pair(
                 daily_pnl[day_key] = daily_pnl.get(day_key, 0.0) + trade.pnl_usd
                 result.balance_curve.append((m1_time, balance))
 
-        # Slot számítás
+        # Slot számítás — KÉT korlát (core.risk_manager fejléc): a darabszám
+        # (mint eddig) ÉS a SÚLYOZOTT kockázati keret. Egy pozíció annyi slotot
+        # fogyaszt, ahányszorosa a kockázata egy slot keretének; kis számlán a
+        # `min_lot` miatt ez 1-nél több is lehet.
         occupied = sum(1 for t in open_trades if not t.risk_free)
+        occupied_w = sum(t.slot_weight for t in open_trades if not t.risk_free)
         free_slots = trading_cfg["max_open_slots"] - occupied
 
         # M1 belépési jelzés. A jelzés-ÁLLAPOTGÉP (bt_on_low_close) MINDEN M1-báron fut —
@@ -1531,6 +1541,17 @@ def run_pair(
                     eff_slots = calc_effective_slots(balance, sl_points, pair_cfg, _size_cfg)
                     lot = calc_lot(balance, sl_points, pair_cfg, _size_cfg, eff_slots)
 
+                    # ── SLOT-KERET a TÉNYLEGES kockázat ismeretében ──────────
+                    # A fenti `free_slots > 0` csak azt nézte, van-e EGYÁLTALÁN
+                    # hely. A pontos döntés itt dől el, ahogy ÉLESBEN is
+                    # (live_trader: ugyanez a képlet a `calc_lot` után) — a
+                    # `min_lot` a kockázatot a slot kerete fölé emelheti.
+                    _w = _rm_slot_weight(lot * sl_points * pv1_point,
+                                         balance, trading_cfg)
+                    if not _rm_fits(occupied_w, _w, trading_cfg["max_open_slots"]):
+                        prev_m1_row = m1_row
+                        continue
+
                     # A belépő a gyertya ZÁRÁSÁN → a bar UTOLSÓ tickjének spreadje
                     # (`close_spread`) a pontos; tartalék az átlag (_sp).
                     _esp = _cspread_arr[i] if _cspread_arr is not None else float("nan")
@@ -1563,6 +1584,7 @@ def run_pair(
                         entry_balance=balance,
                         risk_usd=risk_usd,
                         risk_pct=risk_usd / balance * 100 if balance > 0 else 0,
+                        slot_weight=_w,
                     )
                     trade.legs = [(open_price, lot)]     # 1. láb; a build a listát bővíti
                     trade.build_ref = open_price         # az első ráépítés innen figyel
@@ -2224,7 +2246,11 @@ def run_portfolio_backtest(
             continue   # nap leállt, nem nyitunk új pozíciót
 
         # ── 4. Új belépések ellenőrzése ────────────────────────────────────
+        # KÉT korlát — ugyanaz a modell, mint élesben (core.risk_manager):
+        # darabszám ÉS súlyozott kockázati keret.
         occupied = sum(1 for t in open_trades.values() if not t.risk_free)
+        occupied_w = sum(t.slot_weight for t in open_trades.values()
+                         if not t.risk_free)
 
         for sym, info in pair_data.items():
             m1_df    = info["m1"]
@@ -2326,6 +2352,14 @@ def run_portfolio_backtest(
                             eff_slots = calc_effective_slots(balance, sl_points, pair_cfg, sizing_cfg)
                             lot = calc_lot(balance, sl_points, pair_cfg, sizing_cfg, eff_slots)
 
+                            # A `min_lot` a kockázatot a slot kerete fölé emelheti
+                            # — a pontos döntés csak a lot ismeretében hozható meg
+                            # (a fenti `occupied < max_slots` csak durva előszűrő).
+                            _w = _rm_slot_weight(lot * sl_points * pv1_point,
+                                                 balance, trading_cfg)
+                            if not _rm_fits(occupied_w, _w, max_slots):
+                                continue
+
                             open_price = float(row["close"])
                             if signal == "BUY":
                                 open_price += points_to_price(sp, point_size)
@@ -2347,6 +2381,7 @@ def run_portfolio_backtest(
                                 entry_balance=balance,
                                 risk_usd=risk_usd,
                                 risk_pct=risk_usd / balance * 100 if balance > 0 else 0,
+                                slot_weight=_w,
                             )
                             trade.legs = [(open_price, lot)]   # 1. láb; a build bővíti
                             trade.build_ref = open_price       # az első ráépítés innen figyel
@@ -2357,6 +2392,7 @@ def run_portfolio_backtest(
                                     else _rrm.PRESET_SHIELD)
                             open_trades[sym] = trade
                             occupied += 1
+                            occupied_w += _w
 
     # ── Végeredmény ───────────────────────────────────────────────────────
     if progress_callback:

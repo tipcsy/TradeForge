@@ -342,13 +342,50 @@ def _pos_risk_free(p) -> bool:
     return p.sl <= p.price_open     # SELL
 
 
+def _pos_risk_ccy(p) -> float:
+    """Egy nyitott pozíció kockázata (1 R) a számla devizájában.
+
+    Elsődlegesen a BELÉPÉSKORI érték (`position_meta`) — ez akkor is helyes, ha a
+    BE/trailing azóta elmozgatta a stopot. Bejegyzés híján az ÉLŐ stop-távból
+    számolunk a bróker tick-értékével. 0.0, ha semmiből nem jön ki (a hívó ezt
+    ismeretlennek veszi, nem nullának)."""
+    try:
+        from core import position_meta
+        r = position_meta.risk_of(p.ticket)
+        if r and r > 0:
+            return float(r)
+    except Exception as ex:
+        # Nem néma: a nyilvántartás sérülése ITT látszik meg először. Nem
+        # warning, mert pozíciónként/körönként fut — a debug-napló elég.
+        log.debug("#%s — a belépéskori kockázat nem olvasható: %s",
+                  getattr(p, "ticket", "?"), ex)
+    try:
+        if not p.sl or p.sl == 0.0:
+            return 0.0
+        with MT5_LOCK:
+            info = mt5.symbol_info(p.symbol)
+        if info is None or not info.point:
+            return 0.0
+        tick_sz = float(info.trade_tick_size or 0.0) or float(info.point)
+        pv1 = float(info.trade_tick_value or 0.0) * (float(info.point) / tick_sz)
+        pts = abs(float(p.price_open) - float(p.sl)) / float(info.point)
+        return pts * float(p.volume) * pv1
+    except Exception:
+        return 0.0
+
+
 def open_positions_by_symbol() -> dict:
     """
     Visszaadja az MT5-ben nyitott pozíciókat szimbólum szerint AGGREGÁLVA.
     Egy szimbólumon több pozíció is lehet → összegzett P&L + darabszám.
-    {symbol: {"pnl": float, "count": int, "occupied": int,
+    {symbol: {"pnl": float, "count": int, "occupied": int, "risk_ccy": float,
               "direction": "BUY"|"SELL"|"MIX", "risk_free": bool}}
-      - occupied: a NEM kockázatmentes pozíciók száma (ennyi slotot foglal valóban)
+      - occupied: a NEM kockázatmentes pozíciók DARABSZÁMA
+      - risk_ccy: a NEM kockázatmentes pozíciók együttes kockázata a számla
+        devizájában — ebből számol a felület SÚLYOZOTT slot-foglaltságot
+        (`core.risk_manager` fejléc: a slot kockázati keret, nem darabszám).
+        A belépéskori 1 R a `position_meta`-ból jön; ha nincs bejegyzés (a
+        változtatás előtt nyitott pozíció), az ÉLŐ stop-távból számoljuk.
       - risk_free: True, ha a szimbólum teljes kitettsége kockázatmentes
     """
     try:
@@ -359,12 +396,13 @@ def open_positions_by_symbol() -> dict:
         result = {}
         for pos in positions:
             agg = result.setdefault(pos.symbol, {
-                "pnl": 0.0, "count": 0, "occupied": 0,
+                "pnl": 0.0, "count": 0, "occupied": 0, "risk_ccy": 0.0,
                 "direction": None, "risk_free": False})
             agg["pnl"]   += pos.profit
             agg["count"] += 1
             if not _pos_risk_free(pos):
                 agg["occupied"] += 1
+                agg["risk_ccy"] += _pos_risk_ccy(pos)
             d = "BUY" if pos.type == 0 else "SELL"
             agg["direction"] = d if agg["direction"] in (None, d) else "MIX"
         for agg in result.values():

@@ -152,6 +152,9 @@ def cmd_live():
     def update_header():
         balance = mt5_connector.account_balance()
         win.set_balance(balance)
+        # A slot-keret az egyenleggel és a felületen állított kockázat-%-kal is
+        # változik → frissítjük, mielőtt a szabad keretet kiolvassuk.
+        slot_mgr.set_budget(balance, cfg["trading"])
         free = slot_mgr.free()
         win.set_slots(free, slot_mgr.max_slots)
         win.root.after(5000, update_header)

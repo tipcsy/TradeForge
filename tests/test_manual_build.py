@@ -55,10 +55,13 @@ class Tick:
 
 class Slots:
     def __init__(self):
-        self.added, self.rf = [], []
+        self.added, self.rf, self.risks = [], [], []
 
-    def add(self, t):
+    def add(self, t, risk_ccy=0.0):
+        # A slot KOCKAZATI KERET (core.risk_manager): a motor a pozicio
+        # kockazatat is atadja, ebbol szamol sulyt.
         self.added.append(t)
+        self.risks.append(risk_ccy)
 
     def set_risk_free(self, t):
         self.rf.append(t)
