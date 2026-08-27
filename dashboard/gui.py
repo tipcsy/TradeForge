@@ -73,6 +73,15 @@ TRAILING_COLUMNS = [
 ]
 
 
+# A KIJELZÉSI ÚT fájl-olvasásai gyorsítótáron át mennek: a 2.0 sor soronként
+# hívja őket, minden képfrissítésnél, a FŐ SZÁLON. Egy 672 futásos hangolás alatt
+# ezek beragadtak és 93,5 mp-es fő szál-megállást okoztak (2026-08-27). A TTL
+# alatt a lemezhez hozzá sem nyúlunk; utána is csak `stat()`, olvasás CSAK ha a
+# fájl változott. Lásd `core/fs_cache.py`.
+from core.fs_cache import FileCache as _FileCache      # noqa: E402
+_DISPLAY_FS_CACHE = _FileCache(ttl=10.0)
+
+
 def opt_done_date(symbol: str, strategy_name: str):
     """Az ADOTT stratégia utolsó optimalizálásának ideje a done-marker fájlból
     (`{symbol}_study.done`, a stratégia mappájában), vagy None ha nincs marker."""
@@ -80,11 +89,10 @@ def opt_done_date(symbol: str, strategy_name: str):
         from core.params_store import done_marker
         import datetime as _dt
         dm = done_marker(symbol, strategy_name)
-        if dm.exists():
-            return _dt.datetime.fromtimestamp(dm.stat().st_mtime)
+        return _DISPLAY_FS_CACHE.get(
+            dm, lambda p: _dt.datetime.fromtimestamp(p.stat().st_mtime))
     except Exception:
-        pass
-    return None
+        return None
 
 
 def opt_done_label(symbol: str, strategy_name: str) -> str:
@@ -3068,7 +3076,16 @@ class DashboardWindow:
         # a jelzés sehol nem jelenik meg, és eddig semmi nem szólt róla.
         try:
             from core import mt_charts as _mch
-            _open_charts = _mch.open_symbols()
+            # Szintén a fő szál útja: könyvtár-glob + fájlonkénti stat a MT5
+            # Common mappában. A heartbeat 90 mp-ig érvényes (MAX_AGE_SEC), így
+            # egy 5 mp-es memó semmit nem torzít — a `mt_charts` viszont TISZTA
+            # marad (a tesztjei frissen írt fájlt olvasnak vissza).
+            _now = time.monotonic()
+            if _now - getattr(self, "_open_charts_at", -1e9) < 5.0:
+                _open_charts = self._open_charts_memo
+            else:
+                _open_charts = _mch.open_symbols()
+                self._open_charts_memo, self._open_charts_at = _open_charts, _now
         except Exception:
             _open_charts = set()
 
@@ -3355,13 +3372,16 @@ class DashboardWindow:
         1. körben a Minőség-oszlopot némán „—"-re állította)."""
         from core.params_store import params_file
         from strategy import get_strategy_by_name
-        p = params_file(symbol, name)
-        if not p.exists():
-            return None
-        try:
-            with open(p, encoding="utf-8") as f:
-                data = json.load(f)
-        except (OSError, ValueError):
+
+        def _load(path):
+            with open(path, encoding="utf-8") as f:
+                return json.load(f)
+
+        # ⚠ Gyorsítótáron át: ez a fő szál képfrissítési útja (lásd a
+        # `_DISPLAY_FS_CACHE` melletti megjegyzést). Enélkül soronként egy
+        # open()+json.load() futott 3 mp-enként.
+        data = _DISPLAY_FS_CACHE.get(params_file(symbol, name), _load)
+        if not isinstance(data, dict):
             return None
         txt, col, _reason = get_strategy_by_name(name).grade(
             data.get("test_summary", {}), self.cfg)
