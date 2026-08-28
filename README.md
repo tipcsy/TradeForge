@@ -350,7 +350,7 @@ python tests/run_all.py
 Egy teszt önmagában is futtatható (`python tests/test_gates.py`), és részhalmaz is
 szűrhető névtöredékkel (`python tests/run_all.py package`).
 
-### Miért nem 114/114 a CI-ben?
+### Miért nem 116/116 a CI-ben?
 
 13 teszt a saját `config.json`-odból, a `data/` mappádból vagy egy valódi képernyőből
 dolgozik — historikus parquet, optimalizált paraméterek, mentett készletek, illetve

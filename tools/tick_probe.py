@@ -20,7 +20,8 @@ Futtatás (a projekt gyökeréből, futó MT5 mellett):
 
     python tools/tick_probe.py
     python tools/tick_probe.py --symbols UsaTec,Ger40,GOLD,USDJPY
-    python tools/tick_probe.py --years 12 --keep     # a mintafájl maradjon meg
+    python tools/tick_probe.py --quick              # CSAK a tartomány (másodpercek)
+    python tools/tick_probe.py --keep               # a mintanapok maradjanak meg
 
 A `--keep` a letöltött mintanapokat a `data/ticks/<SYM>/` alá menti (a végleges
 formátumban) — így egyben a tároló-formátum próbája is.
@@ -50,9 +51,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)-8s %(message)s")
 log = logging.getLogger(__name__)
 
 TICK_DIR = ROOT / "data" / "ticks"
-PROBE_DAYS = 1          # ennyi napot kérünk le a "van-e itt tick?" próbához
 SAMPLE_DAYS = 5         # ennyi KERESKEDÉSI nap tickjéből mérünk
-MAX_EMPTY_YEARS = 3     # ennyi egymás utáni üres év után feladjuk
 
 
 def _ticks(sym: str, start: datetime, end: datetime, retries: int = 2):
@@ -76,36 +75,38 @@ def _ticks(sym: str, start: datetime, end: datetime, retries: int = 2):
     return None
 
 
-def _probe_window(sym: str, start: datetime, days: int = PROBE_DAYS) -> int:
-    """Hány tick van egy rövid ablakban? −1 = MT5-hiba (nem 'nincs adat')."""
-    t = _ticks(sym, start, start + timedelta(days=days))
-    if t is None:
-        err = mt5.last_error()
-        return -1 if err and err[0] != 0 else 0
-    return len(t)
+def earliest_tick(sym: str, attempts: int = 8) -> "datetime | None":
+    """A LEGKORÁBBI elérhető tick ideje.
 
+    ⚠ MÉRT VISELKEDÉS (2026-08-27). A tick-előzmény NINCS a gépen, amíg le nem
+    kéred. Az ELSŐ hívás elindítja a letöltést, ~90 mp-ig fut, majd `None`-nal és
+    „Terminal: Call failed"-del tér vissza. A MÁSODIK hívás (további ~65 mp) már
+    megkapja az adatot — RÉSZBEN már szinkronizált szimbólumon. HIDEG
+    szimbólumnál (UsaTec, UsaInd) 3 próbálkozás is kevés volt, ezért az
+    alapértelmezés 8 (~12 perc). Ez egyszeri költség szimbólumonként. Utána a történelmi napok 0,1 mp alatt jönnek — a szinkron
+    tehát EGYSZERI, szimbólumonkénti költség.
 
-def earliest_year(sym: str, max_years: int) -> "int | None":
-    """Melyik a legkorábbi év, ahol még van tick? Évente egy szerdai ablakkal
-    próbálkozunk visszafelé (a hétvége/ünnep üres lenne)."""
-    now = datetime.now(timezone.utc)
-    found, empty_streak = None, 0
-    for back in range(0, max_years + 1):
-        y = now.year - back
-        # március közepe: nincs ünnep-sűrűség, és minden piac nyitva
-        probe = datetime(y, 3, 12, tzinfo=timezone.utc)
-        if probe >= now:
-            probe = now - timedelta(days=30)
-        n = _probe_window(sym, probe)
-        if n > 0:
-            found, empty_streak = y, 0
-        elif n == 0:
-            empty_streak += 1
-            if empty_streak >= MAX_EMPTY_YEARS and found is not None:
-                break
-        else:
-            log.debug("%s %d — MT5 hiba a próbán", sym, y)
-    return found
+    Ezért próbálkozunk többször; ez NEM hibatűrés, hanem maga a letöltési
+    protokoll. Az első változat egyszer hívott, és ezért írt mindenhol „nincs"-et.
+
+    (Az évente visszafelé próbálgatás — 13 kérés/szimbólum — még rosszabb volt:
+    percekig fogta a terminált, és befagyasztotta a dashboardot.)"""
+    ep = datetime(1970, 1, 2, tzinfo=timezone.utc)
+    for i in range(attempts):
+        with mt5_connector.MT5_LOCK:
+            t = mt5.copy_ticks_from(sym, ep, 1, mt5.COPY_TICKS_ALL)
+        if t is not None and len(t):
+            names = t.dtype.names or ()
+            sec = (int(t["time_msc"][0]) / 1000.0 if "time_msc" in names
+                   else int(t["time"][0]))
+            try:
+                return datetime.fromtimestamp(sec, timezone.utc)
+            except (OSError, OverflowError, ValueError):
+                return None
+        if i < attempts - 1:
+            log.info("   %s — a terminál tölti a tick-előzményt… (%d/%d)",
+                     sym, i + 1, attempts - 1)
+    return None
 
 
 def _to_frame(ticks, point: float) -> pd.DataFrame:
@@ -148,7 +149,7 @@ def sample_days(sym: str, point: float, keep: bool, n_days: int = SAMPLE_DAYS) -
         return {"nap": 0, "tick_nap": 0}
 
     allf = pd.concat(frames, ignore_index=True)
-    out_dir = TICK_DIR / sym
+    out_dir = TICK_DIR / sym / "_minta"
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"minta_{len(per_day)}nap.parquet"
     allf.to_parquet(path, compression="zstd", index=False)
@@ -170,8 +171,9 @@ def main() -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--symbols", default="",
                     help="vesszős lista; elhagyva a config aktív párjai")
-    ap.add_argument("--years", type=int, default=12,
-                    help="ennyi évre visszamenőleg próbálkozzon (alap: 12)")
+    ap.add_argument("--quick", action="store_true",
+                    help="CSAK a legkorábbi tick ideje (szimbólumonként EGY hívás, "
+                         "másodpercek) — nem tölt le mintanapokat")
     ap.add_argument("--keep", action="store_true",
                     help="a letöltött mintahónap maradjon meg a data/ticks alatt")
     args = ap.parse_args()
@@ -197,14 +199,26 @@ def main() -> int:
             if point <= 0:
                 log.warning("%s — nincs érvényes point_size, kihagyva", sym)
                 continue
-            log.info("%s — tick-előzmény keresése…", sym)
-            y = earliest_year(sym, args.years)
+            first = earliest_tick(sym)
+            y = first.year if first else None
+            log.info("%s — legkorábbi tick: %s", sym,
+                     first.strftime("%Y-%m-%d") if first else "nincs")
+            if args.quick:
+                rows.append({"symbol": sym,
+                             "legkorabbi": first.strftime("%Y-%m-%d") if first else "—",
+                             "legkorabbi_ev": y or "—",
+                             "ev_szam": (datetime.now(timezone.utc).year - y + 1)
+                                        if y else 0,
+                             "minta_nap": 0, "tick_nap": 0, "byte_per_tick": 0.0,
+                             "MB_nap": 0.0, "GB_ev_becsult": 0.0})
+                continue
             log.info("%s — mintanapok letöltése…", sym)
             m = sample_days(sym, point, args.keep)
             # 252 kereskedési nap/év (a hétvégéket a napi minta már kihagyta)
             gb_ev = m.get("MB_nap", 0.0) * 252 / 1000
             rows.append({
                 "symbol": sym,
+                "legkorabbi": first.strftime("%Y-%m-%d") if first else "—",
                 "legkorabbi_ev": y if y else "—",
                 "ev_szam": (datetime.now(timezone.utc).year - y + 1) if y else 0,
                 "minta_nap": m["nap"],
@@ -215,7 +229,7 @@ def main() -> int:
             })
             r = rows[-1]
             log.info("%s — %s-tól · %s tick/nap (%d napból) · %.2f MB/nap · ~%.2f GB/év",
-                     sym, r["legkorabbi_ev"], f"{int(m['tick_nap']):,}", m["nap"],
+                     sym, r["legkorabbi"], f"{int(m['tick_nap']):,}", m["nap"],
                      m.get("MB_nap", 0.0), gb_ev)
 
         if not rows:
