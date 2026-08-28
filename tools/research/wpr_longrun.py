@@ -40,7 +40,12 @@ from strategy import get_strategy_by_name
 from strategy.settings import config_for_strategy
 from trading.backtest import run_pair
 
+# A strategia a parancssorbol valaszthato: --strat=<nev>. Alap: wpr_sma.
 STRAT = "wpr_sma"
+for _a in _sys.argv[1:]:
+    if _a.startswith("--strat="):
+        STRAT = _a.split("=", 1)[1]
+_sys.argv = [a for a in _sys.argv if not a.startswith("--strat=")]
 BALANCE = 1000.0
 
 
@@ -77,6 +82,12 @@ def run(sym):
 def main():
     pd.set_option("display.width", 220)
     syms = _sys.argv[1:] or ["GOLD", "UsaInd", "UsaTec", "Ger40"]
+    print(f"=== STRATEGIA: {STRAT} ===")
+    for s in syms:
+        f = ROOT / "data" / "optimized_params" / STRAT / f"{s}.json"
+        if f.exists():
+            j = json.loads(f.read_text(encoding="utf-8"))
+            print(f"   {s:8s} hangolva: {j.get('optimized_at','?')[:19]}")
     parts = []
     for s in syms:
         if not (ROOT / "data" / "m1" / f"{s}.parquet").exists():
@@ -128,7 +139,7 @@ def main():
     print(f"\n   Ahol MINDKET irany pozitiv: {len(both)}/{t.sym.nunique()} "
           f"{both if both else ''}")
 
-    out = ROOT / "data" / "wpr_longrun.csv"
+    out = ROOT / "data" / f"longrun_{STRAT}.csv"
     t.to_csv(out, index=False)
     print(f"\nkotes-szintu tabla: {out}")
 
