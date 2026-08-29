@@ -122,6 +122,13 @@ def default_config() -> dict:
     return {
         # ── BE + trailing (lásd BE_TRAIL_KEYS / be_trail_active) ──
         "breakeven_pct":        0.5,        # a TP hány %-ánál megy az SL a belépőre (0 = ki)
+        # ⚠ KÖLTSÉG-TUDATOS BREAKEVEN. A stop PONTOSAN a nyitóárra állítva a
+        # kötés árban nullán zár, de a jutalék+swap után MÍNUSZBAN — vagyis a
+        # "kockázatmentes" pozíció valójában kis veszteséget garantál. Ez a
+        # puffer (a spread hányszorosa, PONTBAN a hívó adja) a stopot annyival
+        # a nyitó FÖLÉ (BUY) / ALÁ (SELL) teszi, hogy tényleg 0 vagy kicsit
+        # pozitív legyen. 0.0 = a régi viselkedés, bitazonosan.
+        "be_buffer_points":     0.0,
         "trail_activation_atr": 0.5,        # ennyi ATR profit UTÁN indul a trailing
         "trail_distance_atr":   0.4,        # ennyi ATR-rel követ
         "trigger_R":        1.0,            # hány R-nél lép életbe a részleges zárás

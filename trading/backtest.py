@@ -302,12 +302,17 @@ def _update_stops(trade: "Trade", high: float, low: float, rr: dict,
     trail_dist = (rr.get("trail_distance_atr", 0.4) * _atr
                   * (RISKY_TRAIL_FACTOR if risky else 1.0))
 
+    # Költség-tudatos breakeven: a stop a nyitóár + puffer (BUY) / − puffer
+    # (SELL). Enélkül a "kockázatmentes" pozíció a jutalék+swap miatt kis
+    # MÍNUSZT garantál. 0.0 (alap) → a régi viselkedés bitazonosan.
+    _be_buf = float(rr.get("be_buffer_points", 0.0) or 0.0) * point_size
+
     if trade.direction == "BUY":
         if (risky or be_pct > 0) and not trade.risk_free:
             be_trigger = (trade.open_price if risky
                           else trade.open_price + (trade.tp - trade.open_price) * be_pct)
             if high >= be_trigger:
-                trade.sl = trade.open_price
+                trade.sl = trade.open_price + _be_buf
                 trade.risk_free = True
         if trade.risk_free and _trail_ok:
             trail_trigger = trade.open_price + trail_act      # ÁRban (ATR × szorzó)
@@ -320,7 +325,7 @@ def _update_stops(trade: "Trade", high: float, low: float, rr: dict,
             be_trigger = (trade.open_price if risky
                           else trade.open_price - (trade.open_price - trade.tp) * be_pct)
             if low <= be_trigger:
-                trade.sl = trade.open_price
+                trade.sl = trade.open_price - _be_buf
                 trade.risk_free = True
         if trade.risk_free and _trail_ok:
             trail_trigger = trade.open_price - trail_act      # ÁRban (ATR × szorzó)
