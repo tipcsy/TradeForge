@@ -50,8 +50,14 @@ import pandas as pd
 import signal_lib
 
 VAGAS = "2023-01-01"           # ez elott: kereses. ez utan: ERINTETLEN holdout.
-# A felfuto-el szuresse ~20x kevesebb belepot hagy, ezert a kuszob is kisebb.
-MIN_N = 150
+# ⚠ A KUSZOB TORTENETE (2026-08-29) — ne vidd vissza alacsonyra.
+# A felfuto-el szures ~20x-ara csokkentette a kotesszamot, ezert eloszor 150-re
+# vettem. Kovetkezmeny: 480 000 jeloltbol a legnagyobb tobbletet RENDSZERESEN a
+# legkisebb mintak adtak (a top jeloltek n_k-ja mind 153-244 volt, a kuszob
+# kozeleben) — nem mert jobbak, hanem mert zajosabbak. A GOLD-on ezek a
+# "nyertesek" a valodi motoron -0,31 R-t hoztak, 0/4 pozitiv.
+# 1000-nel kevesebb jelolt marad, de mind ERTEKELHETO.
+MIN_N = 1000
 
 
 def _t(v):
