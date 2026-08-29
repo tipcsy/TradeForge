@@ -50,7 +50,8 @@ import pandas as pd
 import signal_lib
 
 VAGAS = "2023-01-01"           # ez elott: kereses. ez utan: ERINTETLEN holdout.
-MIN_N = 300                    # ennyi kotes alatt nem ertekelunk
+# A felfuto-el szuresse ~20x kevesebb belepot hagy, ezert a kuszob is kisebb.
+MIN_N = 150
 
 
 def _t(v):
@@ -87,7 +88,9 @@ def fuss(sym: str, max_par: int = 400000):
     rng = np.random.default_rng(0)
 
     def ertekel(maszk, cimke, szint):
-        mk = maszk & kereso
+        # ⚠ CSAK A FELFUTO EL — lasd signal_lib.felfuto: allapoton belul
+        # atlagolva piac-idozitest mernenk, nem belepojelet.
+        mk = signal_lib.felfuto(maszk) & kereso
         idx = np.flatnonzero(mk)
         if len(idx) < MIN_N:
             return

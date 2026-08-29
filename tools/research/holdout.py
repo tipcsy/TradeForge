@@ -77,7 +77,9 @@ def ertekel(sym: str):
     hr, hn = [], []
     for cimke, irany in zip(t.mintazat, t.irany):
         try:
-            m = _maszk(cimke, A, E) & hold
+            # UGYANAZ a felfuto-el transzformacio, mint a keresesnel — kulonben
+            # a ket szakasz mast merne es az osszehasonlitas ertelmetlen lenne.
+            m = signal_lib.felfuto(_maszk(cimke, A, E)) & hold
         except KeyError:
             hr.append(np.nan); hn.append(0); continue
         idx = np.flatnonzero(m)

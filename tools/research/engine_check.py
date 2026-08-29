@@ -62,8 +62,12 @@ def fuss(sym: str, mintazat: str, irany: str, cfg, params, m15, m1,
 
 def main():
     sym = _sys.argv[1] if len(_sys.argv) > 1 else "UsaTec"
-    jeloltek = json.loads((ROOT / "data" / f"jeloltek_{sym}.json")
-                          .read_text(encoding="utf-8"))
+    _j = json.loads((ROOT / "data" / f"jeloltek_{sym}.json")
+                    .read_text(encoding="utf-8"))
+    # a jelolt lehet puszta string (regi alak) vagy {mintazat, irany} (uj)
+    jeloltek = [(d, "BUY") if isinstance(d, str)
+                else (d["mintazat"], "BUY" if d["irany"] == "long" else "SELL")
+                for d in _j]
     raw = json.loads((ROOT / "config.json").read_text(encoding="utf-8"))
     cfg = config_for_strategy(raw, "wpr_sma")      # a VAZ configja (kapuk, slot)
     params = {"sl_atr_mult": 1.5, "tp_rr_ratio": 2.0,
@@ -79,9 +83,9 @@ def main():
         print(f"   {'#':>2s} {'n':>5s} {'R/kotes':>9s} {'t':>7s} "
               f"{'netto$':>9s} {'poz.ev':>7s} {'swap$':>8s}")
         sorok = []
-        for i, mp in enumerate(jeloltek, 1):
+        for i, (mp, ir) in enumerate(jeloltek, 1):
             try:
-                s = fuss(sym, mp, "BUY", cfg, params, m15, m1, kapuk)
+                s = fuss(sym, mp, ir, cfg, params, m15, m1, kapuk)
             except Exception as e:
                 print(f"   {i:>2d} HIBA: {type(e).__name__}: {e}")
                 continue
@@ -89,7 +93,7 @@ def main():
                 print(f"   {i:>2d} (keves kotes)")
                 continue
             sorok.append(s)
-            print(f"   {i:>2d} {s['n']:>5d} {s['R']:>+9.4f} {s['t']:>+7.2f} "
+            print(f"   {i:>2d}{ir[0]} {s['n']:>5d} {s['R']:>+9.4f} {s['t']:>+7.2f} "
                   f"{s['netto$']:>+9.1f} {s['poz_ev']:>7s} {s['swap$']:>+8.1f}")
         if sorok:
             R = np.array([s["R"] for s in sorok])

@@ -48,6 +48,23 @@ def _x_up(a, b):
     return (pa <= pb) & (a > b)
 
 
+def felfuto(m: np.ndarray) -> np.ndarray:
+    """A maszk FELFUTO ELE: csak az a racspont, ahol IGAZZA valt.
+
+    ⚠ EZ A JAVITAS a 2026-08-29-i buktatora. A korabbi meres MINDEN olyan
+    racspontot ertekelt, ahol a mintazat igaz volt — ez viszont osszemosta a
+    "jo PILLANAT belepni" (belepojel) es a "jo IDOSZAK bent lenni"
+    (piac-idozites) kerdest. A valodi motoron ez bukott meg: az idoszakon
+    +0,029, a belepes pillanataban -0,022.
+
+    Ket okbol kell KOZOS fuggveny: (a) a kereses es a holdout ugyanazt kell
+    hogy merje, (b) nehany "esemeny"-nek nevezett jel valojaban ALLAPOT
+    (pl. `donchian_kitores_fel` = `c > elozo_csucs`, ami sok baron at igaz
+    marad) — ezeket ez a transzformacio teszi valodi esemennye.
+    """
+    return m & ~np.concatenate([[False], m[:-1]])
+
+
 def _allapotok(d: pd.DataFrame, p: int) -> dict:
     """ALLAPOT-jelek (nem esemeny): 'a piac EPPEN ilyen'.
 
