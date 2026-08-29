@@ -2781,7 +2781,10 @@ class DashboardWindow:
         self._signals_tab = SignalsTab(
             sig_frame, _TCSV,
             on_trade=self._signal_manual_trade,
-            price_of=self._signal_price_of)
+            price_of=self._signal_price_of,
+            digits_of=self._signal_digits_of,
+            lot_step_of=self._signal_lot_step_of,
+            max_age_hours=self._signal_max_age_hours)
 
         bt_frame = tk.Frame(self._notebook, bg=BG_BT)
         self._notebook.add(bt_frame, text="  Portfólió Backtest  ")
@@ -4999,7 +5002,45 @@ class DashboardWindow:
                       exc_info=True)
             return None
 
-    def _signal_manual_trade(self, row: dict):
+    def _signal_digits_of(self, symbol: str) -> int:
+        """Az ár tizedesjegyei. A `pairs.<sym>.point_size`-ból vezetjük le, mert
+        az MINDIG megvan (a `digits` csak élő MT5-kapcsolatnál). Bra50 →
+        point_size 0.01 → 2 tizedes; EURUSD → 0.00001 → 5."""
+        try:
+            ps = float((self.cfg["pairs"][symbol] or {})["point_size"])
+            if ps > 0:
+                import math
+                return max(0, min(8, int(round(-math.log10(ps)))))
+        except Exception:
+            pass
+        return 5
+
+    def _signal_lot_step_of(self, symbol: str):
+        """(min_lot, lépés, max_lot). A LÉPÉS a `min_lot` — a felhasználó kérése:
+        „mindig min_lottal növelje/csökkentse". Így a beállítható értékek mindig
+        a bróker által elfogadható rácson vannak."""
+        pc = (self.cfg.get("pairs") or {}).get(symbol) or {}
+        try:
+            mn = float(pc.get("min_lot") or 0.01)
+        except (TypeError, ValueError):
+            mn = 0.01
+        try:
+            mx = float(pc.get("max_lot") or (mn * 100.0))
+        except (TypeError, ValueError):
+            mx = mn * 100.0
+        return mn, mn, max(mn, mx)
+
+    def _signal_max_age_hours(self) -> float:
+        """Ennél régebbi jelzésre a Kötés gomb PASSZÍV.
+        `dashboard.signal_trade_max_age_hours`, alap 4 óra."""
+        try:
+            v = float((self.cfg.get("dashboard") or {})
+                      .get("signal_trade_max_age_hours", 4.0))
+            return v if v > 0 else 4.0
+        except (TypeError, ValueError):
+            return 4.0
+
+    def _signal_manual_trade(self, row: dict, lot: float | None = None):
         """A Jelzések fül „Kötés" gombja. Visszaad: `(ticket|None, üzenet)`.
 
         ⚠ A stop és a célár a jelzéskori TÁVOLSÁGBÓL, a MOSTANI árhoz igazítva
@@ -5016,7 +5057,8 @@ class DashboardWindow:
         if irany not in ("BUY", "SELL") or not sym:
             return None, "Hiányos jelzés-sor (instrumentum vagy irány)."
         try:
-            lot = float(row.get("lot"))
+            # a lotot a megerősítő ablak adja (ott állítható); ha nincs, a jelzésé
+            lot = float(lot) if lot is not None else float(row.get("lot"))
             jelzett = float(row.get("price"))
             sl0, tp0 = float(row.get("sl")), float(row.get("tp"))
         except (TypeError, ValueError):

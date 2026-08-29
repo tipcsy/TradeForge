@@ -48,7 +48,9 @@
     "countdown_timeframes": [
       15,
       1
-    ]
+    ],
+    "signal_trade_max_age_hours": 4,
+    "_comment_signal_age": "signal_trade_max_age_hours: a Jelzések fülön ennél régebbi jelzésre a Kötés gomb PASSZÍV. Egy fél napja kiadott belépő már nem ugyanaz a szetup — az ár és a piaci állapot is más. Alap: 4 óra."
   },
   "broker": {
     "_comment": "MT5 belépési adatok — a valós config.json-ban töltsd ki. is_demo=true amíg demón tesztelsz.",
@@ -93,7 +95,6 @@
   "licence": {
     "api_url": "https://licence.tipcsy.hu/api/v1"
   },
-
   "gates": {
     "_comment": "BELÉPŐ-KAPUK és a HATÁSUK, per (instrumentum × stratégia). A hatás: 'block' (nincs belépő) | 'reduce' (belép, de FELEZETT mérettel) | 'none' (a kapu nem szól bele). Öröklés (a legszűkebb nyer): pairs.<SYM>.gates.<kapu>.<stratégia> → pairs.<SYM>.gates.<kapu>.default → gates.<kapu>.<stratégia> → gates.<kapu>.default → beépített. A v1.97.0 óta a MOTOR is eszerint dönt (él + backtest + portfólió-backtest); korábban minden bekapcsolt kapu kemény blokk volt, a 'reduce' pedig csak kijelzés.",
     "_comment_market": "A piac-kapu akkor 'bukik', ha az aktuális besorolás benne van az 'adverse' listában (core/regime.py kategóriái: clean_bull, clean_bear, volatile_bull, volatile_bear, ranging, dead, uncertain, transition). Alap: dead + uncertain. Ez CSAK akkor számít, ha a piac-kapu hatását 'block'/'reduce'-ra állítod — alapból 'none'. FIGYELEM: a hatás beállítása önmagában kevés — a páron KI IS KELL VÁLASZTANI egy piac-előszűrőt (pairs.<SYM>.market_strategy), különben a kapunak nincs mit mérnie, és sosem tüzel. A config-ellenőrző szól, ha ez az állapot előáll.",
