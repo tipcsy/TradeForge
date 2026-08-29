@@ -957,6 +957,11 @@ _server_offset = {"v": None}
 _OFF_MAX = 14 * 3600          # a Föld legszélső időzónái
 _OFF_QUANT = 3600             # bróker-eltolás: egész óra
 _OFF_TOL = 180                # ennyi mp-en belül még „friss" a tick
+# Hány EGYBEHANGZÓ, a tárolttól távoli mérés után fogadjuk el az újat. Egy
+# valódi eltérés kitart, egy elavult tick szeszélye nem ismétlődik ugyanarra
+# az órára. 12 mérés ~1 perc (5 mp-es ciklusnál).
+_OFF_FAR_MIN = 12
+_off_far = {"ertek": None, "db": 0}
 
 
 def _offset_file():
@@ -1053,10 +1058,34 @@ def server_offset_sec(symbols) -> Optional[float]:
             # akkor hiszünk el, ha még nincs korábbi értékünk.
             _prev = _load_offset()
             if off is not None and _prev is not None and abs(off - _prev) > 3600:
-                log.warning("szerver-eltolás: a mért %+.0f óra túl messze az eddigi "
-                            "%+.0f órától (elavult tick?) — a régit tartjuk meg",
-                            off / 3600.0, _prev / 3600.0)
+                # ⚠ AZ ŐR ÖNGYÓGYÍTÓ ÁGA (2026-08-29). Az eredeti változat egy
+                # BERAGADT rossz értéket is örökre megvédett: a tárolt -13 óra
+                # (egy hétvégi elavult tickből, ami véletlenül egész óra közelébe
+                # esett) 15 órával tévedett, és a helyes +2 órás mérést a saját
+                # őre dobta el — másodpercenként egy WARNING kíséretében.
+                #
+                # Egy VALÓDI eltérés (rossz tárolt érték, bróker-költözés) KITART;
+                # egy elavult tick szeszélye NEM. Ezért: N egybehangzó mérés után
+                # elfogadjuk az újat. A napló pedig ritkítva szól, nem 5 mp-enként.
+                if off == _off_far["ertek"]:
+                    _off_far["db"] += 1
+                else:
+                    _off_far["ertek"], _off_far["db"] = off, 1
+                if _off_far["db"] >= _OFF_FAR_MIN:
+                    log.warning("szerver-eltolás: a mért %+.0f óra %d egybehangzó "
+                                "mérés után FELÜLÍRJA a tárolt %+.0f órát",
+                                off / 3600.0, _off_far["db"], _prev / 3600.0)
+                    _off_far["ertek"], _off_far["db"] = None, 0
+                    _server_offset["v"] = off
+                    _save_offset(off)
+                    return off
+                if _off_far["db"] == 1 or _off_far["db"] % 60 == 0:
+                    log.warning("szerver-eltolás: a mért %+.0f óra túl messze az "
+                                "eddigi %+.0f órától (elavult tick?) — a régit "
+                                "tartjuk meg [%d. mérés]",
+                                off / 3600.0, _prev / 3600.0, _off_far["db"])
                 return _prev
+            _off_far["ertek"], _off_far["db"] = None, 0
             if off is not None:
                 if off != _server_offset["v"]:
                     _server_offset["v"] = off
