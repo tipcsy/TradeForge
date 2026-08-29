@@ -1,0 +1,97 @@
+{
+  "_comment": "A trend_pullback stratégia SAJÁT beállításai. A holdout-kereséssel talált minta: erős H1 trendben (ár a Keltner felső sávja fölött), élénk M30 volatilitás mellett (ATR > 200-as átlaga) egy M5 stochastic visszahúzódásra vásárolunk. CSAK LONG — a short irányt a kutatás külön mérte és nem működött.",
+
+  "quality": {
+    "_comment": "Minősítési küszöbök. A min_trades MÉRT érték (lásd wpr_sma.json): 50 alatt a PF zaja akkora, hogy semmitől nem véd.",
+    "min_trades": 50,
+    "maxdd_mid": 0.18,
+    "maxdd_weak": 0.25,
+    "maxdd_bad": 0.35,
+    "pf_mid": 1.4,
+    "pf_weak": 1.2,
+    "pf_bad": 1.0,
+    "winrate_weak": 0.35,
+    "winrate_good": 0.45
+  },
+
+  "indicators": {
+    "_comment": "A három feltétel paraméterei. Az IDŐKERETEK (M5 belépő / M30 volatilitás / H1 trend) NEM paraméterek — a keresés ezeken találta, és a kombináció együtt érvényes.",
+    "stoch_period": 14,
+    "stoch_d": 3,
+    "atr_ref_period": 200,
+    "keltner_period": 14,
+    "keltner_mult": 2.0
+  },
+
+  "sltp": {
+    "_comment": "ATR-alapú SL/TP: SL = M15 ATR × sl_atr_mult, TP = SL × tp_rr_ratio. Az atr_period a KÖZÖS execution configban van (core/execution_params.py).",
+    "sl_atr_mult": 1.5,
+    "tp_rr_ratio": 2.0
+  },
+
+  "position_mgmt": {
+    "_comment": "⚠ A BELÉPÉS UTÁNI dolgok NEM ezé a modulé. A mérésben talált legjobb kilépés — breakeven a TP 50%-ánál 3× spread pufferrel (be_buffer_points), trailing KI, cost_cut 24 M15 gyertyánál — a KOCKÁZATCSÖKKENTŐ modulé (core/risk_reduction.py + data/risk_mode.json, per pár). Itt csak emlékeztetőül szerepel."
+  },
+
+  "optimizer": {
+    "_comment": "Óvatos tartományok a mért érték körül. A stoch_period és a keltner_mult a jel LÉNYEGE — széles tartomány itt illesztéshez vezet, nem javuláshoz.",
+    "ranges": {
+      "stoch_period":    {"min": 9,   "max": 21,  "step": 1},
+      "stoch_d":         {"min": 3,   "max": 5,   "step": 1},
+      "atr_ref_period":  {"min": 100, "max": 300, "step": 50},
+      "keltner_period":  {"min": 10,  "max": 20,  "step": 2},
+      "keltner_mult":    {"min": 1.5, "max": 2.5, "step": 0.25},
+      "sl_atr_mult":     {"min": 1.0, "max": 2.5, "step": 0.25},
+      "tp_rr_ratio":     {"min": 1.5, "max": 3.0, "step": 0.25}
+    },
+    "constraints": []
+  },
+
+  "param_meta": {
+    "_comment": "A Paraméterek ablak csoportosítása + megjegyzései.",
+    "categories": [
+      "Belépő – M5",
+      "Volatilitás – M30",
+      "Trend – H1",
+      "SL / TP",
+      "Egyéb"
+    ],
+    "params": {
+      "stoch_period": {
+        "recompute": "signal",
+        "category": "Belépő – M5",
+        "comment": "M5 stochastic periódus — a %K keresztezi LEFELÉ a %D-t = visszahúzódás"
+      },
+      "stoch_d": {
+        "recompute": "signal",
+        "category": "Belépő – M5",
+        "comment": "A stochastic %D (jelvonal) simítása"
+      },
+      "atr_ref_period": {
+        "recompute": "signal",
+        "category": "Volatilitás – M30",
+        "comment": "Az M30 ATR-átlag hossza. A belépő csak akkor él, ha az aktuális ATR e fölött van (élénk piac)"
+      },
+      "keltner_period": {
+        "recompute": "signal",
+        "category": "Trend – H1",
+        "comment": "A H1 Keltner-csatorna periódusa (EMA + ATR)"
+      },
+      "keltner_mult": {
+        "recompute": "signal",
+        "category": "Trend – H1",
+        "comment": "A csatorna szélessége ATR-ben. Az ár a FELSŐ sáv fölött = erős emelkedő trend"
+      },
+      "sl_atr_mult": {
+        "recompute": "exec",
+        "category": "SL / TP",
+        "comment": "A stop az M15 ATR ennyiszerese"
+      },
+      "tp_rr_ratio": {
+        "recompute": "exec",
+        "category": "SL / TP",
+        "comment": "A célár a stop-táv ennyiszerese (R)"
+      }
+    }
+  }
+}

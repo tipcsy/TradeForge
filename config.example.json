@@ -8,7 +8,8 @@
     "wpr_sma": true,
     "ml_ai": true,
     "bollinger_squeeze_breakout": false,
-    "candle_level_break": false
+    "candle_level_break": false,
+    "trend_pullback": false
   },
   "_comment_available_strategies": "A programban ELÉRHETŐVÉ tett stratégiák — a strategy/ csomag automatikusan felderített moduljainak ki-be kapcsolója. true = a program felkínálja (per-pár választó) és oszlopot képez belőle a dashboardon; false = nem is látszik. A dashboardon a ⚙ Beállítás ablakból állítható, és MINDIG ide íródik vissza a TELJES készlet — a kikapcsoltak is —, hogy a fájlból kiderüljön, mi LÉTEZIK (nem csak az, mi tér el az alapértelmezéstől). Az oszlop-változás újraindítás után látszik. A régi LISTA alak (whitelist) változatlanul olvasható. Kihagyva/üresen = az ÖSSZES regisztrált. Egy frissen hozzáadott, itt még nem szereplő stratégia alapból ELÉRHETŐ — kikapcsolni kifejezetten kell (false).",
   "tf_align": {
