@@ -2774,6 +2774,15 @@ class DashboardWindow:
             range_provider=self._closed_in_range,
             risk_provider=self._closed_risk)
 
+        sig_frame = tk.Frame(self._notebook, bg=BG)
+        self._notebook.add(sig_frame, text="  Jelzések  ")
+        from dashboard.signals_tab import SignalsTab
+        from trading.live_trader import TRADES_CSV as _TCSV
+        self._signals_tab = SignalsTab(
+            sig_frame, _TCSV,
+            on_trade=self._signal_manual_trade,
+            price_of=self._signal_price_of)
+
         bt_frame = tk.Frame(self._notebook, bg=BG_BT)
         self._notebook.add(bt_frame, text="  Portfólió Backtest  ")
         self._bt_tab = PortfolioBacktestTab(bt_frame, cfg, mono_font, small_font, header_font)
@@ -4975,6 +4984,74 @@ class DashboardWindow:
         self.optimizer_status.pop(symbol, None)
         self._apply_filter_sort()
 
+    # ── Jelzések fül: kézi kötés ──────────────────────────────────────────
+    def _signal_price_of(self, symbol: str):
+        """(bid, ask) a mostani árból — a megerősítő ablak ebből mutatja, mennyit
+        mozdult az ár a jelzés óta. None, ha nincs kapcsolat."""
+        try:
+            import MetaTrader5 as _mt5
+            from core.mt5_connector import MT5_LOCK
+            with MT5_LOCK:
+                t = _mt5.symbol_info_tick(symbol)
+            return (float(t.bid), float(t.ask)) if t else None
+        except Exception:
+            log.debug("A jelzés-ár lekérdezése elbukott (%s)", symbol,
+                      exc_info=True)
+            return None
+
+    def _signal_manual_trade(self, row: dict):
+        """A Jelzések fül „Kötés" gombja. Visszaad: `(ticket|None, üzenet)`.
+
+        ⚠ A stop és a célár a jelzéskori TÁVOLSÁGBÓL, a MOSTANI árhoz igazítva
+        megy ki. Egy régi jelzés ABSZOLÚT stopja ma más kockázatot jelentene: a
+        stratégiából a TÁVOLSÁG jön (ATR × szorzó), nem a szint — így a kötés
+        1 R-je ugyanaz marad, mint amit a jel tervezett.
+
+        A megbízást a `live_trader.open_position()` küldi — UGYANAZ az út, amit a
+        motor használ (csúszás-tűrés, kitöltési mód, naplózás). Nincs második
+        kötés-implementáció, ami elcsúszhatna tőle."""
+        from trading import live_trader as _lt
+        sym = str(row.get("symbol") or "")
+        irany = str(row.get("direction") or "")
+        if irany not in ("BUY", "SELL") or not sym:
+            return None, "Hiányos jelzés-sor (instrumentum vagy irány)."
+        try:
+            lot = float(row.get("lot"))
+            jelzett = float(row.get("price"))
+            sl0, tp0 = float(row.get("sl")), float(row.get("tp"))
+        except (TypeError, ValueError):
+            return None, "A jelzés-sor ára / SL / TP / lot nem szám."
+        if lot <= 0:
+            return None, "A jelzésben nincs érvényes lot."
+
+        ar = self._signal_price_of(sym)
+        if not ar:
+            return None, "Nincs élő ár (MT5 kapcsolat?)."
+        belepo = ar[1] if irany == "BUY" else ar[0]
+
+        sl_tav, tp_tav = abs(jelzett - sl0), abs(tp0 - jelzett)
+        if sl_tav <= 0:
+            return None, "A jelzés stop-távolsága nulla."
+        if irany == "BUY":
+            sl, tp = belepo - sl_tav, belepo + tp_tav
+        else:
+            sl, tp = belepo + sl_tav, belepo - tp_tav
+
+        strat = str(row.get("strategy") or "")
+        try:
+            magic = int(row.get("magic"))
+        except (TypeError, ValueError):
+            magic = 0
+        ticket = _lt.open_position(sym, irany, lot, sl, tp, magic,
+                                   comment="ErikBot-kezi", strategy_name=strat)
+        if ticket:
+            log.info("Kézi kötés a Jelzések fülről: %s %s lot=%.2f SL=%.5g "
+                     "TP=%.5g (a jelzés ideje: %s)", sym, irany, lot, sl, tp,
+                     row.get("time"))
+            return ticket, ""
+        return None, ("A megbízás nem ment ki — a részletes ok (retcode) a "
+                      "naplóban.")
+
     def _closed_in_range(self, date_from, date_to) -> list:
         """LEZÁRT pozíciók egy dátum-intervallumra (a „Lezárt" fül tól–ig nézete).
 
@@ -6396,6 +6473,11 @@ class DashboardWindow:
                 pass
 
         # Lezárt (ma) fül frissítése
+        if hasattr(self, "_signals_tab"):
+            try:
+                self._signals_tab.refresh()
+            except Exception:
+                log.debug("A Jelzések fül frissítése elbukott", exc_info=True)
         if hasattr(self, "_closed_tab"):
             try:
                 self._closed_tab.refresh()
