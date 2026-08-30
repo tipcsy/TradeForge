@@ -155,6 +155,27 @@ def t(key: str, **kw) -> str:
         return s
 
 
+def num(s: str) -> str:
+    """ANGOL alakban megformázott szám → az aktív nyelv írásmódja.
+
+    Bemenet az, amit a Python ad (`f"{v:,.2f}"` → `1,234.50`), kimenet a nyelv
+    szerinti (`1 234,50` magyarul). Két kulcs vezérli: `number.group` és
+    `number.decimal`.
+
+    ⚠ MIÉRT KELL KÖZÖS HELYRE. Ez eddig tucatnyi ponton így nézett ki:
+    `.replace(",", NBSP).replace(".", ",")` — vagyis a MAGYAR írásmód be volt
+    drótozva a kijelzésbe. Angol felületen `1 234,50` jelent volna meg: nem hiba,
+    nem is olvashatatlan, csak épp következetesen rossz, és tizenkét helyen
+    kellett volna észrevenni."""
+    grp = _load(language()).get("number.group",
+                                _load(BASE_LANG).get("number.group", " "))
+    dec = _load(language()).get("number.decimal",
+                                _load(BASE_LANG).get("number.decimal", ","))
+    # ⚠ Két lépésben, jelölőn át: egy naiv `replace(",", grp)` után a
+    # `replace(".", dec)` visszahozhatná a vesszőt, és `1,234,50` lenne belőle.
+    return s.replace(",", "\x00").replace(".", dec).replace("\x00", grp)
+
+
 def has(key: str) -> bool:
     """Van-e ilyen kulcs (bármelyik katalógusban)? A kód-kulcs ↔ címke
     leképezéseknek kell, ahol a hiány csendes visszaesést jelentene."""

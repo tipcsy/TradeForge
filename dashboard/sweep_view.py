@@ -19,6 +19,7 @@ megépíteni: a puszta „legjobb érték" szám ezt eltakarja.
 A rajz tk.Canvas-on készül (nincs külső függőség), a színek a témából jönnek.
 """
 from __future__ import annotations
+from core.i18n import num as _num
 
 import logging
 
@@ -30,7 +31,7 @@ PAD_L, PAD_R, PAD_T, PAD_B = 62, 16, 18, 34
 def _nice(v: float) -> str:
     if v == int(v):
         return f"{int(v)}"
-    return f"{v:g}".replace(".", ",")
+    return _num(f"{v:g}")
 
 
 def _lerp(a, b, t):

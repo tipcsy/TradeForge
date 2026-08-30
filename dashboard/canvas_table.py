@@ -27,6 +27,7 @@ formázóival. A renderelő cseréje nem változtathat azon, ami a képernyőn v
 """
 
 from __future__ import annotations
+from core.i18n import t as _t
 
 import tkinter as tk
 
@@ -88,7 +89,7 @@ def groups(strategies, collapsed: dict = None) -> list:
         else:
             out.append((_lab, [f"{n}|{k}" for k in
                                ("stages", "position", "daily", "quality", "ctrl", "opt")], n))
-    out.append(("Összesítő", ["total_pos", "total_daily"], None))
+    out.append((_t("table.total"), ["total_pos", "total_daily"], None))
     return out
 
 
@@ -325,12 +326,13 @@ class CanvasTable:
                 sp = _cols.x_of(self._cols, "badge")
                 if sp:
                     t = hc.create_text(sp[0] - x0 + sp[1] / 2, self._h / 2,
-                                       text="▸ K.Ö.", fill=FG_GRAY_DIM, font=f_small)
+                                       text=_t("table.gates_short"),
+                                       fill=FG_GRAY_DIM, font=f_small)
                     hc.tag_bind(t, "<Button-1>", lambda _e: self._toggle("gates"))
             # 2. sor: oszlopnevek (kattintva rendez)
             for key, x, w in self._by_pane[pane]:
                 base = _cols.base_key(key)
-                label = _lr._HEADER_TEXT.get(base, "")
+                label = _lr.header_text(base)
                 if not label:
                     continue
                 mark = ""

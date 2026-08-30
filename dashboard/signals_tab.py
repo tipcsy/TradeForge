@@ -30,6 +30,8 @@ teszi láthatatlanná, nem a törlés.
 
 from __future__ import annotations
 
+from core.i18n import t as _t, num as _num
+
 import tkinter as tk
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -89,8 +91,7 @@ class SignalsTab:
 
         top = tk.Frame(p, bg=BG)
         top.pack(fill="x", padx=10, pady=(8, 2))
-        tk.Label(top, text="Kiküldött jelzések  (a „csak jelzés” módú "
-                           "stratégiáktól)",
+        tk.Label(top, text=_t("signals.title"),
                  bg=BG, fg=FG_WHITE, font=self._header).pack(side="left")
         self._lbl_info = tk.Label(top, text="—", bg=BG, fg=FG_GRAY,
                                   font=self._header)
@@ -100,8 +101,8 @@ class SignalsTab:
         sel = tk.Frame(p, bg=BG)
         sel.pack(fill="x", padx=10, pady=(0, 4))
         self._range_var = tk.StringVar(value="today")
-        for val, txt in (("today", "Ma"), ("7", "7 nap"), ("30", "30 nap"),
-                         ("custom", "Tól–ig:")):
+        for val, txt in (("today", _t("range.today")), ("7", _t("range.7d")),
+                         ("30", _t("range.30d")), ("custom", _t("range.custom"))):
             tk.Radiobutton(sel, text=txt, value=val, variable=self._range_var,
                            bg=BG, fg=FG_WHITE, selectcolor=BG_HEADER,
                            activebackground=BG, activeforeground=FG_WHITE,
@@ -114,15 +115,18 @@ class SignalsTab:
             tk.Entry(sel, textvariable=v, width=11, bg=BG_HEADER, fg=FG_WHITE,
                      font=self._small, insertbackground=FG_WHITE,
                      relief="flat").pack(side="left", padx=2)
-        tk.Button(sel, text="Betölt", bg=BG_HEADER, fg=FG_WHITE, relief="flat",
+        tk.Button(sel, text=_t("range.load"), bg=BG_HEADER, fg=FG_WHITE, relief="flat",
                   font=self._small, padx=8,
                   command=self._ujratolt).pack(side="left", padx=6)
         self._lbl_hiba = tk.Label(sel, text="", bg=BG, fg=FG_RED,
                                   font=self._small)
         self._lbl_hiba.pack(side="left", padx=6)
 
-        self._oszlopok = [("Idő", 17), ("Kor", 10), ("Instrumentum", 13),
-                          ("Stratégia", 20), ("Irány", 7), ("Jelzett ár", 13),
+        self._oszlopok = [(_t("signals.col.time"), 17), (_t("signals.col.age"), 10),
+                          (_t("signals.col.symbol"), 13),
+                          (_t("signals.col.strategy"), 20),
+                          (_t("signals.col.dir"), 7),
+                          (_t("signals.col.price"), 13),
                           ("SL", 13), ("TP", 13), ("Lot", 7), ("", 10)]
         fej = tk.Frame(p, bg=BG_HEADER)
         fej.pack(fill="x", padx=10)
@@ -162,7 +166,7 @@ class SignalsTab:
             return []
         tart = self._idoszak()
         if tart is None:
-            self._lbl_hiba.config(text="hibás dátum (ÉÉÉÉ-HH-NN)")
+            self._lbl_hiba.config(text=_t("range.bad_date"))
             return []
         self._lbl_hiba.config(text="")
         tol, ig = tart
@@ -196,30 +200,28 @@ class SignalsTab:
         sorok = self._olvas()
 
         if not sorok:
-            uzenet = ("Ebben az időszakban nincs jelzés.\n\n"
-                      "A „csak jelzés” módú stratégiák jelei jelennek meg itt — "
-                      "a kötés-módúak a Pozíciók fülön.")
+            uzenet = _t("signals.empty")
             tk.Label(self._inner, text=uzenet, bg=BG, fg=FG_GRAY_DIM,
                      font=self._small,
                      justify="left").pack(anchor="w", padx=12, pady=20)
-            self._lbl_info.config(text="0 jelzés")
+            self._lbl_info.config(text=_t("signals.count", n=0))
             return
 
         for i, r in enumerate(sorok):
             self._sor(i, r)
-        self._lbl_info.config(text=f"{len(sorok)} jelzés")
+        self._lbl_info.config(text=_t("signals.count", n=len(sorok)))
 
     def _kor_frissit(self, ido, lbl, gomb):
         perc = _kor_perc(ido)
         if perc == float("inf"):
             szoveg, szin = "—", FG_GRAY_DIM
         elif perc < 60:
-            szoveg, szin = f"{perc:.0f} perce", (
+            szoveg, szin = _t("age.min", n=f"{perc:.0f}"), (
                 FG_GREEN if perc <= FRISS_PERC else FG_YELLOW)
         elif perc < 60 * 24:
-            szoveg, szin = f"{perc/60:.1f} órája", FG_GRAY_DIM
+            szoveg, szin = _t("age.hour", n=_num(f"{perc/60:.1f}")), FG_GRAY_DIM
         else:
-            szoveg, szin = f"{perc/1440:.0f} napja", FG_GRAY_DIM
+            szoveg, szin = _t("age.day", n=f"{perc/1440:.0f}"), FG_GRAY_DIM
         if lbl is not None:
             lbl.config(text=szoveg, fg=szin)
         if gomb is not None:
@@ -256,7 +258,7 @@ class SignalsTab:
 
         gomb = None
         if self._on_trade is not None:
-            gomb = tk.Button(keret, text="Kötés", font=self._small,
+            gomb = tk.Button(keret, text=_t("signals.trade"), font=self._small,
                              bg=BG_HEADER, fg=FG_YELLOW, relief="flat", padx=8,
                              command=lambda rr=r: self._kotes_ablak(rr))
             gomb.pack(side="left", padx=2)
@@ -296,8 +298,7 @@ class SignalsTab:
             sl0, tp0 = float(r.get("sl")), float(r.get("tp"))
             lot0 = float(r.get("lot"))
         except (TypeError, ValueError):
-            messagebox.showerror("Kézi kötés",
-                                 "A jelzés-sor ára / SL / TP / lot nem szám.",
+            messagebox.showerror(_t("manual.title"), _t("manual.bad_row"),
                                  parent=self.parent)
             return
         most = None
@@ -307,7 +308,7 @@ class SignalsTab:
             most = None
 
         w = tk.Toplevel(self.parent)
-        w.title("Kézi kötés")
+        w.title(_t("manual.title"))
         w.configure(bg=BG)
         w.transient(self.parent.winfo_toplevel())
         w.resizable(False, False)
@@ -316,8 +317,8 @@ class SignalsTab:
                  fg=FG_GREEN if irany == "BUY" else FG_RED).pack(
                      anchor="w", padx=14, pady=(12, 0))
         perc = _kor_perc(r.get("time"))
-        tk.Label(w, text=f"{r.get('strategy','')}  ·  a jelzés "
-                         f"{perc:.0f} perce érkezett",
+        tk.Label(w, text=_t("manual.head", strategy=r.get("strategy", ""),
+                            min=f"{perc:.0f}"),
                  bg=BG, fg=FG_GRAY, font=self._small).pack(anchor="w", padx=14)
 
         info = tk.Frame(w, bg=BG)
@@ -326,17 +327,19 @@ class SignalsTab:
         if most:
             belepo = most[1] if irany == "BUY" else most[0]
             elt = (belepo - jelzett) / jelzett * 100.0 if jelzett else 0.0
-            tk.Label(info, text=f"jelzéskor: {jelzett:.{dig}f}      "
-                                f"most: {belepo:.{dig}f}   ({elt:+.2f}%)",
+            tk.Label(info, text=_t("manual.prices",
+                                   signal=_num(f"{jelzett:.{dig}f}"),
+                                   now=_num(f"{belepo:.{dig}f}"),
+                                   diff=_num(f"{elt:+.2f}")),
                      bg=BG, fg=FG_WHITE, font=self._mono).pack(anchor="w")
         else:
-            tk.Label(info, text="A mostani ár nem elérhető (MT5 kapcsolat?).",
+            tk.Label(info, text=_t("manual.no_price"),
                      bg=BG, fg=FG_RED, font=self._small).pack(anchor="w")
 
         # lot-léptető: min_lot lépésekben
         lotf = tk.Frame(w, bg=BG)
         lotf.pack(fill="x", padx=14, pady=(0, 6))
-        tk.Label(lotf, text="Lot:", bg=BG, fg=FG_WHITE,
+        tk.Label(lotf, text=_t("manual.lot"), bg=BG, fg=FG_WHITE,
                  font=self._small).pack(side="left")
         lot_var = tk.StringVar(value=f"{max(lot0, min_lot):.2f}")
         tk.Spinbox(lotf, from_=min_lot, to=max_lot, increment=lepes,
@@ -344,7 +347,8 @@ class SignalsTab:
                    bg=BG_HEADER, fg=FG_WHITE, buttonbackground=BG_HEADER,
                    insertbackground=FG_WHITE,
                    relief="flat").pack(side="left", padx=6)
-        tk.Label(lotf, text=f"(lépés {lepes:g}, min {min_lot:g})", bg=BG,
+        tk.Label(lotf, text=_t("manual.lot_step", step=_num(f"{lepes:g}"),
+                               min=_num(f"{min_lot:g}")), bg=BG,
                  fg=FG_GRAY_DIM, font=self._small).pack(side="left")
 
         lbl_terv = tk.Label(w, text="", bg=BG, fg=FG_GRAY, font=self._mono,
@@ -361,10 +365,9 @@ class SignalsTab:
                 sl, tp = belepo - sl_tav, belepo + tp_tav
             else:
                 sl, tp = belepo + sl_tav, belepo - tp_tav
-            lbl_terv.config(
-                text=f"kimenő SL: {sl:.{dig}f}      TP: {tp:.{dig}f}\n"
-                     f"(a jelzéskori TÁVOLSÁGOK a mostani árhoz igazítva —\n"
-                     f" így az 1 R ugyanaz marad, mint amit a jel tervezett)")
+            lbl_terv.config(text=_t("manual.plan",
+                                    sl=_num(f"{sl:.{dig}f}"),
+                                    tp=_num(f"{tp:.{dig}f}")))
         lot_var.trace_add("write", _terv)
         _terv()
 
@@ -375,34 +378,37 @@ class SignalsTab:
             try:
                 lot = float(lot_var.get())
             except ValueError:
-                messagebox.showerror("Kézi kötés", "A lot nem szám.", parent=w)
+                messagebox.showerror(_t("manual.title"), _t("manual.lot_nan"),
+                                     parent=w)
                 return
             if lot < min_lot:
-                messagebox.showerror("Kézi kötés",
-                                     f"A lot nem lehet kisebb, mint {min_lot:g}.",
-                                     parent=w)
+                messagebox.showerror(_t("manual.title"),
+                                     _t("manual.lot_min",
+                                        min=_num(f"{min_lot:g}")), parent=w)
                 return
             w.destroy()
             try:
                 ticket, uzenet = self._on_trade(r, lot)
             except Exception as ex:
-                messagebox.showerror("Kézi kötés",
-                                     f"Hiba: {type(ex).__name__}: {ex}",
+                messagebox.showerror(_t("manual.title"),
+                                     _t("manual.failed",
+                                        type=type(ex).__name__, error=ex),
                                      parent=self.parent)
                 return
             if ticket:
-                messagebox.showinfo("Kézi kötés", f"Megnyitva — ticket {ticket}",
+                messagebox.showinfo(_t("manual.title"),
+                                    _t("manual.opened", ticket=ticket),
                                     parent=self.parent)
             else:
-                messagebox.showerror("Kézi kötés",
-                                     uzenet or "A megbízás nem ment ki.",
+                messagebox.showerror(_t("manual.title"),
+                                     uzenet or _t("manual.not_sent"),
                                      parent=self.parent)
             self._ujratolt()
 
-        tk.Button(gombok, text="Mégsem", command=w.destroy, bg=BG_HEADER,
+        tk.Button(gombok, text=_t("btn.cancel2"), command=w.destroy, bg=BG_HEADER,
                   fg=FG_WHITE, font=self._small, relief="flat",
                   padx=12).pack(side="right", padx=4)
-        tk.Button(gombok, text="Küldés", command=_kuld, bg=BG_HEADER,
+        tk.Button(gombok, text=_t("manual.send"), command=_kuld, bg=BG_HEADER,
                   fg=FG_YELLOW, font=self._small, relief="flat",
                   padx=12).pack(side="right", padx=4)
         w.grab_set()

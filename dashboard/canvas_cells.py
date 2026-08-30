@@ -20,6 +20,7 @@ A cella-fajták (`kind`) a rajzolónak szólnak:
 """
 
 from __future__ import annotations
+from core.i18n import t as _t
 
 from dashboard import live_row as _lr
 from dashboard.theme import (FG_WHITE, FG_GREEN, FG_RED, FG_GRAY, FG_GRAY_DIM)
@@ -179,9 +180,7 @@ def cells_for(d: dict, collapsed: dict, on_close=None) -> dict:
         # mutatott, tehát késznek látszott.
         _tip = ""
         if not st.get("enabled", True):
-            _tip = (f"A(z) „{n}” nincs bekapcsolva ezen a páron — a motor "
-                    f"sosem futtatja." + chr(10) + "Bekapcsolás: kattints az "
-                    f"instrumentum NEVÉRE a sor elején, majd pipáld be a stratégiát.")
+            _tip = _t("strategy.disabled_tip", name=n)
         out[f"{n}|ctrl"] = Cell(f"{n}|ctrl", kind="ctrl", tip=_tip, parts=[
             ("run", run_txt, run_fg, st.get("on_toggle"),
              bool(st.get("enabled", True))),

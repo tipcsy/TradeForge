@@ -68,10 +68,17 @@ bad_keys = sorted(k for k in base_keys if not _KEY_RE.match(k))
 check("minden kulcs a konvenciot koveti (<terulet>.<elem>, kisbetu)",
       not bad_keys, ", ".join(bad_keys[:5]))
 
+# ⚠ A `number.*` kivetel: az ezres elvalaszto magyarul NEM TORO SZOKOZ, tehat
+# szandekosan „ures" a `.strip()` szemeben. Ha ezt nem vennenk ki, a helyes
+# ertek buktatna a tesztet — es a javitas az lenne, hogy elrontjuk.
 for code in i18n.LANGUAGES:
     empty = sorted(k for k, v in raw(code).items()
-                   if not k.startswith("_") and isinstance(v, str) and not v.strip())
+                   if not k.startswith("_") and isinstance(v, str)
+                   and not v.strip() and not k.startswith("number."))
     check(f"{code}: nincs ures szoveg", not empty, ", ".join(empty[:5]))
+check("a magyar ezres elvalaszto NEM TORO szokoz",
+      raw("hu")["number.group"] == " ",
+      repr(raw("hu")["number.group"]))
 
 # ⚠ A HELYKITOLTOK NYELVENKENT AZONOSAK. Egy elgepelt `{trade}` a `{trades}`
 # helyett nem hibauzenet, hanem egy nyers kapcsos zarojel a kepernyon.

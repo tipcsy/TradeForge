@@ -16,6 +16,7 @@ tag-eket ragaszt — nem lehet benne elrejtett logika.
 """
 
 from __future__ import annotations
+from core.i18n import t as _t
 
 import re
 
@@ -275,7 +276,7 @@ def render(parent, md: str, source: "str | None" = None):
     txt.config(state="disabled")      # olvasható, de nem szerkeszthető
 
     if source:
-        tk.Label(holder, text=f"Forrás: {source}", bg=_th.BG, fg=_th.FG_GRAY_DIM,
+        tk.Label(holder, text=_t("docs.source", source=source), bg=_th.BG, fg=_th.FG_GRAY_DIM,
                  font=F["small"], anchor="w").pack(fill="x", padx=10, pady=(0, 6))
     return holder
 
@@ -290,7 +291,7 @@ def show(parent, title: str, md: str, source: "str | None" = None):
     popup.title(title)
     popup.configure(bg=_th.BG)
     popup.geometry("760x620")
-    tk.Button(popup, text="Bezárás", bg=_th.BTN_DIS_BG, fg=_th.BTN_DIS_FG,
+    tk.Button(popup, text=_t("btn.close"), bg=_th.BTN_DIS_BG, fg=_th.BTN_DIS_FG,
               relief="flat", font=_th.fonts()["small"],
               command=popup.destroy).pack(side="bottom", anchor="e",
                                           padx=10, pady=8)

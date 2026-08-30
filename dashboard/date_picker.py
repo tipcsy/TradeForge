@@ -16,11 +16,18 @@ import tkinter as tk
 from dashboard.theme import (BG, BG_HEADER, FG_WHITE, FG_GRAY, FG_GRAY_DIM,
                              FG_BLUE, BTN_BT_BG, BTN_BT_FG)
 
+from core.i18n import t as _t
+
 log = logging.getLogger(__name__)
 
-_MONTHS_HU = ["", "január", "február", "március", "április", "május", "június",
-              "július", "augusztus", "szeptember", "október", "november", "december"]
-_WD_HU = ["H", "K", "Sze", "Cs", "P", "Szo", "V"]   # hétfő-kezdet
+def _month_name(m: int) -> str:
+    return _t(f"date.month.{m}")
+
+
+def _weekdays() -> list:
+    """A napok rövidítése, HÉTFŐ-kezdettel. Egy kulcsban, szóközzel tagolva:
+    így a fordító egyben látja a hetet, és nem csúszhat el a sorrend."""
+    return _t("date.weekdays").split()
 
 
 class CalendarPopup(tk.Toplevel):
@@ -35,7 +42,7 @@ class CalendarPopup(tk.Toplevel):
         self._hi      = hi
         self._font    = font
         self._sel     = initial            # datetime.date | None
-        self.title("Dátum")
+        self.title(_t("date.title"))
         self.configure(bg=BG_HEADER)
         self.resizable(False, False)
 
@@ -80,10 +87,10 @@ class CalendarPopup(tk.Toplevel):
         self._render()
 
     def _render(self):
-        self._hdr.config(text=f"{self._vy}. {_MONTHS_HU[self._vm]}")
+        self._hdr.config(text=f"{self._vy}. {_month_name(self._vm)}")
         for w in self._days.winfo_children():
             w.destroy()
-        for i, wd in enumerate(_WD_HU):
+        for i, wd in enumerate(_weekdays()):
             tk.Label(self._days, text=wd, width=3, bg=BG_HEADER, fg=FG_GRAY,
                      **self._f()).grid(row=0, column=i, padx=1, pady=1)
         cal = calendar.Calendar(firstweekday=0)   # hétfő

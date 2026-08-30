@@ -210,6 +210,7 @@ class GateDialog:
         self._f = _theme.fonts()
         self._vars = {}          # paraméter-kulcs → tk változó (vagy dict MULTI-nál)
         self._eff_vars = {}      # stratégia → tk.StringVar (hatás)
+        self._eff_by_label = {}
         self._mode_vars = {}     # stratégia → tk.StringVar (mód — csak a Lendületnél)
 
         self.top = tk.Toplevel(parent)
@@ -278,7 +279,7 @@ class GateDialog:
             return
         load, _save = _STORE.get(self.key, (None, None))
         cur = load(self.cfg, self.symbol) if load else {}
-        box = _section(self._page, "Beállítások")
+        box = _section(self._page, _t("gate.section.settings"))
         for spec in specs:
             val = cur.get(spec.key, spec.default)
             self._build_one(box, spec, val)
@@ -337,11 +338,21 @@ class GateDialog:
     # ── HATÁS stratégiánként ─────────────────────────────────────────────
     def _inherited_label(self, name: str) -> str:
         inh, _src = _g.inherited_effect(self.cfg, self.symbol, name, self.key)
-        return f"Örökölt ({_g.EFFECT_LABEL[inh]})"
+        return _t("gate.effect.inherited", effect=_g.EFFECT_LABEL[inh])
 
     def _effect_choices(self, name: str) -> list:
-        return [self._inherited_label(name)] + \
-               [_g.EFFECT_LABEL[e] for e in _g.EFFECTS]
+        """A legördülő feliratai — és a FELIRAT → KÓD leképezés eltéve.
+
+        ⚠ Az „Örökölt" sort korábban a felirat ELŐTAGJA azonosította
+        (`txt.startswith("Örökölt")`). Lefordítva ez sosem talált volna: a
+        mentés az öröklés visszavonása helyett egy konkrét hatást írt volna a
+        configba — csendben, rossz értékkel."""
+        labels = [self._inherited_label(name)] + \
+                 [_g.EFFECT_LABEL[e] for e in _g.EFFECTS]
+        self._eff_by_label[name] = {labels[0]: None}
+        for e in _g.EFFECTS:
+            self._eff_by_label[name][_g.EFFECT_LABEL[e]] = e
+        return labels
 
     def _has_override(self, name: str) -> bool:
         pg = ((self.cfg.get("pairs") or {}).get(self.symbol) or {}).get("gates") or {}
@@ -356,17 +367,12 @@ class GateDialog:
         # szűrést — a némán hatástalan beállítás pont az, amit ez a projekt a
         # legrosszabbnak tart. Ezért a választó helyett MEGMONDJUK, hol lakik.
         if _g.is_display_only(self.key):
-            box = _section(self._page, "Hatás")
-            tk.Label(box, text=(
-                "Ez az oszlop MUTAT, nem dönt — nincs állítható hatása.\n"
-                "A szűrés a stratégia belépő-kapujában történik "
-                "(atr_min_pct / atr_max_pct, a Piac-szűrő kategóriában).\n"
-                "Ott állítsd, ne itt: így a backtest, a viz és az él ugyanazt "
-                "a szűrést végzi."),
+            box = _section(self._page, _t("gate.section.effect"))
+            tk.Label(box, text=_t("gate.display_only"),
                 bg=BG, fg=FG_GRAY, font=self._f["small"], anchor="w",
                 justify="left", wraplength=560).pack(anchor="w", pady=(4, 0))
             return
-        box = _section(self._page, "Mi történjen, ha a kapu blokkoló állapotban van")
+        box = _section(self._page, _t("gate.section.when_blocking"))
         grid = tk.Frame(box, bg=BG)
         grid.pack(fill="x", pady=(4, 0))
         for i, name in enumerate(self.strategies):
@@ -412,8 +418,7 @@ class GateDialog:
         _foot = tk.Frame(self.top, bg=BG)
         _foot.pack(side="bottom", fill="x")
         tk.Checkbutton(_foot,
-                       text="Az összes instrumentumra vonatkozzon "
-                            "(felülírja a többi pár saját beállítását)",
+                       text=_t("gate.all_symbols"),
                        variable=self._all_var, bg=BG, fg=FG_WHITE,
                        selectcolor=BG_HEADER, font=self._f["small"],
                        activebackground=BG, activeforeground=FG_WHITE).pack(
@@ -424,10 +429,10 @@ class GateDialog:
         self.lbl_err.pack(anchor="w", padx=12, pady=(6, 0))
         bar = tk.Frame(_foot, bg=BG)
         bar.pack(fill="x", padx=12, pady=12)
-        tk.Button(bar, text="Mentés", command=self._save, bg=BTN_PLAY_BG,
+        tk.Button(bar, text=_t("btn.save"), command=self._save, bg=BTN_PLAY_BG,
                   fg=BTN_PLAY_FG, font=self._f["small"], bd=0,
                   padx=14, pady=4).pack(side="left")
-        tk.Button(bar, text="Mégse", command=self.top.destroy, bg=BTN_DIS_BG,
+        tk.Button(bar, text=_t("btn.cancel"), command=self.top.destroy, bg=BTN_DIS_BG,
                   fg=BTN_DIS_FG, font=self._f["small"], bd=0,
                   padx=14, pady=4).pack(side="left", padx=8)
 
@@ -454,8 +459,8 @@ class GateDialog:
         if errors:
             # RÉSZLEGES mentés SOHA: a fele beállítás elmenne, a másik fele nem,
             # és utána semmi nem mondaná meg, melyik melyik.
-            self.lbl_err.config(text="Nem mentettem — javítsd:\n• "
-                                     + "\n• ".join(errors))
+            self.lbl_err.config(text=_t("save.errors",
+                                        list="\n• ".join(errors)))
             return
         targets = self._all_symbols if self._all_var.get() else [self.symbol]
         try:
@@ -464,7 +469,7 @@ class GateDialog:
                 save(self.cfg, self.symbol, values, targets)
             self._save_effects(targets)
         except Exception as ex:
-            self.lbl_err.config(text=f"Mentési hiba: {ex}")
+            self.lbl_err.config(text=_t("save.error", error=ex))
             return
         if self.on_saved:
             self.on_saved()
@@ -485,7 +490,7 @@ class GateDialog:
                 txt = sv.get()
                 gates = pc.setdefault("gates", {})
                 gg = gates.setdefault(self.key, {})
-                if txt.startswith("Örökölt"):
+                if self._eff_by_label.get(name, {}).get(txt, "?") is None:
                     gg.pop(name, None)
                 else:
                     eff = by_label.get(txt)

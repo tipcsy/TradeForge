@@ -34,6 +34,8 @@ a `tkinter` is csak a betű-méréshez kell (`fonts[...].measure`).
 
 from __future__ import annotations
 
+from core.i18n import t as _t
+
 from dashboard.theme import (FG_WHITE, FG_GREEN, FG_RED, FG_GRAY, FG_GRAY_DIM,
                              FG_BLUE, FG_ORANGE, FG_YELLOW)
 
@@ -68,7 +70,10 @@ _SAMPLE = {
     "badge": ("mono", "⛔9"),
     # ⚠ A minta a BETUT is tartalmazza („V"/„J" a pottyok elott): enelkul a
     # betu kilogna a cellabol, vagy raszorulna a pottyokre.
-    "stages": ("mono", "V ●●●●"), "quality": ("small", "Közepes"),
+    "stages": ("mono", "V ●●●●"),
+    # A minta a mostani nyelv minősítés-szava — angolul rövidebb, tehát
+    # az oszlop is keskenyebb lehet.
+    "quality": ("small", _t("quality.mid")),
     "ctrl": ("small", "■ OPT"), "opt": ("small", "99/99"),
     "position": ("mono", "+9999.99$ +99.99R"),
     "daily": ("mono", "+9999.99$ +99.99R"),
@@ -103,15 +108,25 @@ def pnl_mode(collapsed: dict) -> str:
 # A FEJLÉC szövegei — az oszlop szélességét ezek is meghatározzák. (Első
 # változatban kimaradtak, és a mérés emiatt levágta a „K.Össz." és a „Vezérlés"
 # feliratot: a fejléc is tartalom.)
-_HEADER_TEXT = {
-    "symbol": "Symbol", "bid": "BID", "ask": "ASK", "change": "Vált.%",
-    "spread": "Spread", "align": "Együtt", "market": "Piac",
-    "momentum": "Lendület", "cost": "Költség",
-    "volatility": "Volat.×",
-    "badge": "K.Össz.", "stages": "jelzés", "position": "Pozíció",
-    "daily": "Napi P&L", "quality": "Min.", "ctrl": "Vezérlés", "opt": "Opt",
-    "total_pos": "Pozíció", "total_daily": "Napi P&L", "close": "",
+# ⚠ A SZAKSZAVAK NEM FORDULNAK: a „Symbol", „BID", „ASK", „Spread", „Opt"
+# minden nyelven ugyanaz — lefordítva nem világosabb, csak szokatlan.
+_HEADER_KEYS = {
+    "change": "col.change", "align": "col.align", "market": "col.market",
+    "momentum": "col.momentum", "cost": "col.cost",
+    "volatility": "col.volatility", "badge": "col.badge",
+    "stages": "col.stages", "position": "col.position", "daily": "col.daily",
+    "quality": "col.quality", "ctrl": "col.ctrl",
+    "total_pos": "col.position", "total_daily": "col.daily",
 }
+_HEADER_FIXED = {"symbol": "Symbol", "bid": "BID", "ask": "ASK",
+                 "spread": "Spread", "opt": "Opt", "close": ""}
+
+
+def header_text(key: str) -> str:
+    """Oszlop-kulcs → fejlécszöveg az aktív nyelven (szakszó esetén változatlan)."""
+    if key in _HEADER_FIXED:
+        return _HEADER_FIXED[key]
+    return _t(_HEADER_KEYS[key]) if key in _HEADER_KEYS else ""
 
 
 def _mode_mark(st: dict) -> tuple:
@@ -211,7 +226,7 @@ def widths(fonts: dict, strategy_names=(), collapsed: dict = None) -> dict:
             txt = _PNL_SAMPLE[mode]
         # A fejlec-felirat a RENDEZES-JELZOT is viselheti (" ▲") — enelkul az
         # aktiv oszlop feliratanak vege levagodna.
-        head = _HEADER_TEXT.get(k, "")
+        head = header_text(k)
         w = max(fonts[fkey].measure(txt),
                 small.measure(head + " ▲") if head else 0)
         out[k] = w + 2 * PAD

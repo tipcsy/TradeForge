@@ -140,8 +140,8 @@ check("a leiras a valodi meressel indokol", "0,51" in g.doc_text(g.VOLATILITY))
 from dashboard import live_row as lr             # noqa: E402
 # A fejlec mondja meg, MIHEZ kepest merunk: az „×" jelzi, hogy ez ARANY (a
 # kalibralt mercehez), nem abszolut ATR.
-check("van fejlec-szovege", (lr._HEADER_TEXT.get("volatility") or "").startswith("Volat."),
-      lr._HEADER_TEXT.get("volatility"))
+check("van fejlec-szovege", (lr.header_text("volatility") or "").startswith("Volat."),
+      lr.header_text("volatility"))
 check("van szelesseg-mintaja", "volatility" in lr._SAMPLE)
 
 print()

@@ -63,5 +63,119 @@
   "opt.multi": "Opt: {parts}",
 
   "lang.label": "Nyelv",
-  "lang.restart_note": "A nyelv a program újraindítása után változik meg."
+  "lang.restart_note": "A nyelv a program újraindítása után változik meg.",
+
+  "col.change": "Vált.%",
+  "col.align": "Együtt",
+  "col.market": "Piac",
+  "col.momentum": "Lendület",
+  "col.cost": "Költség",
+  "col.volatility": "Volat.×",
+  "col.badge": "K.Össz.",
+  "col.stages": "jelzés",
+  "col.position": "Pozíció",
+  "col.daily": "Napi P&L",
+  "col.quality": "Min.",
+  "col.ctrl": "Vezérlés",
+
+  "date.month.1": "január",
+  "date.month.2": "február",
+  "date.month.3": "március",
+  "date.month.4": "április",
+  "date.month.5": "május",
+  "date.month.6": "június",
+  "date.month.7": "július",
+  "date.month.8": "augusztus",
+  "date.month.9": "szeptember",
+  "date.month.10": "október",
+  "date.month.11": "november",
+  "date.month.12": "december",
+  "date.weekdays": "H K Sze Cs P Szo V",
+  "date.title": "Dátum",
+
+  "trials.empty": "Még nincs eredmény ehhez a párhoz és stratégiához.\n\nVárt fájl:  {path}\n\nAz optimalizálás menet közben, 10 trialonként írja — tehát futás közben is meg lehet nézni.",
+  "trials.filter": "Szűrés:",
+  "trials.open_csv": "CSV megnyitása",
+
+  "docs.source": "Forrás: {source}",
+
+  "btn.close": "Bezárás",
+  "btn.save": "Mentés",
+  "btn.cancel": "Mégse",
+  "btn.cancel2": "Mégsem",
+
+  "table.total": "Összesítő",
+  "table.gates_short": "▸ K.Ö.",
+
+  "strategy.disabled_tip": "A(z) „{name}” nincs bekapcsolva ezen a páron — a motor sosem futtatja.\nBekapcsolás: kattints az instrumentum NEVÉRE a sor elején, majd pipáld be a stratégiát.",
+
+  "common.filter": "Szűrés:",
+  "common.all": "mind",
+
+  "trades.reason.tp": "Célár",
+  "trades.reason.sl": "Stop",
+  "trades.reason.sl_free": "Stop (BE/trail)",
+  "trades.reason.exit": "Kiszállási jel",
+  "trades.reason.cut": "Cost-cut (idő)",
+  "trades.reason.open": "nyitva",
+
+  "trades.outcome.win": "nyerő",
+  "trades.outcome.loss": "vesztő",
+
+  "trades.summary.empty": "nincs megjelenített kötés",
+  "trades.summary.line": "{n} kötés · {wins} nyerő ({pct}%) · {pnl}$",
+  "trades.summary.avg_r": " · átlag {r}R",
+  "trades.empty_run": "Még nincs futás — indítsd el fent, és ide kerülnek a kötések tételesen.",
+
+  "number.group": " ",
+  "number.decimal": ",",
+
+  "save.errors": "Nem mentettem — javítsd:\n• {list}",
+  "save.error": "Mentési hiba: {error}",
+
+  "gate.section.settings": "Beállítások",
+  "gate.section.effect": "Hatás",
+  "gate.section.when_blocking": "Mi történjen, ha a kapu blokkoló állapotban van",
+
+  "gate.effect.inherited": "Örökölt ({effect})",
+  "gate.display_only": "Ez az oszlop MUTAT, nem dönt — nincs állítható hatása.\nA szűrés a stratégia belépő-kapujában történik (atr_min_pct / atr_max_pct, a Piac-szűrő kategóriában).\nOtt állítsd, ne itt: így a backtest, a viz és az él ugyanazt a szűrést végzi.",
+  "gate.all_symbols": "Az összes instrumentumra vonatkozzon (felülírja a többi pár saját beállítását)",
+
+  "range.today": "Ma",
+  "range.7d": "7 nap",
+  "range.30d": "30 nap",
+  "range.custom": "Tól–ig:",
+  "range.load": "Betölt",
+  "range.bad_date": "hibás dátum (ÉÉÉÉ-HH-NN)",
+
+  "age.min": "{n} perce",
+  "age.hour": "{n} órája",
+  "age.day": "{n} napja",
+
+  "signals.title": "Kiküldött jelzések  (a „csak jelzés” módú stratégiáktól)",
+
+  "signals.col.time": "Idő",
+  "signals.col.age": "Kor",
+  "signals.col.symbol": "Instrumentum",
+  "signals.col.strategy": "Stratégia",
+  "signals.col.dir": "Irány",
+  "signals.col.price": "Jelzett ár",
+  "signals.empty": "Ebben az időszakban nincs jelzés.\n\nA „csak jelzés” módú stratégiák jelei jelennek meg itt — a kötés-módúak a Pozíciók fülön.",
+  "signals.count": "{n} jelzés",
+  "signals.trade": "Kötés",
+
+  "manual.title": "Kézi kötés",
+  "manual.bad_row": "A jelzés-sor ára / SL / TP / lot nem szám.",
+  "manual.head": "{strategy}  ·  a jelzés {min} perce érkezett",
+  "manual.prices": "jelzéskor: {signal}      most: {now}   ({diff}%)",
+  "manual.no_price": "A mostani ár nem elérhető (MT5 kapcsolat?).",
+  "manual.lot": "Lot:",
+  "manual.lot_step": "(lépés {step}, min {min})",
+  "manual.plan": "kimenő SL: {sl}      TP: {tp}\n(a jelzéskori TÁVOLSÁGOK a mostani árhoz igazítva —\n így az 1 R ugyanaz marad, mint amit a jel tervezett)",
+  "manual.lot_nan": "A lot nem szám.",
+  "manual.lot_min": "A lot nem lehet kisebb, mint {min}.",
+  "manual.failed": "Hiba: {type}: {error}",
+  "manual.opened": "Megnyitva — ticket {ticket}",
+  "manual.not_sent": "A megbízás nem ment ki.",
+  "manual.send": "Küldés"
 }

@@ -29,7 +29,7 @@ tesztelhető), a `build()` pedig csak a megjelenítés.
 
 from __future__ import annotations
 
-from core.i18n import t as _t
+from core.i18n import t as _t, num as _num
 
 # A tábla oszlopai — a sorrend a KÉRDÉSEK sorrendje: mikor · merre · hol be/ki ·
 # mennyi · mennyi kockázathoz képest · MIÉRT ért véget.
@@ -57,14 +57,44 @@ def col_label(col: str) -> str:
 
 # A zárás okának EMBERI neve. A kulcs a `Trade.status`; az `sl` kettéválik a
 # `risk_free` szerint (lásd a modul fejlécét).
-REASON = {
-    "tp":       "Célár",
-    "sl":       "Stop",
-    "sl_free":  "Stop (BE/trail)",
-    "exit":     "Kiszállási jel",
-    "cut":      "Cost-cut (idő)",
-    "open":     "nyitva",
-}
+#
+# ⚠ A KULCS a `Trade.status` KÓDJA, a szöveg csak kijelzés — a szűrő ezért a
+# kódra szűr, nem a feliratra (a visszafejtést lásd a `build`-ben).
+REASON_CODES = ("tp", "sl", "sl_free", "exit", "cut", "open")
+
+
+def reason_label(code: str) -> str:
+    return _t(f"trades.reason.{code}") if code in REASON_CODES else str(code)
+
+
+class _ReasonMap(dict):
+    """`REASON[kód]` visszafelé kompatibilis alak — mindig az AKTÍV nyelven.
+
+    ⚠ Miért nem egy sima dict: a katalógus a nyelvváltással változik, egy
+    modul-betöltéskor kiszámolt szótár pedig befagyna. (Ma a váltás úgyis
+    újraindítást igényel, de egy befagyott szótár a tesztekben és az
+    előnézetben CSENDBEN a régi nyelvet mutatná.)"""
+
+    def __missing__(self, k):
+        return reason_label(k)
+
+    def __iter__(self):
+        return iter(REASON_CODES)
+
+    def keys(self):
+        return REASON_CODES
+
+    def items(self):
+        return [(k, reason_label(k)) for k in REASON_CODES]
+
+    def values(self):
+        return [reason_label(k) for k in REASON_CODES]
+
+    def get(self, k, default=None):
+        return reason_label(k) if k in REASON_CODES else default
+
+
+REASON = _ReasonMap()
 
 # A szűrő-sáv választható okai (a „mind" mellett). Sorrend = gyakoriság.
 REASON_KEYS = ("tp", "sl", "sl_free", "exit", "cut")
@@ -133,11 +163,11 @@ def fmt(col: str, v) -> str:
     if kind == KIND_TEXT:
         return REASON.get(v, v) if col == "reason" else str(v)
     if kind == KIND_PRICE:
-        return f"{float(v):,.2f}".replace(",", NBSP).replace(".", ",")
+        return _num(f"{float(v):,.2f}")
     if kind == KIND_MONEY:
-        return f"{float(v):+,.2f}".replace(",", NBSP).replace(".", ",")
+        return _num(f"{float(v):+,.2f}")
     if kind == KIND_R:
-        return f"{float(v):+.2f}".replace(".", ",")
+        return _num(f"{float(v):+.2f}")
     return str(v)
 
 
@@ -198,15 +228,15 @@ def summary_line(rows: list) -> str:
     „csak Stop" szűrő be van kapcsolva, a lényeg épp az, hogy AZOK mennyit
     visznek — az összes kötés összege máshol (a metrika-sávon) ott van."""
     if not rows:
-        return "nincs megjelenített kötés"
+        return _t("trades.summary.empty")
     n = len(rows)
     wins = sum(1 for r in rows if r.get("_win"))
     pnl = sum(float(r.get("pnl") or 0.0) for r in rows)
     rs = [float(r["r"]) for r in rows if r.get("r") is not None]
-    txt = (f"{n} kötés · {wins} nyerő ({wins / n * 100:.0f}%) · "
-           f"{pnl:+,.0f}$".replace(",", NBSP))
+    txt = _t("trades.summary.line", n=n, wins=wins,
+             pct=f"{wins / n * 100:.0f}", pnl=_num(f"{pnl:+,.0f}"))
     if rs:
-        txt += f" · átlag {sum(rs) / len(rs):+.2f}R".replace(".", ",")
+        txt += _t("trades.summary.avg_r", r=_num(f"{sum(rs) / len(rs):+.2f}"))
     return txt
 
 
@@ -258,14 +288,21 @@ def build(parent, fonts, theme=None, on_export=None):
     # ── Szűrő-sáv ───────────────────────────────────────────────────────────
     bar = tk.Frame(wrap, bg=BG)
     bar.pack(fill="x", padx=10, pady=(6, 4))
-    tk.Label(bar, text="Szűrés:", bg=BG, fg=FG_GRAY, font=sf).pack(side="left",
-                                                                   padx=(0, 6))
-    _dir = tk.StringVar(value="mind")
-    _out = tk.StringVar(value="mind")
-    _rsn = tk.StringVar(value="mind")
-    for _var, _vals, _w in ((_dir, ("mind", "BUY", "SELL"), 6),
-                            (_out, ("mind", "nyerő", "vesztő"), 8),
-                            (_rsn, ("mind",) + tuple(REASON[k] for k in REASON_KEYS),
+    tk.Label(bar, text=_t("common.filter"), bg=BG, fg=FG_GRAY, font=sf).pack(
+        side="left", padx=(0, 6))
+    # ⚠ A legördülők FELIRATOT mutatnak, a szűrés KÓDON megy — a visszafejtést
+    # a `_refilter` végzi. Amíg a kettő egy volt, a „nyerő"/„vesztő" szó maga
+    # volt a szűrőfeltétel: lefordítva egyik sem talált volna, és a lista
+    # CSENDBEN szűretlen maradt volna.
+    _ALL = _t("common.all")
+    _out_labels = {"win": _t("trades.outcome.win"), "loss": _t("trades.outcome.loss")}
+    _dir = tk.StringVar(value=_ALL)
+    _out = tk.StringVar(value=_ALL)
+    _rsn = tk.StringVar(value=_ALL)
+    for _var, _vals, _w in ((_dir, (_ALL, "BUY", "SELL"), 6),
+                            (_out, (_ALL,) + tuple(_out_labels.values()), 8),
+                            (_rsn, (_ALL,) + tuple(reason_label(k)
+                                                   for k in REASON_KEYS),
                              16)):
         cb = ttk.Combobox(bar, textvariable=_var, values=list(_vals), width=_w,
                           state="readonly", font=sf)
@@ -313,8 +350,7 @@ def build(parent, fonts, theme=None, on_export=None):
 
     _EMPTY = tk.Label(wrap, bg=BG, fg=FG_GRAY_DIM, font=sf, anchor="w",
                       justify="left",
-                      text="Még nincs futás — indítsd el fent, és ide kerülnek "
-                           "a kötések tételesen.")
+                      text=_t("trades.empty_run"))
 
     def _redraw():
         tree.delete(*tree.get_children())
@@ -328,12 +364,12 @@ def build(parent, fonts, theme=None, on_export=None):
             _EMPTY.pack(anchor="w", padx=12, pady=(0, 8))
 
     def _refilter(*_a):
-        _r = {v: k for k, v in REASON.items()}.get(_rsn.get(), "")
+        _r = next((k for k in REASON_KEYS if reason_label(k) == _rsn.get()), "")
+        _o = next((c for c, lbl in _out_labels.items() if lbl == _out.get()), "")
         state["rows"] = sort_rows(
             apply_filters(state["all"],
-                          "" if _dir.get() == "mind" else _dir.get(),
-                          {"nyerő": "win", "vesztő": "loss"}.get(_out.get(), ""),
-                          "" if _rsn.get() == "mind" else _r),
+                          "" if _dir.get() == _ALL else _dir.get(), _o,
+                          "" if _rsn.get() == _ALL else _r),
             state["sort"], state["desc"])
         _redraw()
 

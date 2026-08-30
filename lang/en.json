@@ -63,5 +63,119 @@
   "opt.multi": "Opt: {parts}",
 
   "lang.label": "Language",
-  "lang.restart_note": "The language changes after restarting the program."
+  "lang.restart_note": "The language changes after restarting the program.",
+
+  "col.change": "Chg.%",
+  "col.align": "Align",
+  "col.market": "Market",
+  "col.momentum": "Momentum",
+  "col.cost": "Cost",
+  "col.volatility": "Volat.×",
+  "col.badge": "Gates",
+  "col.stages": "signal",
+  "col.position": "Position",
+  "col.daily": "Daily P&L",
+  "col.quality": "Qual.",
+  "col.ctrl": "Control",
+
+  "date.month.1": "January",
+  "date.month.2": "February",
+  "date.month.3": "March",
+  "date.month.4": "April",
+  "date.month.5": "May",
+  "date.month.6": "June",
+  "date.month.7": "July",
+  "date.month.8": "August",
+  "date.month.9": "September",
+  "date.month.10": "October",
+  "date.month.11": "November",
+  "date.month.12": "December",
+  "date.weekdays": "Mo Tu We Th Fr Sa Su",
+  "date.title": "Date",
+
+  "trials.empty": "No results yet for this pair and strategy.\n\nExpected file:  {path}\n\nThe optimiser writes it every 10 trials while running — so you can look at it mid-run.",
+  "trials.filter": "Filter:",
+  "trials.open_csv": "Open CSV",
+
+  "docs.source": "Source: {source}",
+
+  "btn.close": "Close",
+  "btn.save": "Save",
+  "btn.cancel": "Cancel",
+  "btn.cancel2": "Cancel",
+
+  "table.total": "Totals",
+  "table.gates_short": "▸ Gates",
+
+  "strategy.disabled_tip": "„{name}” is not enabled on this pair — the engine never runs it.\nTo enable: click the instrument NAME at the start of the row, then tick the strategy.",
+
+  "common.filter": "Filter:",
+  "common.all": "all",
+
+  "trades.reason.tp": "Target",
+  "trades.reason.sl": "Stop",
+  "trades.reason.sl_free": "Stop (BE/trail)",
+  "trades.reason.exit": "Exit signal",
+  "trades.reason.cut": "Cost-cut (time)",
+  "trades.reason.open": "open",
+
+  "trades.outcome.win": "winners",
+  "trades.outcome.loss": "losers",
+
+  "trades.summary.empty": "no trades shown",
+  "trades.summary.line": "trades: {n} · won: {wins} ({pct}%) · {pnl}$",
+  "trades.summary.avg_r": " · avg {r}R",
+  "trades.empty_run": "No run yet — start one above and every trade will be listed here.",
+
+  "number.group": ",",
+  "number.decimal": ".",
+
+  "save.errors": "Not saved — please fix:\n• {list}",
+  "save.error": "Save failed: {error}",
+
+  "gate.section.settings": "Settings",
+  "gate.section.effect": "Effect",
+  "gate.section.when_blocking": "What should happen while the gate is blocking",
+
+  "gate.effect.inherited": "Inherited ({effect})",
+  "gate.display_only": "This column SHOWS, it does not decide — it has no adjustable effect.\nThe filtering happens in the strategy's entry gate (atr_min_pct / atr_max_pct, under the Market filter category).\nSet it there, not here: that way the backtest, the visualisation and live trading all filter the same way.",
+  "gate.all_symbols": "Apply to every instrument (overrides the other pairs' own settings)",
+
+  "range.today": "Today",
+  "range.7d": "7 days",
+  "range.30d": "30 days",
+  "range.custom": "From–to:",
+  "range.load": "Load",
+  "range.bad_date": "invalid date (YYYY-MM-DD)",
+
+  "age.min": "{n} min ago",
+  "age.hour": "{n} h ago",
+  "age.day": "{n} d ago",
+
+  "signals.title": "Signals sent  (from strategies in „signal only” mode)",
+
+  "signals.col.time": "Time",
+  "signals.col.age": "Age",
+  "signals.col.symbol": "Instrument",
+  "signals.col.strategy": "Strategy",
+  "signals.col.dir": "Side",
+  "signals.col.price": "Signalled px",
+  "signals.empty": "No signals in this period.\n\nSignals from strategies in „signal only” mode show up here — the trading ones are on the Positions tab.",
+  "signals.count": "{n} signals",
+  "signals.trade": "Trade",
+
+  "manual.title": "Manual trade",
+  "manual.bad_row": "The signal row's price / SL / TP / lot is not a number.",
+  "manual.head": "{strategy}  ·  the signal arrived {min} min ago",
+  "manual.prices": "at signal: {signal}      now: {now}   ({diff}%)",
+  "manual.no_price": "The current price is not available (MT5 connection?).",
+  "manual.lot": "Lot:",
+  "manual.lot_step": "(step {step}, min {min})",
+  "manual.plan": "outgoing SL: {sl}      TP: {tp}\n(the DISTANCES from the signal, re-anchored to the current price —\n so 1 R stays what the signal planned)",
+  "manual.lot_nan": "The lot is not a number.",
+  "manual.lot_min": "The lot cannot be smaller than {min}.",
+  "manual.failed": "Error: {type}: {error}",
+  "manual.opened": "Opened — ticket {ticket}",
+  "manual.not_sent": "The order was not sent.",
+  "manual.send": "Send"
 }

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import csv
 import logging
+from core.i18n import t as _t, num as _num
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -113,15 +114,15 @@ def fmt(col: str, raw) -> str:
     # az Excelben látsz. Vegyes írásmódnál (tábla pont, CSV vessző) a két nézet
     # összevetése folyamatos fordítgatás lenne.
     if k == KIND_PCT:
-        return f"{v * 100:.1f}".replace(".", ",") + "%"
+        return _num(f"{v * 100:.1f}") + "%"
     if k == KIND_MONEY:
         # Az ezres elvalaszto NEM TORHETO szokoz (U+00A0): a szam igy nem
         # szakad kette a cella szelen. NEVESITVE, mert a forrasban egy sima
         # szokoztol megkulonboztethetetlen volna — a teszt is erre hivatkozik.
-        return f"{v:,.2f}".replace(",", NBSP).replace(".", ",")
+        return _num(f"{v:,.2f}")
     if v == float("inf"):
         return "∞"
-    return f"{v:g}".replace(".", ",")
+    return _num(f"{v:g}")
 
 
 def _cmp(op: str, a: float, b: float) -> bool:
@@ -218,11 +219,7 @@ def build(parent, path, fonts, on_export=None, theme=None):
 
     if not cols:
         tk.Label(wrap, bg=BG, fg=FG_GRAY, font=fonts["small"], justify="left",
-                 anchor="w", text=(
-                     "Még nincs eredmény ehhez a párhoz és stratégiához.\n\n"
-                     f"Várt fájl:  {path}\n\n"
-                     "Az optimalizálás menet közben, 10 trialonként írja — "
-                     "tehát futás közben is meg lehet nézni.")
+                 anchor="w", text=_t("trials.empty", path=path)
                  ).pack(anchor="w", padx=12, pady=12)
         return None
 
@@ -231,7 +228,7 @@ def build(parent, path, fonts, on_export=None, theme=None):
     # ── Szűrő-sáv ───────────────────────────────────────────────────────────
     bar = tk.Frame(wrap, bg=BG)
     bar.pack(fill="x", padx=10, pady=(8, 4))
-    tk.Label(bar, text="Szűrés:", bg=BG, fg=FG_GRAY, font=fonts["small"]
+    tk.Label(bar, text=_t("trials.filter"), bg=BG, fg=FG_GRAY, font=fonts["small"]
              ).pack(side="left", padx=(0, 6))
 
     widgets = {}
@@ -341,7 +338,7 @@ def build(parent, path, fonts, on_export=None, theme=None):
     if on_export:
         btns = tk.Frame(wrap, bg=BG)
         btns.pack(fill="x", padx=10, pady=(0, 8))
-        tk.Button(btns, text="CSV megnyitása", bg=th.BTN_BT_BG, fg=th.BTN_BT_FG,
+        tk.Button(btns, text=_t("trials.open_csv"), bg=th.BTN_BT_BG, fg=th.BTN_BT_FG,
                   relief="flat", font=fonts["small"], command=on_export
                   ).pack(side="left")
         tk.Label(btns, bg=BG, fg=FG_GRAY_DIM, font=fonts["small"],
