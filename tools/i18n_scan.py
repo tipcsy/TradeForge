@@ -88,12 +88,26 @@ def _used_keys():
     # `_t("kulcs")` (a projekt alias-szokása), ritkán `t("kulcs")`.
     pat = re.compile(r'(?<![A-Za-z0-9])_?t\(\s*f?["\']([a-z0-9][a-z0-9._]*)'
                      r'(\{[^"\']*)?["\']')
+    # ⚠ A `LabelMap("elotag", KODOK)` EGY sorban hivatkozik egy egesz csoportra.
+    # Enelkul a jelentes fele hamis riasztas lenne (a kod->felirat tablak mind
+    # „nem hivatkozott"-kent latszanak) — es epp ettol szokik le rola az ember.
+    lm = re.compile(r'LabelMap\(\s*["\']([a-z0-9][a-z0-9._]*)["\']')
+    # bármely pontozott, kisbetűs szöveg-literál (a miértet lásd lent)
+    lit = re.compile(r'["\']([a-z0-9_]+(?:\.[a-z0-9_]+)+)["\']')
     for p in _py_files():
         try:
-            for key, dyn in pat.findall(p.read_text(encoding="utf-8")):
-                (prefixes if dyn else keys).add(key)
+            src = p.read_text(encoding="utf-8")
         except Exception:
-            pass
+            continue
+        for key, dyn in pat.findall(src):
+            (prefixes if dyn else keys).add(key)
+        prefixes.update(m + "." for m in lm.findall(src))
+        # ⚠ A kulcs nem mindig `_t(...)`-ben all: a kod->kulcs TABLAK (pl.
+        # `live_row._HEADER_KEYS`, `theme.THEME_LABEL_KEYS`) sima szotar-ertekkent
+        # tartjak, es a feltételes agak masodik fele (`_t(A if x else B)`) is
+        # kimaradna. Ezert MINDEN pontozott, kisbetus literalt hivatkozasnak
+        # veszunk — a hamis riasztas itt rosszabb, mint a hamis „hasznalt".
+        keys.update(lit.findall(src))
     return keys, prefixes
 
 

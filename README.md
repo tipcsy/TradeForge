@@ -319,6 +319,23 @@ python main.py live
 > mindent kiszámoljon és naplózzon, de **megbízást ne küldjön ki**. Új stratégia
 > élesítése előtt ez a legbiztonságosabb üzemmód.
 
+### A felület nyelve
+
+**⚙ → 🎨 Megjelenés → Nyelv** — magyar vagy angol. A választás a
+`config.json`-ba (`dashboard.language`) kerül, és a **program következő
+indításakor** lép életbe, ugyanúgy, mint a téma színei: a tkinter a feliratot a
+widget megépítésekor kapja meg, futás közbeni váltásnál a felület fele magyar,
+fele angol lenne.
+
+A nyelvek a **saját nevükön** szerepelnek a listában (Magyar / English) — így
+akkor is megtalálod a sajátodat, ha véletlenül egy olvashatatlan nyelvre
+kapcsoltál.
+
+> Ami még nincs lefordítva, az **magyarul** jelenik meg, nem üresen. A napló, a
+> `tools/` szkriptek kimenete és a config-ellenőrző szándékosan magyar marad.
+> Új nyelvhez nem kell kódot írni: egy `lang/<kód>.json` és a leírásoknál egy
+> `<név>.<kód>.md` elég. Az állapotot a `python tools/i18n_scan.py` mondja meg.
+
 ### Naplók, kimenetek
 
 | Hely | Tartalom |
@@ -847,6 +864,23 @@ python main.py live
 > **Signal-only mode.** Per pair and per strategy you can make the system compute
 > and log everything but **send no orders**. This is the safest mode before
 > taking a new strategy live.
+
+### The interface language
+
+**⚙ → 🎨 Appearance → Language** — Hungarian or English. The choice is written to
+`config.json` (`dashboard.language`) and takes effect **the next time the program
+starts**, just like the theme colours: tkinter gives a widget its label when the
+widget is built, so switching mid-run would leave half the interface Hungarian
+and half English.
+
+The languages appear under their **own names** in the list (Magyar / English) —
+so you can find yours even if you switched to one you cannot read by accident.
+
+> Whatever is not translated yet appears **in Hungarian**, not empty. The log,
+> the output of the `tools/` scripts and the config checker deliberately stay
+> Hungarian. A new language needs no code: a `lang/<code>.json` and, for the
+> descriptions, a `<name>.<code>.md` is enough. `python tools/i18n_scan.py` tells
+> you where it stands.
 
 ### Logs and outputs
 

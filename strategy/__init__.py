@@ -79,7 +79,8 @@ def get_strategy_by_name(name: str) -> Strategy:
     if name not in _INSTANCES:
         cls = _registry().get(name)
         if cls is None:
-            raise ValueError(f"Ismeretlen stratégia: {name!r}")
+            from core.i18n import t as _t
+            raise ValueError(_t("strategy.unknown", name=repr(name)))
         _INSTANCES[name] = cls()
     return _INSTANCES[name]
 

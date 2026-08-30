@@ -539,9 +539,9 @@ def compile_file(exe: Path, src: Path, timeout: int = 120) -> tuple:
             capture_output=True, timeout=timeout)
         rc = proc.returncode
     except subprocess.TimeoutExpired:
-        return False, f"{src.name}: a fordítás {timeout} mp után sem végzett"
+        return False, _t("mt.err.timeout", file=src.name, sec=timeout)
     except OSError as ex:
-        return False, f"{src.name}: nem indítható a MetaEditor ({ex})"
+        return False, _t("mt.err.no_editor", file=src.name, error=ex)
 
     text = ""
     try:
@@ -561,12 +561,12 @@ def compile_file(exe: Path, src: Path, timeout: int = 120) -> tuple:
     errs = [ln.strip() for ln in text.splitlines()
             if ": error" in ln.lower()]
     if errs:
-        return False, f"{src.name}: {errs[0]}"
+        return False, _t("mt.err.first", file=src.name, error=errs[0])
     after = compiled.stat().st_mtime if compiled.exists() else 0.0
     if after > before:
-        return True, f"{src.name}: lefordítva"
+        return True, _t("mt.compiled", file=src.name)
     if rc != 0:
-        return False, f"{src.name}: {rc} hiba"
+        return False, _t("mt.err.compile_rc", file=src.name, rc=rc)
     # rc=0, nincs hibaüzenet, de a kimenet SEM készült el.
     return False, _t("mt.err.compile_failed", file=src.name)
 
@@ -582,7 +582,7 @@ def compile_all(platform: str, extra_roots=None, include_appdata: bool = True,
     res = {"ok": [], "failed": [], "errors": []}
     tgts = targets(platform, extra_roots, include_appdata)
     if not tgts:
-        res["errors"].append(f"nincs {platform} célmappa")
+        res["errors"].append(_t("mt.err.no_target_dir", platform=platform))
         return res
     for tgt in tgts:
         # Portable módban a MetaEditor a terminál gyökerében van — az a
@@ -590,7 +590,7 @@ def compile_all(platform: str, extra_roots=None, include_appdata: bool = True,
         _exe = exe or metaeditor(platform, [tgt.parent.parent]) or \
             metaeditor(platform, extra_roots)
         if _exe is None:
-            res["errors"].append(f"{tgt}: nem találom a MetaEditort")
+            res["errors"].append(_t("mt.err.editor_missing", file=tgt))
             continue
         for src in sources(platform):
             dst = tgt / src.name

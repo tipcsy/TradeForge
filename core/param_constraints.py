@@ -19,6 +19,7 @@ tud mellékhatást okozni.
 """
 
 from __future__ import annotations
+from core.i18n import t as _t
 
 import ast
 import logging
@@ -45,7 +46,7 @@ def _cmp(op, a, b) -> bool:
     if isinstance(op, ast.GtE):  return a >= b
     if isinstance(op, ast.Eq):   return a == b
     if isinstance(op, ast.NotEq): return a != b
-    raise ValueError(f"nem támogatott összehasonlítás: {type(op).__name__}")
+    raise ValueError(_t("pc.bad_compare", what=type(op).__name__))
 
 
 def _eval(node, params: dict):
@@ -57,13 +58,14 @@ def _eval(node, params: dict):
             return all(vals)
         if isinstance(node.op, ast.Or):
             return any(vals)
-        raise ValueError("nem támogatott bool-művelet")
+        raise ValueError(_t("pc.bad_bool"))
     if isinstance(node, ast.Compare):
         left = _eval(node.left, params)
         for op, right_node in zip(node.ops, node.comparators):
             right = _eval(right_node, params)
             if not isinstance(op, _ALLOWED_CMP):
-                raise ValueError(f"nem támogatott összehasonlítás: {type(op).__name__}")
+                raise ValueError(_t("pc.bad_compare",
+                                    what=type(op).__name__))
             if not _cmp(op, left, right):
                 return False
             left = right                      # láncolt: a < b < c
@@ -76,7 +78,7 @@ def _eval(node, params: dict):
         return node.value
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
         return -_eval(node.operand, params)
-    raise ValueError(f"nem támogatott kifejezés-elem: {type(node).__name__}")
+    raise ValueError(_t("pc.bad_node", what=type(node).__name__))
 
 
 def check(params: dict, constraints) -> bool:
@@ -123,5 +125,6 @@ def validate(constraints, known_keys) -> list[tuple[str, str]]:
         names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
         unknown = names - known
         if unknown:
-            problems.append((expr, f"ismeretlen paraméter(ek): {', '.join(sorted(unknown))}"))
+            problems.append((expr, _t("pc.unknown_params",
+                                      names=", ".join(sorted(unknown)))))
     return problems

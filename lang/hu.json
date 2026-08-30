@@ -63,7 +63,6 @@
   "opt.multi": "Opt: {parts}",
 
   "lang.label": "Nyelv",
-  "lang.restart_note": "A nyelv a program újraindítása után változik meg.",
 
   "col.change": "Vált.%",
   "col.align": "Együtt",
@@ -516,7 +515,6 @@
   "gui.tema": "Téma:",
   "gui.betutipus": "Betűtípus:",
   "gui.betumeret": "Betűméret:",
-  "gui.mentve_a_betu_azonnal": "Mentve. A betű azonnal érvényes; a TÉMA SZÍNEI a program következő indításakor jelennek meg.",
   "gui.mely_kapuk_latszanak_es": "Mely kapuk látszanak és milyen sorrendben",
   "gui.mely_strategiak_elerhetok_es": "Mely stratégiák elérhetők és milyen sorrendben",
   "gui.config_json_szerkesztese_menteskor": "config.json szerkesztése (mentéskor JSON-validálás):",
@@ -718,6 +716,8 @@
   "gui.log.open_error": "A napló nem nyitható meg: {error}",
   "gui.download_failed": "Hiba: {msg}",
   "gui.download_failed_generic": "letöltés sikertelen",
+  "gui.saved": "Mentve.",
+  "gui.saved_restart": "Mentve. A betű azonnal érvényes; {what} csak a program következő indításakor változik.",
 
   "rr.name.none": "Ki (semmi)",
   "rr.name.off": "BE + trailing",
@@ -1057,8 +1057,10 @@
   "mt.err.timeout": "{file}: a fordítás {sec} mp után sem végzett",
   "mt.err.no_editor": "{file}: nem indítható a MetaEditor ({error})",
   "mt.err.editor_missing": "{file}: nem találom a MetaEditort",
+  "mt.err.compile_rc": "{file}: {rc} hiba",
+  "mt.err.first": "{file}: {error}",
+  "mt.err.no_target_dir": "nincs {platform} célmappa",
   "mt.compiled": "{file}: lefordítva",
-  "mt.target_dir": "célmappa",
 
   "range.err.nan": "a(z) „{name}” nem szám",
   "range.err.step": "a lépésköz csak pozitív lehet",
@@ -1113,5 +1115,9 @@
 
   "alert.signal": "{symbol} {side} JELZÉS ({strategy}) — belépő {entry} | SL {sl} | TP {tp} | lot {lot}",
 
-  "gate.dialog.title": "{symbol} — {gate} kapu"
+  "gate.dialog.title": "{symbol} — {gate} kapu",
+
+  "gui.restart.theme": "a TÉMA SZÍNEI",
+  "gui.restart.language": "a NYELV",
+  "gui.language_note": "A még lefordítatlan szövegek magyarul jelennek meg — nem üresen."
 }

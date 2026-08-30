@@ -83,7 +83,8 @@ def _exind_name() -> dict:
 _EXIT_PARAM_SPEC = {
     "supertrend": [("st_period", "Per"), ("st_multiplier", _t("exit.param.mult"))],
     "wpr":        [("wpr_period", "Per"), ("wpr_ma_period", "MA")],
-    "divergence": [("osc", "Oszc"), ("div_period", "Per"), ("div_pivot", "Pivot")],
+    "divergence": [("osc", _t("exit.param.osc")), ("div_period", "Per"),
+                   ("div_pivot", "Pivot")],
 }
 def _exit_tip(key: str) -> str:
     return _t(f"exit.tip.{key}") if _t(f"exit.tip.{key}") != f"exit.tip.{key}" else ""

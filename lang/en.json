@@ -63,7 +63,6 @@
   "opt.multi": "Opt: {parts}",
 
   "lang.label": "Language",
-  "lang.restart_note": "The language changes after restarting the program.",
 
   "col.change": "Chg.%",
   "col.align": "Align",
@@ -516,7 +515,6 @@
   "gui.tema": "Theme:",
   "gui.betutipus": "Font:",
   "gui.betumeret": "Font size:",
-  "gui.mentve_a_betu_azonnal": "Saved. The font applies immediately; the THEME COLOURS appear the next time the program starts.",
   "gui.mely_kapuk_latszanak_es": "Which gates are shown and in what order",
   "gui.mely_strategiak_elerhetok_es": "Which strategies are available and in what order",
   "gui.config_json_szerkesztese_menteskor": "Editing config.json (JSON-validated on save):",
@@ -718,6 +716,8 @@
   "gui.log.open_error": "The log cannot be opened: {error}",
   "gui.download_failed": "Error: {msg}",
   "gui.download_failed_generic": "download failed",
+  "gui.saved": "Saved.",
+  "gui.saved_restart": "Saved. The font applies immediately; {what} only changes the next time the program starts.",
 
   "rr.name.none": "Off (nothing)",
   "rr.name.off": "BE + trailing",
@@ -1057,8 +1057,10 @@
   "mt.err.timeout": "{file}: compilation did not finish in {sec} s",
   "mt.err.no_editor": "{file}: cannot start MetaEditor ({error})",
   "mt.err.editor_missing": "{file}: MetaEditor not found",
+  "mt.err.compile_rc": "{file}: {rc} error(s)",
+  "mt.err.first": "{file}: {error}",
+  "mt.err.no_target_dir": "no {platform} target folder",
   "mt.compiled": "{file}: compiled",
-  "mt.target_dir": "target folder",
 
   "range.err.nan": "„{name}” is not a number",
   "range.err.step": "the step must be positive",
@@ -1113,5 +1115,9 @@
 
   "alert.signal": "{symbol} {side} SIGNAL ({strategy}) — entry {entry} | SL {sl} | TP {tp} | lot {lot}",
 
-  "gate.dialog.title": "{symbol} — {gate} gate"
+  "gate.dialog.title": "{symbol} — {gate} gate",
+
+  "gui.restart.theme": "the THEME COLOURS",
+  "gui.restart.language": "the LANGUAGE",
+  "gui.language_note": "Texts that are not translated yet appear in Hungarian — not empty."
 }
