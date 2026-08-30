@@ -24,24 +24,22 @@ from core.risk_reduction import (
     BE_TRAIL_KEYS, be_trail_active, default_config, wants_cautious_size,
 )
 from core import exit_signal
+from core.i18n import LabelMap as _LabelMap
 
 PATH = Path(__file__).resolve().parents[1] / "data" / "risk_mode.json"
 
 CYCLE = (PRESET_NONE, PRESET_OFF, PRESET_RISKY, PRESET_HALVING, PRESET_SHIELD,
          PRESET_FIBO, PRESET_THIRDS, PRESET_SHIELD_FIBO)
-LABEL = {PRESET_NONE: "—", PRESET_OFF: "BT", PRESET_RISKY: "R",
-         PRESET_HALVING: "F", PRESET_SHIELD: "P",
-         PRESET_FIBO: "Fi", PRESET_THIRDS: "H", PRESET_SHIELD_FIBO: "PF"}
+# ⚠ LabelMap, nem sima szótár: a felület ezekből építi a legördülőt ÉS ebből
+# fejti vissza a választást. Egy betöltéskor kiszámolt tábla befagyna a
+# nyelvvel, és a két oldal elcsúszna — lásd `core.i18n.LabelMap`.
+LABEL = _LabelMap("rr.short", CYCLE)
 # ⚠ Az `off` NEVE volt hazug, nem a viselkedése: mindig BE-t és trailinget
 # futtatott. A KULCS marad (a mentett állapot és a viselkedés érintetlen), csak a
 # felirat mond végre igazat. A „semmi" ezentúl a külön `none`.
-NAME  = {PRESET_NONE: "Ki (semmi)", PRESET_OFF: "BE + trailing",
-         PRESET_RISKY: "Risky", PRESET_HALVING: "Felező",
-         PRESET_SHIELD: "Pajzs", PRESET_FIBO: "Fibo", PRESET_THIRDS: "Harmados",
-         PRESET_SHIELD_FIBO: "Pajzs↔Fibo"}
+NAME = _LabelMap("rr.name", CYCLE)
 RUNNERS = (RUNNER_TRAILING, RUNNER_KEEP, RUNNER_BREAKEVEN, RUNNER_EXIT)
-RUNNER_NAME = {RUNNER_TRAILING: "Trailing", RUNNER_KEEP: "Marad távol",
-               RUNNER_BREAKEVEN: "BE", RUNNER_EXIT: "Kiszállási jel"}
+RUNNER_NAME = _LabelMap("rr.runner", RUNNERS)
 
 # A per-pár kiszállási-modul beállítás mezői (a core.exit_signal.default_config
 # kulcsai az `enabled` NÉLKÜL — az `enabled`-et a runner==exit vezérli).

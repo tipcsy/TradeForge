@@ -20,6 +20,7 @@ nyelvet ad, hogy EGY ablak mindegyiket ki tudja szolgálni
 from __future__ import annotations
 
 from core import gates as _g
+from core.i18n import t as _t
 
 # ── Egy paraméter FAJTÁJA (a szerkesztő ebből tudja, mit rajzoljon) ──────────
 FLOAT = "float"
@@ -37,20 +38,38 @@ class ParamSpec:
     registerből, és modul-betöltéskor még nem szabad importálni.
     `lo`/`hi`: megengedett tartomány (None = nincs korlát) — a szerkesztő ezt
     kényszeríti ki, hogy egy elgépelt 20-as ATR-hányad (2000%) ne jusson el
-    némán a motorig."""
+    némán a motorig.
 
-    __slots__ = ("key", "label", "kind", "default", "help", "choices", "lo", "hi")
+    ⚠ A FELIRAT ÉS A SÚGÓ NINCS ITT: a nyelvi katalógusban élnek
+    (`gp.<kapu>.<kulcs>.label` / `.help`), és a `label`/`help` tulajdonság a
+    HÍVÁSKOR oldja fel őket. Egy modul-betöltéskor kiszámolt szöveg befagyna a
+    betöltéskori nyelvbe — ez a modul pedig import-időben épül fel.
 
-    def __init__(self, key, label, kind, default, help="", choices=None,
-                 lo=None, hi=None):
+    A `gate` mezőt a `_SPECS` definíciója után egy ciklus tölti ki (a spec a
+    saját kapuja nélkül nem tudná, melyik kulcsot kérdezze)."""
+
+    __slots__ = ("key", "gate", "kind", "default", "choices", "lo", "hi")
+
+    def __init__(self, key, kind, default, choices=None, lo=None, hi=None):
         self.key = key
-        self.label = label
+        self.gate = ""
         self.kind = kind
         self.default = default
-        self.help = help
         self.choices = choices if callable(choices) else tuple(choices or ())
         self.lo = lo
         self.hi = hi
+
+    @property
+    def label(self) -> str:
+        return _t(f"gp.{self.gate}.{self.key}.label")
+
+    @property
+    def help(self) -> str:
+        """Üres, ha nincs súgó — nem a nyers kulcs (a felület csak akkor
+        rajzol halvány sort, ha van mit mondania)."""
+        k = f"gp.{self.gate}.{self.key}.help"
+        txt = _t(k)
+        return "" if txt == k else txt
 
     def __repr__(self):                       # a teszt-hibaüzenetekhez
         return f"ParamSpec({self.key!r}, {self.kind})"
@@ -90,76 +109,49 @@ def _adverse_choices():
 
 _SPECS = {
     _g.SPREAD: (
-        ParamSpec("max_spread_atr_ratio", "Spread ATR-hányada", FLOAT, 0.20,
-                  "A megengedett spread az ATR ekkora része. "
-                  "határ = max(padló, (ATR / point) × ez)", lo=0.0, hi=5.0),
-        ParamSpec("min_spread_mult", "Padló: a normál spread szorzója", FLOAT, 1.5,
-                  "Az ALSÓ küszöb az instrumentum saját tipikus spreadjének "
-                  "ennyiszerese — így minden páron ugyanazt jelenti.",
-                  lo=0.0, hi=50.0),
-        ParamSpec("atr_period", "ATR-ablak (gyertya)", INT, 14,
-                  "A volatilitás mércéje a fő időkereten.", lo=2, hi=500),
+        ParamSpec("max_spread_atr_ratio", FLOAT, 0.20, lo=0.0, hi=5.0),
+        ParamSpec("min_spread_mult", FLOAT, 1.5, lo=0.0, hi=50.0),
+        ParamSpec("atr_period", INT, 14, lo=2, hi=500),
     ),
     _g.TF_ALIGN: (
-        ParamSpec("enabled", "Bekapcsolva — figyeli az együttállást", BOOL, True,
-                  "Ez tölti az „Együtt” oszlopot és ad bemenetet a kapunak."),
-        ParamSpec("timeframes", "Figyelt idősíkok (2–6)", MULTI, [1, 5, 15],
-                  "Minden kiválasztott idősíkon az SMA-hoz mért irány számít.",
-                  choices=_TF_CHOICES),
-        ParamSpec("sma_period", "SMA-periódus", INT, 50,
-                  "Az irányt a záróár és ennek az SMA-nak a viszonya adja.",
-                  lo=2, hi=1000),
-        ParamSpec("viz", "SMA-vonalak a charton (viz)", BOOL, False,
-                  "Csak rajz — a figyelés ettől függetlenül működik."),
+        ParamSpec("enabled", BOOL, True),
+        ParamSpec("timeframes", MULTI, [1, 5, 15], choices=_TF_CHOICES),
+        ParamSpec("sma_period", INT, 50, lo=2, hi=1000),
+        ParamSpec("viz", BOOL, False),
     ),
     _g.MARKET: (
-        ParamSpec("market_strategy", "Piac-osztályozó", CHOICE, "",
-                  "Ez tölti a „Piac” oszlopot. „Nincs” → a kapu néma.",
-                  choices=_market_choices),
-        ParamSpec("adverse", "KEDVEZŐTLEN besorolások (ezeken bukik a kapu)",
-                  MULTI, list(_g.MARKET_ADVERSE_DEFAULT),
-                  "A kapu csak akkor szól bele, ha a hatása nem „Ki”.",
+        ParamSpec("market_strategy", CHOICE, "", choices=_market_choices),
+        ParamSpec("adverse", MULTI, list(_g.MARKET_ADVERSE_DEFAULT),
                   choices=_adverse_choices),
-        ParamSpec("market_viz", "Piac-sáv a charton (viz)", BOOL, False,
-                  "Csak rajz."),
+        ParamSpec("market_viz", BOOL, False),
     ),
     _g.COST: (
-        ParamSpec("max_rr_distortion", "Megengedett tavolsag-hatrany", FLOAT, 0.25,
-                  "A KIFIZETES aranya nem valtozik a spreadtol — a megteendo "
-                  "UT igen. 0,25 = a 2:1-es kifizetesert legfeljebb 2,5:1 eselyu "
-                  "utat vallalunk. Merve: EURCHF +70%, EURGBP +72%, EURJPY +31%, "
-                  "EURUSD +21%, GOLD +5%, UsaTec +4%.", lo=0.0, hi=10.0),
+        ParamSpec("max_rr_distortion", FLOAT, 0.25, lo=0.0, hi=10.0),
     ),
     _g.MOMENTUM: (
-        ParamSpec("basis", "Mérési alap", CHOICE, "sma",
-                  "„Egy idősík, 3 SMA”: a gyors/közép/lassú átlag távolsága — ez a "
-                  "legszorosabb fordulatszámmérő. „Három idősík”: idősíkonként a "
-                  "záróár SMA-tól vett távolsága, átlagolva.",
-                  choices=lambda: [("sma", "Egy idősík, 3 SMA"),
-                                   ("tf", "Három idősík, egy SMA")]),
-        ParamSpec("idle_threshold", "Alapjárat-küszöb", FLOAT, 0.35,
-                  "Ez alatt „áll a piac”. Egysége: átlagos gyertya-elmozdulás — "
-                  "0,35 azt jelenti, hogy az átlagok egy átlagos gyertya "
-                  "harmadánál közelebb vannak egymáshoz.", lo=0.0, hi=20.0),
-        ParamSpec("timeframe", "Idősík (az „egy idősík” alaphoz)", CHOICE, 15,
-                  "Ezen fut a három SMA.", choices=_TF_CHOICES),
-        ParamSpec("sma_fast", "Gyors SMA", INT, 8, "", lo=2, hi=1000),
-        ParamSpec("sma_mid", "Közepes SMA", INT, 32, "", lo=2, hi=2000),
-        ParamSpec("sma_slow", "Lassú SMA", INT, 100,
-                  "A három SMA-ból két „fordulat” adódik (gyors↔közép, "
-                  "közép↔lassú), az átlaguk a mutató.", lo=2, hi=5000),
-        ParamSpec("timeframes", "Idősíkok (a „három idősík” alaphoz)", MULTI,
-                  [1, 5, 15], "Idősíkonként egy fordulat, átlagolva.",
-                  choices=_TF_CHOICES),
-        ParamSpec("tf_sma", "SMA-periódus (a „három idősík” alaphoz)", INT, 50,
-                  "Minden kiválasztott idősíkon ugyanez.", lo=2, hi=1000),
-        ParamSpec("vol_window", "Normáló ablak (gyertya)", INT, 14,
-                  "Ennyi gyertya átlagos abszolút záróár-elmozdulása a mérce — "
-                  "ettől jelent ugyanazt a szám GOLD-on és EURUSD-n.",
-                  lo=2, hi=500),
+        ParamSpec("basis", CHOICE, "sma",
+                  choices=lambda: [("sma", _t("gp.basis.sma")),
+                                   ("tf", _t("gp.basis.tf"))]),
+        ParamSpec("idle_threshold", FLOAT, 0.35, lo=0.0, hi=20.0),
+        ParamSpec("timeframe", CHOICE, 15, choices=_TF_CHOICES),
+        ParamSpec("sma_fast", INT, 8, lo=2, hi=1000),
+        ParamSpec("sma_mid", INT, 32, lo=2, hi=2000),
+        ParamSpec("sma_slow", INT, 100, lo=2, hi=5000),
+        ParamSpec("timeframes", MULTI, [1, 5, 15], choices=_TF_CHOICES),
+        ParamSpec("tf_sma", INT, 50, lo=2, hi=1000),
+        ParamSpec("vol_window", INT, 14, lo=2, hi=500),
     ),
 }
 
+
+
+# ⚠ A spec a SAJÁT KAPUJÁT is ismeri: a felirata és a súgója a katalógusban
+# `gp.<kapu>.<kulcs>.label` alatt él, és a kulcs-nevek kapuk közt ismétlődnek
+# (`timeframes` a tf_align-ban ÉS a lendületben). A kapu nélkül a kettő
+# összeakadna — némán, egymás szövegét mutatva.
+for _gate_key, _gate_specs in _SPECS.items():
+    for _spec in _gate_specs:
+        _spec.gate = _gate_key
 
 def specs_for(key: str) -> tuple:
     """Egy kapu szerkeszthető paraméterei (üres, ha a kapunak nincs saját száma)."""
@@ -186,22 +178,24 @@ def parse(spec: ParamSpec, raw):
     if spec.kind == CHOICE:
         vals = [v for v, _ in choices_of(spec)]
         return (raw, None) if raw in vals else (spec.default,
-                                                f"{spec.label}: ismeretlen érték")
+                                                _t("gp.err.unknown", label=spec.label))
     if spec.kind == MULTI:
         vals = {v for v, _ in choices_of(spec)}
         picked = [v for v in (raw or []) if v in vals]
         return picked, None
     txt = str(raw).strip().replace(",", ".")     # magyar tizedesvessző is jó
     if not txt:
-        return spec.default, f"{spec.label}: üres"
+        return spec.default, _t("gp.err.empty", label=spec.label)
     try:
         val = int(txt) if spec.kind == INT else float(txt)
     except ValueError:
-        return spec.default, f"{spec.label}: nem szám ({raw!r})"
+        return spec.default, _t("gp.err.nan", label=spec.label, value=repr(raw))
     if spec.lo is not None and val < spec.lo:
-        return spec.default, f"{spec.label}: {val} < {spec.lo} (alsó határ)"
+        return spec.default, _t("gp.err.too_low", label=spec.label, value=val,
+                                limit=spec.lo)
     if spec.hi is not None and val > spec.hi:
-        return spec.default, f"{spec.label}: {val} > {spec.hi} (felső határ)"
+        return spec.default, _t("gp.err.too_high", label=spec.label, value=val,
+                                limit=spec.hi)
     return val, None
 
 
@@ -226,18 +220,25 @@ def extra_errors(key: str, values: dict) -> list:
     if key == _g.TF_ALIGN:
         tfs = values.get("timeframes")
         if tfs is not None and not (2 <= len(tfs) <= 6):
-            out.append("Idősíkok: 2 és 6 között válassz "
-                       f"(most {len(tfs)}) — egyetlen idősík nem „együttállás”.")
+            out.append(_t("gp.err.tf_count", n=len(tfs)))
     if key == _g.MOMENTUM:
         out += extra_errors_momentum(values)
         if str(values.get("basis")) == "tf" and not values.get("timeframes"):
-            out.append("A „három idősík” alaphoz legalább egy idősík kell.")
+            out.append(_t("gp.err.tf_basis"))
     return out
 
 
 # ── A MÉRT állapot emberi kiírása ───────────────────────────────────────────
 # A `ctx` ugyanaz, amit a `gates.evaluate` kap (`gates.ctx_from_state`), tehát a
 # számok GARANTÁLTAN azok, amikkel a kapu dönt — nem külön számolt „kb. ugyanaz”.
+
+
+def _pts_txt(v) -> str:
+    """„{n} pont" — az egyetlen hely, ahol a pont-mértékegység szövegbe kerül."""
+    if v is None:
+        return "—"
+    return _t("gp.val.points", n=f"{float(v):,.0f}".replace(",", " "))
+
 
 def measured_rows(key: str, ctx: dict) -> list:
     """`[(címke, érték_szöveg), …]` — a kapu ablakának felső, csak-olvasható
@@ -248,16 +249,18 @@ def measured_rows(key: str, ctx: dict) -> list:
         cap = ctx.get("max_spread_points")
         atr = ctx.get("atr_price")
         pt = ctx.get("point_size")
-        rows = [("Jelenlegi spread", f"{cur:.0f} pont" if cur is not None else "—"),
-                ("Számított határ",
-                 f"{cap:.0f} pont" if cap not in (None, 0) and cap != float("inf")
-                 else "—")]
+        rows = [(_t("gp.row.spread_now"),
+                 _pts_txt(cur)),
+                (_t("gp.row.spread_cap"),
+                 _pts_txt(cap) if cap not in (None, 0)
+                 and cap != float("inf") else "—")]
         if atr:
-            rows.append(("ATR (fő időkeret)",
-                         f"{atr:.5f}" + (f"  ({atr / pt:.0f} pont)" if pt else "")))
+            rows.append((_t("gp.row.atr_main"),
+                         f"{atr:.5f}"
+                         + (f"  ({_pts_txt(atr / pt)})" if pt else "")))
         norm = ctx.get("normal_spread_points")
         if norm:
-            rows.append(("Instrumentum normál spreadje", f"{float(norm):.0f} pont"))
+            rows.append((_t("gp.row.spread_normal"), _pts_txt(float(norm))))
         return rows
     if key == _g.TF_ALIGN:
         signs = ctx.get("tf_align_signs") or []
@@ -266,23 +269,25 @@ def measured_rows(key: str, ctx: dict) -> list:
         txt = "  ".join(f"{labels[i] if i < len(labels) else '?'} "
                         f"{arrows.get(int(s), '·')}" for i, s in enumerate(signs))
         d = ctx.get("tf_align_dir")
-        return [("Idősík-irányok", txt or "—"),
-                ("Együttállás", d or "nincs")]
+        return [(_t("gp.row.tf_dirs"), txt or "—"),
+                (_t("gp.row.tf_align"), d or _t("gp.val.no_align"))]
     if key == _g.MARKET:
-        return [("Osztályozó", ctx.get("market_name") or "nincs kiválasztva"),
-                ("Jelenlegi besorolás", ctx.get("market_label") or "—")]
+        return [(_t("gp.row.classifier"),
+                 ctx.get("market_name") or _t("gp.val.none_sel")),
+                (_t("gp.row.classification"), ctx.get("market_label") or "—")]
     if key == _g.COST:
         from core import cost_gate as _cg
         sl, tp = ctx.get("plan_sl_points"), ctx.get("plan_tp_points")
         sp = ctx.get("spread_points")
         cap = ctx.get("cost_max_distortion")
-        rows = [("Tervezett SL", f"{sl:.0f} pont" if sl else "—"),
-                ("Jelenlegi spread", f"{sp:.0f} pont" if sp is not None else "—")]
+        rows = [(_t("gp.row.planned_sl"), _pts_txt(sl) if sl else "—"),
+                (_t("gp.row.spread_now"), _pts_txt(sp))]
         if sl and tp:
-            rows.append(("Kifizetes aranya", f"{float(tp) / float(sl):.1f}:1"))
-            rows.append(("Megteendo ut aranya", _cg.cell_text(sl, tp, sp)))
+            rows.append((_t("gp.row.payout_ratio"),
+                         f"{float(tp) / float(sl):.1f}:1"))
+            rows.append((_t("gp.row.path_ratio"), _cg.cell_text(sl, tp, sp)))
         if cap is not None:
-            rows.append(("Határ", f"{float(cap) * 100:+.0f}%"))
+            rows.append((_t("gp.row.limit"), f"{float(cap) * 100:+.0f}%"))
         return rows
     if key == _g.VOLATILITY:
         from core import vol_baseline as _vb
@@ -292,37 +297,40 @@ def measured_rows(key: str, ctx: dict) -> list:
         pt = ctx.get("point_size")
 
         def _pts(v):
-            return f"{v / pt:,.0f} pont".replace(",", " ") if (v and pt) else "—"
+            return _pts_txt(v / pt) if (v and pt) else "—"
 
-        rows = [("Mostani ATR", _pts(atr)),
-                ("Mérce (kalibrált átlag)", _pts(base))]
+        rows = [(_t("gp.row.atr_now"), _pts(atr)),
+                (_t("gp.row.baseline"), _pts(base))]
         if atr and base:
             st = _vb.status(float(atr), prm, float(base))
-            rows.append(("Arány", f"{st['ratio']:.2f}×"))
-            rows.append(("Engedett sáv",
+            rows.append((_t("gp.row.ratio"), f"{st['ratio']:.2f}×"))
+            rows.append((_t("gp.row.band"),
                          f"{_pts(st['lo'])} … {_pts(st['hi'])}"
-                         if (st["lo"] or st["hi"]) else "nincs korlát"))
-            rows.append(("Állapot", "RENDBEN" if st["ok"] else f"⛔ {st['why']}"))
+                         if (st["lo"] or st["hi"]) else _t("gp.val.no_limit")))
+            rows.append((_t("gp.row.state"),
+                         _t("gp.val.ok") if st["ok"] else f"⛔ {st['why']}"))
         nb = _vb.baseline_bars(prm)
-        rows.append(("A mérce fajtája",
-                     f"gördülő, {nb} gyertya (≈{nb // 96} nap)" if nb > 0 else
-                     "befagyasztott (atr_avg_ref, az optimalizálásból)"))
+        rows.append((_t("gp.row.baseline_kind"),
+                     _t("gp.val.rolling", bars=nb, days=nb // 96) if nb > 0
+                     else _t("gp.val.frozen")))
         return rows
     if key == _g.MOMENTUM:
         from core import momentum as _m
         val = ctx.get("momentum")
         thr = ctx.get("momentum_idle_threshold")
         v = val if val is not None else float("nan")
-        rows = [("Fordulat most", _m.cell_text(val))]
+        rows = [(_t("gp.row.momentum_now"), _m.cell_text(val))]
         d = _m.direction(v)
-        rows.append(("Irány", {"BUY": "felfelé", "SELL": "lefelé"}.get(d, "—")))
+        rows.append((_t("gp.row.direction"),
+                     {"BUY": _t("gp.val.up"),
+                      "SELL": _t("gp.val.down")}.get(d, "—")))
         if thr is not None:
-            rows.append(("Alapjárat-küszöb", f"{float(thr):.2f}"))
-            rows.append(("Állapot", momentum_state_text(v, thr)))
+            rows.append((_t("gp.row.idle_threshold"), f"{float(thr):.2f}"))
+            rows.append((_t("gp.row.state"), momentum_state_text(v, thr)))
             # ⚠ A szótár KIÍRVA: a mért érték önmagában nem árulja el, hogy
             # mihez képest sok vagy kevés, és melyik szó milyen állapotot jelöl.
             # (Enélkül a felhasználó olyan állapotra vár, ami nem is létezik.)
-            rows.append(("Lehetséges állapotok", MOMENTUM_STATES))
+            rows.append((_t("gp.row.states"), momentum_states()))
         return rows
     return []
 
@@ -336,7 +344,12 @@ def measured_rows(key: str, ctx: dict) -> list:
 # fedi le. Harmadik állapot az adathiány: a kapu ilyenkor NEM szűr (fail-open,
 # mint a spread-kapu), ezért nem szabad „fut”-ként mutatni.
 
-MOMENTUM_STATES = "alapjárat (küszöb alatt) · fut (küszöb fölött)"
+def momentum_states() -> str:
+    """A kapu KÉT állapotának szótára — az aktív nyelven.
+
+    ⚠ Függvény, nem konstans: egy modul-szintű `_t(...)` a betöltéskori
+    nyelvbe fagyna."""
+    return _t("gp.mom.states")
 
 
 def momentum_state_text(value, threshold) -> str:
@@ -344,11 +357,11 @@ def momentum_state_text(value, threshold) -> str:
     import math as _math
     from core import momentum as _m
     if value is None or _math.isnan(float(value)):
-        return "nincs adat (a kapu átenged)"
+        return _t("gp.mom.no_data")
     mag, thr = abs(float(value)), float(threshold)
     if _m.is_idle(value, {"idle_threshold": thr}):
-        return f"ALAPJÁRAT — {mag:.2f} < {thr:.2f} (a kapu bukik)"
-    return f"fut — {mag:.2f} ≥ {thr:.2f}"
+        return _t("gp.mom.idle", value=f"{mag:.2f}", threshold=f"{thr:.2f}")
+    return _t("gp.mom.running", value=f"{mag:.2f}", threshold=f"{thr:.2f}")
 
 
 def extra_errors_momentum(values: dict) -> list:
@@ -359,5 +372,5 @@ def extra_errors_momentum(values: dict) -> list:
     if None in (f, m, s):
         return []
     if not (f < m < s):
-        return [f"SMA-k: gyors < közepes < lassú kell legyen (most {f}/{m}/{s})."]
+        return [_t("gp.err.sma_order", fast=f, mid=m, slow=s)]
     return []

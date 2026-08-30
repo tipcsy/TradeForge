@@ -155,6 +155,70 @@ def t(key: str, **kw) -> str:
         return s
 
 
+class LabelMap(dict):
+    """KÓD → felirat leképezés, ami az AKTÍV nyelvből szolgál ki.
+
+        NAME = LabelMap("rr.name", CYCLE)      # NAME[PRESET_HALVING] → „Felező"
+
+    ⚠ MIÉRT NEM EGY SIMA SZÓTÁR. A felület tucatnyi helyen így épít legördülőt:
+
+        om = OptionMenu(row, var, *[NAME[p] for p in CYCLE])
+        ...
+        preset = {v: k for k, v in NAME.items()}.get(var.get())
+
+    A visszafejtés tehát UGYANABBÓL a táblából készül, mint a feliratok — ez a
+    minta nyelvfüggetlen, DE csak akkor, ha a tábla nem fagy be. Egy modul
+    betöltésekor `_t()`-vel kiszámolt szótár a betöltéskori nyelvet őrizné meg:
+    egy későbbi nyelvváltás után a legördülő az ÚJ, a visszafejtés a RÉGI
+    feliratokat ismerné — és a `.get()` csendben `None`-t adna, azaz a
+    beállítás némán nem történne meg.
+
+    Az osztály minden szótár-műveletet (indexelés, `get`, `items`, `values`,
+    bejárás) a hívás pillanatában old fel, tehát a kettő nem tud elcsúszni."""
+
+    def __init__(self, prefix: str, codes):
+        super().__init__()
+        self._prefix = prefix
+        self._codes = tuple(codes)
+
+    def _label(self, code):
+        return t(f"{self._prefix}.{code}") if code in self._codes else str(code)
+
+    def __getitem__(self, k):
+        if k not in self._codes:
+            raise KeyError(k)
+        return self._label(k)
+
+    def __contains__(self, k):
+        return k in self._codes
+
+    def __iter__(self):
+        return iter(self._codes)
+
+    def __len__(self):
+        return len(self._codes)
+
+    def get(self, k, default=None):
+        return self._label(k) if k in self._codes else default
+
+    def keys(self):
+        return list(self._codes)
+
+    def values(self):
+        return [self._label(c) for c in self._codes]
+
+    def items(self):
+        return [(c, self._label(c)) for c in self._codes]
+
+    def code_of(self, label: str, default=None):
+        """Felirat → kód. A visszafejtés OLVASHATÓ alakja (a hívók eddig egy
+        `{v: k for ...}` szótár-fordítást írtak le minden alkalommal)."""
+        for c in self._codes:
+            if self._label(c) == label:
+                return c
+        return default
+
+
 def num(s: str) -> str:
     """ANGOL alakban megformázott szám → az aktív nyelv írásmódja.
 

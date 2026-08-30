@@ -139,6 +139,9 @@
   "gate.section.when_blocking": "What should happen while the gate is blocking",
 
   "gate.effect.inherited": "Inherited ({effect})",
+  "gate.effect.block": "Blocks the entry",
+  "gate.effect.reduce": "Risk reduction",
+  "gate.effect.none": "Off",
   "gate.display_only": "This column SHOWS, it does not decide — it has no adjustable effect.\nThe filtering happens in the strategy's entry gate (atr_min_pct / atr_max_pct, under the Market filter category).\nSet it there, not here: that way the backtest, the visualisation and live trading all filter the same way.",
   "gate.all_symbols": "Apply to every instrument (overrides the other pairs' own settings)",
 
@@ -710,5 +713,164 @@
 
   "gui.log.open_error": "The log cannot be opened: {error}",
   "gui.download_failed": "Error: {msg}",
-  "gui.download_failed_generic": "download failed"
+  "gui.download_failed_generic": "download failed",
+
+  "rr.name.none": "Off (nothing)",
+  "rr.name.off": "BE + trailing",
+  "rr.name.risky": "Risky",
+  "rr.name.halving": "Halving",
+  "rr.name.shield": "Shield",
+  "rr.name.fibo": "Fibo",
+  "rr.name.thirds": "Thirds",
+  "rr.name.shield_fibo": "Shield↔Fibo",
+
+  "rr.short.none": "—",
+  "rr.short.off": "BT",
+  "rr.short.risky": "R",
+  "rr.short.halving": "H",
+  "rr.short.shield": "S",
+  "rr.short.fibo": "Fi",
+  "rr.short.thirds": "T",
+  "rr.short.shield_fibo": "SF",
+
+  "rr.runner.trailing": "Trailing",
+  "rr.runner.keep": "Stays away",
+  "rr.runner.breakeven": "BE",
+  "rr.runner.exit": "Exit signal",
+
+  "build.mode.off": "Off",
+  "build.mode.manual": "Manual",
+  "build.mode.auto": "Auto",
+
+  "build.trigger.candle": "Candle",
+  "build.trigger.r_fixed": "Fixed R",
+  "build.trigger.r_converge": "R-halving",
+
+  "gate.name.spread": "Spread",
+  "gate.name.tf_align": "Timeframe alignment",
+  "gate.name.market": "Market state",
+  "gate.name.momentum": "Momentum",
+  "gate.name.cost": "Cost/risk",
+  "gate.name.volatility": "Volatility",
+
+  "gate.mom.idle": "Idle (turnover too low)",
+  "gate.mom.dir": "Direction filter (moves against the signal)",
+  "gate.mom.both": "Both",
+
+  "gate.src.pair": "set on this pair",
+  "gate.src.pair_default": "inherited — the pair's default",
+  "gate.src.global": "inherited — global, for this strategy",
+  "gate.src.global_default": "inherited — global default",
+  "gate.src.legacy": "inherited — from the old tf_align.gate list",
+  "gate.src.builtin": "inherited — built-in default",
+  "gate.src.master_off": "SWITCHED OFF in Settings (the per-pair settings are kept and come back when you switch it on again)",
+  "gate.no_doc": "There is no description for this gate yet.",
+
+  "gp.spread.max_spread_atr_ratio.label": "Spread as a share of ATR",
+  "gp.spread.max_spread_atr_ratio.help": "The allowed spread is this share of the ATR. limit = max(floor, (ATR / point) × this)",
+
+  "gp.spread.min_spread_mult.label": "Floor: multiplier of the normal spread",
+  "gp.spread.min_spread_mult.help": "The LOWER threshold is this many times the instrument's own typical spread — so it means the same on every pair.",
+
+  "gp.spread.atr_period.label": "ATR window (bars)",
+  "gp.spread.atr_period.help": "The volatility baseline on the main timeframe.",
+
+  "gp.tf_align.enabled.label": "Enabled — watches the alignment",
+  "gp.tf_align.enabled.help": "This fills the „Align” column and feeds the gate.",
+
+  "gp.tf_align.timeframes.label": "Watched timeframes (2–6)",
+  "gp.tf_align.timeframes.help": "On every selected timeframe the direction measured against the SMA counts.",
+
+  "gp.tf_align.sma_period.label": "SMA period",
+  "gp.tf_align.sma_period.help": "The direction comes from the close price versus this SMA.",
+
+  "gp.tf_align.viz.label": "SMA lines on the chart (viz)",
+  "gp.tf_align.viz.help": "Drawing only — the watching works regardless.",
+
+  "gp.market.market_strategy.label": "Market classifier",
+  "gp.market.market_strategy.help": "This fills the „Market” column. „None” → the gate is silent.",
+
+  "gp.market.adverse.label": "ADVERSE classifications (the gate fails on these)",
+  "gp.market.adverse.help": "The gate only intervenes if its effect is not „Off”.",
+
+  "gp.market.market_viz.label": "Market band on the chart (viz)",
+  "gp.market.market_viz.help": "Drawing only.",
+
+  "gp.cost.max_rr_distortion.label": "Allowed distance handicap",
+  "gp.cost.max_rr_distortion.help": "The PAYOUT ratio does not change with the spread — the DISTANCE to cover does. 0.25 = for a 2:1 payout we accept a path with odds of at most 2.5:1. Measured: EURCHF +70%, EURGBP +72%, EURJPY +31%, EURUSD +21%, GOLD +5%, UsaTec +4%.",
+
+  "gp.momentum.basis.label": "Measurement basis",
+  "gp.momentum.basis.help": "„One timeframe, 3 SMAs”: the distance between the fast/mid/slow averages — the tightest turnover meter. „Three timeframes”: the close's distance from the SMA per timeframe, averaged.",
+
+  "gp.momentum.idle_threshold.label": "Idle threshold",
+  "gp.momentum.idle_threshold.help": "Below this „the market stands still”. Its unit is the average bar movement — 0.35 means the averages are closer to each other than a third of an average bar.",
+
+  "gp.momentum.timeframe.label": "Timeframe (for the „one timeframe” basis)",
+  "gp.momentum.timeframe.help": "The three SMAs run on this.",
+
+  "gp.momentum.sma_fast.label": "Fast SMA",
+
+  "gp.momentum.sma_mid.label": "Mid SMA",
+
+  "gp.momentum.sma_slow.label": "Slow SMA",
+  "gp.momentum.sma_slow.help": "The three SMAs give two „turnovers” (fast↔mid, mid↔slow); their average is the indicator.",
+
+  "gp.momentum.timeframes.label": "Timeframes (for the „three timeframes” basis)",
+  "gp.momentum.timeframes.help": "One turnover per timeframe, averaged.",
+
+  "gp.momentum.tf_sma.label": "SMA period (for the „three timeframes” basis)",
+  "gp.momentum.tf_sma.help": "The same on every selected timeframe.",
+
+  "gp.momentum.vol_window.label": "Normalising window (bars)",
+  "gp.momentum.vol_window.help": "The baseline is the average absolute close-to-close move of this many bars — that is what makes the number mean the same on GOLD and on EURUSD.",
+
+  "gp.err.unknown": "{label}: unknown value",
+  "gp.err.empty": "{label}: empty",
+  "gp.err.nan": "{label}: not a number ({value})",
+  "gp.err.too_low": "{label}: {value} < {limit} (lower bound)",
+  "gp.err.too_high": "{label}: {value} > {limit} (upper bound)",
+
+  "gp.err.tf_count": "Timeframes: pick between 2 and 6 (now {n}) — a single timeframe is not an „alignment”.",
+  "gp.err.tf_basis": "The „three timeframes” basis needs at least one timeframe.",
+  "gp.err.sma_order": "SMAs: fast < mid < slow is required (now {fast}/{mid}/{slow}).",
+  "gp.row.spread_now": "Current spread",
+  "gp.row.spread_cap": "Computed limit",
+  "gp.row.atr_main": "ATR (main timeframe)",
+  "gp.row.spread_normal": "The instrument's normal spread",
+  "gp.row.tf_dirs": "Timeframe directions",
+  "gp.row.tf_align": "Alignment",
+  "gp.row.classifier": "Classifier",
+  "gp.row.classification": "Current classification",
+  "gp.row.planned_sl": "Planned SL",
+  "gp.row.payout_ratio": "Payout ratio",
+  "gp.row.path_ratio": "Distance ratio",
+  "gp.row.limit": "Limit",
+  "gp.row.atr_now": "Current ATR",
+  "gp.row.baseline": "Baseline (calibrated average)",
+  "gp.row.ratio": "Ratio",
+  "gp.row.band": "Allowed band",
+  "gp.row.state": "State",
+  "gp.row.baseline_kind": "The baseline's kind",
+  "gp.row.momentum_now": "Turnover now",
+  "gp.row.direction": "Direction",
+  "gp.row.idle_threshold": "Idle threshold",
+  "gp.row.states": "Possible states",
+
+  "gp.val.none_sel": "not selected",
+  "gp.val.no_align": "none",
+  "gp.val.points": "{n} points",
+  "gp.val.ok": "OK",
+  "gp.val.no_limit": "no limit",
+  "gp.val.rolling": "rolling, {bars} bars (≈{days} days)",
+  "gp.val.frozen": "frozen (atr_avg_ref, from the optimisation)",
+  "gp.val.up": "up",
+  "gp.val.down": "down",
+
+  "gp.mom.states": "idle (below the threshold) · running (above it)",
+  "gp.mom.no_data": "no data (the gate lets it through)",
+  "gp.mom.idle": "IDLE — {value} < {threshold} (the gate fails)",
+  "gp.mom.running": "running — {value} ≥ {threshold}",
+
+  "gp.basis.sma": "One timeframe, 3 SMAs",
+  "gp.basis.tf": "Three timeframes, one SMA"
 }

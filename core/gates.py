@@ -29,6 +29,8 @@ meg, hogy „engem ez blokkol-e".
 
 from __future__ import annotations
 
+from core.i18n import LabelMap as _LabelMap, t as _t
+
 # ── Egy kapu ÁLLAPOTA (mért) ─────────────────────────────────────────────
 PASS = "pass"          # be van kapcsolva és épp ÁTENGED
 BLOCKING = "blocking"  # be van kapcsolva és épp BLOKKOL
@@ -43,12 +45,9 @@ EFFECT_NONE = "none"      # a kapu nem szól bele
 
 EFFECTS = (EFFECT_BLOCK, EFFECT_REDUCE, EFFECT_NONE)
 
-# A magyar nevek a beállító felülethez (a 2.0 a stratégia paraméter-ablakába teszi).
-EFFECT_LABEL = {
-    EFFECT_BLOCK:  "Akadályozza a beszállást",
-    EFFECT_REDUCE: "Kockázatcsökkentés",
-    EFFECT_NONE:   "Ki",
-}
+# A feliratok a beállító felülethez. ⚠ LabelMap: a legördülő ÉS a
+# visszafejtése ugyanebből épül (lásd `core.i18n.LabelMap`).
+EFFECT_LABEL = _LabelMap("gate.effect", EFFECTS)
 
 # FONTOS: a „csak jelzés" NEM kapu-hatás. Az azt jelenti, hogy jelzést küldünk az
 # MT5-nek kötés helyett — ez a STRATÉGIA kiváltsága (`core.trade_mode`), nem a
@@ -76,11 +75,7 @@ MOM_IDLE = "idle"
 MOM_DIR = "dir"
 MOM_BOTH = "both"
 MOM_MODES = (MOM_IDLE, MOM_DIR, MOM_BOTH)
-MOM_MODE_LABEL = {
-    MOM_IDLE: "Alapjárat (túl alacsony fordulat)",
-    MOM_DIR:  "Irány-szűrő (szemben megy a jellel)",
-    MOM_BOTH: "Mindkettő",
-}
+MOM_MODE_LABEL = _LabelMap("gate.mom", MOM_MODES)
 MOM_MODE_DEFAULT = MOM_IDLE
 
 # ── A `reduce` hatás KONKRÉT jelentése a motorban (v1.97.0) ─────────────────
@@ -112,16 +107,16 @@ def market_adverse(cfg: dict, symbol: str) -> set:
 # viselkedést tükrözi (spread blokkol; a tf_align a `gate` lista szerint; a piac
 # ma nem blokkol, csak a preset-választáshoz ad bemenetet).
 REGISTRY = (
-    {"key": SPREAD,   "label": "Spread",             "default_effect": EFFECT_BLOCK},
-    {"key": TF_ALIGN, "label": "Idősík-együttállás", "default_effect": EFFECT_NONE},
-    {"key": MARKET,   "label": "Piac-állapot",       "default_effect": EFFECT_NONE},
+    {"key": SPREAD,   "default_effect": EFFECT_BLOCK},
+    {"key": TF_ALIGN, "default_effect": EFFECT_NONE},
+    {"key": MARKET,   "default_effect": EFFECT_NONE},
     # ÚJ kapu alapból NEM szól bele (`none`): egy frissítés SOHA ne kezdjen el
     # némán másképp kereskedni, mint amit tegnap tesztelted. Bekapcsolni a
     # kapu ablakában, stratégiánként kell.
-    {"key": MOMENTUM, "label": "Lendület",           "default_effect": EFFECT_NONE},
+    {"key": MOMENTUM, "default_effect": EFFECT_NONE},
     # Költség/kockázat: a spread mennyire torzítja a TERVEZETT RR-t. Alapból
     # `none` — a meglévő párok viselkedése nem változhat egy frissítéstől.
-    {"key": COST,     "label": "Költség/kockázat",   "default_effect": EFFECT_NONE},
+    {"key": COST,     "default_effect": EFFECT_NONE},
     # ⚠ CSAK KIJELZÉS. A volatilitás-szűrés NEM itt történik, hanem a stratégia
     # `bt_entry` hookjában (atr_min_pct/atr_max_pct) — ott van a backtest, a viz
     # és az él KÖZÖS belépő-kapuja. Ha ez a kapu is kapna állítható hatást, az
@@ -133,7 +128,7 @@ REGISTRY = (
     # kalibrált sáv alá csúszott (0,51×) — a chart üres maradt, és semmi nem
     # árulta el, miért. Minden más ok (spread, együttállás, piac, lendület,
     # költség) látható kapu volt; ez az aszimmetria került a felhasználónak hetekbe.
-    {"key": VOLATILITY, "label": "Volatilitás", "default_effect": EFFECT_NONE,
+    {"key": VOLATILITY, "default_effect": EFFECT_NONE,
      "display_only": True},
 )
 
@@ -167,16 +162,16 @@ def doc_text(key: str) -> str:
         return p.read_text(encoding="utf-8")
     except OSError:
         _lines = ["# " + label_of(key), "",
-                  "Ehhez a kapuhoz még nincs leírás.", "",
+                  _t("gate.no_doc"), "",
                   "Várt fájl:", "", "```", str(p), "```"]
         return chr(10).join(_lines) + chr(10)
 
 
 def label_of(key: str) -> str:
-    for g in REGISTRY:
-        if g["key"] == key:
-            return g["label"]
-    return key
+    """A kapu felirata az aktív nyelven. ⚠ A REGISTRY-ben már NINCS `label`:
+    a szöveg a katalógusban él (`gate.name.<kulcs>`), a REGISTRY a viselkedést
+    írja le. Így egy új nyelv nem nyúl a kapu-definícióhoz."""
+    return _t(f"gate.name.{key}") if key in KEYS else key
 
 
 def default_effect_of(key: str) -> str:
@@ -254,15 +249,9 @@ SRC_LEGACY = "legacy"              # a régi tf_align.gate lista
 SRC_BUILTIN = "builtin"            # REGISTRY default_effect
 SRC_MASTER_OFF = "master_off"      # a Beállításokban KIKAPCSOLT kapu
 
-SOURCE_LABEL = {
-    SRC_PAIR: "ezen a páron beállítva",
-    SRC_PAIR_DEFAULT: "örökölt — a pár alapértéke",
-    SRC_GLOBAL: "örökölt — globális, erre a stratégiára",
-    SRC_GLOBAL_DEFAULT: "örökölt — globális alapérték",
-    SRC_LEGACY: "örökölt — a régi tf_align.gate listából",
-    SRC_BUILTIN: "örökölt — beépített alapérték",
-    SRC_MASTER_OFF: "a Beállításokban KIKAPCSOLVA (a per-pár beállítások megmaradnak, visszakapcsoláskor újra élnek)",
-}
+_SOURCES = (SRC_PAIR, SRC_PAIR_DEFAULT, SRC_GLOBAL, SRC_GLOBAL_DEFAULT,
+            SRC_LEGACY, SRC_BUILTIN, SRC_MASTER_OFF)
+SOURCE_LABEL = _LabelMap("gate.src", _SOURCES)
 
 
 def effect_with_source(cfg: dict, symbol: str, strategy: str,
@@ -592,11 +581,11 @@ def evaluate(ctx: dict, effects: dict = None) -> list:
         key = g["key"]
         eff = (effects or {}).get(key) or g["default_effect"]
         if eff == EFFECT_NONE:
-            out.append({"key": key, "label": g["label"], "effect": eff,
+            out.append({"key": key, "label": label_of(key), "effect": eff,
                         "state": OFF, "detail": "erre a stratégiára nincs bekapcsolva"})
             continue
         state, detail = _EVAL[key](ctx or {})
-        out.append({"key": key, "label": g["label"], "effect": eff,
+        out.append({"key": key, "label": label_of(key), "effect": eff,
                     "state": state, "detail": detail})
     return out
 

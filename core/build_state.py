@@ -9,6 +9,8 @@ import json
 import threading
 from pathlib import Path
 
+from core.i18n import LabelMap as _LabelMap
+
 from core.position_build import (
     default_config, MODES, MODE_OFF, MODE_MANUAL, MODE_AUTO, TRIGGERS, TRIGGER_CANDLE,
 )
@@ -16,7 +18,10 @@ from core.position_build import (
 PATH = Path(__file__).resolve().parents[1] / "data" / "build_mode.json"
 
 CYCLE = (MODE_OFF, MODE_MANUAL, MODE_AUTO)
-NAME = {MODE_OFF: "Ki", MODE_MANUAL: "Kézi", MODE_AUTO: "Auto"}
+# ⚠ LabelMap (lásd `core.i18n.LabelMap`): a legördülő és a visszafejtése
+# ugyanabból a hívásból dolgozik.
+MODES = (MODE_OFF, MODE_MANUAL, MODE_AUTO)
+NAME = _LabelMap("build.mode", MODES)
 
 _lock = threading.Lock()
 _state: dict[str, dict] = {}

@@ -3246,7 +3246,8 @@ class InstrumentParamsDialog:
                          padx=(0 if _c == 0 else 6, 0))
         for i, g in enumerate(_g.REGISTRY, start=1):
             key = g["key"]
-            tk.Label(grid, text=g["label"], bg=BG, fg=FG_WHITE, font=self._sf,
+            tk.Label(grid, text=self._g.label_of(g["key"]), bg=BG,
+                     fg=FG_WHITE, font=self._sf,
                      anchor="w", width=22).grid(row=i, column=0, sticky="w", pady=1)
             eff, _src = _g.effect_with_source(self.root_cfg, self.symbol,
                                               self.strategy.name, key)

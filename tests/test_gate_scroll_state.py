@@ -61,7 +61,8 @@ check("negativ fordulat is 'fut' (abszolut ertek)",
 check("kuszob HATARAN meg fut (>=)", gp.momentum_state_text(0.35, 0.35).startswith("fut"))
 
 for word in ("alapj", "fut", "szöb"):
-    check(f"a szotar emliti: {word!r}", word in gp.MOMENTUM_STATES, gp.MOMENTUM_STATES)
+    check(f"a szotar emliti: {word!r}", word in gp.momentum_states(),
+          gp.momentum_states())
 
 rows = dict(gp.measured_rows(g.MOMENTUM,
                              {"momentum": 0.12, "momentum_idle_threshold": 0.35}))

@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import math
 
+from core.i18n import LabelMap as _LabelMap
+
 MODE_OFF = "off"
 MODE_MANUAL = "manual"
 MODE_AUTO = "auto"          # későbbi kör (automatikus építés minden jel-gyertyán)
@@ -26,8 +28,8 @@ TRIGGER_CANDLE     = "candle"      # gyertyás trendkövető (új csúcs/mély-z
 TRIGGER_R_FIXED    = "r_fixed"     # fix R-rács: +1R, +2R, +3R… (r_step állandó)
 TRIGGER_R_CONVERGE = "r_converge"  # R-felező: a lépés zsugorodik (1R, +0.5R, +0.25R…) → sűrűsödik
 TRIGGERS = (TRIGGER_CANDLE, TRIGGER_R_FIXED, TRIGGER_R_CONVERGE)
-TRIGGER_NAME = {TRIGGER_CANDLE: "Gyertyás", TRIGGER_R_FIXED: "Fix R",
-                TRIGGER_R_CONVERGE: "R-felező"}
+TRIGGERS = (TRIGGER_CANDLE, TRIGGER_R_FIXED, TRIGGER_R_CONVERGE)
+TRIGGER_NAME = _LabelMap("build.trigger", TRIGGERS)
 
 # Biztonsági plafon a ráépítések számára. Nincs FELHASZNÁLÓI korlát (mehet sok R-ig),
 # de az R-FELEZŐ a konvergencia-plafon átlépésekor VÉGTELEN adalékot nyitna (minden
