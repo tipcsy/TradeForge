@@ -31,6 +31,29 @@ log = logging.getLogger(__name__)
 
 MT4, MT5 = "MT4", "MT5"
 
+# ── ÁLLAPOT-KÓDOK ──────────────────────────────────────────────────────────
+# ⚠ A KÓD AZ AZONOSÍTÓ, A SZÖVEG CSAK A KIJELZÉS. Ezek az állapotok korábban
+# magyar mondatok voltak (`"MÁS FORRÁSHOZ készült"`), és a felület EZEKRE
+# hasonlított. Lefordítva egyik ág sem tüzelt volna: a „más forráshoz készült"
+# figyelmeztetés — a modul legfontosabb üzenete, mert ilyenkor a terminálban MÁS
+# fut, mint amit a repóban látsz — némán eltűnt volna.
+# Kitelepítés (deploy_status):
+ST_MISSING, ST_FRESH, ST_STALE = "missing", "fresh", "stale"
+# A repóban TÁROLT lefordított (compiled_status):
+ST_NOT_STORED, ST_MATCH, ST_OTHER_SOURCE = "not_stored", "match", "other_source"
+# A terminálban KINT lévő lefordított (compiled_behind):
+ST_NOT_COMPILED, ST_OLDER, ST_OK = "not_compiled", "older", "ok"
+
+STATES = (ST_MISSING, ST_FRESH, ST_STALE, ST_NOT_STORED, ST_MATCH,
+          ST_OTHER_SOURCE, ST_NOT_COMPILED, ST_OLDER, ST_OK)
+
+
+def state_label(code: str) -> str:
+    """Állapot-kód → a felületen mutatott felirat, az aktív nyelven."""
+    from core.i18n import t as _t
+    return _t(f"deploy.state.{code}") if code in STATES else str(code)
+
+
 # A repó forrásmappái platformonként, és a terminálon belüli MQL-gyökér.
 # ⚠ Az MT5-höz a `tools/` is hozzátartozik: a backtest-visszajátszó és a két
 # néző ott lakik (történelmi okból). Ha csak az `mt5/`-öt néznénk, azok
@@ -264,7 +287,8 @@ def _manifest(platform: str) -> dict:
 def compiled_status(platform: str) -> list:
     """A repóban TÁROLT lefordított fájlok állapota a forráshoz képest.
 
-    `state`: `"nincs tárolva"` · `"egyezik"` · `"MÁS FORRÁSHOZ készült"`.
+    `state`: `ST_NOT_STORED` · `ST_MATCH` · `ST_OTHER_SOURCE` (kódok — a
+    feliratot a `state_label()` adja).
     """
     man = _manifest(platform)
     cdir = _compiled_dir(platform)
@@ -274,11 +298,11 @@ def compiled_status(platform: str) -> list:
         ex = cdir / (src.stem + ext)
         rec = man.get(ex.name) or {}
         if not ex.exists():
-            st = "nincs tárolva"
+            st = ST_NOT_STORED
         elif rec.get("source_sha1") == _sha1(src):
-            st = "egyezik"
+            st = ST_MATCH
         else:
-            st = "MÁS FORRÁSHOZ készült"
+            st = ST_OTHER_SOURCE
         out.append({"file": src.name, "compiled": ex.name, "state": st,
                     "version": source_version(src),
                     "stored_version": rec.get("source_version", "")})
@@ -369,11 +393,11 @@ def status(platform: str, extra_roots=None, include_appdata: bool = True) -> lis
         for src in sources(platform):
             dst = dest_for(tgt, src)
             if not dst.exists():
-                st = "hiányzik"
+                st = ST_MISSING
             elif _same_bytes(src, dst):
-                st = "friss"
+                st = ST_FRESH
             else:
-                st = "elavult"
+                st = ST_STALE
             out.append({"target": dst.parent, "file": src.name, "state": st,
                         "kind": subfolder_of(src)})
     return out
@@ -418,9 +442,9 @@ def deploy(platform: str, extra_roots=None, dry_run: bool = False,
                 continue
             pairs = [(src, dst)]
             _c = _cs.get(src.name) or {}
-            if _c.get("state") == "egyezik":
+            if _c.get("state") == ST_MATCH:
                 pairs.append((_cdir / (src.stem + _ext), dst.with_suffix(_ext)))
-            elif _c.get("state") == "MÁS FORRÁSHOZ készült":
+            elif _c.get("state") == ST_OTHER_SOURCE:
                 res["stale_compiled"].append(src.name)
             for s_, d_ in pairs:
                 if not s_.exists():
@@ -599,10 +623,10 @@ def compiled_beside(platform: str, extra_roots=None, include_appdata: bool = Tru
             c = s.with_suffix(ext)
             if not c.exists():
                 out.append({"target": s.parent, "file": src.name,
-                            "state": "nincs fordítva"})
+                            "state": ST_NOT_COMPILED})
             elif s.exists() and c.stat().st_mtime < s.stat().st_mtime:
                 out.append({"target": s.parent, "file": src.name,
-                            "state": "RÉGEBBI a forrásnál"})
+                            "state": ST_OLDER})
             else:
-                out.append({"target": s.parent, "file": src.name, "state": "rendben"})
+                out.append({"target": s.parent, "file": src.name, "state": ST_OK})
     return out

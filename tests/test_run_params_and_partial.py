@@ -110,7 +110,7 @@ if TK:
                                     get_strategy_by_name("wpr_sma"),
                                     fonts["header"], fonts["small"], lambda: None,
                                     root_cfg=copy.deepcopy(cfg))
-    d._shell.show("Paraméter")
+    d._shell.show("params")
     root.update_idletasks()
 
     # ── 1. AZ INDITAS A FRISS ERTEKKEL fut ───────────────────────────────

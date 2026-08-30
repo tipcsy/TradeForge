@@ -31,6 +31,30 @@ küszöb, ami a configból feljebb vihető.
 
 from typing import Optional
 
+from core.i18n import t as _t
+
+# ── A minősítés KÓDJAI ─────────────────────────────────────────────────────
+# ⚠ A KÓD AZ AZONOSÍTÓ, A SZÖVEG CSAK A KIJELZÉS. Korábban a magyar szó volt
+# mindkettő: a `grade()` „Közepes"-t adott vissza, és ugyanez a szó volt a
+# rangsor kulcsa (`_RANK`), a sor-rendezésé (`row_source`) és a cellaszínezésé
+# (`live_row`). Angolra fordítva egyik sem talált volna — a tábla NÉMÁN rossz
+# sorrendben és szürkén állt volna, mert a `.get(...)` nem hiba, hanem `None`.
+GOOD, MID, WEAK, BAD = "good", "mid", "weak", "bad"
+NONE = ""                       # nincs adat
+GRADES = (GOOD, MID, WEAK, BAD)
+
+# Rang: kisebb = erősebb. A „—" (nincs adat) mindig a végére.
+_RANK = {GOOD: 0, MID: 1, WEAK: 2, BAD: 3}
+
+# Szemantikus szín kódonként (a modul tkinter-független marad).
+_COLOR = {GOOD: "green", MID: "yellow", WEAK: "orange", BAD: "red"}
+
+
+def label(code: str) -> str:
+    """Kód → a felhasználónak mutatott felirat az aktív nyelven."""
+    return _t(f"quality.{code}") if code in _RANK else "—"
+
+
 # Alapértelmezett küszöbök (a config "quality" blokkja felülírja)
 _DEFAULTS = {
     "min_trades":   50,     # ⚠ MÉRVE (lásd a modul fejlécét) — 15-nél a PF zaj
@@ -52,12 +76,24 @@ def _q(cfg: dict) -> dict:
 
 
 def grade(test_summary: dict, cfg: dict) -> tuple[str, str, str]:
-    """(minősítő_szöveg, szín-név, indok) a test_summary alapján.
+    """(minősítő_SZÖVEG, szín-név, indok) — a KIJELZÉSHEZ.
 
     Ha nincs adat → ("—", "muted", "").
+
+    ⚠ Ez a szöveg le van fordítva: rendezni, összehasonlítani, kulcsként
+    használni SOSEM szabad vele. Arra a `grade_code()` van."""
+    code, color, why = grade_code(test_summary, cfg)
+    return (label(code) if code else "—", color, why)
+
+
+def grade_code(test_summary: dict, cfg: dict) -> tuple[str, str, str]:
+    """(minősítés-KÓD, szín-név, indok) a test_summary alapján.
+
+    A kód nyelvfüggetlen (`GOOD`/`MID`/`WEAK`/`BAD`, nincs adat → `""`), tehát
+    ez való rendezéshez, összehasonlításhoz és mentéshez.
     """
     if not test_summary:
-        return ("—", "muted", "")
+        return (NONE, "muted", "")
     q = _q(cfg)
     trades = test_summary.get("trades", 0)
     pnl    = test_summary.get("total_pnl", 0.0)
@@ -65,42 +101,51 @@ def grade(test_summary: dict, cfg: dict) -> tuple[str, str, str]:
     wr     = test_summary.get("win_rate", 0.0)
     mdd    = test_summary.get("max_drawdown", 1.0)
 
+    def _r(code, why=""):
+        return (code, _COLOR[code], why)
+
     # 🔴 Rossz — bármelyik súlyos kizáró feltétel
     if pnl <= 0:
-        return ("Rossz", "red", "veszteséges")
+        return _r(BAD, _t("quality.why.losing"))
     if trades < q["min_trades"]:
-        return ("Rossz", "red", f"kevés trade ({trades})")
+        return _r(BAD, _t("quality.why.few_trades", trades=trades))
     if pf < q["pf_bad"]:
-        return ("Rossz", "red", f"PF {pf:.2f}")
+        return _r(BAD, _t("quality.why.pf", pf=f"{pf:.2f}"))
     if mdd >= q["maxdd_bad"]:
-        return ("Rossz", "red", f"MaxDD {mdd*100:.0f}%")
+        return _r(BAD, _t("quality.why.maxdd", mdd=f"{mdd*100:.0f}"))
 
     # 🟠 Gyenge
     if mdd >= q["maxdd_weak"]:
-        return ("Gyenge", "orange", f"MaxDD {mdd*100:.0f}%")
+        return _r(WEAK, _t("quality.why.maxdd", mdd=f"{mdd*100:.0f}"))
     if pf < q["pf_weak"]:
-        return ("Gyenge", "orange", f"PF {pf:.2f}")
+        return _r(WEAK, _t("quality.why.pf", pf=f"{pf:.2f}"))
 
     # 🟡 Közepes  (a win_rate csak enyhe jelzés: a PF már fedi a nyereségességet,
     #  alacsony WR + erős PF = ritka nagy nyerő, attól még jó lehet)
     if mdd >= q["maxdd_mid"]:
-        return ("Közepes", "yellow", f"MaxDD {mdd*100:.0f}%")
+        return _r(MID, _t("quality.why.maxdd", mdd=f"{mdd*100:.0f}"))
     if pf < q["pf_mid"]:
-        return ("Közepes", "yellow", f"PF {pf:.2f}")
+        return _r(MID, _t("quality.why.pf", pf=f"{pf:.2f}"))
     if wr < q["winrate_weak"]:
-        return ("Közepes", "yellow", f"Win {wr*100:.0f}%")
+        return _r(MID, _t("quality.why.win", wr=f"{wr*100:.0f}"))
 
     # 🟢 Jó
-    return ("Jó", "green", "")
+    return _r(GOOD)
 
 
-_RANK = {"Jó": 0, "Közepes": 1, "Gyenge": 2, "Rossz": 3}
+def grade_rank(grade: str) -> int:
+    """Minősítés → rang (kisebb = erősebb). Ismeretlen/nincs → 4.
+    A 'Csak erősebb' korreláció-mód a feldolgozási sorrendhez használja.
 
-
-def grade_rank(grade_text: str) -> int:
-    """Minősítő szöveg → rang (kisebb = erősebb). Ismeretlen/nincs → 4.
-    A 'Csak erősebb' korreláció-mód a feldolgozási sorrendhez használja."""
-    return _RANK.get(grade_text, 4)
+    ⚠ KÓDOT vár (`GOOD`/`MID`/…), de a LEFORDÍTOTT feliratot is elfogadja — a
+    hívók egy része a kijelzett szöveget adja tovább, és egy néma 4-es rang ott
+    a rendezést borítaná fel, észrevétlenül."""
+    if grade in _RANK:
+        return _RANK[grade]
+    for code in GRADES:
+        if grade and grade == label(code):
+            return _RANK[code]
+    return 4
 
 
 def metric_colors(test_summary: dict, cfg: dict) -> dict:

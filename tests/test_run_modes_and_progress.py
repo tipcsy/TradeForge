@@ -57,7 +57,7 @@ def _dialog():
     d = idlg.InstrumentParamsDialog(root, SYM, cfg, get_strategy_by_name("wpr_sma"),
                                     FONTS["header"], FONTS["small"], lambda: None,
                                     root_cfg=copy.deepcopy(cfg))
-    d._shell.show("Paraméter")
+    d._shell.show("params")
     d.popup.update_idletasks()
     d._sections["futtatas"].set_open(True)
     d.popup.update_idletasks()

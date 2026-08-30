@@ -161,8 +161,10 @@ def cells_for(d: dict, collapsed: dict, on_close=None) -> dict:
                 text=_lr._money_r(day.get("money"), day.get("r"), pnl),
                 fg=_lr._pnl_color(day.get("money")))
             q = st.get("quality") or "—"
-            out[f"{n}|quality"] = Cell(f"{n}|quality", text=q, anchor="center",
-                                       font="small", fg=_lr._quality_color(q))
+            # A SZÖVEG a lefordított felirat, a SZÍN a kódból jön.
+            out[f"{n}|quality"] = Cell(
+                f"{n}|quality", text=q, anchor="center", font="small",
+                fg=_lr._quality_color(st.get("quality_code") or q))
         # ⚠ A VEZERLES mostantol CSAK Play/Stop. Az OPT lekerult: az
         # optimalizalas a parameter-ablak Futtatas lapjarol indul, ahol LATOD,
         # mi fog tortenni (idoszakok, kapuk, hangolt dimenziok, keresesi ter).

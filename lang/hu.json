@@ -1,0 +1,67 @@
+{
+  "_comment": "TradeForge nyelvi katalógus — MAGYAR (alapnyelv). A kulcs STABIL azonosító, a szöveg adat: a kulcsot sosem írjuk át fordításkor. Konvenció: <terület>.<elem>[.<változat>], csupa kisbetű, pont-elválasztással. A {név} helykitöltők MINDEN nyelvben ugyanazok — a teszt (tests/test_i18n.py) ezt ellenőrzi. Ez a fájl a TELJES kulcskészlet forrása: ami itt nincs, azt a többi nyelv sem tartalmazhatja.",
+  "_comment_lang": "A nyelvek SAJÁT nevei (Magyar / English) NEM ide tartoznak — azok a core/i18n.py LANGUAGES tábláján élnek, mert egy nyelv nevét sosem fordítjuk le.",
+
+  "quality.good": "Jó",
+  "quality.mid": "Közepes",
+  "quality.weak": "Gyenge",
+  "quality.bad": "Rossz",
+  "quality.why.losing": "veszteséges",
+  "quality.why.few_trades": "kevés trade ({trades})",
+  "quality.why.pf": "PF {pf}",
+  "quality.why.maxdd": "MaxDD {mdd}%",
+  "quality.why.win": "Win {wr}%",
+
+  "theme.dark_mocha": "Sötét (Mocha)",
+  "theme.light": "Világos",
+  "theme.contrast": "Magas kontraszt",
+
+  "tab.overview": "Áttekintés",
+  "tab.params": "Paraméter",
+  "tab.trials": "Kísérletek",
+  "tab.link": "Kapcsolat",
+  "tab.docs": "Leírás",
+  "tab.settings": "Beállítás",
+  "tab.json": "Json",
+  "tab.gates": "Kapuk",
+  "tab.strategies": "Stratégiák",
+
+  "rr.preset.auto": "Auto (jelenlegi)",
+  "rr.preset.off": "Ki (mind)",
+  "rr.preset.risky": "Risky (mind)",
+  "rr.preset.halving": "Felező (mind)",
+  "rr.preset.shield": "Pajzs (mind)",
+  "rr.preset.fibo": "Fibo (mind)",
+  "rr.preset.thirds": "Harmados (mind)",
+  "rr.preset.shield_fibo": "Pajzs↔Fibo (mind)",
+
+  "trades.col.open": "nyitás",
+  "trades.col.dir": "irány",
+  "trades.col.entry": "be",
+  "trades.col.exit": "ki",
+  "trades.col.closed": "zárva",
+  "trades.col.pnl": "P&L",
+  "trades.col.r": "R",
+  "trades.col.reason": "ok",
+
+  "deploy.state.missing": "hiányzik",
+  "deploy.state.fresh": "friss",
+  "deploy.state.stale": "elavult",
+  "deploy.state.not_stored": "nincs tárolva",
+  "deploy.state.match": "egyezik",
+  "deploy.state.other_source": "MÁS FORRÁSHOZ készült",
+  "deploy.state.not_compiled": "nincs fordítva",
+  "deploy.state.older": "RÉGEBBI a forrásnál",
+  "deploy.state.ok": "rendben",
+
+  "backtest.overlay.none": "Nincs",
+  "backtest.overlay.prev": "Előző",
+  "backtest.overlay.orig": "Eredeti",
+
+  "opt.done": "Kész ✓",
+  "opt.last": "Utolsó opt: {date}",
+  "opt.multi": "Opt: {parts}",
+
+  "lang.label": "Nyelv",
+  "lang.restart_note": "A nyelv a program újraindítása után változik meg."
+}

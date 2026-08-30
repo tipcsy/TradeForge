@@ -35,6 +35,7 @@ from tkinter import ttk
 
 import pandas as pd
 
+from core.i18n import t as _t
 from dashboard.theme import (
     BG, BG_HEADER,
     FG_WHITE, FG_GREEN, FG_RED, FG_YELLOW, FG_GRAY, FG_GRAY_DIM, FG_BLUE,
@@ -712,8 +713,13 @@ class BacktestDialog:
         cmp_bar.pack(anchor="w", padx=12, pady=(2, 0))
         tk.Label(cmp_bar, text="Összevetés:", bg=BG, fg=FG_GRAY,
                  font=self._sf).pack(side="left")
-        self._overlay_mode = tk.StringVar(value="Előző")
-        omc = tk.OptionMenu(cmp_bar, self._overlay_mode, "Nincs", "Előző", "Eredeti",
+        # ⚠ FELIRAT a legördülőben, KÓD a döntésben (`_reference`) — a
+        # lefordított szövegre hasonlítás ott némán „nincs összevetés"-t adna.
+        self._overlay_choices = [(c, _t(f"backtest.overlay.{c}"))
+                                 for c in ("none", "prev", "orig")]
+        self._overlay_mode = tk.StringVar(value=self._overlay_choices[1][1])
+        omc = tk.OptionMenu(cmp_bar, self._overlay_mode,
+                            *[lbl for _c, lbl in self._overlay_choices],
                             command=lambda _=None: self._on_overlay_change())
         omc.config(bg=BG_HEADER, fg=FG_WHITE, font=self._sf, relief="flat",
                    highlightthickness=0, activebackground=BG_HEADER)
@@ -1458,11 +1464,12 @@ class BacktestDialog:
     def _reference(self):
         """A kiválasztott összevetési (referencia) futás (result, summary, címke).
         (None, None, "") ha nincs / „Nincs" van választva."""
-        mode = self._overlay_mode.get()
-        if mode == "Előző":
-            return self._prev_result, self._prev_summary, "Előző"
-        if mode == "Eredeti":
-            return self._orig_result, self._orig_summary, "Eredeti"
+        _lbl = self._overlay_mode.get()
+        mode = next((c for c, lb in self._overlay_choices if lb == _lbl), "none")
+        if mode == "prev":
+            return self._prev_result, self._prev_summary, _lbl
+        if mode == "orig":
+            return self._orig_result, self._orig_summary, _lbl
         return None, None, ""
 
     def _on_overlay_change(self):

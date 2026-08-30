@@ -48,6 +48,8 @@ from core import position_meta as _pmeta
 from core import pnl_split as _pnl_split
 from core import opt_activity as _opt_activity
 from core import gate_layout as _gate_layout
+from core import quality as _quality
+from core.i18n import t as _t
 from version import APP_NAME, APP_VERSION
 
 
@@ -95,12 +97,41 @@ def opt_done_date(symbol: str, strategy_name: str):
         return None
 
 
+# ── Az optimalizálás-státusz: SZÖVEG + nyelvfüggetlen FAJTA ────────────────
+# ⚠ A felület korábban a SZÖVEGBEN keresett: `"Kész" in txt or "Utolsó opt" in
+# txt` döntötte el, hogy zöld-e a cella, és hogy felülírható-e a perzisztens
+# címkével. Lefordítva egyik sem talált volna — a státusz némán szürke marad, a
+# perzisztens „utolsó opt" pedig sosem íródik ki.
+#
+# Ezért a státusz egy `str` LESZÁRMAZOTT: minden megjelenítési hely változatlanul
+# szövegként kezeli (nincs 40 hívóhely átírva), a döntés viszont a `.kind`-ra
+# épül. A kettő így nem tud elcsúszni egymástól — egy szöveg mellé nem lehet
+# „elfelejteni" beállítani a fajtát, mert együtt keletkeznek.
+OPT_DONE = "done"
+
+
+class OptStatus(str):
+    """Optimalizálás-státusz szöveg, `kind` fajtával (`""` | `OPT_DONE`)."""
+
+    kind: str = ""
+
+    def __new__(cls, text: str, kind: str = ""):
+        o = super().__new__(cls, text)
+        o.kind = kind
+        return o
+
+
+def opt_kind(value) -> str:
+    """Egy státusz fajtája — sima `str` (idegen forrás) esetén üres."""
+    return getattr(value, "kind", "")
+
+
 def opt_done_label(symbol: str, strategy_name: str) -> str:
     """PERZISZTENS 'utolsó optimalizálás' címke EGY stratégiára, pl.
     'Utolsó opt: 26/07/16'. '' ha nincs marker. Modul-szintű (a vezérlő és az
     ablak is használja — az OptimizerController-nek nincs `strategy` tagja)."""
     d = opt_done_date(symbol, strategy_name)
-    return f"Utolsó opt: {d.strftime('%y/%m/%d')}" if d else ""
+    return OptStatus(_t("opt.last", date=d.strftime('%y/%m/%d')), OPT_DONE) if d else ""
 
 
 def build_columns(strategies) -> list[Column]:
@@ -193,8 +224,7 @@ def _fixed_cell(key: str, ds, opt_status: str, inst_state: str) -> tuple[str, st
         if inst_state in ("OPTIMIZING", "QUEUED"):
             col = "yellow" if inst_state == "OPTIMIZING" else "muted"
         else:
-            col = "green" if ("Kész" in txt or "Utolsó opt" in txt
-                              or txt.startswith("Opt:")) else "muted"
+            col = "green" if opt_kind(opt_status) == OPT_DONE else "muted"
         return txt, col
     return "—", "muted"
 
@@ -1048,7 +1078,8 @@ class OptimizerController:
                 ds.trained = True
             # A frissen írt done-marker idejéből a perzisztens 'Utolsó opt: <dátum>'
             # címke — a MOST futtatott stratégia markeréből (pl. ml_ai tanítás).
-            self.optimizer_status[symbol] = opt_done_label(symbol, strategy) or "Kész ✓"
+            self.optimizer_status[symbol] = (opt_done_label(symbol, strategy)
+                                             or OptStatus(_t("opt.done"), OPT_DONE))
 
         except Exception as e:
             import traceback
@@ -1185,13 +1216,18 @@ class PortfolioBacktestTab:
         # Kockázatcsökkentés preset (MIND a párra) — a technikák összevetéséhez.
         tk.Label(form, text="Kockázatcsökkentés:", bg=BG_BT, fg=FG_GRAY,
                  font=self._small).grid(row=2, column=0, sticky="e", pady=4)
-        self._rr_var = tk.StringVar(value="Auto (jelenlegi)")
+        # ⚠ A legördülő FELIRATOKAT mutat, a döntés KÓDON megy. Amíg a kettő egy
+        # volt, a preset-választás egy magyar szöveg megtalálásán múlt: angolul a
+        # `.get()` `None`-t adott volna, tehát a backtest CSENDBEN a régi
+        # („Auto") viselkedéssel futott volna — más eredménnyel, hibaüzenet nélkül.
+        self._rr_choices = [(c, _t(f"rr.preset.{c}")) for c in
+                            ("auto", "off", "risky", "halving", "shield",
+                             "fibo", "thirds", "shield_fibo")]
+        self._rr_var = tk.StringVar(value=self._rr_choices[0][1])
         self._rr_combo = ttk.Combobox(
             form, textvariable=self._rr_var, width=16, state="readonly",
             font=self._small,
-            values=["Auto (jelenlegi)", "Ki (mind)", "Risky (mind)",
-                    "Felező (mind)", "Pajzs (mind)", "Fibo (mind)",
-                    "Harmados (mind)", "Pajzs↔Fibo (mind)"])
+            values=[lbl for _c, lbl in self._rr_choices])
         self._rr_combo.grid(row=2, column=1, padx=4, sticky="w")
 
         # Pozícióépítés (piramidális ráépítés a risk-free runnereken) ki/be.
@@ -1367,13 +1403,15 @@ class PortfolioBacktestTab:
         """A választott preset → kockázatcsökkentő spec (mind a párra), vagy None
         ('Auto' = a per-pár auto-risky, a jelenlegi viselkedés)."""
         from core import risk_reduction as _rr
-        preset = {"Ki (mind)": _rr.PRESET_OFF, "Risky (mind)": _rr.PRESET_RISKY,
-                  "Felező (mind)": _rr.PRESET_HALVING,
-                  "Pajzs (mind)": _rr.PRESET_SHIELD,
-                  "Fibo (mind)": _rr.PRESET_FIBO,
-                  "Harmados (mind)": _rr.PRESET_THIRDS,
-                  "Pajzs↔Fibo (mind)": _rr.PRESET_SHIELD_FIBO}.get(self._rr_var.get())
-        if preset is None:
+        _code = next((c for c, lbl in self._rr_choices
+                      if lbl == self._rr_var.get()), "auto")
+        preset = {"off": _rr.PRESET_OFF, "risky": _rr.PRESET_RISKY,
+                  "halving": _rr.PRESET_HALVING,
+                  "shield": _rr.PRESET_SHIELD,
+                  "fibo": _rr.PRESET_FIBO,
+                  "thirds": _rr.PRESET_THIRDS,
+                  "shield_fibo": _rr.PRESET_SHIELD_FIBO}.get(_code)
+        if preset is None:          # "auto" — a per-pár auto-risky marad
             return None
         return {**_rr.default_config(), "preset": preset}
 
@@ -2423,9 +2461,9 @@ class ClosedTab:
                            activebackground=BG, activeforeground=FG_WHITE,
                            font=self._small,
                            command=self._on_range_change).pack(side="left", padx=(0, 6))
-        _t = datetime.now().date()
-        self._from_var = tk.StringVar(value=str(_t))
-        self._to_var   = tk.StringVar(value=str(_t))
+        _today = datetime.now().date()
+        self._from_var = tk.StringVar(value=str(_today))
+        self._to_var   = tk.StringVar(value=str(_today))
         for _v in (self._from_var, self._to_var):
             tk.Entry(sel, textvariable=_v, width=11, bg=BG_HEADER, fg=FG_WHITE,
                      font=self._small, insertbackground=FG_WHITE,
@@ -3395,9 +3433,13 @@ class DashboardWindow:
         data = _DISPLAY_FS_CACHE.get(params_file(symbol, name), _load)
         if not isinstance(data, dict):
             return None
-        txt, col, _reason = get_strategy_by_name(name).grade(
-            data.get("test_summary", {}), self.cfg)
-        return (txt, col)
+        # ⚠ A KÓD IS MEGY: a cella SZÖVEGE fordítható, de a rendezés és a szín a
+        # kódra épül. Enélkül angolra kapcsolva a „Minőség" oszlop rendezése
+        # némán ábécésorrendre esne vissza (Bad < Fair < Good), a szín pedig
+        # szürkére — mindkettő hiba nélkül, észrevétlenül.
+        _s = get_strategy_by_name(name)
+        code, col, _reason = _s.grade_code(data.get("test_summary", {}), self.cfg)
+        return (_quality.label(code) if code else "—", col, code)
 
     def _on_header_click(self, col_idx: int):
         if self._sort_col == col_idx:
@@ -3851,8 +3893,13 @@ class DashboardWindow:
         # ── Téma ────────────────────────────────────────────────────────────
         tk.Label(frm, text="Téma:", bg=BG, fg=FG_GRAY,
                  font=self._small_font).grid(row=0, column=0, sticky="e", pady=3)
-        theme_var = tk.StringVar(value=_orig_theme)
-        _omt = tk.OptionMenu(frm, theme_var, *_theme.THEMES.keys())
+        # ⚠ A legördülő FELIRATOKAT mutat, a config KÓDOT tárol. A kettő közt a
+        # `theme_code()` fordít — így a mentett érték nyelvfüggetlen marad, és a
+        # régi, magyar nevű mentés is felismerhető.
+        theme_var = tk.StringVar(value=_theme.theme_label(
+            _theme.theme_code(str(_orig_theme))))
+        _omt = tk.OptionMenu(frm, theme_var,
+                             *[_theme.theme_label(c) for c in _theme.THEMES])
         _omt.config(bg=BG_HEADER, fg=FG_WHITE, font=self._small_font, relief="flat",
                     highlightthickness=0, activebackground=BG_HEADER, width=18)
         _omt["menu"].config(bg=BG_HEADER, fg=FG_WHITE)
@@ -3908,7 +3955,7 @@ class DashboardWindow:
 
         def _save():
             dash = self.cfg.setdefault("dashboard", {})
-            dash["theme"]       = theme_var.get()
+            dash["theme"]       = _theme.theme_code(theme_var.get())
             dash["font_family"] = fam_var.get()
             dash["font_size"]   = int(size_var.get())
             try:
@@ -3917,7 +3964,7 @@ class DashboardWindow:
                 lbl_note.config(text=f"Mentési hiba: {ex}", fg=FG_RED)
                 return
             _preview()          # a betű már él; a szín csak indítás után
-            if theme_var.get() != _theme.ACTIVE_THEME:
+            if _theme.theme_code(theme_var.get()) != _theme.ACTIVE_THEME:
                 lbl_note.config(text="Mentve. A betű azonnal érvényes; a TÉMA SZÍNEI "
                                      "a program következő indításakor jelennek meg.",
                                 fg=FG_YELLOW)
@@ -3983,13 +4030,15 @@ class DashboardWindow:
 
         # ── BAL OLDALI FÜLEK (közös váz: `dashboard/tab_shell.py`) ───────
         from dashboard.tab_shell import TabShell
-        _shell = TabShell(popup, ("Json", "Kapuk", "Stratégiák"))
+        _shell = TabShell(popup, (("json", _t("tab.json")),
+                                  ("gates", _t("tab.gates")),
+                                  ("strategies", _t("tab.strategies"))))
         _page = {n: _shell.page(n) for n in _shell.names()}
 
         # ── KAPUK lap ────────────────────────────────────────────────────
         from core import gates as _gts, gate_layout as _glay
         from dashboard.order_editor import OrderEditor
-        _kp = _page["Kapuk"]
+        _kp = _page["gates"]
         tk.Label(_kp, text="Mely kapuk látszanak és milyen sorrendben",
                  bg=BG, fg=FG_BLUE, font=self._header_font, anchor="w").pack(
                  anchor="w", padx=10, pady=(10, 4))
@@ -4006,7 +4055,7 @@ class DashboardWindow:
         _gate_ed.frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
         # ── STRATÉGIÁK lap ───────────────────────────────────────────────
-        _st = _page["Stratégiák"]
+        _st = _page["strategies"]
         tk.Label(_st, text="Mely stratégiák elérhetők és milyen sorrendben",
                  bg=BG, fg=FG_BLUE, font=self._header_font, anchor="w").pack(
                  anchor="w", padx=10, pady=(10, 4))
@@ -4021,12 +4070,12 @@ class DashboardWindow:
         _strat_ed.frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
         # ── JSON lap (a korábbi tartalom) ────────────────────────────────
-        # ⚠ A Json lap tartalma ide épül. Régen itt egy `popup = _page["Json"]`
+        # ⚠ A Json lap tartalma ide épül. Régen itt egy `popup = _page["json"]`
         # újrakötés állt — és a mentés végi `popup.destroy()` emiatt a LAPOT
         # törölte az ABLAK helyett: utána bármelyik fülre kattintva
         # „bad window path name" jött. A Toplevel neve marad `popup`.
-        json_page = _page["Json"]
-        _shell.show("Json")
+        json_page = _page["json"]
+        _shell.show("json")
 
         tk.Label(json_page, text="config.json szerkesztése (mentéskor JSON-validálás):",
                  bg=BG, fg=FG_BLUE, font=self._header_font).pack(anchor="w", padx=10, pady=(10, 2))
@@ -6010,8 +6059,7 @@ class DashboardWindow:
         # Így restart / opt közben sem tűnik el (nem az in-memory 'Kész ✓'-ra hagyatkozik).
         if not _opt_activity.symbol_busy(symbol):
             _cur = self.optimizer_status.get(symbol, "")
-            if (not _cur or "Kész" in _cur or "Utolsó opt" in _cur
-                    or _cur.startswith("Opt:")):
+            if not _cur or opt_kind(_cur) == OPT_DONE:
                 _lbl = self._opt_done_label(symbol)
                 if _lbl:
                     self.optimizer_status[symbol] = _lbl
@@ -6034,7 +6082,7 @@ class DashboardWindow:
         for n in names:
             d = opt_done_date(symbol, n)
             parts.append(f"{n} {d.strftime('%m/%d')}" if d else f"{n} —")
-        return "Opt: " + " · ".join(parts)
+        return OptStatus(_t("opt.multi", parts=" · ".join(parts)), OPT_DONE)
 
     # MT5 timeframe leképezés perc → konstans (lazán, futásidőben)
     @staticmethod
@@ -6076,7 +6124,8 @@ class DashboardWindow:
             # Külsőleg (más app által) optimalizált párt is "vegyük észre":
             # ha nem épp most optimalizál, a perzisztens 'Utolsó opt: <dátum>' címke.
             if not _opt_activity.symbol_busy(symbol):
-                self.optimizer_status[symbol] = self._opt_done_label(symbol) or "Kész ✓"
+                self.optimizer_status[symbol] = (self._opt_done_label(symbol)
+                                                 or OptStatus(_t("opt.done"), OPT_DONE))
         else:
             params = self.strategy.base_params(self.cfg)
             ds.trained = False
@@ -6727,7 +6776,7 @@ def _demo_dashboard(cfg: dict):
         trained = symbol in real_trained
         st      = states_pool[i % len(states_pool)] if trained else "STOPPED"
         inst_state[symbol] = st
-        opt_status[symbol] = "Kész ✓" if trained else ""
+        opt_status[symbol] = OptStatus(_t("opt.done"), OPT_DONE) if trained else ""
 
         # Valós minősítés a test_summary alapján (ha optimalizált)
         grade_cell, grade_reason = None, ""

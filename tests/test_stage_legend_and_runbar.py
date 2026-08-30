@@ -110,7 +110,7 @@ if TK:
                                         fonts["small"], lambda: None,
                                         root_cfg=copy.deepcopy(cfg))
         root.update_idletasks()
-        blob = " ".join(_texts(d._shell.page("Áttekintés")))
+        blob = " ".join(_texts(d._shell.page("overview")))
         check(f"[{name}] van karika-magyarazat", "Mit jelentenek a karikák" in blob)
         # ⚠ A DARABSZAM a strategiaebol jon, nem bedrotozva.
         _n = len(st.columns()[0].stages)
@@ -160,7 +160,7 @@ if TK:
                                     get_strategy_by_name("wpr_sma"),
                                     fonts["header"], fonts["small"], lambda: None,
                                     root_cfg=copy.deepcopy(cfg))
-    d._shell.show("Paraméter")
+    d._shell.show("params")
     top = d.popup
     top.deiconify(); top.update(); top.update_idletasks()
 

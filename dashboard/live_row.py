@@ -372,8 +372,12 @@ def _pnl_color(v):
 
 
 def _quality_color(q):
-    return {"Jó": FG_GREEN, "Közepes": FG_ORANGE,
-            "Gyenge": FG_RED, "Rossz": FG_RED}.get(q, FG_GRAY)
+    """A minősítés színe. ⚠ KÓDOT vár (`core.quality.GOOD` …); a lefordított
+    feliratot is elfogadja, mert a `grade_rank` visszafelé is felismeri — enélkül
+    angol felületen minden cella szürke lenne, hiba nélkül."""
+    from core import quality as _q
+    return {0: FG_GREEN, 1: FG_ORANGE, 2: FG_RED, 3: FG_RED}.get(
+        _q.grade_rank(q or ""), FG_GRAY)
 # ---------------------------------------------------------------------------
 # Bemutató adat — a tervben szereplő Ger 40 sor
 # ---------------------------------------------------------------------------

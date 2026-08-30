@@ -1962,11 +1962,14 @@ def run_portfolio_backtest(
             # közös, instrumentum-szintű execution config felülírja az esetleges
             # elavult másolatot a régi optimalizált json-ban.
             pair_params[sym] = {**data.get("params", {}), **load_execution_params(sym, cfg)}
-            gtxt, _, _ = strategy.grade(data.get("test_summary", {}), cfg)
-            weak = 1 <= strategy.grade_rank(gtxt) <= 3   # Közepes/Gyenge/Rossz
+            # ⚠ KÓD, nem a kijelzett szöveg: a döntés (RISKY mód) nem függhet a
+            # felület nyelvétől — angolra kapcsolva a `grade_rank` a lefordított
+            # szót nem ismerné fel, és MINDEN pár kimaradna a risky ágból.
+            gcode, _, _ = strategy.grade_code(data.get("test_summary", {}), cfg)
+            weak = 1 <= strategy.grade_rank(gcode) <= 3   # Közepes/Gyenge/Rossz
             pair_risky[sym] = risky_mode.is_risky(sym) or (auto_risky and weak)
             if pair_risky[sym]:
-                log.info("Portfolio BT: %s — RISKY mód (minősítés: %s%s)", sym, gtxt,
+                log.info("Portfolio BT: %s — RISKY mód (minősítés: %s%s)", sym, gcode,
                          ", kézi" if risky_mode.is_risky(sym) else "")
         else:
             log.warning("Portfolio BT: %s — nincs optimalizált params, kihagyva.", sym)

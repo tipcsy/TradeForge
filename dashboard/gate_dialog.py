@@ -27,6 +27,7 @@ import tkinter as tk
 
 from core import gate_params as _gp
 from core import gates as _g
+from core.i18n import t as _t
 from dashboard import theme as _theme
 from dashboard.scroll_area import scrollable as _scrollable
 from dashboard.theme import (BG, BG_HEADER, FG_WHITE, FG_GRAY, FG_GRAY_DIM,
@@ -230,7 +231,9 @@ class GateDialog:
         # A leírás a felhasználó kérésére NEM külön ablak: a paraméterek MELLETT
         # kell tudni, mit is állítunk.
         from dashboard.tab_shell import TabShell
-        self._shell = TabShell(self.top, ("Beállítás", "Leírás"),
+        self._shell = TabShell(self.top,
+                               (("settings", _t("tab.settings")),
+                                ("docs", _t("tab.docs"))),
                                on_show=self._on_tab)
 
         # A Beállítás lap GÖRGETHETŐ: a Lendületnek nyolc paramétere van, és
@@ -238,7 +241,7 @@ class GateDialog:
         # levágódott, gördítősáv nélkül pedig NÉMÁN (semmi nem jelezte, hogy van
         # még lejjebb). A Leírás lap nem kap külön görgetőt: a Markdown-nézet
         # Text-widgetje magától görget, két sáv egymás mellett zavaró lenne.
-        _holder, self._page, _ = _scrollable(self._shell.page("Beállítás"))
+        _holder, self._page, _ = _scrollable(self._shell.page("settings"))
         _holder.pack(fill="both", expand=True)
 
         self._build_measured()
@@ -248,10 +251,10 @@ class GateDialog:
     def _on_tab(self, name):
         """LUSTA feltöltés: a leírást csak akkor rendereljük, ha rá is néztek.
         A lemezről olvassa, tehát szerkesztés után újranyitva azonnal friss."""
-        if name != "Leírás":
+        if name != "docs":
             return
         from dashboard import md_view
-        md_view.render(self._shell.page("Leírás"), _g.doc_text(self.key),
+        md_view.render(self._shell.page("docs"), _g.doc_text(self.key),
                        source=str(_g.doc_path(self.key)))
 
     # ── MOST (mért) ──────────────────────────────────────────────────────

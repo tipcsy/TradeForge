@@ -124,7 +124,7 @@ if TK:
     # ⚠ ES A SZAKASZ LEGYEN NYITVA, a lap pedig ELOL. Az orak alapbol CSUKOTTAN
     # indulnak (napi munkaban ritkan kellenek) — a csukott szakasz torzse nincs
     # csomagolva, tehat a gyerekei sosem kapnanak geometriat.
-    d._shell.show("Paraméter")
+    d._shell.show("params")
     d._sections["orak"].set_open(True)
     _top = _hb.winfo_toplevel()
     _top.deiconify()

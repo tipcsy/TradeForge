@@ -25,6 +25,8 @@
   },
   "dashboard": {
     "_comment": "Felület frissítési ütem. price_refresh_sec: BID/ASK/spread MINDEN párra (1-5 ajánlott). live_refresh_sec: indikátor (WPR) a FUTÓ pároknál. all_refresh_sec: indikátor minden párra. watchdog_threshold_sec: ennyi mp blokkolás fölött figyelmeztet a fagyás-watchdog (data/ui_watchdog.log). watchdog_stacks: a figyelmeztetés mellé MINDEN szál hívási vermét is naplózza (alap: true) — enélkül csak az látszik, hogy volt akadás, az nem, hogy hol; a Tk ciklusát egy GIL-t tartó HÁTTÉRSZÁL is megállítja, tehát a fő szál verme önmagában félrevezethet.",
+    "_comment_language": "A FELULET NYELVE: \"hu\" (alap) | \"en\". A valtas UJRAINDITAS utan lathato — a tkinter a feliratot a widget megepitesekor kapja, tehat futas kozben az egesz feluletet ujra kellene epiteni (ugyanaz a hatar, mint a tema szineinel). Ami meg nincs leforditva, az MAGYARUL jelenik meg (visszaeses), nem uresen; a hiany a naplobol es a `python tools/i18n_scan.py`-bol latszik. A NAPLO es a stratégia-leirasok (strategy/docs) egyelore magyarul maradnak.",
+    "language": "hu",
     "price_refresh_sec": 3,
     "live_refresh_sec": 7,
     "all_refresh_sec": 30,

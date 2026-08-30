@@ -172,13 +172,51 @@ _CONTRAST = {
     "TOOLTIP_FG":   "#ffffff",
 }
 
-# Megjelenítendő név → paletta. A sorrend a beállító ablak sorrendje.
+# KÓD → paletta. A sorrend a beállító ablak sorrendje.
+#
+# ⚠ A KULCS KÓD, NEM FELIRAT — és ez a config.json-ban IS így él
+# (`dashboard.theme`). Korábban a megjelenítendő magyar név volt a kulcs, tehát
+# a téma neve lefordítva elárvította volna a mentett beállítást: a `load_prefs`
+# nem találná a listában, és néma visszaesés lenne a Mochára. A felhasználó
+# annyit látna, hogy „a program elfelejtette a témámat".
 THEMES: dict[str, dict] = {
-    "Sötét (Mocha)":   _MOCHA,
-    "Világos":         _LIGHT,
-    "Magas kontraszt": _CONTRAST,
+    "dark_mocha": _MOCHA,
+    "light":      _LIGHT,
+    "contrast":   _CONTRAST,
 }
-DEFAULT_THEME = "Sötét (Mocha)"
+DEFAULT_THEME = "dark_mocha"
+
+# Kód → nyelvi kulcs. A feliratot a `theme_label()` adja (i18n).
+THEME_LABEL_KEYS = {
+    "dark_mocha": "theme.dark_mocha",
+    "light":      "theme.light",
+    "contrast":   "theme.contrast",
+}
+
+# ⚠ A RÉGI, MAGYAR NEVEK BEOLVASÁSA. A meglévő config.json-okban a téma neve
+# magyar szöveg. NEM írjuk át a fájlt (egy induláskori csendes configírás a
+# legrosszabb fajta mellékhatás) — csak OLVASÁSKOR képezzük le. A kód akkor
+# kerül a fájlba, amikor a felhasználó legközelebb ment a beállító ablakban.
+_LEGACY_THEME_NAMES = {
+    "Sötét (Mocha)":   "dark_mocha",
+    "Világos":         "light",
+    "Magas kontraszt": "contrast",
+}
+
+
+def theme_label(code: str) -> str:
+    """Téma-kód → a beállító ablakban mutatott felirat, az aktív nyelven."""
+    from core.i18n import t as _t
+    return _t(THEME_LABEL_KEYS.get(code, "")) if code in THEME_LABEL_KEYS else code
+
+
+def theme_code(label: str) -> str:
+    """Felirat → kód (a legördülő visszafejtése). Ismeretlen → alapértelmezett."""
+    for code in THEMES:
+        if label == theme_label(code):
+            return code
+    return _LEGACY_THEME_NAMES.get(label, label if label in THEMES
+                                   else DEFAULT_THEME)
 
 # A kötelező kulcsok halmaza — minden témának teljesnek kell lennie (a hiányt a
 # betöltés a Mocha értékével pótolja, hogy soha ne legyen None egy widget-színben).
@@ -216,8 +254,11 @@ def load_prefs() -> dict:
     try:
         with open(_config_path(), encoding="utf-8") as f:
             dash = (json.load(f).get("dashboard") or {})
-        if dash.get("theme") in THEMES:
-            theme = dash["theme"]
+        _th = dash.get("theme")
+        if _th in THEMES:
+            theme = _th
+        elif _th in _LEGACY_THEME_NAMES:      # régi, magyar nevű mentés
+            theme = _LEGACY_THEME_NAMES[_th]
         if isinstance(dash.get("font_family"), str) and dash["font_family"].strip():
             family = dash["font_family"].strip()
         _s = dash.get("font_size")

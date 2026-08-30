@@ -93,8 +93,8 @@ try:
     root.update_idletasks()
     root.update()
 
-    SET = "Beállítás"
-    DOC = "Leírás"
+    SET = "settings"
+    DOC = "docs"
     page = d._shell.page(SET)
     sbs = [c for c in walk(page) if isinstance(c, tk.Scrollbar)]
     cvs = [c for c in walk(page) if isinstance(c, tk.Canvas)]

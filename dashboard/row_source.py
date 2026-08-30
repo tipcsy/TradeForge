@@ -286,6 +286,9 @@ def row_data(symbol: str, ds, strategy_names, cfg: dict = None,
             "position": _open_position(positions, symbol, name, owner_of, risk_of),
             "daily": _daily(ds, name),
             "quality": (q[0] if q else None),
+            # ⚠ A KÓD a rendezés és a szín alapja — a `quality` mező LEFORDÍTOTT
+            # felirat. Régebbi/egyszerűbb `quality_of` (2 elemű) esetén üres.
+            "quality_code": (q[2] if q and len(q) > 2 else ""),
             "live": live,
             "opt": (opt_of(symbol, name) if opt_of else None),
             # A KERESKEDŐ stratégiát nem optimalizáljuk: a futás végén felülíródna
@@ -344,7 +347,10 @@ def row_data(symbol: str, ds, strategy_names, cfg: dict = None,
 # és a rendezés nem tud „elcsúszni" a megjelenítéstől.
 
 # A minőség rangsora — szövegként rendezve „Gyenge" < „Jó" lenne, ami hazugság.
-_QUALITY_RANK = {"Jó": 0, "Közepes": 1, "Gyenge": 2, "Rossz": 3}
+# ⚠ A rangot a KÓD adja (`core.quality`), nem a kijelzett felirat: az utóbbi
+# fordítható, és angolul a „Bad < Fair < Good" ábécérend épp az ellenkezőjét
+# állítaná — hibaüzenet nélkül.
+from core import quality as _quality
 
 
 def _num(v):
@@ -391,7 +397,8 @@ def sort_value(row: dict, key: str):
         if field in ("position", "daily"):
             return _num((st.get(field) or {}).get("money"))
         if field == "quality":
-            return (0, _QUALITY_RANK.get(st.get("quality"), 9))
+            return (0, _quality.grade_rank(st.get("quality_code")
+                                           or st.get("quality") or ""))
         if field == "stages":
             # A jelzés-oszlop: a BLOKKOLT sorok előre (ott van teendő), utána a
             # csökkentett, végül a szabadon futók.

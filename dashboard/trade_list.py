@@ -29,19 +29,31 @@ tesztelhető), a `build()` pedig csak a megjelenítés.
 
 from __future__ import annotations
 
+from core.i18n import t as _t
+
 # A tábla oszlopai — a sorrend a KÉRDÉSEK sorrendje: mikor · merre · hol be/ki ·
 # mennyi · mennyi kockázathoz képest · MIÉRT ért véget.
-COLS = ("nyitás", "irány", "be", "ki", "zárva", "P&L", "R", "ok")
+#
+# ⚠ A KULCS KÓD, NEM FEJLÉC. Ugyanez a kulcs azonosítja a sor-szótár mezőit, a
+# rendezést, a szűrést és a CSV-oszlopokat — a fejléc viszont fordítható. Amíg a
+# kettő egy volt (magyar szó), a fordítás minden mezőhivatkozást elárvított
+# volna: a tábla üres cellákkal telne meg, hibaüzenet nélkül.
+COLS = ("open", "dir", "entry", "exit", "closed", "pnl", "r", "reason")
 
 # Oszlop-fajták: a rendezés és a formázás ebből dől el (nem oszlopnév-találgatásból).
 KIND_TIME, KIND_TEXT, KIND_PRICE, KIND_MONEY, KIND_R = (
     "time", "text", "price", "money", "r")
 KINDS = {
-    "nyitás": KIND_TIME, "zárva": KIND_TIME,
-    "irány": KIND_TEXT, "ok": KIND_TEXT,
-    "be": KIND_PRICE, "ki": KIND_PRICE,
-    "P&L": KIND_MONEY, "R": KIND_R,
+    "open": KIND_TIME, "closed": KIND_TIME,
+    "dir": KIND_TEXT, "reason": KIND_TEXT,
+    "entry": KIND_PRICE, "exit": KIND_PRICE,
+    "pnl": KIND_MONEY, "r": KIND_R,
 }
+
+
+def col_label(col: str) -> str:
+    """Oszlop-kód → a táblában látszó fejléc, az aktív nyelven."""
+    return _t(f"trades.col.{col}")
 
 # A zárás okának EMBERI neve. A kulcs a `Trade.status`; az `sl` kettéválik a
 # `risk_free` szerint (lásd a modul fejlécét).
@@ -79,15 +91,15 @@ def rows_from(result) -> list:
         risk = float(getattr(t, "risk_usd", 0.0) or 0.0)
         pnl = float(getattr(t, "pnl_usd", 0.0) or 0.0)
         out.append({
-            "nyitás": getattr(t, "open_time", None),
-            "irány": getattr(t, "direction", "") or "",
-            "be": _f(getattr(t, "open_price", None)),
-            "ki": _f(getattr(t, "close_price", None)),
-            "zárva": getattr(t, "close_time", None),
-            "P&L": pnl,
+            "open": getattr(t, "open_time", None),
+            "dir": getattr(t, "direction", "") or "",
+            "entry": _f(getattr(t, "open_price", None)),
+            "exit": _f(getattr(t, "close_price", None)),
+            "closed": getattr(t, "close_time", None),
+            "pnl": pnl,
             # ⚠ ÜRES, ha a kockázat nem ismert — a 0,0 azt hazudná, hogy mértük.
-            "R": (pnl / risk) if risk > 0 else None,
-            "ok": reason_of(getattr(t, "status", ""),
+            "r": (pnl / risk) if risk > 0 else None,
+            "reason": reason_of(getattr(t, "status", ""),
                             bool(getattr(t, "risk_free", False))),
             # Nem oszlop, de a szűrés és a színezés használja:
             "_win": pnl > 0,
@@ -119,7 +131,7 @@ def fmt(col: str, v) -> str:
         except AttributeError:
             return str(v)
     if kind == KIND_TEXT:
-        return REASON.get(v, v) if col == "ok" else str(v)
+        return REASON.get(v, v) if col == "reason" else str(v)
     if kind == KIND_PRICE:
         return f"{float(v):,.2f}".replace(",", NBSP).replace(".", ",")
     if kind == KIND_MONEY:
@@ -166,18 +178,18 @@ def apply_filters(rows: list, direction: str = "", outcome: str = "",
     `reason`: a REASON kulcsa vagy "". Üres = nincs szűrés."""
     out = list(rows)
     if direction:
-        out = [r for r in out if r.get("irány") == direction]
+        out = [r for r in out if r.get("dir") == direction]
     if outcome == "win":
         out = [r for r in out if r.get("_win")]
     elif outcome == "loss":
         out = [r for r in out if not r.get("_win")]
     if reason:
-        out = [r for r in out if r.get("ok") == reason]
+        out = [r for r in out if r.get("reason") == reason]
     return out
 
 
 def row_tone(row: dict) -> str:
-    return "pos" if row.get("_win") else ("neg" if row.get("P&L") else "zero")
+    return "pos" if row.get("_win") else ("neg" if row.get("pnl") else "zero")
 
 
 # ── Összegzés ───────────────────────────────────────────────────────────────
@@ -189,8 +201,8 @@ def summary_line(rows: list) -> str:
         return "nincs megjelenített kötés"
     n = len(rows)
     wins = sum(1 for r in rows if r.get("_win"))
-    pnl = sum(float(r.get("P&L") or 0.0) for r in rows)
-    rs = [float(r["R"]) for r in rows if r.get("R") is not None]
+    pnl = sum(float(r.get("pnl") or 0.0) for r in rows)
+    rs = [float(r["r"]) for r in rows if r.get("r") is not None]
     txt = (f"{n} kötés · {wins} nyerő ({wins / n * 100:.0f}%) · "
            f"{pnl:+,.0f}$".replace(",", NBSP))
     if rs:
@@ -202,7 +214,8 @@ def summary_line(rows: list) -> str:
 # A projekt máshol is `;` elválasztót és tizedesVESSZŐT használ (trials CSV):
 # a magyar Excel így nyitja meg kattintásra, átalakítás nélkül.
 def to_csv(rows: list) -> str:
-    lines = [";".join(COLS)]
+    # A CSV fejléce a felhasználóé (Excelben nézi) — lefordított feliratok.
+    lines = [";".join(col_label(c) for c in COLS)]
     for r in rows:
         lines.append(";".join(_csv_cell(c, r.get(c)) for c in COLS))
     return "\n".join(lines) + "\n"
@@ -218,7 +231,7 @@ def _csv_cell(col: str, v) -> str:
         except AttributeError:
             return str(v)
     if kind == KIND_TEXT:
-        return REASON.get(v, str(v)) if col == "ok" else str(v)
+        return REASON.get(v, str(v)) if col == "reason" else str(v)
     return f"{float(v):.4f}".replace(".", ",")
 
 
@@ -237,7 +250,7 @@ def build(parent, fonts, theme=None, on_export=None):
     FG_GREEN, FG_RED, FG_GRAY_DIM = th.FG_GREEN, th.FG_RED, th.FG_GRAY_DIM
     sf = fonts["small"]
 
-    state = {"all": [], "rows": [], "sort": "nyitás", "desc": False}
+    state = {"all": [], "rows": [], "sort": "open", "desc": False}
 
     wrap = tk.Frame(parent, bg=BG)
     wrap.pack(fill="both", expand=True)
@@ -332,13 +345,13 @@ def build(parent, fonts, theme=None, on_export=None):
         state["sort"] = col
         _refilter()
         for c in COLS:
-            tree.heading(c, text=c + ("" if c != col
-                                      else (" ▼" if state["desc"] else " ▲")))
+            tree.heading(c, text=col_label(c) + ("" if c != col
+                                                 else (" ▼" if state["desc"] else " ▲")))
 
     for c in COLS:
-        tree.heading(c, text=c, command=lambda cc=c: _on_head(cc))
+        tree.heading(c, text=col_label(c), command=lambda cc=c: _on_head(cc))
         tree.column(c, width=(96 if KINDS[c] == KIND_TIME else
-                              (128 if c == "ok" else 72)),
+                              (128 if c == "reason" else 72)),
                     anchor=("w" if KINDS[c] == KIND_TEXT else "e"))
 
     class Ctl:

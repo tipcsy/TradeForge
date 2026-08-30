@@ -30,10 +30,19 @@ from dashboard.theme import BG, BG_HEADER, FG_WHITE, FG_GRAY
 
 
 class TabShell:
-    """`names`: a fülek feliratai, sorrendben. A lapok üres keretek — a hívó
-    tölti fel őket (`shell.page("Leírás")`).
+    """`names`: a fülek, sorrendben — `(kód, felirat)` párok VAGY sima szövegek.
 
-    `on_show(name)`: opcionális, a lapváltáskor fut. A LUSTA feltöltéshez kell:
+    ⚠ A KÓD ÉS A FELIRAT KÜLÖNVÁLIK. A lapot a hívó a KÓDJÁN kéri
+    (`shell.page("docs")`), a felhasználó pedig a FELIRATOT látja („Leírás" /
+    „Description"). Korábban a kettő ugyanaz a magyar szöveg volt, tehát az
+    `on_show` ágai (`if name == "Leírás"`) a fordítás után SOSEM tüzeltek volna:
+    a lap üresen maradt volna, hibaüzenet nélkül — a felhasználó annyit lát, hogy
+    egy fül nem csinál semmit.
+
+    Sima szöveget adva a kód és a felirat ugyanaz (visszafelé kompatibilis, a
+    technikai neveknek — „MT4", „MT5" — pont ez kell).
+
+    `on_show(kód)`: opcionális, a lapváltáskor fut. A LUSTA feltöltéshez kell:
     egy Markdown-leírást fölösleges megjeleníteni, amíg rá sem néztek.
 
     `side`: a fülsáv helye — `"left"` (alap) vagy `"top"`. A felső elrendezés
@@ -76,9 +85,11 @@ class TabShell:
         self._body.pack(side="top" if self._side == "top" else "left",
                         fill="both", expand=True)
 
-        for name in names:
+        for _item in names:
+            # `(kód, felirat)` vagy sima szöveg (ilyenkor a kettő ugyanaz).
+            name, text = _item if isinstance(_item, (tuple, list)) else (_item, _item)
             self._pages[name] = tk.Frame(self._body, bg=BG)
-            lbl = tk.Label(self._tabs, text=name, bg=BG_HEADER, fg=FG_GRAY,
+            lbl = tk.Label(self._tabs, text=text, bg=BG_HEADER, fg=FG_GRAY,
                            font=self._f["small"],
                            anchor="center" if self._side == "top" else "w",
                            padx=16 if self._side == "top" else 12, pady=8,
@@ -89,8 +100,8 @@ class TabShell:
                 lbl.pack(fill="x")
             lbl.bind("<Button-1>", lambda _e, n=name: self.show(n))
             self._btns[name] = lbl
-        if names:
-            self.show(list(names)[0])
+        if self._pages:
+            self.show(next(iter(self._pages)))
 
     def page(self, name) -> tk.Frame:
         """A lap kerete — ide épít a hívó."""

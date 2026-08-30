@@ -42,6 +42,7 @@ from core.params_store import (
 )
 from core import execution_params as _execp
 from core import risk_reduction as _rrx
+from core.i18n import t as _t
 
 log = logging.getLogger(__name__)
 
@@ -425,8 +426,11 @@ class InstrumentParamsDialog:
         # Egy lapon „Eredmények" ÉS egy szakaszon „Eredmény" kibírhatatlanul
         # összekeverhető lett volna — a kettő nem ugyanaz: a szakasz a MOST
         # lefuttatott futásé, a lap az összes korábbi PRÓBÁLKOZÁSÉ.
-        self._shell = TabShell(popup, ("Áttekintés", "Paraméter",
-                                "Kísérletek", "Kapcsolat", "Leírás"),
+        self._shell = TabShell(popup, (("overview", _t("tab.overview")),
+                                       ("params",   _t("tab.params")),
+                                       ("trials",   _t("tab.trials")),
+                                       ("link",     _t("tab.link")),
+                                       ("docs",     _t("tab.docs"))),
                                on_show=self._on_tab, notify_every_show=True)
 
         # Görgethető törzs — innentől MINDEN tartalom ide (`body`) megy.
@@ -434,7 +438,7 @@ class InstrumentParamsDialog:
         # Kiszállási jelnél jóval szélesebb, mint Ki-nél, és keskeny ablakon a
         # jobb széle eddig NÉMÁN levágódott. A csúszka az OLDAL alján ül, nem egy
         # szakaszon belül — így egy kérdést old meg egy helyen.
-        holder, body, self._body_canvas = _scrollable(self._shell.page("Paraméter"),
+        holder, body, self._body_canvas = _scrollable(self._shell.page("params"),
                                                       horizontal=True)
         holder.pack(side="top", fill="both", expand=True)
         self._body = body
@@ -565,10 +569,13 @@ class InstrumentParamsDialog:
 
         # Oszlop-fejléc. A „söprés" blokk (pipa + -tól/-ig/lépés + érték-szám)
         # AZT mondja meg, mit csinál az optimalizálás EZZEL a paraméterrel.
-        for _c, (_t, _w) in enumerate((("Paraméter", 24), ("Érték", 8),
-                                       ("", 3), ("-tól", 7), ("-ig", 7),
-                                       ("lépés", 7), ("db", 4))):
-            tk.Label(form, text=_t, bg=BG, fg=FG_GRAY_DIM, font=self._sf,
+        # ⚠ A ciklusváltozó NEM `_t` — az a fordító (`core.i18n`) neve ebben a
+        # modulban, és egy azonos nevű lokális az EGÉSZ metódusban elfedné
+        # (UnboundLocalError, a metódus legelső i18n-hívásánál).
+        for _c, (_hdr, _w) in enumerate((("Paraméter", 24), ("Érték", 8),
+                                         ("", 3), ("-tól", 7), ("-ig", 7),
+                                         ("lépés", 7), ("db", 4))):
+            tk.Label(form, text=_hdr, bg=BG, fg=FG_GRAY_DIM, font=self._sf,
                      anchor="w", width=_w).grid(row=0, column=_c, sticky="w",
                                                 padx=(0, 3))
         tk.Label(form, text="Megjegyzés (szerkeszthető)", bg=BG, fg=FG_GRAY_DIM,
@@ -1021,35 +1028,35 @@ class InstrumentParamsDialog:
         nem üres lap, hanem felszólítás. Mindig a lemezről olvas, tehát
         szerkesztés után újranyitva azonnal friss (nincs gyorsítótár, ami
         elavulhatna)."""
-        if name == "Áttekintés":
+        if name == "overview":
             # LUSTA + MINDIG FRISS: az állapot (él/áll, kézi szerkesztés,
             # kapuk) menet közben változhat, egy gyorsítótárazott lap pedig
             # éppen a figyelmeztetéseket mutatná elavultan.
             self._build_overview_tab()
             return
-        if name == "Paraméter":
+        if name == "params":
             # A futtatás-szakasz újraépül, ha a paraméterek közben változtak —
             # a `_build_run_sections` maga dönti el, kell-e (értékre hasonlít).
             self._maybe_build_run()
             return
-        if name == "Kapcsolat":
+        if name == "link":
             # MINDIG friss: a terminál-mappák állapota (mi van kint, mi elavult)
             # két megnyitás között is változhat — egy gyorsítótárazott lap épp
             # azt takarná el, amiért készült.
             self._build_link_tab()
             return
-        if name == "Kísérletek":
+        if name == "trials":
             # LUSTA: az 500 soros CSV beolvasása és a tábla felépítése nem
             # kell minden ablak-megnyitáskor. Minden megjelenítéskor ÚJRAOLVAS:
             # futó optimalizálás alatt a CSV 10 trialonként frissül, tehát a
             # lap visszakattintása friss allast mutat (nem elavult masolatot).
             self._build_results_tab()
             return
-        if name != "Leírás":
+        if name != "docs":
             return
         from dashboard import md_view
         try:
-            md_view.render(self._shell.page("Leírás"), self.strategy.doc_text(),
+            md_view.render(self._shell.page("docs"), self.strategy.doc_text(),
                            source=str(self.strategy.doc_path()))
         except Exception as e:
             self.lbl_err.config(text=f"A leírás nem nyitható meg: {e}")
@@ -1909,7 +1916,7 @@ class InstrumentParamsDialog:
                 pass
 
     def _build_overview_tab(self):
-        page = self._shell.page("Áttekintés")
+        page = self._shell.page("overview")
         for w in page.winfo_children():
             w.destroy()
         from core import overview as _ov
@@ -2215,7 +2222,7 @@ class InstrumentParamsDialog:
     # hiba). A lap ezért ELŐSZÖR megmondja, mi van kint, és csak utána kínál gombot.
 
     def _build_link_tab(self):
-        page = self._shell.page("Kapcsolat")
+        page = self._shell.page("link")
         for w in page.winfo_children():
             w.destroy()
         from dashboard.tab_shell import TabShell
@@ -2336,13 +2343,15 @@ class InstrumentParamsDialog:
         else:
             from collections import Counter
             cnt = Counter(s["state"] for s in st)
-            _fg = (FG_RED if cnt.get("elavult") else
-                   (FG_YELLOW if cnt.get("hiányzik") else FG_GREEN))
-            _n(f"{len(tgts)} terminál-mappa · friss {cnt.get('friss', 0)} · "
-               f"elavult {cnt.get('elavult', 0)} · hiányzik {cnt.get('hiányzik', 0)}",
+            _fg = (FG_RED if cnt.get(_md.ST_STALE) else
+                   (FG_YELLOW if cnt.get(_md.ST_MISSING) else FG_GREEN))
+            _n(f"{len(tgts)} terminál-mappa · "
+               f"{_md.state_label(_md.ST_FRESH)} {cnt.get(_md.ST_FRESH, 0)} · "
+               f"{_md.state_label(_md.ST_STALE)} {cnt.get(_md.ST_STALE, 0)} · "
+               f"{_md.state_label(_md.ST_MISSING)} {cnt.get(_md.ST_MISSING, 0)}",
                _fg)
             # ⚠ Az ELAVULT a legfontosabb: ott MÁS fut, mint amit a repóban látsz.
-            bad = [s for s in st if s["state"] == "elavult"]
+            bad = [s for s in st if s["state"] == _md.ST_STALE]
             for s in bad:
                 tk.Label(body, bg=BG, fg=FG_RED, font=self._sf, anchor="w",
                          justify="left", wraplength=820,
@@ -2431,10 +2440,10 @@ class InstrumentParamsDialog:
                      anchor="w").pack(side="left")
             # A TÁROLT lefordított állapota — ha más forráshoz készült, az baj.
             _c = cs.get(src.name) or {}
-            if _c.get("state") == "MÁS FORRÁSHOZ készült":
+            if _c.get("state") == _md.ST_OTHER_SOURCE:
                 tk.Label(line, text="  ⚠ a tárolt lefordított MÁS forráshoz készült",
                          bg=BG, fg=FG_RED, font=self._sf, anchor="w").pack(side="left")
-            elif _c.get("state") == "egyezik":
+            elif _c.get("state") == _md.ST_MATCH:
                 tk.Label(line, text="  ✓ lefordított tárolva", bg=BG, fg=FG_GREEN,
                          font=self._sf, anchor="w").pack(side="left")
         _n(_md.USAGE.get(name, ""), FG_GRAY)
@@ -2672,7 +2681,7 @@ class InstrumentParamsDialog:
     # sorok színe az eredmény szerint, és ide költözik a CSV-gomb.
 
     def _build_results_tab(self):
-        page = self._shell.page("Kísérletek")
+        page = self._shell.page("trials")
         # ⚠ MINDIG újraépítjük. Futó optimalizálás alatt a CSV 10 trialonként
         # frissül; egy gyorsítótárazott tábla azt sugallná, hogy nincs új
         # eredmény — pont az ellenkezőjét annak, amiért a lap készült.
@@ -3327,8 +3336,8 @@ class InstrumentParamsDialog:
         # ugyanazt mondta, ami a legördülőben állt. Egyetlen dolgot vitt, amit a
         # legördülő NEM: ha a kapu a Beállításokban globálisan ki van kapcsolva.
         # Az megmaradt — de csak akkor jelenik meg, amikor tényleg ez a helyzet.
-        for _c, _t in ((0, "név"), (1, "állapot (élesben)"), (2, "backtest")):
-            tk.Label(grid, text=_t, bg=BG, fg=FG_GRAY_DIM, font=self._sf,
+        for _c, _hdr in ((0, "név"), (1, "állapot (élesben)"), (2, "backtest")):
+            tk.Label(grid, text=_hdr, bg=BG, fg=FG_GRAY_DIM, font=self._sf,
                      anchor=("center" if _c == 2 else "w")).grid(
                          row=0, column=_c, sticky="we", pady=(0, 2),
                          padx=(0 if _c == 0 else 6, 0))
@@ -4087,7 +4096,7 @@ class InstrumentParamsDialog:
         paraméter két külön kinézetben jelenik meg. A megszokott hívási pont
         viszont ne tűnjön el — csak vezessen a helyére."""
         try:
-            self._shell.show("Paraméter")
+            self._shell.show("params")
             self._sections["futtatas"].set_open(True)
             self._maybe_build_run()
             return

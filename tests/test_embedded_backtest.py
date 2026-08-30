@@ -163,7 +163,7 @@ if TK_OK:
           str(d._shell.names()))
     check("van „Futtatás” SZAKASZ", "futtatas" in d._sections)
     check("van „Eredmény” SZAKASZ", "eredmeny" in d._sections)
-    d._shell.show("Paraméter"); root.update_idletasks()
+    d._shell.show("params"); root.update_idletasks()
     check("a szakasz beagyazott backtestet epit", d._run_tab is not None)
     check("...ami NEM sajat ablak", d._run_tab.win is d.popup)
     # ⚠ LAPOS beagyazas: az oldal MAGA gorget. Sajat gorgetheto terulet ide
@@ -172,7 +172,7 @@ if TK_OK:
           d._run_tab._body_canvas is None)
 
     _first = d._run_tab
-    d._shell.show("Áttekintés"); d._shell.show("Paraméter"); root.update_idletasks()
+    d._shell.show("overview"); d._shell.show("params"); root.update_idletasks()
     check("valtozatlan parameternel NEM epul ujra (nem vesz el az allapot)",
           d._run_tab is _first)
 
@@ -183,7 +183,7 @@ if TK_OK:
     if _key:
         d.entries[_key].delete(0, "end")
         d.entries[_key].insert(0, "123")
-        d._shell.show("Áttekintés"); d._shell.show("Paraméter")
+        d._shell.show("overview"); d._shell.show("params")
         root.update_idletasks()
         check("parameter-valtozas utan UJRAEPUL a szakasz",
               d._run_tab is not _first)

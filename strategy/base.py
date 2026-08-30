@@ -343,19 +343,27 @@ class Strategy(ABC):
 
     # --- Minőség-értékelés (a stratégiához tartozik) ----------------------
     def grade(self, test_summary: dict, cfg: dict) -> tuple[str, str, str]:
-        """Optimalizált eredmény minősítése: (szöveg, szín-név, indok).
+        """Optimalizált eredmény minősítése: (SZÖVEG, szín-név, indok).
 
         Alapértelmezés: a `core.quality` szabályrendszere a stratégia SAJÁT
         (merge-elt) `quality` küszöbeivel. A küszöbök a stratégia config-jában
         élnek; egy másik stratégia felülírhatja ezt a metódust saját logikával.
+
+        ⚠ A szöveg LE VAN FORDÍTVA — rendezéshez/összehasonlításhoz a
+        `grade_code()` kell.
         """
         from core.quality import grade as _grade
         return _grade(test_summary, cfg)
 
-    def grade_rank(self, grade_text: str) -> int:
+    def grade_code(self, test_summary: dict, cfg: dict) -> tuple[str, str, str]:
+        """Ugyanaz, de nyelvfüggetlen KÓDDAL: (kód, szín-név, indok)."""
+        from core.quality import grade_code as _grade_code
+        return _grade_code(test_summary, cfg)
+
+    def grade_rank(self, grade: str) -> int:
         """A minősítés rangsora (0 = legjobb) — rendezéshez/szűréshez."""
         from core.quality import grade_rank as _rank
-        return _rank(grade_text)
+        return _rank(grade)
 
     # --- Azonosítás: MT5 magic ---------------------------------------------
     def magic(self, cfg: dict) -> int:

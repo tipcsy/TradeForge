@@ -64,7 +64,7 @@ check("csak a megadott gyoker celoz (nincs AppData mellekhatas)",
 st = md.status(md.MT5, [fake], include_appdata=False)
 _mine = st
 check("kezdetben MINDEN hianyzik",
-      _mine and all(s["state"] == "hiányzik" for s in _mine),
+      _mine and all(s["state"] == md.ST_MISSING for s in _mine),
       str({s["state"] for s in _mine}))
 
 res = md.deploy(md.MT5, [fake], include_appdata=False)
@@ -74,7 +74,7 @@ check("...es nem hibazott", not res["errors"], str(res["errors"]))
 
 st2 = md.status(md.MT5, [fake], include_appdata=False)
 check("kitelepites utan MINDEN friss",
-      st2 and all(s["state"] == "friss" for s in st2),
+      st2 and all(s["state"] == md.ST_FRESH for s in st2),
       str({s["state"] for s in st2}))
 
 # ⚠ Masodszorra NEM ir feleslegesen: a terminal a fajl-valtozasra ujratolt,
@@ -93,9 +93,9 @@ _dst = fake / "MQL5" / "Indicators" / _first.name
 _dst.write_text("// MAS TARTALOM\n", encoding="utf-8")
 _after = {s["file"]: s["state"] for s in md.status(md.MT5, [fake], include_appdata=False)}
 check("a MEGVALTOZOTT fajl ELAVULT-nak latszik",
-      _after.get(_first.name) == "elavult", str(_after.get(_first.name)))
+      _after.get(_first.name) == md.ST_STALE, str(_after.get(_first.name)))
 check("...a tobbi valtozatlanul friss",
-      all(v == "friss" for k, v in _after.items() if k != _first.name))
+      all(v == md.ST_FRESH for k, v in _after.items() if k != _first.name))
 _r3 = md.deploy(md.MT5, [fake], include_appdata=False)
 check("az elavultat FELULIRJA", any(_first.name in c for c in _r3["copied"]))
 
@@ -106,12 +106,12 @@ check("az elavultat FELULIRJA", any(_first.name in c for c in _r3["copied"]))
 cb = {c["file"]: c["state"] for c in md.compiled_beside(md.MT5, [fake], include_appdata=False)}
 # ⚠ Ahol a repoban VAN tarolt (egyezo) binaris, oda a kitelepites azt is kivitte
 # — ott tehat mar "rendben" all. Amihez nincs tarolt, az "nincs fordítva".
-_stored = {c["file"] for c in md.compiled_status(md.MT5) if c["state"] == "egyezik"}
+_stored = {c["file"] for c in md.compiled_status(md.MT5) if c["state"] == md.ST_MATCH}
 check("ahol nincs tarolt binaris, ott „nincs fordítva”",
-      all(v == "nincs fordítva" for k, v in cb.items() if k not in _stored),
-      str({k: v for k, v in cb.items() if k not in _stored and v != "nincs fordítva"}))
+      all(v == md.ST_NOT_COMPILED for k, v in cb.items() if k not in _stored),
+      str({k: v for k, v in cb.items() if k not in _stored and v != md.ST_NOT_COMPILED}))
 check("...ahol viszont van tarolt, azt a kitelepites KI IS VITTE",
-      all(cb.get(k) == "rendben" for k in _stored if k in cb),
+      all(cb.get(k) == md.ST_OK for k in _stored if k in cb),
       str({k: cb.get(k) for k in _stored if k in cb}))
 import os
 import time
@@ -124,7 +124,7 @@ _src_mt = (fake / "MQL5" / "Indicators" / _first.name).stat().st_mtime
 os.utime(_ex, (_src_mt - 3600, _src_mt - 3600))
 cb2 = {c["file"]: c["state"] for c in md.compiled_beside(md.MT5, [fake], include_appdata=False)}
 check("a REGEBBI leforditottat eszreveszi",
-      cb2.get(_first.name) == "RÉGEBBI a forrásnál", str(cb2.get(_first.name)))
+      cb2.get(_first.name) == md.ST_OLDER, str(cb2.get(_first.name)))
 
 # ── 5. Nincs celmappa -> BESZEDES hiba, nem nema no-op ────────────────────
 _empty = tmp / "nincs_itt_terminal"
@@ -196,7 +196,7 @@ check("a forras-verzio kiolvashato",
 _cs = md.compiled_status(md.MT5)
 check("minden forrasra van tarolt-allapot", len(_cs) == len(md.sources(md.MT5)))
 check("az allapot ertelmes ertek",
-      all(c["state"] in ("nincs tárolva", "egyezik", "MÁS FORRÁSHOZ készült")
+      all(c["state"] in (md.ST_NOT_STORED, md.ST_MATCH, md.ST_OTHER_SOURCE)
           for c in _cs), str({c["state"] for c in _cs}))
 
 import inspect as _i
@@ -208,7 +208,7 @@ _dep = _i.getsource(md.deploy)
 # kulonben ugyanaz a "regi fut, uj forras" allapot allna elo, csak a repobol
 # szallitva.
 check("a kitelepites csak EGYEZO leforditottat visz ki",
-      '"egyezik"' in _dep and "stale_compiled" in _dep)
+      "ST_MATCH" in _dep and "stale_compiled" in _dep)
 
 
 # ── 10. A BEOLVASAS NEM KOTHET REGI BINARIST UJ FORRASHOZ ────────────────

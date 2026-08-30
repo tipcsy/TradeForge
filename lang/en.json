@@ -1,0 +1,67 @@
+{
+  "_comment": "TradeForge language catalogue — ENGLISH. Keys are stable identifiers, mirroring lang/hu.json (the base catalogue). Never invent a key here: a key that does not exist in hu.json is dead weight, and the test (tests/test_i18n.py) fails on it. The {name} placeholders must match hu.json exactly.",
+  "_comment_terms": "Trading terms stay untranslated on purpose: spread, ATR, PF, MaxDD, WPR, SMA, BE, trailing, Risky, Fibo.",
+
+  "quality.good": "Good",
+  "quality.mid": "Fair",
+  "quality.weak": "Weak",
+  "quality.bad": "Bad",
+  "quality.why.losing": "losing",
+  "quality.why.few_trades": "few trades ({trades})",
+  "quality.why.pf": "PF {pf}",
+  "quality.why.maxdd": "MaxDD {mdd}%",
+  "quality.why.win": "Win {wr}%",
+
+  "theme.dark_mocha": "Dark (Mocha)",
+  "theme.light": "Light",
+  "theme.contrast": "High contrast",
+
+  "tab.overview": "Overview",
+  "tab.params": "Parameters",
+  "tab.trials": "Trials",
+  "tab.link": "Terminals",
+  "tab.docs": "Description",
+  "tab.settings": "Settings",
+  "tab.json": "Json",
+  "tab.gates": "Gates",
+  "tab.strategies": "Strategies",
+
+  "rr.preset.auto": "Auto (current)",
+  "rr.preset.off": "Off (all)",
+  "rr.preset.risky": "Risky (all)",
+  "rr.preset.halving": "Halving (all)",
+  "rr.preset.shield": "Shield (all)",
+  "rr.preset.fibo": "Fibo (all)",
+  "rr.preset.thirds": "Thirds (all)",
+  "rr.preset.shield_fibo": "Shield↔Fibo (all)",
+
+  "trades.col.open": "open",
+  "trades.col.dir": "side",
+  "trades.col.entry": "in",
+  "trades.col.exit": "out",
+  "trades.col.closed": "closed",
+  "trades.col.pnl": "P&L",
+  "trades.col.r": "R",
+  "trades.col.reason": "why",
+
+  "deploy.state.missing": "missing",
+  "deploy.state.fresh": "up to date",
+  "deploy.state.stale": "STALE",
+  "deploy.state.not_stored": "not stored",
+  "deploy.state.match": "matches",
+  "deploy.state.other_source": "built from a DIFFERENT SOURCE",
+  "deploy.state.not_compiled": "not compiled",
+  "deploy.state.older": "OLDER than the source",
+  "deploy.state.ok": "ok",
+
+  "backtest.overlay.none": "None",
+  "backtest.overlay.prev": "Previous",
+  "backtest.overlay.orig": "Original",
+
+  "opt.done": "Done ✓",
+  "opt.last": "Last opt: {date}",
+  "opt.multi": "Opt: {parts}",
+
+  "lang.label": "Language",
+  "lang.restart_note": "The language changes after restarting the program."
+}
