@@ -12,10 +12,18 @@ vizualizáció — több instrumentumra és több stratégiára egyszerre.
 > és csak akkor válts élesre, ha megértetted, mit csinál. A szerzők nem vállalnak
 > felelősséget a kereskedési veszteségekért.
 
+> ⚠️ **Risk warning.** This program can send **real orders** through the MT5
+> terminal. Use it on a **demo account** first (`broker.is_demo: true`), and only
+> switch to live once you understand what it does. The authors accept no
+> liability for trading losses.
+
+🇬🇧 **English description:** scroll to the bottom of this page — [English version](#english).
+
 ---
 
 ## Tartalom
 
+- [Licencelés és regisztráció](#licencelés-és-regisztráció)
 - [Előfeltételek](#előfeltételek)
 - [Telepítés](#telepítés)
 - [Konfiguráció](#konfiguráció)
@@ -27,8 +35,10 @@ vizualizáció — több instrumentumra és több stratégiára egyszerre.
 - [Projektstruktúra](#projektstruktúra)
 - [Tesztek](#tesztek)
 - [Hibakeresés](#hibakeresés)
+- [Dolgozzunk együtt!](#dolgozzunk-együtt)
 - [További dokumentáció](#további-dokumentáció)
 - [Licenc](#licenc)
+- [English version](#english)
 
 ---
 
@@ -89,7 +99,7 @@ Ez mindent feltesz — az alap- és az opcionális csomagokat is. Ha csak a
 minimumot szeretnéd:
 
 ```bash
-python -m pip install MetaTrader5 numpy pandas optuna pyarrow fastparquet
+python -m pip install MetaTrader5 numpy pandas optuna pyarrow fastparquet cryptography
 ```
 
 | Csomag | Mire kell |
@@ -98,6 +108,7 @@ python -m pip install MetaTrader5 numpy pandas optuna pyarrow fastparquet
 | `numpy`, `pandas` | számítások, idősorok |
 | `optuna` | paraméter-optimalizálás |
 | `pyarrow`, `fastparquet` | a historikus adatok Parquet-formátuma |
+| `cryptography` | a licencszerver válaszának aláírás-ellenőrzése |
 
 Opcionális csomagok, csak bizonyos funkciókhoz:
 
@@ -164,6 +175,69 @@ A többi mező jelentését a `config.example.json` `_comment` kulcsai írják l
 2. Eszközök → Beállítások → Expert Advisors: **algoritmikus kereskedés engedélyezve**.
 3. Hagyd a terminált **nyitva** — a Python háttérben ehhez csatlakozik.
 4. A kereskedni kívánt instrumentumok legyenek láthatók a **Piac-figyelőben**.
+
+---
+
+## Licencelés és regisztráció
+
+A TradeForge **ingyenesen használható, de regisztrációhoz kötött.** A regisztráció
+egy e-mail cím és egy jelszó — nincs bankkártya, nincs megerősítő levél, nincs
+próbaidő-számláló.
+
+> A regisztráció **csak az élő kereskedéshez** kell. A backtest, az optimalizálás
+> és az adatletöltés licenc nélkül is fut: azok nem nyúlnak a brókerszámlához.
+
+### A regisztráció lépésről lépésre
+
+1. **Nyisd meg a portált:** <https://licence.tipcsy.hu>
+2. **Regisztráció** — e-mail cím + jelszó. Ennyi; a fiók azonnal használható.
+3. **Indítsd el a programot:** `python main.py live`. Az első élő indításkor a
+   TradeForge feldob egy belépő-ablakot — ugyanaz az e-mail cím és jelszó, amivel
+   a portálra regisztráltál.
+4. **Kész.** A program elmenti a belépőt (tokent), és **többé nem kérdez**. A
+   jelszó **sehol nem tárolódik**: a belépéskor tokenre váltjuk, és ott véget ér.
+
+Ha elfelejtetted a jelszavad, a portál belépő képernyőjén van **„Elfelejtettem a
+jelszavam"** — a visszaállító link 30 percig él, és egyszer használható.
+
+### Mi történik minden induláskor
+
+A program a mentett tokennel és az **MT5-ből olvasott brókerszámla-számmal**
+megkérdezi a szervert, hogy futhat-e:
+
+1. a számlaszám **már be van kötve** a licencedhez → indul;
+2. nincs bekötve, de **van szabad számla-slot** → beköti és indul;
+3. nincs szabad slot → nem indul, és megmondja, hány slotod van használatban.
+
+Egy licenchez tehát több brókerszámla tartozhat — a slotok számát a portálon
+látod. A tokenek gépenként külön élnek (a címke a **gép neve**), és a portálról
+bármikor visszavonhatók: a visszavont gép a következő indításnál újra belépést kér.
+
+### Ha a licencszerver nem érhető el
+
+Ilyenkor a program a **legutóbbi, sikeres ellenőrzés** alapján még elindul, egy
+**72 órás türelmi időn** belül. Ez nem hátsó ajtó: a szerver a válaszát Ed25519
+aláírással látja el, a TradeForge-ba a publikus kulcs van beépítve, tehát egy
+kézzel átírt gyorsítótár érvénytelen.
+
+A türelmi idő **látszik a felületen** is: a fejlécben, a licenc e-mail mellett
+(*„nincs licencszerver: még 51 óra"*) — sárgán, 12 óra alatt pirosan. Ugyanitt
+jelenik meg a közelgő lejárat is (*„licenc lejár: 12 nap"*), 30 nap alatt.
+
+### Beállítás a `config.json`-ban
+
+Alapból nincs vele dolgod; a minta már tartalmazza:
+
+```json
+"licence": {
+  "api_url": "https://licence.tipcsy.hu/api/v1"
+}
+```
+
+> A licenc **nem ugyanaz, mint a forráskód licence.** A program **GPL-3.0** alatt
+> áll (lásd lent a [Licenc](#licenc) szakaszt) — a regisztráció a *szolgáltatás*
+> (licencszerver, számla-slotok) használatához kell, nem a kód olvasásához vagy
+> módosításához.
 
 ---
 
@@ -384,6 +458,31 @@ mentesítés, hanem a hiányzó bemenet könyvelése.
 | Nincs historikus adat | Előbb `python main.py download` |
 | Nem látszik egy instrumentum | Add hozzá a Piac-figyelőhöz az MT5-ben, és `"enabled": true` a `config.json`-ban |
 | Nincs vizualizáció a charton | Le van fordítva a `TradeForgeViz.mq5`, rajta van az **M1** charton, és be van kapcsolva a párnál? |
+| Élő indításkor belépést kér | Ez a licenc-belépés — a portál-fiókod (<https://licence.tipcsy.hu>). Gépenként egyszer kérdezi |
+| „A licenced LEJÁRT" / „Elfogytak a számla-slotok" | A licencedet és a számla-slotokat a portálon kezeled |
+| „nincs licencszerver: még … óra" a fejlécben | A szerver nem érhető el, a program a türelmi időből fut. Nézd meg a hálózatot — 72 óra után az élő kereskedés megáll |
+
+---
+
+## Dolgozzunk együtt!
+
+Van egy beszállási ötleted — egy indikátor-kombináció, egy gyertyaminta, egy
+napszak-szabály —, és tudni szeretnéd, **hogy valóban ér-e valamit?**
+
+**Írj egy e-mailt a <tipcsy@gmail.com> címre, és dolgozzunk együtt:** te hozod az
+ötletet, én lemérem a motorral — több instrumentumon, éveken át, valós költséggel
+(spread, swap), mintán belül **és** mintán kívül. A visszajelzés az lesz, amit a
+számok mondanak, akkor is, ha az a válasz, hogy nincs benne él.
+
+Ha lehet, ennyit írj meg a levélben:
+
+- **mikor lépnél be** (a feltétel, minél pontosabban);
+- **mikor szállnál ki** (stop, célár, idő);
+- **melyik instrumentumon és idősíkon** gondolod;
+- ha van: chart-kép vagy egy-két konkrét példa a mintára.
+
+> Nem kell kódot írnod, és nem kell programozónak lenned hozzá. Az sem baj, ha az
+> ötlet még csak fél mondat — a mérhető szabállyá formálás a közös munka része.
 
 ---
 
@@ -426,3 +525,539 @@ Röviden, mit jelent ez a gyakorlatban:
 - Zárt forrású termékbe **nem** építhető be.
 - **Nincs garancia.** Ezt a fenti kockázati figyelmeztetéssel együtt olvasd: a
   program valós pénzzel kereskedhet, és a felelősség a felhasználóé.
+
+> A fenti [Licencelés és regisztráció](#licencelés-és-regisztráció) ettől külön
+> kérdés: a GPL a **forráskódra** vonatkozik, a regisztráció pedig a
+> **licencszolgáltatás** (élő kereskedés, számla-slotok) használatához kell. A
+> regisztráció ingyenes.
+
+---
+
+<a id="english"></a>
+
+# TradeForge — English
+
+A Python trading framework for MetaTrader 5: live engine, tkinter dashboard,
+backtesting, Optuna-based parameter optimisation and MT5 chart visualisation —
+across multiple instruments and multiple strategies at once.
+
+> ⚠ **Risk warning.** This program can send **real orders** through the MT5
+> terminal. Use it on a **demo account** first (`broker.is_demo: true`), and only
+> switch to live once you understand what it does. The authors accept no
+> liability for trading losses.
+
+---
+
+## Contents
+
+- [Licensing and registration](#licensing-and-registration)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Preparing the MT5 terminal](#preparing-the-mt5-terminal)
+- [Running](#running)
+- [User guide](#user-guide)
+- [Installing the MT5 indicators](#installing-the-mt5-indicators)
+- [Updating from Git](#updating-from-git)
+- [Project layout](#project-layout)
+- [Tests](#tests)
+- [Troubleshooting](#troubleshooting)
+- [Let's work together!](#lets-work-together)
+- [Further documentation](#further-documentation)
+- [Source licence](#source-licence)
+
+---
+
+## Licensing and registration
+
+TradeForge is **free to use, but it requires registration.** Registration means
+an e-mail address and a password — no credit card, no confirmation e-mail, no
+trial countdown.
+
+> Registration is needed **for live trading only**. Backtesting, optimisation and
+> data download run without a licence: they never touch your broker account.
+
+### Registration, step by step
+
+1. **Open the portal:** <https://licence.tipcsy.hu>
+2. **Register** — e-mail address + password. That is all; the account works
+   immediately.
+3. **Start the program:** `python main.py live`. On the first live start
+   TradeForge shows a login window — the same e-mail and password you registered
+   with.
+4. **Done.** The program stores a login token and **never asks again**. Your
+   password is **stored nowhere**: it is exchanged for a token at login and
+   discarded there.
+
+If you forget your password, the portal's login screen has **"Forgot my
+password"** — the reset link is valid for 30 minutes and can be used once.
+
+### What happens on every start
+
+Using the stored token and the **broker account number read from MT5**, the
+program asks the server whether it may run:
+
+1. the account number is **already bound** to your licence → it starts;
+2. not bound, but a **free account slot** exists → it binds it and starts;
+3. no free slot → it does not start, and tells you how many slots are in use.
+
+So one licence can cover several broker accounts — the portal shows your slots.
+Tokens are per machine (the label is the **machine name**) and can be revoked
+from the portal at any time: a revoked machine asks for login again on next start.
+
+### If the licence server is unreachable
+
+The program still starts from the **last successful check**, within a **72-hour
+grace period**. This is not a back door: the server signs its answer with
+Ed25519 and the public key is built into TradeForge, so a hand-edited cache is
+invalid.
+
+The grace period is **visible in the UI**: in the header, next to the licence
+e-mail (*"no licence server: 51 hours left"*) — amber, and red below 12 hours.
+An approaching expiry appears in the same place (*"licence expires: 12 days"*)
+within 30 days.
+
+### The setting in `config.json`
+
+Nothing to do by default; the sample already contains:
+
+```json
+"licence": {
+  "api_url": "https://licence.tipcsy.hu/api/v1"
+}
+```
+
+> The licence **is not the same thing as the source licence.** The program is
+> **GPL-3.0** (see [Source licence](#source-licence) below) — registration is for
+> using the *service* (licence server, account slots), not for reading or
+> modifying the code.
+
+---
+
+## Requirements
+
+| Requirement | Note |
+|---|---|
+| **Windows** | The `MetaTrader5` Python package is Windows-only |
+| **Python 3.10+** | `tkinter` ships with the official installer — nothing extra to install |
+| **MetaTrader 5 terminal** | Any broker; the program connects to the running terminal |
+| **Git** (optional) | To download / update the code — <https://git-scm.com/download/win> |
+
+> The program is **not** tied to a specific folder: install it wherever you like.
+> In the commands below, `<project-folder>` is the directory you chose.
+
+---
+
+## Installation
+
+### 1. Get the code
+
+```bash
+git clone https://github.com/tipcsy/TradeForge.git
+```
+
+This creates a `TradeForge` folder in the current directory. For a different
+name, append it (`git clone <url> <folder>`). Without Git you can also download
+the ZIP from GitHub and extract it anywhere.
+
+Then enter the project folder — **run every further command from here**:
+
+```bash
+cd TradeForge
+```
+
+### 2. Virtual environment (recommended)
+
+```bash
+python -m venv .venv
+```
+
+```bash
+.venv\Scripts\activate
+```
+
+> The line above activates it in PowerShell/CMD; in Git Bash: `source .venv/Scripts/activate`.
+
+> `.venv` is in `.gitignore`, so it never reaches the repository. It also works
+> without a virtual environment — the packages then go into the system Python.
+
+### 3. Install the packages
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+This installs everything — required and optional alike. For the bare minimum:
+
+```bash
+python -m pip install MetaTrader5 numpy pandas optuna pyarrow fastparquet cryptography
+```
+
+| Package | What it is for |
+|---|---|
+| `MetaTrader5` | talking to the MT5 terminal (Windows-only) |
+| `numpy`, `pandas` | maths, time series |
+| `optuna` | parameter optimisation |
+| `pyarrow`, `fastparquet` | Parquet format for the historical data |
+| `cryptography` | verifying the licence server's signature |
+
+Optional packages, for specific features only:
+
+```bash
+python -m pip install scikit-learn lightgbm pillow
+```
+
+| Package | For what |
+|---|---|
+| `scikit-learn`, `lightgbm` | training/running the `ml_ai` strategy |
+| `pillow` | UI screenshot in `tools/ui_preview.py` |
+
+> **Why `python -m pip` and not `pip`?** On Windows `pip` is often not on PATH,
+> whereas `python -m pip` always calls the package manager of the Python you are
+> running — so it cannot accidentally install into another environment.
+
+---
+
+## Configuration
+
+`config.json` is **not in the repository** (it holds a password, it is
+`.gitignore`d). Create it from the sample:
+
+```bash
+cp config.example.json config.json
+```
+
+Then edit `config.json`:
+
+```json
+"broker": {
+  "name": "YourBroker",
+  "server": "YourBroker-Demo",
+  "login": 0,
+  "password": "",
+  "is_demo": true,
+  "magic": 20260627
+},
+"mt5": {
+  "path": "C:\\Path\\To\\MetaTrader5\\terminal64.exe",
+  "portable": true
+}
+```
+
+- **`broker`** — your own MT5 credentials. Start with `is_demo: true`.
+- **`mt5.path`** — the full path to `terminal64.exe` on **your** machine. If only
+  one MT5 is installed it can be omitted (the package finds it); with several
+  installed terminals it is **mandatory**, otherwise it may connect to the wrong
+  one. In JSON the backslashes must be doubled: `C:\\...\\terminal64.exe`.
+- **`pairs`** — the instruments. The sample has two (`EURUSD`, `GER40`); you can
+  add the rest from the UI as well (it fills in the broker's data automatically).
+  Enable or disable a pair with `"enabled": true|false`.
+
+The meaning of the other fields is described by the `_comment` keys of
+`config.example.json`.
+
+> **Never commit your own `config.json`.** `.gitignore` excludes `config.json`
+> and the `config*copy*.json` / `config*másolata*.json` patterns too.
+
+---
+
+## Preparing the MT5 terminal
+
+1. Start the **MetaTrader 5** terminal and log in to the account.
+2. Tools → Options → Expert Advisors: **algorithmic trading enabled**.
+3. Leave the terminal **open** — Python connects to it in the background.
+4. The instruments you want to trade must be visible in **Market Watch**.
+
+---
+
+## Running
+
+Every command runs from the project root (where `main.py` is):
+
+| Command | What it does |
+|---|---|
+| `python main.py download` | download history from MT5 (into `data/`) |
+| `python main.py dashboard` | UI only, with demo data — **works without MT5** |
+| `python main.py live` | live engine + dashboard |
+| `python main.py backtest` | backtest with the default parameters |
+| `python main.py optimize` | optimise every active pair, each with its own strategies |
+| `python main.py optimize EURUSD GBPJPY` | optimise the given pairs only |
+| `python main.py optimize Ger40 --strategy ml_ai` | one pair, one strategy (for a trainable strategy this means training) |
+| `python main.py optimize -s wpr_sma,ml_ai` | every pair, only the listed strategies |
+
+With no argument (`python main.py`) it prints this list.
+
+**Recommended order on the first run:**
+
+```bash
+python main.py dashboard
+```
+
+(to see the UI, still without MT5), then
+
+```bash
+python main.py download
+```
+
+and finally
+
+```bash
+python main.py live
+```
+
+---
+
+## User guide
+
+### Dashboard tabs
+
+| Tab | What it shows |
+|---|---|
+| **Live Dashboard** | one row per instrument: BID/ASK, change %, spread, position, daily P&L, strategy cells, optimisation status and the control buttons |
+| **Positions** | details of the open positions (strategy, exit plan, BE/trailing state, manual control) |
+| **Closed** | the closed trades — including today's |
+| **Portfolio Backtest** | joint backtest of several instruments: starting capital, period, risk reduction, equity curve and result table |
+
+### Controls on the Live Dashboard
+
+- **▶ / ■** — start / stop a pair (or a strategy). The state is saved into
+  `config.json`, so it **survives a restart**. Stopping while a position is open
+  puts the pair into *closing* (CLOSING) state: no new entries, but the engine
+  keeps managing the existing position.
+- **Opt** — start optimisation for that pair/strategy. For the `ml_ai` strategy
+  this button means **training**, not a parameter search. An interrupted
+  optimisation is offered/resumed at start-up.
+- **BT** — backtest window for that pair: parameter editing, exploratory
+  switches, comparison of the previous/original run.
+- **Clicking the instrument name** — parameter window: rating and metrics,
+  loading the optimisation results by rank (▲/▼), hourly trading switch, manual
+  parameter save.
+- **Other cells are clickable too**: the gate cells set the gate effect (block /
+  reduce / none), and the "Together" cell sets the per-pair timeframe alignment.
+
+### A typical session
+
+1. `python main.py download` — download history (for a new instrument the program
+   also downloads the missing history automatically).
+2. **Opt** on the pair → the optimised parameters land in
+   `data/optimized_params/<SYMBOL>.json`.
+3. **BT** or Portfolio Backtest → check the parameter set.
+4. `python main.py live` → **▶** on the selected pairs.
+
+> **Signal-only mode.** Per pair and per strategy you can make the system compute
+> and log everything but **send no orders**. This is the safest mode before
+> taking a new strategy live.
+
+### Logs and outputs
+
+| Location | Content |
+|---|---|
+| `data/tradeforge.log` | rotating run log |
+| `data/optimized_params/` | per-pair optimised parameters + trials CSV |
+| `data/execution_params/` | per-symbol execution settings |
+| `data/backtest_results/` | backtest outputs |
+| `data/mt5_backtest/` | backtest CSVs replayable in MT5 |
+
+The `data/` folder is in `.gitignore` — your own data never reaches the repository.
+
+---
+
+## Installing the MT5 indicators
+
+The program hands the chart visualisation to MT5 through a file (Python does not
+draw on the chart). The `.mq5` files must be copied into **your own MT5 data
+folder**: in MT5 choose **File → Open Data Folder**, then the `MQL5` subdirectory.
+
+| File | Where | What it does |
+|---|---|---|
+| `mt5/TradeForgeViz.mq5` | `MQL5\Indicators\` | live signal visualisation (entries, SL/TP, alert markers); it also puts the other two on the chart |
+| `mt5/TradeForgeBands.mq5` | `MQL5\Indicators\` | state bands in a separate sub-window (M15 signal window, SMA direction, market state, no-trade hour) |
+| `mt5/TradeForgeWPR.mq5` | `MQL5\Indicators\` | Williams %R with the strategy's own maths, adjustable levels |
+| `tools/BacktestTradesViewer.mq5` | `MQL5\Indicators\` | draws the backtest trades |
+| `tools/BacktestPnLViewer.mq5` | `MQL5\Indicators\` | the same plus per-trade P&L and R, with a summary panel |
+| `tools/BacktestReplayer.mq5` | `MQL5\Experts\` | replays the backtest in the Strategy Tester |
+
+After copying, **compile them all in MetaEditor** (F7). On the (**M1**) chart it
+is enough to attach `TradeForgeViz` — it adds the bands and the WPR with the
+strategy's parameters. The visualisation can be switched on per pair and per
+strategy from the UI.
+
+Details on backtest replay: [`tools/MT5_BACKTEST_README.md`](tools/MT5_BACKTEST_README.md).
+
+---
+
+## Updating from Git
+
+From the project folder:
+
+```bash
+git pull
+```
+
+If `git pull` fails because of local modifications:
+
+```bash
+git status
+```
+
+```bash
+git stash
+```
+
+```bash
+git pull
+```
+
+```bash
+git stash pop
+```
+
+| Command | What it does |
+|---|---|
+| `git status` | what changed locally |
+| `git pull` | download the latest version |
+| `git log --oneline -10` | the last 10 changes |
+| `git stash` / `git stash pop` | set local changes aside / bring them back |
+
+> `config.json` and `data/` are gitignored, so `git pull` **does not overwrite**
+> your settings and your data.
+
+---
+
+## Project layout
+
+```
+.
+├── main.py                  ← entry point (download / dashboard / live / backtest / optimize)
+├── version.py               ← application name and version (in one place)
+├── config.example.json      ← config sample (the real config.json is gitignored)
+├── core/                    ← MT5 connection, indicators, risk, gates, execution
+├── trading/                 ← live engine and backtest
+├── strategy/                ← strategies (wpr_sma, ml_ai) + their own configs and docs
+├── ml/                      ← Optuna optimiser
+├── dashboard/               ← tkinter UI
+├── mt5/                     ← MQL5 indicators (visualisation)
+├── tools/                   ← data download and maintenance scripts, MQL5 backtest tools
+├── tests/                   ← tests (no pytest dependency)
+├── build/                   ← PyInstaller EXE build
+└── data/                    ← data, logs, results (gitignored, created at runtime)
+```
+
+---
+
+## Tests
+
+```bash
+python tests/run_all.py
+```
+
+A single test can be run on its own (`python tests/test_gates.py`), and a subset
+can be filtered by a name fragment (`python tests/run_all.py package`).
+
+### Why is CI not 116/116?
+
+13 tests work from your own `config.json`, your `data/` folder or a real screen —
+historical parquet, optimised parameters, saved sets, or Tk geometry. The first
+two are in `.gitignore`: one contains broker data, the other is hundreds of
+megabytes. On a fresh clone they have nothing to measure, and — following this
+project's rule that a silent pass is worse than a failure — they fail loudly.
+
+CI therefore runs with the `--no-live-data` switch:
+
+```bash
+python tests/run_all.py --no-live-data
+```
+
+The skipped files and the reason for each:
+[`tests/requires_live_data.txt`](tests/requires_live_data.txt). The runner prints
+every one of them as a `SKIP` line, so the log shows exactly what was left out.
+**On the developer machine these tests run and pass** — the list is bookkeeping
+for a missing input, not an exemption.
+
+---
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `ModuleNotFoundError: MetaTrader5` | `python -m pip install MetaTrader5` (needs Windows) |
+| `ModuleNotFoundError: optuna` / `pyarrow` | `python -m pip install optuna pyarrow fastparquet` |
+| `pip` command not found | Use `python -m pip install ...` |
+| `FileNotFoundError: config.json` | Copy `config.example.json` to `config.json`, and run the command from the project root |
+| MT5 connection fails | Is the terminal running and logged in? Is `mt5.path` correct on **your** machine? Is algorithmic trading enabled? |
+| No historical data | Run `python main.py download` first |
+| An instrument is missing | Add it to Market Watch in MT5, and set `"enabled": true` in `config.json` |
+| No visualisation on the chart | Is `TradeForgeViz.mq5` compiled, attached to the **M1** chart, and switched on for that pair? |
+| Live start asks for a login | This is the licence login — the portal account (<https://licence.tipcsy.hu>). It is asked once per machine |
+| "The licence has EXPIRED" / "no free account slots" | Manage your licence and your account slots on the portal |
+| "No licence server: … hours left" in the header | The server is unreachable; the program runs from the grace period. Check the network — after 72 hours live trading stops |
+
+---
+
+## Let's work together!
+
+Do you have an entry idea — an indicator combination, a candle pattern, a
+time-of-day rule — and want to know **whether it is actually worth anything?**
+
+**Write an e-mail to <tipcsy@gmail.com> and let's work on it together:** you bring
+the idea, I measure it with the engine — across several instruments, over years,
+with real costs (spread, swap), in-sample **and** out-of-sample. The feedback will
+be whatever the numbers say, even when the answer is that there is no edge in it.
+
+If you can, put this much in the mail:
+
+- **when you would enter** (the condition, as precisely as possible);
+- **when you would exit** (stop, target, time);
+- **which instrument and timeframe** you have in mind;
+- if you have one: a chart image or a couple of concrete examples of the pattern.
+
+> You do not need to write code and you do not need to be a programmer. It is
+> fine if the idea is still half a sentence — turning it into a measurable rule
+> is part of the joint work.
+
+---
+
+## Further documentation
+
+- [`strategy/docs/wpr_sma.md`](strategy/docs/wpr_sma.md) — the WPR + SMA trend-following strategy (Hungarian)
+- [`strategy/docs/ml_ai.md`](strategy/docs/ml_ai.md) — the machine-learning strategy (currently **not** recommended live) (Hungarian)
+- [`tools/MT5_BACKTEST_README.md`](tools/MT5_BACKTEST_README.md) — replaying a backtest in MT5 (Hungarian)
+- [`build/README.md`](build/README.md) — EXE build (PyInstaller) (Hungarian)
+- [`.claude/skills/new-strategy/SKILL.md`](.claude/skills/new-strategy/SKILL.md) — checklist for introducing a new strategy (Hungarian)
+
+---
+
+## Source licence
+
+**GNU General Public License v3.0** — full text: [`LICENSE`](LICENSE).
+
+```
+TradeForge — MetaTrader 5 trading framework
+Copyright (C) 2026 tipcsy
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with
+this program. If not, see <https://www.gnu.org/licenses/>.
+```
+
+In practice this means:
+
+- You may **freely** use, study, modify and pass it on.
+- If you **pass it on** — modified or not — you must hand over the **source code**
+  as well, under the **same** GPL-3.0 licence.
+- It **cannot** be built into a closed-source product.
+- **No warranty.** Read this together with the risk warning above: the program can
+  trade with real money, and the responsibility is the user's.
+
+> The **registration** described under
+> [Licensing and registration](#licensing-and-registration) is a separate matter:
+> the GPL covers the source code, while registration covers the use of the licence
+> service (live trading, account slots). Registration is free.
