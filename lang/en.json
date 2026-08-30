@@ -1095,12 +1095,22 @@
   "viz.no_params": "{strategy}: no parameters",
   "viz.all_viz_off": "No strategy's DRAWING is switched on for this pair ({names}) — that is why the file is not created either. Click the instrument NAME on the row and tick the Visualisation column.",
   "viz.empty": "the snapshot is EMPTY — the chart keeps its old drawing",
+  "viz.no_bars": "{strategy}: 0 objects — no bar data (is MT5 running, and is the symbol in Market Watch?)",
+  "viz.write_error": "write: {error}",
 
   "block.closing": "closing out (the strategy was switched off / Stop — only the open position runs out)",
   "block.already_open": "there is already an open position on this pair",
+  "block.daily_limit": "daily loss limit reached ({pnl}$ ≤ -{limit}$)",
+  "block.no_atr": "no valid ATR (missing data)",
+  "block.no_slot": "no free slot",
+  "block.gate": "a gate blocks: {reason}",
 
   "bt.err.no_data": "No downloaded data (data/m15, data/m1) for this pair.",
   "bt.err.no_params": "No optimised parameters for any symbol.",
   "bt.err.no_period": "Not enough data in the given period.",
-  "bt.err.no_data_dl": "No downloaded data, and the download failed too: {error}"
+  "bt.err.no_data_dl": "No downloaded data, and the download failed too: {error}",
+
+  "alert.signal": "{symbol} {side} SIGNAL ({strategy}) — entry {entry} | SL {sl} | TP {tp} | lot {lot}",
+
+  "gate.dialog.title": "{symbol} — {gate} gate"
 }

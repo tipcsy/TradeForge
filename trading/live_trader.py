@@ -1562,9 +1562,7 @@ def render_symbol_viz(symbol: str, cfg: dict, clear_first: bool = True) -> dict:
             # elozmeny). A hivo kulonben csak annyit latna, hogy ures a
             # pillanatkep — es nem tudna, MELYIK lepesnel.
             if _cnt == 0:
-                out["errors"].append(
-                    f"{st.name}: 0 objektum — nincs gyertya-adat (fut az MT5, és "
-                    f"benne van a szimbólum a Piac-figyelőben?)")
+                out["errors"].append(_t("viz.no_bars", strategy=st.name))
         except Exception as ex:
             out["errors"].append(f"{st.name}: {ex}")
 
@@ -1584,7 +1582,7 @@ def render_symbol_viz(symbol: str, cfg: dict, clear_first: bool = True) -> dict:
         out["path"] = mt5_visual.write_lines(symbol, lines, clear_first=clear_first)
         out["lines"] = len(lines)
     except Exception as ex:
-        out["errors"].append(f"írás: {ex}")
+        out["errors"].append(_t("viz.write_error", error=ex))
     return out
 
 
@@ -2624,11 +2622,12 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
                   if closing else
                   _t("block.already_open") if already_open else
                   _policy_block if _policy_block else
-                  f"napi veszteség-limit elérve ({_day_pnl:+.2f}$ ≤ -{daily_limit:.0f}$)"
+                  _t("block.daily_limit", pnl=f"{_day_pnl:+.2f}",
+                     limit=f"{daily_limit:.0f}")
                   if daily_limit_hit else
-                  "nincs érvényes ATR (adathiány)" if atr_val is None else
-                  "nincs szabad slot" if not slot_mgr.can_open() else
-                  f"kapu blokkol: {_gates.block_reason(_gate_dec)}"
+                  _t("block.no_atr") if atr_val is None else
+                  _t("block.no_slot") if not slot_mgr.can_open() else
+                  _t("block.gate", reason=_gates.block_reason(_gate_dec))
                   if not _gates_ok else None)
         if _block:
             log.info("⏭ %s %s jel — belépő KIHAGYVA: %s", symbol, signal, _block)
@@ -2836,9 +2835,10 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
                     _aid = f"{symbol}|{strategy.name}|{signal}|{_bt}"
                     request_alert(
                         symbol, strategy.name, _aid,
-                        f"{symbol} {signal} JELZÉS ({strategy.name}) — "
-                        f"belépő {open_price:.5g} | SL {sl_price:.5g} | "
-                        f"TP {tp_price:.5g} | lot {lot:.2f}")
+                        _t("alert.signal", symbol=symbol, side=signal,
+                           strategy=strategy.name,
+                           entry=f"{open_price:.5g}", sl=f"{sl_price:.5g}",
+                           tp=f"{tp_price:.5g}", lot=f"{lot:.2f}"))
                     log.info("🔔 %s %s JELZÉS (%s) — csak jelzés mód, NINCS kötés "
                              "| belépő: %.5g | SL: %.5g | TP: %.5g | lot: %.2f",
                              symbol, signal, strategy.name, open_price,

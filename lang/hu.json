@@ -1095,12 +1095,22 @@
   "viz.no_params": "{strategy}: nincs paraméter",
   "viz.all_viz_off": "Egyetlen stratégia RAJZA sincs bekapcsolva ezen a páron ({names}) — ezért nem jön létre a fájl sem. Kattints az instrumentum NEVÉRE a soron, és pipáld be a Vizualizáció oszlopot.",
   "viz.empty": "a pillanatkép ÜRES — a chart régi rajza megmarad",
+  "viz.no_bars": "{strategy}: 0 objektum — nincs gyertya-adat (fut az MT5, és benne van a szimbólum a Piac-figyelőben?)",
+  "viz.write_error": "írás: {error}",
 
   "block.closing": "kivezetés alatt (a stratégiát kikapcsolták / Stop — csak a nyitott pozíció fut ki)",
   "block.already_open": "már van nyitott pozíció ezen a páron",
+  "block.daily_limit": "napi veszteség-limit elérve ({pnl}$ ≤ -{limit}$)",
+  "block.no_atr": "nincs érvényes ATR (adathiány)",
+  "block.no_slot": "nincs szabad slot",
+  "block.gate": "kapu blokkol: {reason}",
 
   "bt.err.no_data": "Nincs letöltött adat (data/m15, data/m1) ehhez a párhoz.",
   "bt.err.no_params": "Nincs optimalizált paraméter egyetlen szimbólumhoz sem.",
   "bt.err.no_period": "Nincs elegendő adat a megadott időszakban.",
-  "bt.err.no_data_dl": "Nincs letöltött adat, és a letöltés sem sikerült: {error}"
+  "bt.err.no_data_dl": "Nincs letöltött adat, és a letöltés sem sikerült: {error}",
+
+  "alert.signal": "{symbol} {side} JELZÉS ({strategy}) — belépő {entry} | SL {sl} | TP {tp} | lot {lot}",
+
+  "gate.dialog.title": "{symbol} — {gate} kapu"
 }

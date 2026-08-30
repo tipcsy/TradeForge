@@ -220,7 +220,8 @@ class GateDialog:
         self.top.geometry("720x620")
         self.top.grab_set()
 
-        tk.Label(self.top, text=f"{symbol} — {_g.label_of(gate_key)} kapu",
+        tk.Label(self.top, text=_t("gate.dialog.title", symbol=symbol,
+                                   gate=_g.label_of(gate_key)),
                  bg=BG, fg=FG_WHITE, font=self._f["header"], anchor="w").pack(
                  anchor="w", padx=12, pady=(12, 0))
 
