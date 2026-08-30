@@ -174,6 +174,46 @@ for p in ROOT_PY:
 check("a forditot hasznalo modulokban nincs `_t` nevu valtozo", not shadow,
       ", ".join(shadow[:5]))
 
+
+# ══ 6. A LEIRAS-FAJLOK nyelvvalasztasa ═════════════════════════════════════
+# ⚠ A leirasok NEM a katalogusban vannak (tobb ezer szo Markdown), hanem
+# `<nev>.<nyelv>.md` fajlokban. A visszaeses itt FORDITVA nema-ellenes: hianyzo
+# forditasnal a MAGYAR eredeti latszik, es a `doc_note` kiirja, hogy
+# forditatlant olvasol. Egy ures „Leiras" ful azt sugallna, hogy nincs is
+# dokumentacio.
+import tempfile
+
+with tempfile.TemporaryDirectory() as _d:
+    _dir = Path(_d)
+    (_dir / "van.md").write_text("HU", encoding="utf-8")
+    (_dir / "van.en.md").write_text("EN", encoding="utf-8")
+    (_dir / "csak_hu.md").write_text("HU", encoding="utf-8")
+
+    i18n.set_language("hu")
+    check("magyarul mindig az alapnyelvi fajl",
+          i18n.doc_path(_dir, "van").name == "van.md")
+    check("...es nincs megjegyzes", i18n.doc_note(_dir, "van") == "")
+
+    i18n.set_language("en")
+    check("angolul a forditas, ha van",
+          i18n.doc_path(_dir, "van").name == "van.en.md")
+    check("...es ilyenkor sincs megjegyzes", i18n.doc_note(_dir, "van") == "")
+    check("forditas hijan a MAGYAR eredeti (nem ures lap)",
+          i18n.doc_path(_dir, "csak_hu").name == "csak_hu.md")
+    check("...de a megjegyzes SZOL rola",
+          "English" in i18n.doc_note(_dir, "csak_hu"))
+    i18n.set_language("hu")
+
+# A valodi leirasok: minden kapunak es strategianak, aminek van magyar doksija,
+# feloldodik-e az utvonala mindket nyelven (a fajl letezese nem kovetelmeny —
+# azt a scanner jelenti).
+from core import gates as _gt
+for _k in _gt.KEYS:
+    i18n.set_language("en")
+    _p = _gt.doc_path(_k)
+    i18n.set_language("hu")
+    check(f"kapu-leiras utvonala felold: {_k}", _p.name.startswith(_k))
+
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")
 sys.exit(0 if all(results) else 1)

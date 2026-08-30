@@ -431,16 +431,23 @@ class Strategy(ABC):
         elvárt útvonalat. Így a hiányzó doksi nem „elromlott gomb", hanem
         felszólítás — enélkül nem lenne kitalálható, hova kell írni.
 
-        Felülírható, ha egy stratégia máshol tartja a leírását."""
+        Felülírható, ha egy stratégia máshol tartja a leírását.
+
+        ⚠ NYELVFÜGGŐ: angol felületen `<név>.en.md`, ha létezik — különben a
+        magyar eredeti (a `doc_text` ilyenkor kiírja, hogy fordítatlant olvasol).
+        """
         from pathlib import Path
-        return (Path(__file__).resolve().parent / "docs" / f"{self.name}.md")
+        from core.i18n import doc_path as _doc_path
+        return _doc_path(Path(__file__).resolve().parent / "docs", self.name)
 
     def doc_text(self) -> str:
         """A leírás tartalma, vagy egy beszédes helyettesítő szöveg."""
         p = self.doc_path()
         try:
             if p.exists():
-                return p.read_text(encoding="utf-8")
+                from core.i18n import doc_note as _doc_note
+                return (_doc_note(p.parent, self.name)
+                        + p.read_text(encoding="utf-8"))
         except OSError as e:
             return (f"# {self.name}\n\n"
                     + _t("strategy.doc.unreadable", error=e) + "\n")

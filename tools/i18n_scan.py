@@ -152,7 +152,33 @@ def main(argv):
     if len(unused) > 15:
         print(f"  … és még {len(unused) - 15}")
 
-    # ── 3. Hátralék ───────────────────────────────────────────────────────
+    # ── 3. A LEÍRÁS-fájlok (nem a katalógusban élnek) ─────────────────────
+    # ⚠ Külön szakasz, mert a leírások NEM kulcsok: több ezer szó Markdown,
+    # `<név>.<nyelv>.md` fájlokban. A hiányuk nem hiba (a felület a magyar
+    # eredetit mutatja), de MENNYISÉG — és a katalógus 100%-a mellett is
+    # maradhat lefordítatlan doksi.
+    print("\nLEÍRÁSOK (.md)")
+    # ⚠ A kapuknál NEM minden `.md` leírás: a `core/docs/` fejlesztői jegyzeteket
+    # is tart (`tick_storage.md`), amit a felület sosem mutat. A lista ezért a
+    # REGISZTRÁLT kapukhoz igazodik — különben a jelentés olyasmit kérne
+    # számon, amit senki nem olvas a programban.
+    from core import gates as _gates
+    for label, folder, only in (
+            ("kapuk", ROOT / "core" / "docs", set(_gates.KEYS)),
+            ("stratégiák", ROOT / "strategy" / "docs", None)):
+        base = sorted(p for p in folder.glob("*.md")
+                      if p.name.count(".") == 1
+                      and (only is None or p.stem in only))
+        for code in i18n.LANGUAGES:
+            if code == i18n.BASE_LANG:
+                continue
+            have = [p for p in base
+                    if (folder / f"{p.stem}.{code}.md").exists()]
+            miss = [p.stem for p in base if p not in have]
+            print(f"  {label} / {code}: {len(have)}/{len(base)}"
+                  + (f"  ·  hiányzik: {', '.join(miss)}" if miss else ""))
+
+    # ── 4. Hátralék ───────────────────────────────────────────────────────
     rows = []
     total = 0
     for p in _py_files():

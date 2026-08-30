@@ -247,6 +247,34 @@ def num(s: str) -> str:
     return s.replace(",", "\x00").replace(".", dec).replace("\x00", grp)
 
 
+
+def doc_path(base_dir, name: str):
+    """A leírás-fájl útvonala az AKTÍV nyelven: `<név>.<nyelv>.md`, ha van,
+    különben az alapnyelvi `<név>.md`.
+
+    ⚠ A VISSZAESÉS ITT IS NÉMA-ELLENES, de fordítva, mint a katalógusban: egy
+    hiányzó fordítás nem üres lapot ad, hanem a MAGYAR eredetit — a `doc_note()`
+    pedig kiírja, hogy fordítatlant olvasol. Egy üres „Leírás" fül azt sugallná,
+    hogy nincs is dokumentáció, holott van, csak nem ezen a nyelven."""
+    from pathlib import Path
+    base = Path(base_dir)
+    if language() != BASE_LANG:
+        p = base / f"{name}.{language()}.md"
+        if p.exists():
+            return p
+    return base / f"{name}.md"
+
+
+def doc_note(base_dir, name: str) -> str:
+    """Egysoros megjegyzés a leírás ELÉ, ha lefordítatlant mutatunk (különben
+    üres). A `doc_path`-szal PÁRBAN használandó."""
+    from pathlib import Path
+    if language() == BASE_LANG:
+        return ""
+    if (Path(base_dir) / f"{name}.{language()}.md").exists():
+        return ""
+    return t("docs.fallback_note")
+
 def has(key: str) -> bool:
     """Van-e ilyen kulcs (bármelyik katalógusban)? A kód-kulcs ↔ címke
     leképezéseknek kell, ahol a hiány csendes visszaesést jelentene."""

@@ -99,6 +99,7 @@
 
   "docs.source": "Source: {source}",
   "docs.open_error": "The description cannot be opened: {error}",
+  "docs.fallback_note": "> ℹ️ This description has no English translation yet — you are reading the Hungarian original.\n\n",
 
   "btn.close": "Close",
   "btn.save": "Save",

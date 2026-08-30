@@ -99,6 +99,7 @@
 
   "docs.source": "Forrás: {source}",
   "docs.open_error": "A leírás nem nyitható meg: {error}",
+  "docs.fallback_note": "> ℹ️ Ehhez a leíráshoz még nincs magyar fordítás — az eredeti szöveg látszik.\n\n",
 
   "btn.close": "Bezárás",
   "btn.save": "Mentés",

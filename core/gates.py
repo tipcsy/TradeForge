@@ -149,9 +149,13 @@ def doc_path(key: str):
 
     Ugyanaz a minta, mint a stratégiáknál (`strategy/docs/<név>.md`): a leírás
     FÁJLBAN él, nem a kódban — szerkeszthető anélkül, hogy hozzányúlnál a
-    logikához, és a beállító ablak „Leírás" lapja mindig a lemezről olvassa."""
+    logikához, és a beállító ablak „Leírás" lapja mindig a lemezről olvassa.
+
+    ⚠ NYELVFÜGGŐ: angol felületen `<kulcs>.en.md`, ha létezik — különben a
+    magyar eredeti."""
     from pathlib import Path as _P
-    return _P(__file__).resolve().parent / "docs" / f"{key}.md"
+    from core.i18n import doc_path as _doc_path
+    return _doc_path(_P(__file__).resolve().parent / "docs", key)
 
 
 def doc_text(key: str) -> str:
@@ -159,7 +163,8 @@ def doc_text(key: str) -> str:
     hiányzó doksi nem üres lap, hanem felszólítás."""
     p = doc_path(key)
     try:
-        return p.read_text(encoding="utf-8")
+        from core.i18n import doc_note as _doc_note
+        return _doc_note(p.parent, key) + p.read_text(encoding="utf-8")
     except OSError:
         _lines = ["# " + label_of(key), "",
                   _t("gate.no_doc"), "",
