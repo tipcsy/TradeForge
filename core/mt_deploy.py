@@ -31,6 +31,8 @@ log = logging.getLogger(__name__)
 
 MT4, MT5 = "MT4", "MT5"
 
+from core.i18n import LabelMap as _LabelMap, t as _t
+
 # ── ÁLLAPOT-KÓDOK ──────────────────────────────────────────────────────────
 # ⚠ A KÓD AZ AZONOSÍTÓ, A SZÖVEG CSAK A KIJELZÉS. Ezek az állapotok korábban
 # magyar mondatok voltak (`"MÁS FORRÁSHOZ készült"`), és a felület EZEKRE
@@ -68,33 +70,27 @@ _EXPERTS = {"BacktestReplayer"}
 
 # Mi micsoda — a felület ezt írja ki a fájlnév mellé. A szöveg a fájlok saját
 # fejlécéből származik, nem találgatás.
-_DESC = {
-    "TradeForgeViz": ("belépő-jelzések, SL/TP, kötések",
-                      "a fő megjelenítő: a Python írta jelzés-fájlt rajzolja a chartra"),
-    "TradeForgeWPR": ("Williams %R a stratégia matekjával",
-                      "külön al-ablak; a paramétereit a motor fájljából veszi"),
-    "TradeForgeBands": ("állapot-sáv (TBAND)",
-                        "külön al-ablak: mikor van nyitva a jelzési ablak"),
-    "TradeForgeProbe": ("diagnosztika",
-                        "nem rajzol; megmondja, eléri-e a terminál a fájlokat"),
-    "BacktestReplayer": ("EXPERT — a Python backtestjét játssza vissza",
-                         "a Strategy Testerbe való (nem a chartra); az esemény-"
-                         "naplót játssza le, nem szimulál újra"),
-    "BacktestPnLViewer": ("a visszajátszás P&L-görbéje", "a Replayer CSV-jéből"),
-    "BacktestTradesViewer": ("a visszajátszás kötései a charton",
-                             "a Replayer CSV-jéből"),
+# ⚠ A fájlnév a KULCS (az azonosító), a leírás a katalógusban él.
+_DESC_KEY = {
+    "TradeForgeViz": "viz",
+    "TradeForgeWPR": "wpr",
+    "TradeForgeBands": "bands",
+    "TradeForgeProbe": "probe",
+    "BacktestReplayer": "replayer",
+    "BacktestPnLViewer": "pnl",
+    "BacktestTradesViewer": "trades",
 }
 
 # Melyik indikátort kell RÁHÚZNI a chartra, platformonként — a felület ezt írja
 # ki, mert a két platform MÁS: MT4-en a három rész külön indikátor, MT5-ön a
 # fő megjelenítő maga rajzolja az al-ablakokat.
-USAGE = {
-    MT4: ("MT4-en MIND A HÁROM indikátort rá kell húzni a chartra "
-          "(TradeForgeViz + TradeForgeWPR + TradeForgeBands), és mindháromnál "
-          "ugyanazt az utótagot kell beállítani (visszajátszáshoz `_BT`)."),
-    MT5: ("MT5-ön elég a TradeForgeViz — a WPR és a Bands külön al-ablak, csak "
-          "akkor kell, ha azokat is látni akarod."),
-}
+def usage_of(platform: str) -> str:
+    """Melyik indikátort kell RÁHÚZNI a chartra ezen a platformon.
+
+    ⚠ Függvény, nem tábla: a platform-kód nagybetűs (`MT4`), a nyelvi
+    kulcsok viszont kisbetűsek — egy `LabelMap` itt csendben üres
+    szöveget adott volna vissza (a `.get()` nem hiba)."""
+    return _t(f"mt.usage.{str(platform).lower()}")
 
 
 def repo_root() -> Path:
@@ -108,7 +104,8 @@ def subfolder_of(src: Path) -> str:
 
 def describe(src: Path) -> tuple:
     """`(rövid, használat)` — mit csinál ez a fájl. Ismeretlen → üres."""
-    return _DESC.get(src.stem, ("", ""))
+    k = _DESC_KEY.get(src.stem)
+    return (_t(f"mt.desc.{k}.short"), _t(f"mt.desc.{k}.use")) if k else ("", "")
 
 
 def sources(platform: str) -> list:
@@ -417,13 +414,11 @@ def deploy(platform: str, extra_roots=None, dry_run: bool = False,
     res["targets"] = len(tgts)
     srcs = sources(platform)
     if not srcs:
-        res["errors"].append(f"nincs {platform} forrás a repóban")
+        res["errors"].append(_t("mt.err.no_source", platform=platform))
         return res
     if not tgts:
-        res["errors"].append(
-            f"nem találtam {platform} terminál-mappát "
-            f"(AppData\\MetaQuotes\\Terminal\\…\\{_SRC[platform][2]}\\Indicators). "
-            f"Portable módban add meg a terminál telepítési mappáját.")
+        res["errors"].append(_t("mt.err.no_target", platform=platform,
+                                sub=_SRC[platform][2]))
         return res
     # A TAROLT leforditottak: csak azt visszuk ki, ami a MOSTANI forrashoz
     # keszult — kulonben a terminalban ujra a "regi fut, uj forras" allapot allna
@@ -573,9 +568,7 @@ def compile_file(exe: Path, src: Path, timeout: int = 120) -> tuple:
     if rc != 0:
         return False, f"{src.name}: {rc} hiba"
     # rc=0, nincs hibaüzenet, de a kimenet SEM készült el.
-    return False, (f"{src.name}: a MetaEditor nem fordított (a parancssori "
-                   f"fordítás ezen a verzión nem működik) — nyisd meg a fájlt a "
-                   f"MetaEditorban és nyomj F7-et")
+    return False, _t("mt.err.compile_failed", file=src.name)
 
 
 def compile_all(platform: str, extra_roots=None, include_appdata: bool = True,

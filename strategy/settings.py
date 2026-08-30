@@ -16,6 +16,8 @@ motor-kulcsai), hogy a merge és a mentés mindig konzisztens maradjon.
 
 from __future__ import annotations
 
+from core.i18n import t as _t
+
 import copy
 import json
 import logging
@@ -302,16 +304,16 @@ def validate_range(spec: dict) -> str:
     éppen nincs mit választani.
     """
     lo, hi, step = spec.get("min"), spec.get("max"), spec.get("step")
-    for v, nev in ((lo, "-tól"), (hi, "-ig"), (step, "lépés")):
+    for v, nev in ((lo, _t("range.from")), (hi, _t("range.to")),
+                   (step, _t("range.step"))):
         if not isinstance(v, (int, float)):
-            return f"a(z) „{nev}” nem szám"
+            return _t("range.err.nan", name=nev)
     if step <= 0:
-        return "a lépésköz csak pozitív lehet"
+        return _t("range.err.step")
     if lo > hi:
-        return "a „-tól” nagyobb, mint a „-ig”"
+        return _t("range.err.order")
     if lo + step > hi and lo != hi:
-        return (f"ekkora lépésközzel csak EGYETLEN érték áll elő ({lo:g}) — "
-                f"a paraméter gyakorlatilag rögzített")
+        return _t("range.err.single", value=f"{lo:g}")
     return ""
 
 

@@ -63,7 +63,9 @@ for code in i18n.LANGUAGES:
           ", ".join(sorted(k - base_keys)[:5]))
 
 # ══ 2. Kulcs-konvencio es ertekek ══════════════════════════════════════════
-_KEY_RE = re.compile(r"^[a-z0-9]+(\.[a-z0-9_]+)+$")
+# A terulet-nev is tartalmazhat alahuzast (`trade_mode.live`): a kulcsok a
+# MODUL nevet tukrozik, es az konnyebben megtalalhatova teszi oket.
+_KEY_RE = re.compile(r"^[a-z0-9_]+(\.[a-z0-9_]+)+$")
 bad_keys = sorted(k for k in base_keys if not _KEY_RE.match(k))
 check("minden kulcs a konvenciot koveti (<terulet>.<elem>, kisbetu)",
       not bad_keys, ", ".join(bad_keys[:5]))

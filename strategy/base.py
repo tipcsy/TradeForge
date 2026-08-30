@@ -42,6 +42,8 @@ akkor NEM a stratégiáé. Lásd a `new-strategy` checklistet.
 
 from __future__ import annotations
 
+from core.i18n import t as _t
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Optional, Any
@@ -440,11 +442,10 @@ class Strategy(ABC):
             if p.exists():
                 return p.read_text(encoding="utf-8")
         except OSError as e:
-            return f"# {self.name}\n\nA leírás nem olvasható: `{e}`\n"
-        return (f"# {self.name}\n\n"
-                f"Ehhez a stratégiához **még nincs leírás**.\n\n"
-                f"Hozd létre ezt a fájlt, és a tartalma itt fog megjelenni "
-                f"formázva:\n\n```\n{p}\n```\n")
+            return (f"# {self.name}\n\n"
+                    + _t("strategy.doc.unreadable", error=e) + "\n")
+        return (f"# {self.name}\n\n" + _t("strategy.doc.missing")
+                + f"\n\n```\n{p}\n```\n")
 
     def training_window(self, symbol: str, cfg: dict):
         """`(kezdet, vég)` pandas Timestamp-párként: MELYIK időszakot LÁTTA a

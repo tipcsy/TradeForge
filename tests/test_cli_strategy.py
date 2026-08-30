@@ -214,10 +214,16 @@ check("nincs tobbe strategia NELKULI 'main.py optimize' ajanlas az ml_ai-ban",
 nsrc = (ROOT / "main.py").read_text(encoding="utf-8")
 check("main.py: a cmd_optimize fogad strategiakat",
       "def cmd_optimize(symbols=None, strategies=None):" in nsrc)
+# ⚠ A SZOVEGEK a nyelvi katalogusban vannak (i18n) — a forrasban a KULCS all.
+# Ket allitas: hivatkozik-e a kulcsra, ES a magyar szoveg tenyleg ezt mondja-e.
+import json as _json
+_HU_CAT = _json.loads((ROOT / "lang" / "hu.json").read_text(encoding="utf-8"))
 check("main.py: megkulonbozteti az ISMERETLEN es a KIKAPCSOLT nevet",
-      "Ismeretlen stratégia" in nsrc and "ki van kapcsolva" in nsrc)
+      "cli.strategy_unknown" in nsrc and "cli.strategy_off" in nsrc
+      and "Ismeretlen stratégia" in _HU_CAT.get("cli.strategy_unknown", "")
+      and "ki van kapcsolva" in _HU_CAT.get("cli.strategy_off", ""))
 check("main.py: kiirja az elerheto neveket",
-      "Elérhető: " in nsrc)
+      "cli.available" in nsrc and "Elérhető: " in _HU_CAT.get("cli.available", ""))
 check("main.py: a sugo mutatja a --strategy hasznalatat",
       "--strategy ml_ai" in nsrc and "-s wpr_sma,ml_ai" in nsrc)
 check("README: a --strategy dokumentalva van",

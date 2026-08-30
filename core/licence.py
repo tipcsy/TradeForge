@@ -38,6 +38,8 @@ import json
 import logging
 import platform
 import time
+
+from core.i18n import LabelMap as _LabelMap, t as _t
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -121,30 +123,16 @@ class Result:
 
 # ⚠ A SZÖVEG ITT VAN, nem a szerveren. A szerver gépi ok-kódot ad; a mondat a
 # program nyelvén és stílusában szólal meg, és a szerver átírása nem töri el.
-MESSAGES = {
-    "ok_already_bound": "Licenc rendben.",
-    "ok_newly_bound":   "Licenc rendben — a számla mostantól be van kötve.",
-    "bad_token":        "A mentett belépő érvénytelen (talán visszavontad a "
-                        "portálon). Jelentkezz be újra.",
-    "user_inactive":    "A fiókod le van tiltva. Vedd fel a kapcsolatot az "
-                        "üzemeltetővel.",
-    "no_licence":       "Nincs licenced a TradeForge-hoz.",
-    "suspended":        "A licenced fel van függesztve.",
-    "expired":          "A licenced LEJÁRT.",
-    "no_free_slot":     "Elfogytak a számla-slotok: ez a számlaszám nincs "
-                        "bekötve, és nincs több hely.",
-    "bad_request":      "Hibás kérés a licencszerver felé.",
+# (A mondatok a nyelvi katalógusban vannak — a KÓD marad az azonosító.)
+# A szerver gépi ok-kódjai; a mondat a katalógusban él (`lic.msg.<ok>`).
+REASONS = (
+    "ok_already_bound", "ok_newly_bound", "bad_token", "user_inactive",
+    "no_licence", "suspended", "expired", "no_free_slot", "bad_request",
     # Csak kliens-oldali okok
-    "no_token":         "Még nincs mentett belépő. Jelentkezz be a licenchez.",
-    "offline_grace":    "A licencszerver nem érhető el — a program a korábbi "
-                        "ellenőrzés alapján indul.",
-    "offline_expired":  "A licencszerver nem érhető el, és a türelmi idő lejárt.",
-    "offline_no_cache": "A licencszerver nem érhető el, és nincs korábbi, "
-                        "erre a számlára szóló ellenőrzés.",
-    "bad_signature":    "A licencszerver válasza nem hitelesíthető.",
-    "version_mismatch": "A licencszerver újabb formátumot használ — frissítsd a "
-                        "programot.",
-}
+    "no_token", "offline_grace", "offline_expired", "offline_no_cache",
+    "bad_signature", "version_mismatch",
+)
+MESSAGES = _LabelMap("lic.msg", REASONS)
 
 
 def _msg(reason: str, extra: str = "") -> str:
@@ -245,9 +233,9 @@ def machine_label() -> str:
     sor melyik gépé, és a szerver ez alapján cseréli le a régi tokent, ha
     ugyanarról a gépről érkezik új kérés (gépenként EGY élő token)."""
     try:
-        return platform.node() or "ismeretlen gép"
+        return platform.node() or _t("lic.unknown_machine")
     except Exception:
-        return "ismeretlen gép"
+        return _t("lic.unknown_machine")
 
 
 # ── Hálózat ─────────────────────────────────────────────────────────────
@@ -288,10 +276,10 @@ def login_and_get_token(email: str, password: str, api: str = DEFAULT_API,
     menti a `save_token`-nel."""
     ok, res = _post(api, "/auth/login", {"email": email, "password": password})
     if not ok:
-        return False, f"Nem sikerült elérni a licencszervert ({res})."
+        return False, _t("lic.unreachable", error=res)
     jwt = (res or {}).get("access_token")
     if not jwt:
-        return False, "Hibás e-mail cím vagy jelszó."
+        return False, _t("lic.bad_credentials")
 
     import urllib.error
     import urllib.request
@@ -305,7 +293,8 @@ def login_and_get_token(email: str, password: str, api: str = DEFAULT_API,
             data = json.loads(r.read().decode("utf-8"))
         return True, data["token"]
     except Exception as ex:
-        return False, f"A belépő nem hozható létre ({type(ex).__name__}: {ex})."
+        return False, _t("lic.token_failed",
+                         error=f"{type(ex).__name__}: {ex}")
 
 
 # ── A gyorsítótár (türelmi idő) ─────────────────────────────────────────
@@ -339,7 +328,7 @@ def _cache_ok(account_number: str) -> "Result | None":
     if grace <= 0 or kor > grace:
         return Result(False, "offline_expired",
                       _msg("offline_expired",
-                           f"a mentett ellenőrzés {kor // 3600} órás"),
+                           _t("lic.cache_age", hours=kor // 3600)),
                       from_cache=True, payload=payload)
     exp = int(payload.get("expires_at") or 0)
     if exp and exp <= now:
@@ -347,7 +336,7 @@ def _cache_ok(account_number: str) -> "Result | None":
                       payload=payload)
     hatra = (grace - kor) // 3600
     return Result(True, "offline_grace",
-                  _msg("offline_grace", f"még {hatra} óráig"),
+                  _msg("offline_grace", _t("lic.grace_left", hours=hatra)),
                   from_cache=True, payload=payload)
 
 
@@ -478,7 +467,8 @@ def _check(account_number: str, api: str = DEFAULT_API, token: str = "",
     if reason == "no_free_slot":
         bound = (res or {}).get("bound_accounts") or []
         if bound:
-            extra = "bekötve: " + ", ".join(str(b) for b in bound)
+            extra = _t("lic.bound_accounts",
+                       accounts=", ".join(str(b) for b in bound))
     elif reason == "expired" and payload.get("expires_at"):
         extra = time.strftime("%Y-%m-%d",
                               time.localtime(int(payload["expires_at"])))

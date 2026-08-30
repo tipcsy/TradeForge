@@ -31,6 +31,7 @@ egy elavult tickből jönne, és pont akkor csúszna el, amikor számít.
 """
 
 from __future__ import annotations
+from core.i18n import LabelMap as _LabelMap, t as _t
 
 import logging
 
@@ -44,7 +45,22 @@ UNKNOWN = "unknown"
 # a nyitott session gyertya-szünetei 99,9%-ban 1–2 percesek.
 MAX_AGE_SEC = 300
 
-LABEL = {OPEN: "", CLOSED: "zárva", UNKNOWN: "?"}
+# ⚠ A nyitott piacnak NINCS felirata (üres cella) — csak a zártnak.
+def label_of(state: str) -> str:
+    return {CLOSED: _t("market.closed"), UNKNOWN: "?"}.get(state, "")
+
+
+class _LabelDict(dict):
+    """Visszafelé kompatibilis `LABEL[...]` — az aktív nyelvből."""
+
+    def __getitem__(self, k):
+        return label_of(k)
+
+    def get(self, k, default=None):
+        return label_of(k)
+
+
+LABEL = _LabelDict()
 
 
 def _server_now() -> "float | None":
@@ -129,13 +145,13 @@ def summary(states: dict) -> str:
     if not n or (not closed and not unknown):
         return ""
     if closed == n:
-        return "Piac: MINDEN instrumentum zárva"
+        return _t("market.all_closed")
     parts = []
     if closed:
-        parts.append(f"{closed}/{n} zárva")
+        parts.append(_t("market.n_closed", closed=closed, total=n))
     if unknown:
-        parts.append(f"{unknown} ismeretlen")
-    return "Piac: " + ", ".join(parts)
+        parts.append(_t("market.n_unknown", n=unknown))
+    return _t("market.summary", parts=", ".join(parts))
 
 
 def tip_of(info: dict) -> str:
@@ -149,10 +165,10 @@ def tip_of(info: dict) -> str:
     if st == OPEN:
         return ""
     if st == UNKNOWN:
-        return "Ismeretlen — nincs friss tick."
+        return _t("market.tip.unknown")
     t = (info or {}).get("tick_time")
     if not t:
-        return "ZÁRVA"
+        return _t("market.tip.closed")
     from datetime import datetime
-    return ("ZÁRVA — bróker idő: "
-            + datetime.fromtimestamp(t).strftime("%m-%d %H:%M") + " óta.")
+    return _t("market.tip.closed_since",
+              time=datetime.fromtimestamp(t).strftime("%m-%d %H:%M"))

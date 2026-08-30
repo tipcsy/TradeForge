@@ -17,23 +17,27 @@ kezdeti és a mostani pillanatkép különbsége adja a terjedő sorokat.
 
 from __future__ import annotations
 
+from core.i18n import t as _t
+
 # sor-azonosító → (emberi név, PÉNZT érint-e)
 #
 # A „pénzt érint" jelölés nem díszítés: ezek a sorok kapnak külön figyelmeztetést
 # a megerősítő ablakban. Az `strategies` azért van benne, mert egy stratégia
 # bekapcsolása minden páron új belépőket nyithat; a `mode` pedig azért, mert a
 # „Valódi" mód valódi megbízásokat küld.
+# ⚠ A NÉV a katalógusból jön (`bulk.<kulcs>`), a PÉNZ-JELÖLŐ marad itt: az
+# viselkedés, nem szöveg.
 ROWS = {
-    "strategies": ("Aktív stratégia",       True),
-    "viz":        ("Vizualizáció látszik",  False),
-    "trades":     ("Kötések látszanak",     False),
-    "mode":       ("Kötés módja",           True),
-    "market":     ("Piac-előszűrő",         False),
-    "market_viz": ("Piac-állapot sáv",      False),
+    "strategies": (_t("bulk.strategies"),   True),
+    "viz":        (_t("bulk.viz"),          False),
+    "trades":     (_t("bulk.trades"),       False),
+    "mode":       (_t("bulk.mode"),         True),
+    "market":     (_t("bulk.market"),       False),
+    "market_viz": (_t("bulk.market_viz"),   False),
     # PÉNZT ÉRINT: a preset dönti el, mi történik a pozícióval 1R-nél (részleges
     # zárás, stop-húzás, méret). Nem a config.json-ban él, hanem a per-pár
     # `data/risk_mode.json`-ban — a tömeges alkalmazás mégis ugyanúgy működik rá.
-    "rr_preset":  ("Kockázatcsökkentés",    True),
+    "rr_preset":  (_t("bulk.rr_preset"),    True),
 }
 
 
@@ -62,7 +66,7 @@ def summary(rows) -> str:
     out = []
     for r in sorted(rows or ()):
         name, money = ROWS.get(r, (r, False))
-        out.append(f"   • {name}" + ("   ⚠ PÉNZT ÉRINT" if money else ""))
+        out.append(f"   • {name}" + (_t("bulk.money_warning") if money else ""))
     return "\n".join(out)
 
 

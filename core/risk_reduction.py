@@ -19,6 +19,8 @@ részleges zárás, a hívó BE-húzásra (Risky) esik vissza.
 
 from __future__ import annotations
 
+from core.i18n import t as _t
+
 import math
 from dataclasses import dataclass
 
@@ -279,9 +281,9 @@ def preset_blockers(cur_lot, min_lot: float, lot_step: float,
         # NETTING/EXCHANGE számla: egy szimbólumon egy nettó pozíció lehet, így a
         # kockázatmentes runner mellé nyíló új belépő ÖSSZEVONÓDNA vele — a
         # részleges záráson alapuló technikák nem működnének helyesen.
-        return {p: "NETTING számla" for p in PARTIAL_CLOSE_PRESETS}
+        return {p: _t("rr.blocked.netting") for p in PARTIAL_CLOSE_PRESETS}
     if cur_lot is not None and not can_reduce_lot(cur_lot, min_lot, lot_step):
-        return {p: "nem felezhető" for p in PARTIAL_CLOSE_PRESETS}
+        return {p: _t("rr.blocked.lot") for p in PARTIAL_CLOSE_PRESETS}
     return {}
 
 

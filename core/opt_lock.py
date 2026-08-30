@@ -36,6 +36,8 @@ készült; ezért ebbe az irányba tévedünk.
 
 from __future__ import annotations
 
+from core.i18n import t as _t
+
 import json
 import os
 import socket
@@ -182,15 +184,13 @@ def describe(info: dict, symbol: str = "", strategy: str | None = None) -> str:
         _st = float(info.get("started_at") or 0)
         mins = int((time.time() - _st) / 60)
         if _st > 0 and 0 <= mins < 60 * 24 * 30:
-            since = (f" {mins // 60} óra {mins % 60} perce" if mins >= 60
-                     else f" {mins} perce")
+            since = (_t("lock.since_h", hours=mins // 60, min=mins % 60)
+                     if mins >= 60 else _t("lock.since_m", min=mins))
     except (TypeError, ValueError):
         pass
     who = f"pid {info.get('pid')}"
     if info.get("host"):
         who += f" @ {info['host']}"
     cmd = f" ({info['cmd']})" if info.get("cmd") else ""
-    return (f"Ezen a páron MÁR FUT egy optimalizálás{since} — {who}{cmd}. "
-            f"Két párhuzamos futás ugyanabba az optuna study-ba dolgozna, és "
-            f"felülírnák egymás eredményét. Várd meg, vagy állítsd le azt. "
-            f"Ha biztosan nem fut semmi, töröld: {lock_path(symbol, strategy)}")
+    return _t("lock.busy", since=since, who=who, cmd=cmd,
+              path=lock_path(symbol, strategy))

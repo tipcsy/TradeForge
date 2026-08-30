@@ -20,6 +20,7 @@ kategóriát ad; a kategória→(kihagy/óvatos/normál) leképezést az optimiz
 """
 
 from __future__ import annotations
+from core.i18n import LabelMap as _LabelMap, t as _t
 
 import numpy as np
 import pandas as pd
@@ -38,13 +39,9 @@ UNCATEGORIZED = "uncategorized"
 CATEGORIES = (CLEAN_BULL, CLEAN_BEAR, VOLATILE_BULL, VOLATILE_BEAR,
               RANGING, DEAD, UNCERTAIN, TRANSITION, UNCATEGORIZED)
 
-NAME_HU = {
-    CLEAN_BULL: "Szép Bika", CLEAN_BEAR: "Szép Medve",
-    VOLATILE_BULL: "Ideges Bika", VOLATILE_BEAR: "Ideges Medve",
-    RANGING: "Oldalazás", DEAD: "Érdektelenség",
-    UNCERTAIN: "Bizonytalanság", TRANSITION: "Átmenet",
-    UNCATEGORIZED: "Besorolatlan",
-}
+# ⚠ A NÉV MÁR NEM CSAK MAGYAR (a kulcs neve történeti): a felirat a nyelvi
+# katalógusból jön, hívásonként feloldva (`core.i18n.LabelMap`).
+NAME_HU = _LabelMap("regime.name", CATEGORIES)
 
 # Egész KÓD a vizualizációhoz (a STATE-sor `regime` mezője + az MQL5 szín-index).
 # 0 = besorolatlan/nincs. A színeket a TradeForgeBands indikátor rendeli hozzá.

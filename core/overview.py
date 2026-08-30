@@ -20,6 +20,8 @@ dashboard is használhassa.
 """
 from __future__ import annotations
 
+from core.i18n import t as _t
+
 import logging
 from datetime import datetime, timezone
 
@@ -107,11 +109,9 @@ def warnings(cfg: dict, symbol: str, strategy_name: str, data: dict,
     # sem áll semmi, ami elárulná.
     if not has_params:
         out.append({"sev": SEV_RISK if state == "live" else SEV_WARN,
-                    "text": ("A stratégia ALAPÉRTELMEZETT paramétereivel fut "
-                             "(nincs optimalizálva ezen a páron)"
-                             + (" — miközben a pár ÉL. Az alapértékek nem erre "
-                                "az instrumentumra vannak hangolva."
-                                if state == "live" else "."))})
+                    "text": _t("ov.default_params",
+                               suffix=(_t("ov.default_params.live")
+                                       if state == "live" else "."))})
 
     # ⚠ Kézi szerkesztés az optimalizálás UTÁN: a mentett minősítés (minőség,
     # kötésszám, PF) MÁS paraméterekhez tartozik, mint amivel kereskedsz. A
@@ -120,8 +120,7 @@ def warnings(cfg: dict, symbol: str, strategy_name: str, data: dict,
     _opt, _man = _ts(data.get("optimized_at")), _ts(data.get("manually_edited_at"))
     if _man and (not _opt or _man > _opt):
         out.append({"sev": SEV_WARN,
-                    "text": ("A paramétereket KÉZZEL módosítottad az optimalizálás "
-                             "óta — a lenti minősítés a RÉGI beállításhoz tartozik.")})
+                    "text": _t("ov.manual_edit")})
 
     # ⚠ Kapu-eltérés: ha az optimalizálás más kapu-beállítással futott, mint ami
     # most él, a mentett paraméterek olyan világból jönnek, ami nem létezik.
@@ -129,18 +128,19 @@ def warnings(cfg: dict, symbol: str, strategy_name: str, data: dict,
     now_gates = bool((cfg.get("optimizer") or {}).get("exec_gates", True))
     if saved_gates is not None and bool(saved_gates) != now_gates:
         out.append({"sev": SEV_RISK,
-                    "text": (f"Az optimalizálás {'KAPUKKAL' if saved_gates else 'KAPUK NÉLKÜL'} "
-                             f"futott, most {'kapukkal' if now_gates else 'kapuk nélkül'} "
-                             f"mérünk — a mentett paraméterek más feltételekhez valók.")})
+                    "text": _t(
+                        "ov.gate_mismatch",
+                        then=_t("ov.with_gates" if saved_gates
+                                else "ov.without_gates"),
+                        now=_t("ov.with_gates_low" if now_gates
+                               else "ov.without_gates_low"))})
 
     # ⚠ A mentett minősítés NEM független mérés: a walk-forward vizsga-ablakain
     # az optimalizáló ÉPPEN azok alapján választotta a nyertest. (Holdout-mérés:
     # a szennyezett OOS-számok 2,51×-esre fújtak.)
     if ts.get("trades"):
         out.append({"sev": SEV_INFO,
-                    "text": ("A lenti minősítés a walk-forward vizsga-ablakaiból "
-                             "jön — de az optimalizáló ÉPPEN azokon választott, "
-                             "tehát ez nem független mérés.")})
+                    "text": _t("ov.not_independent")})
 
     # ⚠ 100% FÖLÖTTI visszaesés: a mentett minősítésben ilyen szám azt jelenti,
     # hogy a szimulált számla a mérés közben LENULLÁZÓDOTT volna (a képlet a
@@ -154,30 +154,28 @@ def warnings(cfg: dict, symbol: str, strategy_name: str, data: dict,
         _mdd = None
     if _mdd is not None and _mdd >= 1.0:
         out.append({"sev": SEV_RISK,
-                    "text": (f"A mentett minősítés visszaesése {_mdd * 100:.0f}% — "
-                             f"a szimulált számla a mérés közben lenullázódott "
-                             f"volna. Ez a beállítás így nem kereskedhető.")})
+                    "text": _t("ov.ruined", pct=f"{_mdd * 100:.0f}")})
 
     n = int(ts.get("trades") or 0)
     if 0 < n < 30:
         out.append({"sev": SEV_WARN,
-                    "text": f"Kevés kötés a minősítésben ({n}) — az eredmény zaj is lehet."})
+                    "text": _t("ov.few_trades", n=n)})
 
     age = _age_days(data.get("optimized_at"))
     if age is not None and age > 60:
         out.append({"sev": SEV_WARN,
-                    "text": f"Az optimalizálás {age:.0f} napja futott."})
+                    "text": _t("ov.opt_age", days=f"{age:.0f}")})
 
     if state == "live" and mode == "signal":
         out.append({"sev": SEV_INFO,
-                    "text": "A pár ÉL, de „csak jelzés” módban — nem nyit pozíciót."})
+                    "text": _t("ov.signal_only")})
 
     # Egyetlen kapu sincs bekapcsolva → minden jel átmegy.
     try:
         eff = _gt.effects_for(cfg or {}, symbol, strategy_name)
         if all(e == _gt.EFFECT_NONE for e in eff.values()):
             out.append({"sev": SEV_WARN,
-                        "text": "Egyetlen végrehajtási kapu sincs bekapcsolva."})
+                        "text": _t("ov.no_gates")})
     except Exception:
         pass
 

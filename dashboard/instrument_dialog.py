@@ -2378,7 +2378,7 @@ class InstrumentParamsDialog:
             elif _c.get("state") == _md.ST_MATCH:
                 tk.Label(line, text=_t("idlg.leforditott_tarolva"), bg=BG, fg=FG_GREEN,
                          font=self._sf, anchor="w").pack(side="left")
-        _n(_md.USAGE.get(name, ""), FG_GRAY)
+        _n(_md.usage_of(name), FG_GRAY)
 
         # ⚠ Nem fordítunk — és ezt nem szépítjük. A „kitelepítve" önmagában NEM
         # jelenti azt, hogy az új kód FUT: a régi .ex4/.ex5 addig érvényben marad.

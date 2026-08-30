@@ -19,12 +19,14 @@ Egy helyen, könnyen auditálhatóan.
 """
 
 from __future__ import annotations
+from core.i18n import LabelMap as _LabelMap, t as _t
 
 MODE_LIVE   = "live"      # valódi kötés (alapértelmezett)
 MODE_SIGNAL = "signal"    # csak jelzés/riasztás, megbízás NEM megy ki
 
 # Emberi nevek a felülethez (a táblázat legördülője ezeket mutatja).
-LABELS = {MODE_LIVE: "Valódi", MODE_SIGNAL: "Jelzés"}
+MODES = (MODE_LIVE, MODE_SIGNAL)
+LABELS = _LabelMap("trade_mode", MODES)
 
 
 def mode_of(cfg: dict, symbol: str, strategy_name: str) -> str:

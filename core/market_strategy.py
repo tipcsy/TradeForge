@@ -12,6 +12,7 @@ GENERIKUSAN kezeli (kód + címke + szín), így az osztályozó cserélhető.
 """
 
 from __future__ import annotations
+from core.i18n import LabelMap as _LabelMap, t as _t
 
 from core import regime
 
@@ -20,17 +21,21 @@ _REGISTERED = ("regime",)
 NAME_HU = {"regime": "Regime (ADX/DI/ATR)"}
 
 # Megjelenítés kategóriánként: (rövid címke, szemantikus szín-név a dashboardhoz).
-_DISPLAY = {
-    regime.CLEAN_BULL:    ("Sz.Bika",    "green"),
-    regime.CLEAN_BEAR:    ("Sz.Medve",   "red"),
-    regime.VOLATILE_BULL: ("Id.Bika",    "yellow"),
-    regime.VOLATILE_BEAR: ("Id.Medve",   "yellow"),
-    regime.RANGING:       ("Oldalazás",  "white"),
-    regime.DEAD:          ("Érdektelen", "muted"),
-    regime.UNCERTAIN:     ("Bizonyt.",   "red"),
-    regime.TRANSITION:    ("Átmenet",    "muted"),
-    regime.UNCATEGORIZED: ("—",          "muted"),
+# ⚠ A SZÍN itt marad (viselkedés), a RÖVID CÍMKE a katalógusban van
+# (`regime.short.<kategória>`) — a tábla oszlopa szűk, ezért külön a hosszú
+# névtől (`regime.name.*`).
+_COLOR = {
+    regime.CLEAN_BULL:    "green",
+    regime.CLEAN_BEAR:    "red",
+    regime.VOLATILE_BULL: "yellow",
+    regime.VOLATILE_BEAR: "yellow",
+    regime.RANGING:       "white",
+    regime.DEAD:          "muted",
+    regime.UNCERTAIN:     "red",
+    regime.TRANSITION:    "muted",
+    regime.UNCATEGORIZED: "muted",
 }
+_SHORT = _LabelMap("regime.short", tuple(_COLOR))
 
 
 def registered_market_names() -> list[str]:
@@ -70,7 +75,7 @@ def code(name: str, category: str) -> int:
 
 def display(category: str) -> tuple:
     """Kategória → (rövid címke, szemantikus szín-név) a dashboard-cellához."""
-    return _DISPLAY.get(category, ("—", "muted"))
+    return (_SHORT.get(category, "—"), _COLOR.get(category, "muted"))
 
 
 def display_labels() -> list:
@@ -78,6 +83,6 @@ def display_labels() -> list:
 
     A `Piac` oszlop mintaszövege eddig egy bedrótozott „Sz.Bika" volt, holott a
     leghosszabb címke az „Érdektelen": élesben az „Id.Medve"/„Oldalazás"/
-    „Érdektelen" vége levágódott. Ha új kategória kerül a `_DISPLAY`-be, az
+    „Érdektelen" vége levágódott. Ha új kategória kerül a `_COLOR`-ba, az
     oszlop MAGÁTÓL követi — nem kell egy távoli mintaszöveget karbantartani."""
-    return [lbl for lbl, _color in _DISPLAY.values()]
+    return _SHORT.values()

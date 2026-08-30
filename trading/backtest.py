@@ -28,6 +28,7 @@ RESULTS_DIR = Path(__file__).resolve().parents[1] / "data" / "backtest_results"
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from core.i18n import t as _t
 from core.risk_manager import (calc_lot, calc_effective_slots,
                                calc_swing_sl_tp_points,
                                slot_weight as _rm_slot_weight,
@@ -229,11 +230,11 @@ def load_data_ensure(symbol: str, cfg: dict, status=None):
         from tools.download_history import ensure_history
         ok, msg = ensure_history(symbol, cfg, status=status)
     except Exception as ex:
-        return None, None, f"Nincs letöltött adat, és a letöltés sem sikerült: {ex}"
+        return None, None, _t("bt.err.no_data_dl", error=ex)
     df15, df1 = load_data(symbol)
     if df15 is None:
         return None, None, (msg if not ok else
-                            "Nincs letöltött adat (data/m15, data/m1) ehhez a párhoz.")
+                            _t("bt.err.no_data"))
     return df15, df1, None
 
 
@@ -1975,7 +1976,7 @@ def run_portfolio_backtest(
             log.warning("Portfolio BT: %s — nincs optimalizált params, kihagyva.", sym)
 
     if not pair_params:
-        return {"error": "Nincs optimalizált paraméter egyetlen szimbólumhoz sem.",
+        return {"error": _t("bt.err.no_params"),
                 "trades": [], "daily_pnl": {}, "final_balance": initial_balance}
 
     # ── Adat betöltés és indikátor számítás ──────────────────────────────
@@ -2058,7 +2059,7 @@ def run_portfolio_backtest(
         log.info("Portfolio BT: %s betöltve — M15=%d M1=%d bar", sym, len(m15), len(m1))
 
     if not pair_data:
-        return {"error": "Nincs elegendő adat a megadott időszakban.",
+        return {"error": _t("bt.err.no_period"),
                 "trades": [], "daily_pnl": {}, "final_balance": initial_balance}
 
     # ── Egységes M1 idővonal ──────────────────────────────────────────────

@@ -21,6 +21,8 @@ nincs tanítási ablak, tehát nincs mit jelezni.
 
 from __future__ import annotations
 
+from core.i18n import t as _t
+
 import pandas as pd
 
 
@@ -68,12 +70,10 @@ def message(ov: dict) -> str:
         return ""
     pct = ov["pct"] * 100.0
     if severity(ov["pct"]) == "full":
-        return (f"⚠ Az ablak {pct:.0f}%-a a modell TANÍTÁSI időszakára esik — "
-                f"itt a modell emlékszik, nem előrejelez. Az eredmény NEM mond "
-                f"semmit a jövőbeli teljesítményről.")
-    return (f"⚠ Az ablak {pct:.0f}%-a a modell tanítási időszakára esik "
-            f"({ov['from']:%Y-%m-%d} … {ov['to']:%Y-%m-%d}) — ennyivel felfelé "
-            f"torzít. Tiszta méréshez válassz {ov['to']:%Y-%m-%d} utáni kezdetet.")
+        return _t("overlap.full", pct=f"{pct:.0f}")
+    return _t("overlap.partial", pct=f"{pct:.0f}",
+              **{"from": f"{ov['from']:%Y-%m-%d}",
+                 "to": f"{ov['to']:%Y-%m-%d}"})
 
 
 def for_strategy(strategy, symbol: str, cfg: dict, bt_start, bt_end) -> dict:

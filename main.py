@@ -24,6 +24,8 @@ készült, és szabadon terjesztheted a GNU GPL v3 feltételei szerint (lásd LI
 
 import json
 import sys
+
+from core.i18n import t as _t
 import threading
 from pathlib import Path
 
@@ -78,11 +80,10 @@ def cmd_optimize(symbols=None, strategies=None):
             reg = registered_strategy_names()
             for n in unknown:
                 if n in reg:
-                    print(f"A(z) {n!r} stratégia ki van kapcsolva "
-                          f"(config.json → available_strategies).")
+                    print(_t("cli.strategy_off", name=repr(n)))
                 else:
-                    print(f"Ismeretlen stratégia: {n!r}")
-            print(f"Elérhető: {', '.join(avail)}")
+                    print(_t("cli.strategy_unknown", name=repr(n)))
+            print(_t("cli.available", names=", ".join(avail)))
             return 1
     run_optimizer(cfg, symbols or None, strategies or None)
     return 0

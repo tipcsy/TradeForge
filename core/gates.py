@@ -163,7 +163,7 @@ def doc_text(key: str) -> str:
     except OSError:
         _lines = ["# " + label_of(key), "",
                   _t("gate.no_doc"), "",
-                  "Várt fájl:", "", "```", str(p), "```"]
+                  _t("gate.doc.expected_file"), "", "```", str(p), "```"]
         return chr(10).join(_lines) + chr(10)
 
 
@@ -467,10 +467,10 @@ def _eval_spread(ctx: dict):
     cur = ctx.get("spread_points")
     cap = ctx.get("max_spread_points")
     if cur is None:
-        return UNKNOWN, "nincs friss árjegyzés"
+        return UNKNOWN, _t("gate.why.no_quote")
     if not cap:
-        return OFF, "nincs spread-korlát beállítva"
-    txt = f"jelenlegi {cur:.0f} / határ {cap:.0f} pont"
+        return OFF, _t("gate.why.no_spread_cap")
+    txt = _t("gate.why.spread", now=f"{cur:.0f}", cap=f"{cap:.0f}")
     return (BLOCKING if cur > cap else PASS), txt
 
 
@@ -483,24 +483,24 @@ def _eval_tf_align(ctx: dict):
     signs = ctx.get("tf_align_signs") or []
     labels = ctx.get("tf_align_labels") or []
     if not signs:
-        return UNKNOWN, "még nincs adat az idősíkokról"
+        return UNKNOWN, _t("gate.why.no_tf_data")
     arrows = {1: "↑", -1: "↓", 0: "·"}
     txt = "  ".join(f"{labels[i] if i < len(labels) else '?'} {arrows.get(int(s), '·')}"
                     for i, s in enumerate(signs))
     d = ctx.get("tf_align_dir")
     if not d:
-        return BLOCKING, txt + "  — nincs együttállás"
-    return PASS, txt + f"  — együtt: {d}"
+        return BLOCKING, _t("gate.why.no_align", dirs=txt)
+    return PASS, _t("gate.why.align", dirs=txt, dir=d)
 
 
 def _eval_market(ctx: dict):
     """Piac-állapot osztályozó. A besorolást adja; hogy ez blokkol, méretet
     csökkent vagy semmit nem tesz, azt a KONFIGURÁLT hatás dönti el."""
     if not ctx.get("market_name"):
-        return OFF, "nincs piac-előszűrő kiválasztva"
+        return OFF, _t("gate.why.no_market")
     lbl = ctx.get("market_label") or ""
     if not lbl:
-        return UNKNOWN, "még nincs besorolás"
+        return UNKNOWN, _t("gate.why.no_class")
     return PASS, lbl
 
 
@@ -513,16 +513,17 @@ def _eval_cost(ctx: dict):
     tp = ctx.get("plan_tp_points")
     sp = ctx.get("spread_points")
     if not sl or not tp:
-        return UNKNOWN, "nincs belépő-terv (SL/TP)"
+        return UNKNOWN, _t("gate.why.no_plan")
     d = _cg.distortion(sl, tp, sp)
     if d != d:
-        return UNKNOWN, "nincs elég adat"
+        return UNKNOWN, _t("gate.why.not_enough")
     cap = ctx.get("cost_max_distortion")
-    txt = (f"tervezett {float(tp) / float(sl):.1f}:1 → tényleges "
-           f"{_cg.effective_rr(sl, tp, sp):.1f}:1  ({d * 100:+.0f}%)")
+    txt = _t("gate.why.cost", planned=f"{float(tp) / float(sl):.1f}",
+             actual=f"{_cg.effective_rr(sl, tp, sp):.1f}",
+             pct=f"{d * 100:+.0f}")
     if cap is None:
         return PASS, txt
-    txt += f"  /  határ {float(cap) * 100:+.0f}%"
+    txt += _t("gate.why.cost_cap", cap=f"{float(cap) * 100:+.0f}")
     return (BLOCKING if d > float(cap) else PASS), txt
 
 
@@ -536,13 +537,13 @@ def _eval_momentum(ctx: dict):
     import math as _math
     val = ctx.get("momentum")
     if val is None or (isinstance(val, float) and _math.isnan(val)):
-        return UNKNOWN, "még nincs elég gyertya a méréshez"
+        return UNKNOWN, _t("gate.why.no_bars")
     arrow = "↑" if val > 0 else ("↓" if val < 0 else "·")
     thr = ctx.get("momentum_idle_threshold")
-    txt = f"fordulat {arrow}{abs(val):.2f}"
+    txt = _t("gate.why.momentum", arrow=arrow, value=f"{abs(val):.2f}")
     if thr is None:
         return PASS, txt
-    txt += f"  /  alapjárat-küszöb {float(thr):.2f}"
+    txt += _t("gate.why.momentum_thr", threshold=f"{float(thr):.2f}")
     return (BLOCKING if abs(val) < float(thr) else PASS), txt
 
 
@@ -556,9 +557,9 @@ def _eval_volatility(ctx: dict):
     from core import vol_baseline as _vb
     atr, base = ctx.get("atr_price"), ctx.get("atr_baseline")
     if not atr or not base:
-        return UNKNOWN, "nincs ATR vagy mérce (a bemelegítés még tart)"
+        return UNKNOWN, _t("gate.why.no_atr")
     st = _vb.status(float(atr), ctx.get("vol_params") or {}, float(base))
-    txt = f"ATR {st['ratio']:.2f}× a kalibrált mércének"
+    txt = _t("gate.why.vol", ratio=f"{st['ratio']:.2f}")
     return (PASS, txt) if st["ok"] else (BLOCKING, st["why"])
 
 
@@ -582,7 +583,8 @@ def evaluate(ctx: dict, effects: dict = None) -> list:
         eff = (effects or {}).get(key) or g["default_effect"]
         if eff == EFFECT_NONE:
             out.append({"key": key, "label": label_of(key), "effect": eff,
-                        "state": OFF, "detail": "erre a stratégiára nincs bekapcsolva"})
+                        "state": OFF,
+                        "detail": _t("gate.why.off_for_strategy")})
             continue
         state, detail = _EVAL[key](ctx or {})
         out.append({"key": key, "label": label_of(key), "effect": eff,

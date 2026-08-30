@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 
 from core import licence
+from core.i18n import t as _t
 
 log = logging.getLogger(__name__)
 
@@ -32,25 +33,25 @@ def _ask_login_tk(email_hint: str = "") -> "tuple[str, str] | None":
 
     out: dict = {}
     root = tk.Tk()
-    root.title("TradeForge — licenc belépés")
+    root.title(_t("lic.dlg.title"))
     root.resizable(False, False)
 
     frm = ttk.Frame(root, padding=16)
     frm.grid(sticky="nsew")
 
-    ttk.Label(frm, text="Jelentkezz be a licenchez",
+    ttk.Label(frm, text=_t("lic.dlg.head"),
               font=("Segoe UI", 11, "bold")).grid(row=0, column=0, columnspan=2,
                                                   sticky="w", pady=(0, 4))
-    ttk.Label(frm, text="Ezt csak egyszer kell megtenned ezen a gépen.",
+    ttk.Label(frm, text=_t("lic.dlg.once"),
               foreground="#666").grid(row=1, column=0, columnspan=2,
                                       sticky="w", pady=(0, 12))
 
-    ttk.Label(frm, text="E-mail cím").grid(row=2, column=0, sticky="w")
+    ttk.Label(frm, text=_t("lic.dlg.email")).grid(row=2, column=0, sticky="w")
     e_mail = ttk.Entry(frm, width=34)
     e_mail.grid(row=2, column=1, pady=3)
     e_mail.insert(0, email_hint)
 
-    ttk.Label(frm, text="Jelszó").grid(row=3, column=0, sticky="w")
+    ttk.Label(frm, text=_t("lic.dlg.password")).grid(row=3, column=0, sticky="w")
     e_pw = ttk.Entry(frm, width=34, show="•")
     e_pw.grid(row=3, column=1, pady=3)
 
@@ -59,7 +60,7 @@ def _ask_login_tk(email_hint: str = "") -> "tuple[str, str] | None":
 
     def ok(_evt=None):
         if not e_mail.get().strip() or not e_pw.get():
-            hiba.config(text="Az e-mail cím és a jelszó is kell.")
+            hiba.config(text=_t("lic.dlg.need_both"))
             return
         out["email"] = e_mail.get().strip()
         out["pw"] = e_pw.get()
@@ -67,8 +68,10 @@ def _ask_login_tk(email_hint: str = "") -> "tuple[str, str] | None":
 
     gombok = ttk.Frame(frm)
     gombok.grid(row=5, column=0, columnspan=2, sticky="e", pady=(14, 0))
-    ttk.Button(gombok, text="Mégse", command=root.destroy).pack(side="left", padx=4)
-    ttk.Button(gombok, text="Belépés", command=ok).pack(side="left")
+    ttk.Button(gombok, text=_t("btn.cancel"),
+               command=root.destroy).pack(side="left", padx=4)
+    ttk.Button(gombok, text=_t("lic.dlg.sign_in"),
+               command=ok).pack(side="left")
 
     root.bind("<Return>", ok)
     (e_pw if email_hint else e_mail).focus_set()
@@ -117,10 +120,7 @@ def ensure_licence(cfg: dict, account_number: str, account_name: str = "",
         while True:
             adat = _ask_login_tk(hint)
             if adat is None:
-                _show_error_tk("TradeForge — licenc",
-                               "Belépés nélkül az élő kereskedés nem indítható.\n\n"
-                               "A backtest és az optimalizálás továbbra is "
-                               "használható.")
+                _show_error_tk(_t("lic.dlg.title"), _t("lic.dlg.no_login"))
                 return False
             ok, res = licence.login_and_get_token(adat[0], adat[1], api=api)
             if ok:
@@ -130,7 +130,7 @@ def ensure_licence(cfg: dict, account_number: str, account_name: str = "",
             # eset, és egy azonnali kilépés miatt a felhasználónak újra kellene
             # indítania a programot.
             hint = adat[0]
-            _show_error_tk("Sikertelen belépés", str(res))
+            _show_error_tk(_t("lic.dlg.failed"), str(res))
         r = _check()
 
     if r.ok:
@@ -147,10 +147,10 @@ def ensure_licence(cfg: dict, account_number: str, account_name: str = "",
         _reszlet = ""
         p = r.payload or {}
         if p.get("account_limit"):
-            _reszlet = (f"\n\nSzámla-slotok: {p.get('accounts_used')}"
-                        f"/{p.get('account_limit')}")
+            _reszlet = _t("lic.dlg.slots", used=p.get("accounts_used"),
+                          limit=p.get("account_limit"))
         _show_error_tk(
-            "TradeForge — a licenc nem érvényes",
-            f"{r.message}\n\nSzámlaszám: {account_number}{_reszlet}"
-            f"\n\nA licenceidet a portálon kezelheted.")
+            _t("lic.dlg.invalid_title"),
+            _t("lic.dlg.account", message=r.message,
+               account=account_number, detail=_reszlet))
     return False

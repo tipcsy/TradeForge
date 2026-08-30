@@ -32,6 +32,8 @@ felhasználóé, páronként.
 
 from __future__ import annotations
 
+from core.i18n import t as _t
+
 import numpy as np
 import pandas as pd
 
@@ -97,13 +99,13 @@ def status(atr: float, params: dict, base: float) -> dict:
     ratio = (float(atr) / base) if base else float("nan")
     if not base or base <= 0:
         return {"ok": True, "ratio": float("nan"), "lo": 0.0, "hi": 0.0,
-                "why": "nincs mérce (a szűrő kikapcsolva)"}
+                "why": _t("vol.no_baseline")}
     if lo > 0 and atr < lo:
         return {"ok": False, "ratio": ratio, "lo": lo, "hi": hi,
-                "why": f"túl csendes: ATR {ratio:.2f}× a mércének "
-                       f"(a padló {params.get('atr_min_pct')}×)"}
+                "why": _t("vol.too_quiet", ratio=f"{ratio:.2f}",
+                          floor=params.get("atr_min_pct"))}
     if hi > 0 and atr > hi:
         return {"ok": False, "ratio": ratio, "lo": lo, "hi": hi,
-                "why": f"túl kaotikus: ATR {ratio:.2f}× a mércének "
-                       f"(a plafon {params.get('atr_max_pct')}×)"}
+                "why": _t("vol.too_wild", ratio=f"{ratio:.2f}",
+                          cap=params.get("atr_max_pct"))}
     return {"ok": True, "ratio": ratio, "lo": lo, "hi": hi, "why": ""}

@@ -38,6 +38,7 @@ TISZTA modul: se MT5, se tkinter, se fájl — a hívó adja a záróár-sorozat
 """
 
 from __future__ import annotations
+from core.i18n import LabelMap as _LabelMap, t as _t
 
 import math
 
@@ -45,10 +46,7 @@ import math
 BASIS_SMA = "sma"      # egy idősík, három SMA
 BASIS_TF = "tf"        # három idősík, egy SMA
 
-BASIS_LABEL = {
-    BASIS_SMA: "Egy idősík, 3 SMA (8/32/100)",
-    BASIS_TF:  "Három idősík (M1/M5/M15), egy SMA",
-}
+BASIS_LABEL = _LabelMap("momentum.basis", (BASIS_SMA, BASIS_TF))
 
 DEFAULTS = {
     "basis": BASIS_SMA,

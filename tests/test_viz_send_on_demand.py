@@ -47,8 +47,9 @@ check("a kikapcsolt rajzut kihagyja, de jelenti",
       "viz_on" in _src and 'out["skipped"]' in _src)
 # ⚠ URES pillanatkepet CLEAR-rel SOHA: az letorolne a chartot, es ugy nezne ki,
 # mintha a Kuldes ürítette volna ki.
+# ⚠ A felirat a nyelvi katalogusban van — a forrasban a kulcs all.
 check("ures pillanatkepet NEM ir ki", 'if not lines:' in _src
-      and 'régi rajza megmarad' in _src)
+      and 'viz.empty' in _src)
 # ⚠ A parameterek a MENTETT allapotbol + a strategia sajat alapertekeibol —
 # ugyanaz a keplet, mint az elo uton (`config_for_strategy` nelkul a bollinger a
 # wpr_sma indikator-blokkjat kapna).

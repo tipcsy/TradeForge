@@ -9,6 +9,8 @@ tudja használni.
 
 from __future__ import annotations
 
+from core.i18n import t as _t
+
 import logging
 import math
 from dataclasses import dataclass, field, replace
@@ -134,7 +136,8 @@ def _stage_flag(active: bool, direction: str) -> Cell:
 
 
 # A jelölő stádiumai (sorrendben) — a MarkerColumn és a cellák EZEKET használják.
-_STAGES = (("sma", "SMA irány"), ("m15", "M15 WPR jel"), ("m1", "M1 beszállás"))
+_STAGES = (("sma", _t("stage.sma")), ("m15", _t("stage.m15")),
+           ("m1", _t("stage.m1")))
 _MARKS_EMPTY = {k: Cell(_CIRCLE, "muted") for k, _ in _STAGES}
 
 

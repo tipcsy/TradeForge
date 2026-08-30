@@ -176,9 +176,9 @@ check("minden forrasnak van leirasa",
       str([p.name for pf in (md.MT4, md.MT5) for p in md.sources(pf)
            if not md.describe(p)[0]]))
 check("van hasznalati utmutato mindket platformra",
-      bool(md.USAGE.get(md.MT4)) and bool(md.USAGE.get(md.MT5)))
+      bool(md.usage_of(md.MT4)) and bool(md.usage_of(md.MT5)))
 # A ket platform MAS hasznalatu — ez a szoveg lenyege.
-check("...es a ketto NEM ugyanaz", md.USAGE[md.MT4] != md.USAGE[md.MT5])
+check("...es a ketto NEM ugyanaz", md.usage_of(md.MT4) != md.usage_of(md.MT5))
 
 
 # ── 9. A LEFORDITOTT TAROLASA es a VERZIO-ELLENORZES ─────────────────────

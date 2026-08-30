@@ -43,6 +43,8 @@ motornak kellene róla döntenie.
 
 from __future__ import annotations
 
+from core.i18n import t as _t
+
 import logging
 
 log = logging.getLogger(__name__)
@@ -96,11 +98,9 @@ def blocks(policy: str, signal: str, book_dirs) -> "str | None":
     if not dirs:
         return None
     if policy == ONE_PER_SYMBOL:
-        return ("szimbólum-házirend: már van nyitott pozíció ezen a páron egy MÁSIK "
-                "stratégiától (one_per_symbol)")
+        return _t("policy.one_per_symbol")
     if policy == NO_OPPOSITE:
         if any(d != signal for d in dirs):
-            return ("szimbólum-házirend: egy MÁSIK stratégiának ELLENTÉTES irányú "
-                    "pozíciója van ezen a páron (no_opposite)")
+            return _t("policy.no_opposite")
         return None
     return None          # independent — nem szólunk bele

@@ -23,6 +23,8 @@ importja nélkül is használhassa.
 """
 from __future__ import annotations
 
+from core.i18n import t as _t
+
 import logging
 
 log = logging.getLogger(__name__)
@@ -196,21 +198,18 @@ def run_plan(rows: list, trials: int = 500) -> dict:
     keys = [r["key"] for r in tuned]
     if not tuned:
         return {"kind": KIND_SINGLE, "runs": 1, "tuned": [], "exhaustive": True,
-                "text": "0 hangolt paraméter → EGYETLEN futás (ez a backtest)."}
+                "text": _t("plan.single")}
     if len(tuned) == 1:
         n = tuned[0]["values"]
         return {"kind": KIND_SWEEP, "runs": n, "tuned": keys, "exhaustive": True,
-                "text": f"1 hangolt paraméter → VÉGIGPRÓBÁLÁS: {n} futás "
-                        f"({keys[0]} minden értéke, egyesével)."}
+                "text": _t("plan.sweep", runs=n, key=keys[0])}
     if len(tuned) == 2:
         a, b = tuned[0]["values"], tuned[1]["values"]
         return {"kind": KIND_GRID, "runs": a * b, "tuned": keys, "exhaustive": True,
-                "text": f"2 hangolt paraméter → RÁCS: minden párosítás "
-                        f"({a} × {b} = {a * b} futás)."}
+                "text": _t("plan.grid", a=a, b=b, runs=a * b)}
     return {"kind": KIND_OPTIMIZE, "runs": int(trials), "tuned": keys,
             "exhaustive": False,
-            "text": f"{len(tuned)} hangolt paraméter → OPTIMALIZÁLÁS "
-                    f"({int(trials)} mintavétel)."}
+            "text": _t("plan.optimize", n=len(tuned), trials=int(trials))}
 
 
 def estimate_minutes(runs: int, sec_per_run: float, windows: int = 1) -> float:

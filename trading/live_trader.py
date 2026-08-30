@@ -34,6 +34,7 @@ from core import mt5_connector
 from core import mt5_visual
 from core import risky_mode
 from core import correlation
+from core.i18n import t as _t
 from core import run_state
 from core import config_check as _cfgchk
 from core import exit_signal
@@ -1221,12 +1222,14 @@ def pair_visual_lines(symbol: str, params: dict, strategy, point_size: float,
         _bal = mt5_connector.account_balance()
         _tcfg = (_cfg or {}).get("trading") or {}
         if _bal and _bal > 0 and _tcfg:
-            def _lot_of(sl_points, _b=_bal, _pc=(pair_cfg or {}), _t=_tcfg):
+            # ⚠ A parameter NEM `_t`: az a fordito neve ebben a modulban, es
+            # egy azonos nevu lokalis az EGESZ fuggvenyben elfedne.
+            def _lot_of(sl_points, _b=_bal, _pc=(pair_cfg or {}), _tc=_tcfg):
                 try:
                     _sl = float(sl_points)
                     if _sl <= 0:
                         return 0.0
-                    return _cl(_b, _sl, _pc, _t, _ces(_b, _sl, _pc, _t))
+                    return _cl(_b, _sl, _pc, _tc, _ces(_b, _sl, _pc, _tc))
                 except Exception:
                     return 0.0
             md.lot_of = _lot_of
@@ -1447,36 +1450,31 @@ def viz_diagnose(symbol: str, cfg: dict) -> list:
     out = []
     pc = (cfg.get("pairs") or {}).get(symbol)
     if pc is None:
-        out.append((False, f"a(z) {Q1}{symbol}{Q2} NINCS a config.json `pairs` "
-                           f"listájában — a motor hozzá sem nyúl. Elgépelt vagy "
-                           f"más nevű szimbólum?"))
+        out.append((False, _t("diag.not_in_config", symbol=symbol)))
         return out
-    out.append((True, f"a(z) {Q1}{symbol}{Q2} szerepel a config `pairs` listájában"))
+    out.append((True, _t("diag.in_config", symbol=symbol)))
 
     _ps = pc.get("point_size")
     out.append((bool(_ps),
-                f"van `point_size` ({_ps})" if _ps else
-                "HIÁNYZIK a `point_size` a pár configjából — enélkül a viz-író "
-                "AZONNAL kilép. Javítás: python tools/refresh_point_values.py --write"))
+                _t("diag.point_size_ok", value=_ps) if _ps
+                else _t("diag.point_size_missing")))
 
     strats = strategies_for(cfg, symbol)
     out.append((bool(strats),
-                "engedélyezett stratégiák: " + ", ".join(s.name for s in strats)
-                if strats else
-                "egyetlen stratégia sincs ENGEDÉLYEZVE ezen a páron"))
+                _t("diag.strategies_ok",
+                   names=", ".join(s.name for s in strats)) if strats
+                else _t("diag.strategies_none")))
 
     _on = [s.name for s in strats if _vp.viz_on(cfg, symbol, s.name)]
     out.append((bool(_on),
-                "a RAJZ be van kapcsolva: " + ", ".join(_on) if _on else
-                "egyik stratégia RAJZA sincs bekapcsolva — enélkül a motor meg "
-                "sem nyitja az írási utat. Kattints az instrumentum NEVÉRE a "
-                "soron, és pipáld be a Vizualizáció oszlopot."))
+                _t("diag.viz_on", names=", ".join(_on)) if _on
+                else _t("diag.viz_off")))
 
     for st in strats:
         if st.name in _on:
             _f = params_file(symbol, st.name)
-            out.append((True, f"{st.name}: " + ("mentett paraméterkészlet"
-                        if _f.exists() else "a stratégia ALAPÉRTELMEZETT paraméterei")))
+            out.append((True, f"{st.name}: " + (_t("diag.params_saved")
+                        if _f.exists() else _t("diag.params_default"))))
 
     # ⚠ A HIANYZO FELTETEL, ami a leggyakrabban bukik: a motor CSAK a FUTO
     # parokra rajzol. A `_publish_viz_jobs` elso sora:
@@ -1490,30 +1488,26 @@ def viz_diagnose(symbol: str, cfg: dict) -> list:
     except Exception:
         _live = []
     out.append((bool(_live),
-                "a motor futtatja: " + ", ".join(_live) if _live else
-                "EGYETLEN stratégia sincs ELINDÍTVA ezen a páron (▶) — a motor "
-                "CSAK a futó párokra rajzol, tehát magától nem hozza létre a "
-                "fájlt. A „Küldés a charthoz” gomb viszont futó motor nélkül is "
-                "megcsinálja."))
+                _t("diag.running", names=", ".join(_live)) if _live
+                else _t("diag.not_running")))
 
     try:
         from core import mt5_connector as _mc
         _ci = _mc.connection_info(cfg)
         out.append((bool(_ci.get("connected")),
-                    f"MT5 kapcsolat: {_ci.get('server')}" if _ci.get("connected")
-                    else "NINCS MT5-kapcsolat — gyertya-adat nélkül a rajz üres "
-                         "marad, üres pillanatképet pedig nem írunk ki"))
+                    _t("diag.mt5_ok", server=_ci.get("server"))
+                    if _ci.get("connected") else _t("diag.mt5_none")))
     except Exception as ex:
-        out.append((False, f"MT5 kapcsolat: nem ellenőrizhető ({ex})"))
+        out.append((False, _t("diag.mt5_error", error=ex)))
 
     try:
         from core import mt5_visual as _mv
         d = _mv.files_dir()
         _ok = d is not None and d.exists()
-        out.append((_ok, f"a közös Files mappa: {d}" if _ok
-                    else f"a közös Files mappa nem található ({d})"))
+        out.append((_ok, _t("diag.files_ok", path=d) if _ok
+                    else _t("diag.files_missing", path=d)))
     except Exception as ex:
-        out.append((False, f"közös mappa: {ex}"))
+        out.append((False, _t("diag.files_error", error=ex)))
     return out
 
 
@@ -1543,8 +1537,7 @@ def render_symbol_viz(symbol: str, cfg: dict, clear_first: bool = True) -> dict:
     pair_cfg = ((cfg.get("pairs") or {}).get(symbol) or {})
     point_size = pair_cfg.get("point_size")
     if not point_size:
-        out["errors"].append("hiányzik a `point_size` a pár configjából — "
-                             "enélkül nincs mit rajzolni")
+        out["errors"].append(_t("viz.no_point_size"))
         return out
 
     lines = []
@@ -1557,7 +1550,7 @@ def render_symbol_viz(symbol: str, cfg: dict, clear_first: bool = True) -> dict:
             params = strategy_params(symbol, st.name, _cs,
                                      fallback=default_params(st, _cs))
             if not params:
-                out["errors"].append(f"{st.name}: nincs paraméter")
+                out["errors"].append(_t("viz.no_params", strategy=st.name))
                 continue
             _n0 = len(lines)
             lines += pair_visual_lines(symbol, params, st, point_size, pair_cfg,
@@ -1583,13 +1576,9 @@ def render_symbol_viz(symbol: str, cfg: dict, clear_first: bool = True) -> dict:
         # az "ures a pillanatkep" epp azt hallgatna el, amit tenni kell.
         if out["skipped"] and not out["strategies"]:
             out["errors"].append(
-                "Egyetlen stratégia RAJZA sincs bekapcsolva ezen a páron ("
-                + ", ".join(out["skipped"]) + ") — ezért nem jön létre a fájl "
-                "sem. Kattints az instrumentum NEVÉRE a soron, és pipáld be a "
-                "Vizualizáció oszlopot.")
+                _t("viz.all_viz_off", names=", ".join(out["skipped"])))
         else:
-            out["errors"].append(
-                "a pillanatkép ÜRES — a chart régi rajza megmarad")
+            out["errors"].append(_t("viz.empty"))
         return out
     try:
         out["path"] = mt5_visual.write_lines(symbol, lines, clear_first=clear_first)
@@ -2631,10 +2620,9 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
                or bool(getattr(state, "disabled_closing", False)))
 
     if signal != "NONE":
-        _block = ("kivezetés alatt (a stratégiát kikapcsolták / Stop — csak a "
-                  "nyitott pozíció fut ki)"
+        _block = (_t("block.closing")
                   if closing else
-                  "már van nyitott pozíció ezen a páron" if already_open else
+                  _t("block.already_open") if already_open else
                   _policy_block if _policy_block else
                   f"napi veszteség-limit elérve ({_day_pnl:+.2f}$ ≤ -{daily_limit:.0f}$)"
                   if daily_limit_hit else

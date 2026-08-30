@@ -128,12 +128,19 @@ def set_language(code: str) -> None:
     _active = code if code in LANGUAGES else BASE_LANG
 
 
-def t(key: str, **kw) -> str:
+def t(key: str, /, **kw) -> str:
     """A `key` szövege az aktív nyelven, `{név}` helykitöltőkkel.
 
     A visszaesés: aktív nyelv → magyar → maga a kulcs. Hiányzó helykitöltő
     esetén a nyers szöveget adjuk vissza (a felirat legyen csúnya, de a felület
-    NE dőljön el egy fordítási hibától)."""
+    NE dőljön el egy fordítási hibától).
+
+    ⚠ A `/` NEM DÍSZ: a kulcs POZÍCIÓ SZERINTI paraméter. Enélkül egy `{key}`
+    nevű helykitöltő ütközne a paraméter nevével — `TypeError: t() got multiple
+    values for argument 'key'` —, és ez pontosan egy ilyen szövegnél sült el
+    („1 hangolt paraméter → VÉGIGPRÓBÁLÁS: … ({key} minden értéke)"). A hiba nem
+    a fordításban van, hanem abban, hogy a szöveg egy hétköznapi szót akar
+    behelyettesíteni."""
     cur = language()
     s = _load(cur).get(key)
     if s is None and cur != BASE_LANG:
