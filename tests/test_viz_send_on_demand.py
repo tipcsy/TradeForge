@@ -59,22 +59,39 @@ check("...es a mentett keszlet hianyaban az alapertekekbol",
 
 
 # ── 2. A GOMB: csak MT5-on, es beszedes visszajelzessel ─────────────────
+import json as _json
+from pathlib import Path as _Path
+_hu = _json.loads((_Path(__file__).resolve().parents[1] / "lang" / "hu.json")
+                  .read_text(encoding="utf-8"))
 from dashboard import instrument_dialog as idlg
 _gsrc = inspect.getsource(idlg.InstrumentParamsDialog._send_viz)
 check("a gomb kezeloje letezik", bool(_gsrc))
-check("...es KIIRJA, hany objektum ment ki", "Kiküldve:" in _gsrc)
+# ⚠ A felirat a nyelvi katalogusban van — a forrasban csak a kulcs. Ket allitas:
+# a kezelo hivatkozik-e a kulcsra, ES a magyar szoveg tenyleg a darabszamot
+# mondja-e (helykitoltovel). Csak a forras-szoveget keresve a teszt az
+# i18n-atvezetestol bukott volna, holott a felhasznalo ugyanazt latja.
+check("...es KIIRJA, hany objektum ment ki", "idlg.sent" in _gsrc)
 # ⚠ A kihagyott strategia nem lehet nema: kulonben ugy nezne ki, mintha a
 # kuldes nem mukodne.
 check("...es a kihagyott strategiakat is", 'r["skipped"]' in _gsrc
-      and "ki van kapcsolva" in _gsrc)
+      and "ki van kapcsolva" in _hu.get("idlg.skipped_off", "")
+      and "idlg.skipped_off" in _gsrc)
 check("...hibat pirossal", "FG_RED" in _gsrc)
 
 _psrc = inspect.getsource(idlg.InstrumentParamsDialog._build_link_pane)
 check("a gomb CSAK az MT5 fulon van (ott van elo kapcsolat)",
       "if name == _md.MT5:" in _psrc)
 # ⚠ A spec kulon kikoti: a kuldes NEM mentes.
+#
+# ⚠ A FELIRAT MAR NEM A FORRASBAN VAN, hanem a nyelvi katalogusban — a forrasban
+# csak a kulcs all. Ezert KETTOT allitunk: a lap hivatkozik-e a kulcsra, ES a
+# magyar szoveg tartalmazza-e a lenyeget. Csak a forras-szoveget keresve a teszt
+# az i18n-atvezetestol bukott volna el, holott a felhasznalo ugyanazt latja.
+_KEY = "idlg2.a_kuldes_nem_mentes"
 check("...es kiirja, hogy a kuldes NEM mentes",
-      "NEM mentés" in _psrc, "")
+      _KEY in _psrc, "a lap nem hivatkozik a kulcsra")
+check("...a magyar szoveg tenyleg ezt mondja",
+      "NEM mentés" in _hu.get(_KEY, ""), _hu.get(_KEY, "<nincs kulcs>")[:60])
 
 # ── 3. A MENTES IS KULD ─────────────────────────────────────────────────
 # „Persze a mentéskor is le kell futnia!" — de CSENDESEN: egy sikertelen

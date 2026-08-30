@@ -42,7 +42,7 @@ from core.params_store import (
 )
 from core import execution_params as _execp
 from core import risk_reduction as _rrx
-from core.i18n import t as _t
+from core.i18n import t as _t, num as _fmtnum
 
 log = logging.getLogger(__name__)
 
@@ -53,15 +53,20 @@ log = logging.getLogger(__name__)
 # ⚠ A BE/trailing v1.96.0 óta NEM ITT van: a kockázatcsökkentő beállító ablakban
 # jelenik meg, és CSAK azokon a preseteken, ahol tényleg hat (Fibo/Harmados
 # preseten például semmit nem csinált — lásd `core.risk_reduction.be_trail_active`).
+# ⚠ NEM FORDÍTJUK — ez ADAT-AZONOSÍTÓ, nem felirat. A paraméter-kategóriák
+# nevei a stratégiák config-JSON-jaiban élnek (`param_meta.categories`), és
+# a kód ezekre hasonlít. Lefordítva a csoportosítás szétesne: minden
+# paraméter az „Egyéb" ágra kerülne. A kategóriák nyelvesítése külön
+# lépés (a configban kellene kódot tárolni, felirattal együtt).
 _EXEC_CATEGORY = "Végrehajtás"
 _EXEC_KEYS = frozenset(_execp.DEFAULTS)
 _EXEC_PARAM_META = {
     "atr_period": {"category": _EXEC_CATEGORY,
-                   "comment": "ATR periódus (spread-kapu + BE/trailing volatilitás-mércéje)"},
+                   "comment": _t("idlg3.atr_periodus_spread_kapu")},
     "max_spread_atr_ratio": {"category": _EXEC_CATEGORY,
-                              "comment": "Spread-kapu: max spread az ATR arányában"},
+                              "comment": _t("idlg3.spread_kapu_max_spread")},
     "min_spread_mult": {"category": _EXEC_CATEGORY,
-                         "comment": "Spread-kapu alsó küszöbe (a normál spread ennyiszerese)"},
+                         "comment": _t("idlg3.spread_kapu_also_kuszobe")},
 }
 
 # ELAVULT paraméter-kulcsok a régi, mentett `optimized_params/<strat>/<SYM>.json`
@@ -381,9 +386,9 @@ class InstrumentParamsDialog:
         self.popup = popup
         # A címben az instrumentum ÉS a stratégia is látszik (több stratégia esetén
         # egyértelmű, MELYIK stratégia paraméterei jelennek meg).
-        title = f"{self.symbol} — {self.strategy.name} paraméterek"
+        title = _t("idlg.title", symbol=self.symbol, strategy=self.strategy.name)
         if self.is_new:
-            title += " (új / kézi)"
+            title += _t("idlg3.uj_kezi")
         popup.title(title)
         popup.configure(bg=BG)
         popup.grab_set()
@@ -444,7 +449,7 @@ class InstrumentParamsDialog:
         self._body = body
 
         # Fejléc-sor a tartalomban is (a címsor könnyen elsiklik): instrumentum + stratégia.
-        tk.Label(body, text=f"{self.symbol}  ·  stratégia: {self.strategy.name}",
+        tk.Label(body, text=_t("idlg.subtitle", symbol=self.symbol, strategy=self.strategy.name),
                  bg=BG, fg=FG_WHITE, font=self._hf, anchor="w").pack(
                  anchor="w", padx=10, pady=(8, 0))
 
@@ -568,9 +573,9 @@ class InstrumentParamsDialog:
         # ⚠ A ciklusváltozó NEM `_t` — az a fordító (`core.i18n`) neve ebben a
         # modulban, és egy azonos nevű lokális az EGÉSZ metódusban elfedné
         # (UnboundLocalError, a metódus legelső i18n-hívásánál).
-        for _c, (_hdr, _w) in enumerate((("Paraméter", 24), ("Érték", 8),
-                                         ("", 3), ("-tól", 7), ("-ig", 7),
-                                         ("lépés", 7), ("db", 4))):
+        for _c, (_hdr, _w) in enumerate(((_t("tab.params"), 24), (_t("idlg3.ertek"), 8),
+                                         ("", 3), (_t("idlg3.tol"), 7), ("-ig", 7),
+                                         (_t("idlg3.lepes"), 7), ("db", 4))):
             tk.Label(form, text=_hdr, bg=BG, fg=FG_GRAY_DIM, font=self._sf,
                      anchor="w", width=_w).grid(row=0, column=_c, sticky="w",
                                                 padx=(0, 3))
@@ -674,17 +679,17 @@ class InstrumentParamsDialog:
         self._EXIND_NAME = {"supertrend": "Supertrend", "wpr": "WPR",
                             "divergence": "Divergencia"}
         self._EXIT_PARAM_SPEC = {
-            "supertrend": [("st_period", "Per"), ("st_multiplier", "Szorzó")],
+            "supertrend": [("st_period", "Per"), ("st_multiplier", _t("exit.param.mult"))],
             "wpr":        [("wpr_period", "Per"), ("wpr_ma_period", "MA")],
             "divergence": [("osc", "Oszc"), ("div_period", "Per"), ("div_pivot", "Pivot")],
         }
         self._EXIT_TIP = {
-            "st_period": "Supertrend periódus (az ATR-ablak hossza).",
-            "st_multiplier": "Supertrend ATR-szorzó — nagyobb = lazább sáv, később zár.",
-            "wpr_period": "WPR periódus.", "wpr_ma_period": "A WPR mozgóátlagának periódusa (ezt keresztezi).",
-            "osc": "Oszcillátor a divergenciához: rsi vagy cci.",
-            "div_period": "A divergencia-oszcillátor periódusa.",
-            "div_pivot": "Pivot-szélesség — hány gyertya erősíti meg a csúcsot/mélyet.",
+            "st_period": _t("exit.tip.st_period"),
+            "st_multiplier": _t("exit.tip.st_multiplier"),
+            "wpr_period": _t("exit.tip.wpr_period"), "wpr_ma_period": _t("exit.tip.wpr_ma_period"),
+            "osc": _t("exit.tip.osc"),
+            "div_period": _t("exit.tip.div_period"),
+            "div_pivot": _t("exit.tip.div_pivot"),
         }
 
         # A kockázatcsökkentés SAJÁT, teljes szélességű szakaszt kap: preset-
@@ -784,26 +789,23 @@ class InstrumentParamsDialog:
         self._bt_vars = {}
         _BT_META = [
             ("breakeven_pct", "BE %",
-             "A TP hány részénél megy az SL a belépőre (0 = nincs BE).\n"
-             "Csak a 'BE + trailing' preseten hat — a Risky azonnal BE-zik."),
+             _t("idlg3.a_tp_hany_reszenel")),
             ("trail_activation_atr", "Trail indul",
-             "Ennyi ATR-nyi profit UTÁN indul a trailing.\n"
-             "A Risky azonnal trailel, ezért ott nem látszik."),
-            ("trail_distance_atr", "Trail táv",
-             "Ennyi ATR-rel követi a stop az árat.\n"
-             "Riskynél a motor még felezi is ezt a távolságot."),
+             _t("idlg3.ennyi_atr_nyi_profit")),
+            ("trail_distance_atr", _t("idlg3.trail_tav"),
+             _t("idlg3.ennyi_atr_rel_koveti")),
             # ── Részleges zárás (Felező / Pajzs) ─────────────────────────
             # ⚠ Eddig CSAK fájlból volt állítható. A `trigger_R` dönti el,
             # MIKOR zár a Pajzs — és ha a TP ugyanoda esik, SOHA nem hat.
             ("trigger_R", "Trigger R",
-             "HÁNY R-nél zárja a részt (Felező/Pajzs)." + chr(10) +
-             "⚠ Ha a célár ugyanide esik (tp_rr_ratio = ez), a részleges" + chr(10) +
-             "zárás SOHA nem hat: a célár ér oda előbb, és a TELJES pozíciót" + chr(10) +
-             "zárja. Tegyél ide kisebbet (pl. 0,8), mint a tp_rr_ratio."),
-            ("halving_fraction", "Zárt hányad",
-             "A Felező ekkora RÉSZT zár a triggernél (0,5 = fele)."),
-            ("shield_fraction", "Zárt hányad",
-             "A Pajzs ekkora RÉSZT zár a triggernél (0,75 = háromnegyed)."),
+             _t("idlg3.hany_r_nel_zarja") + chr(10) +
+             _t("idlg3.ha_a_celar_ugyanide") + chr(10) +
+             _t("idlg3.zaras_soha_nem_hat") + chr(10) +
+             _t("idlg3.zarja_tegyel_ide_kisebbet")),
+            ("halving_fraction", _t("idlg3.zart_hanyad"),
+             _t("idlg3.a_felezo_ekkora_reszt")),
+            ("shield_fraction", _t("idlg3.zart_hanyad"),
+             _t("idlg3.a_pajzs_ekkora_reszt")),
         ]
         # ⚠ A FIGYELMEZTETÉS HELYE: ha a részleges zárás triggere a TP-re (vagy
         # azon túlra) esik, a Pajzs/Felező SOHA nem hat — a célár előbb zár. A
@@ -877,7 +879,7 @@ class InstrumentParamsDialog:
         tk.Label(self._build_trig_frame, text="Trigger:", bg=BG, fg=FG_GRAY,
                  font=self._sf).pack(side="left")
         self._build_trig_name = tk.StringVar(
-            value=_pb.TRIGGER_NAME.get(_bc0.get("trigger", _pb.TRIGGER_CANDLE), "Gyertyás"))
+            value=_pb.TRIGGER_NAME.get(_bc0.get("trigger", _pb.TRIGGER_CANDLE), _t("idlg3.gyertyas")))
         omt = tk.OptionMenu(self._build_trig_frame, self._build_trig_name,
                             *_pb.TRIGGER_NAME.values(), command=self._on_build_trigger_change)
         _style_om(omt, self._sf)
@@ -914,9 +916,7 @@ class InstrumentParamsDialog:
 
         # Lot-létra tipp (a részleges záráshoz ≥2× min_lot kell)
         _ml = (self.cfg.get("pairs", {}).get(self.symbol, {}) or {}).get("min_lot", 0.01)
-        tk.Label(body, text=f"(A Felező/Pajzs részleges záráshoz ≥2× min_lot ({_ml}) "
-                             f"kell; kisebbnél Risky/BE-re esik vissza. A Backtest a "
-                             f"ténylegesen alkalmazott technikát mutatja.)",
+        tk.Label(body, text=_t("idlg.minlot_note", minlot=_ml),
                  bg=BG, fg=FG_GRAY_DIM, font=self._sf, justify="left",
                  wraplength=560).pack(anchor="w", padx=10, pady=(1, 0))
 
@@ -985,18 +985,22 @@ class InstrumentParamsDialog:
             pass
 
     def _on_tab(self, name):
+        """Lapváltás — a lapok LUSTA feltöltése (pl. `strategy/docs/<név>.md`).
+
+        Ha a leírás-fájl nincs, a nézet KIÍRJA az elvárt útvonalat — így a
+        hiányzó doksi nem üres lap, hanem felszólítás. Mindig a lemezről olvas,
+        tehát szerkesztés után újranyitva azonnal friss.
+
+        ⚠ A dokumentáció korábban a metódus KÖZEPÉN állt (egy `return` után),
+        ahol a Python már nem docstringnek, hanem egy értelmetlen kifejezésnek
+        látja: a `help()` és a szerkesztő sem mutatta.
+        """
         # ⚠ A TabShell a KONSTRUKTORÁBAN megmutatja az első lapot — vagyis ez a
         # visszahívás lefut, mielőtt a `self._shell` értéket kapna. A lapokat
         # ilyenkor még nem lehet felépíteni (nincs mihez kérni az oldalt); az
         # első lap feltöltése a `_build` végén, expliciten történik.
         if not hasattr(self, "_shell"):
             return
-        """A „Leírás" lap LUSTA feltöltése (`strategy/docs/<név>.md`).
-
-        Ha a fájl nincs, a nézet KIÍRJA az elvárt útvonalat — így a hiányzó doksi
-        nem üres lap, hanem felszólítás. Mindig a lemezről olvas, tehát
-        szerkesztés után újranyitva azonnal friss (nincs gyorsítótár, ami
-        elavulhatna)."""
         if name == "overview":
             # LUSTA + MINDIG FRISS: az állapot (él/áll, kézi szerkesztés,
             # kapuk) menet közben változhat, egy gyorsítótárazott lap pedig
@@ -1028,7 +1032,7 @@ class InstrumentParamsDialog:
             md_view.render(self._shell.page("docs"), self.strategy.doc_text(),
                            source=str(self.strategy.doc_path()))
         except Exception as e:
-            self.lbl_err.config(text=f"A leírás nem nyitható meg: {e}")
+            self.lbl_err.config(text=_t("docs.open_error", error=e))
 
     # ── „Futtatás” lap — a backtest, BEÁGYAZVA ─────────────────────────────
     # A doksi panasza: ugyanazt a paramétert két külön kinézetben kellett
@@ -1282,11 +1286,11 @@ class InstrumentParamsDialog:
         _n = sum(1 for r in _rows
                  if not r.get("skipped") and r.get("values", 0) > 0)
         if _m == self.RUN_BACKTEST and _n:
-            return f"⚠ A {_n} pipa most nem számít (Backtest)."
+            return _t("idlg.tick_ignored", name=_n)
         if _m == self.RUN_OPTIMIZE:
-            return "⚠ A pipák nem számítanak — a teljes tér megy."
+            return _t("idlg3.a_pipak_nem_szamitanak")
         if _m == self.RUN_PLANNED and _n == 0:
-            return "⚠ Nincs pipa — így ez egyetlen futás."
+            return _t("idlg3.nincs_pipa_igy_ez")
         return ""
 
     def _build_plan_strip(self, box):
@@ -1327,18 +1331,11 @@ class InstrumentParamsDialog:
         self._run_mode = tk.StringVar(value=self._load_run_mode())
         for _val, _txt, _tip in (
                 (self.RUN_BACKTEST, "Backtest",
-                 "Egyszer fut le, PONTOSAN a Paraméterek szakaszban látható "
-                 "értékekkel. A hangolás-pipák ilyenkor NEM számítanak — nem kell "
-                 "kiszedni őket egyetlen próbához."),
-                (self.RUN_PLANNED, "Hangolás",
-                 "A bepipált dimenziók számából adódik: 1 → végigpróbálás, "
-                 "2 → rács, 3+ → optimalizálás A BEPIPÁLTAKON. A pontos tervet a "
-                 "fenti sor írja."),
-                (self.RUN_OPTIMIZE, "Optimalizálás",
-                 "A megszokott OPT: MINDEN hangolható paramétert keres, akkor is, "
-                 "ha kivetted a pipát. Külön processzben fut, folytatható optuna "
-                 "study-val — az ablakot be is zárhatod, a haladás a főképernyőn "
-                 "látszik.")):
+                 _t("idlg3.egyszer_fut_le_pontosan")),
+                (self.RUN_PLANNED, _t("idlg3.hangolas"),
+                 _t("idlg3.a_bepipalt_dimenziok_szamabol")),
+                (self.RUN_OPTIMIZE, _t("idlg3.optimalizalas"),
+                 _t("idlg3.a_megszokott_opt_minden"))):
             _rb = tk.Radiobutton(mode_box, text=_txt, value=_val,
                                  variable=self._run_mode, bg=BG, fg=FG_GRAY,
                                  selectcolor=BG_HEADER, font=self._sf,
@@ -1409,12 +1406,12 @@ class InstrumentParamsDialog:
             cond = tk.Frame(box, bg=BG)
             self._cond_box = cond
             w = plan["wf"]
-            _txt = (f"Walk-forward: {w['splits']} ablak × ({w['train_months']} hó "
-                    f"tanulás + {w['test_months']} hó vizsga)")
+            _txt = (_t("idlg.walkforward", splits=w["splits"], train=w["train_months"],
+                       test=w["test_months"]))
             if plan["windows"]:
                 _last = plan["windows"][-1]
-                _txt += (f"  ·  utolsó vizsga: {str(_last['test_start'])[:10]} → "
-                         f"{str(_last['test_end'])[:10]}")
+                _txt += (_t("idlg.last_exam", start=str(_last["test_start"])[:10],
+                          end=str(_last["test_end"])[:10]))
             tk.Label(cond, text=_txt, bg=BG, fg=FG_GRAY_DIM, font=self._sf,
                      anchor="w").pack(anchor="w")
             if not plan["windows"]:
@@ -1434,7 +1431,7 @@ class InstrumentParamsDialog:
                          text=("Kapuk: " + (", ".join(
                              f"{_gt.label_of(k)} "
                              f"({_gt.EFFECT_LABEL.get(plan['gate_effects'][k], '')})"
-                             for k in act) if act else "egyik sem aktív"))
+                             for k in act) if act else _t("idlg3.egyik_sem_aktiv")))
                          ).pack(anchor="w")
             tk.Label(cond, bg=BG, fg=FG_GRAY_DIM, font=self._sf, anchor="w",
                      justify="left", wraplength=820,
@@ -1547,10 +1544,10 @@ class InstrumentParamsDialog:
             # ékezeteket („Kiszállási jel" → olvashatatlan).
             with open(path, "w", encoding="utf-8-sig", newline="") as fh:
                 fh.write(_tl.to_csv(rows))
-            self.lbl_err.config(text=f"{len(rows)} kötés mentve: {path}",
+            self.lbl_err.config(text=_t("idlg.trades_saved", n=len(rows), path=path),
                                 fg=FG_GREEN)
         except OSError as ex:
-            self.lbl_err.config(text=f"Mentési hiba: {ex}", fg=FG_RED)
+            self.lbl_err.config(text=_t("save.error", error=ex), fg=FG_RED)
 
     def _on_run_done(self, result):
         """A backtest LEFUTOTT — a kötés-lista feltöltése.
@@ -1570,12 +1567,8 @@ class InstrumentParamsDialog:
             pass
 
     _OPT_TEXT = {
-        "OPTIMIZING": ("Optimalizálás FUT. A haladás a paraméter-ablak fejlécén és "
-                       "a soron látszik; az eredmények a Kísérletek lapon "
-                       "jelennek meg, menet közben is (10 trialonként írja). "
-                       "Újra megnyomva LEÁLLÍTHATÓ.", FG_GREEN),
-        "QUEUED": ("Optimalizálás SORBAN áll (másik pár fut). Újra megnyomva "
-                   "kiveheted a sorból.", FG_YELLOW),
+        "OPTIMIZING": (_t("idlg3.optimalizalas_fut_a_haladas"), FG_GREEN),
+        "QUEUED": (_t("idlg3.optimalizalas_sorban_all_masik"), FG_YELLOW),
     }
 
     def _opt_poll(self):
@@ -1620,8 +1613,7 @@ class InstrumentParamsDialog:
             txt, fg = _note          # az elutasítás oka MEGMARAD, amíg nem indul
         else:
             txt, fg = self._OPT_TEXT.get(_st, (
-                "Az optimalizálás nem fut. (Ha most állítottad le, a leállás a "
-                "futó trial végén történik meg.)", FG_GRAY))
+                _t("idlg3.az_optimalizalas_nem_fut"), FG_GRAY))
             if _st in self._OPT_TEXT:
                 self._run_note = None
         # ⚠ A HALADÁS a MÁSIK PROCESSZ állapotából jön (`opt_activity`) — ugyanaz
@@ -1637,14 +1629,14 @@ class InstrumentParamsDialog:
             # ⚠ A trialok ELŐTT (adat-előkészítés) még nincs haladás: ilyenkor
             # határozatlan sáv megy — nem hazudunk 0%-ot egy dolgozó futásra.
             self._prog_show(_pct, f"{_pct}%" if _pct is not None
-                            else "előkészítés…")
+                            else _t("idlg3.elokeszites"))
         elif not getattr(self, "_bt_running", False) and self._sw_stop is None:
             self._prog_hide()
         try:
             self._run_status.config(text=txt, fg=fg)
             self._plan_btn.config(
-                text=("Optimalizálás leállítása" if _st == "OPTIMIZING"
-                      else ("Kivétel a sorból" if _st == "QUEUED" else "Indítás")))
+                text=(_t("idlg3.optimalizalas_leallitasa") if _st == "OPTIMIZING"
+                      else (_t("idlg3.kivetel_a_sorbol") if _st == "QUEUED" else _t("idlg.inditas"))))
         except tk.TclError:
             pass
 
@@ -1718,8 +1710,7 @@ class InstrumentParamsDialog:
             self._sw_canvas.pack(fill="x", pady=(4, 2))
             self._sw_best.pack(anchor="w", pady=(0, 8))
             self._run_status.config(
-                text=f"{_op.run_plan(rows, 0)['runs']} futás indul — az Eredmény "
-                     f"szakaszban rajzolódik.", fg=FG_GRAY)
+                text=_t("idlg.runs_start", runs=_op.run_plan(rows, 0)["runs"]), fg=FG_GRAY)
             self._start_sweep()
             return
         # 3+ hangolt → OPTIMALIZÁLÁS a BEPIPÁLTAKON.
@@ -1742,8 +1733,7 @@ class InstrumentParamsDialog:
         self._sweep_box.pack_forget()
         _opt = getattr(self, "on_optimize", None)
         if not callable(_opt):
-            self._note("Ez az ablak nincs bekötve az optimalizálóhoz "
-                       "(fejlesztői/önálló megnyitás).", FG_YELLOW)
+            self._note(_t("idlg3.ez_az_ablak_nincs"), FG_YELLOW)
             return
         # ⚠ ELŐBB NÉZZÜK MEG, fut-e MÁSHOL. A zárat úgyis a munkás-processz
         # ellenőrzi, de akkor már elindult egy processz, ami rögtön el is hasal —
@@ -1774,7 +1764,7 @@ class InstrumentParamsDialog:
         except Exception as ex:
             log.exception("optimalizálás indítási hiba (%s/%s)",
                           self.symbol, self.strategy.name)
-            self._note(f"Indítási hiba: {ex}", FG_RED)
+            self._note(_t("idlg.start_error", error=ex), FG_RED)
             return
         # ⚠ AZ ELUTASÍTÁST ITT KELL KIÍRNI, a gomb mellett. A hívó eddig a
         # FŐABLAK állapotsorába írta az okot — az a paraméter-ablak alatt van,
@@ -1818,8 +1808,7 @@ class InstrumentParamsDialog:
         tk.Label(body, text=_t("idlg.mit_jelentenek_a_karikak"), bg=BG, fg=FG_WHITE,
                  font=self._hf, anchor="w").pack(anchor="w", padx=12, pady=(12, 2))
         tk.Label(body, bg=BG, fg=FG_GRAY_DIM, font=self._sf, anchor="w",
-                 text=(f"A soron {len(_stages)} kör jelzi, hol tart a belépő "
-                       f"szetupja — balról jobbra:")
+                 text=(_t("idlg.stages_hint", n=len(_stages)))
                  ).pack(anchor="w", padx=12)
         grid = tk.Frame(body, bg=BG)
         grid.pack(anchor="w", fill="x", padx=12, pady=(2, 0))
@@ -1844,11 +1833,8 @@ class InstrumentParamsDialog:
         self._refresh_legend_dots()
         tk.Label(body, bg=BG, fg=FG_GRAY, font=self._sf, anchor="w",
                  justify="left", wraplength=820, text=(
-                     "A KÖR SZÍNE az irány: zöld = BUY-szetup, piros = "
-                     "SELL-szetup, halvány = ez a feltétel még nem teljesül. "
-                     "Egy piros kör tehát NEM hiba — kész eladási szetup." +
-                     chr(10) + "A körök ELŐTTI betű a kötés-mód: „V” = valódi "
-                     "kötést nyit, „J” = csak jelez az MT5 chartra.")
+                     _t("idlg3.a_kor_szine_az") +
+                     chr(10) + _t("idlg3.a_korok_elotti_betu"))
                  ).pack(anchor="w", padx=12, pady=(4, 0))
 
     def _refresh_legend_dots(self):
@@ -1893,7 +1879,7 @@ class InstrumentParamsDialog:
             o = _ov.build(self.root_cfg, self.symbol, self.strategy,
                           self.data or {}, df_m15=df15)
         except Exception as ex:
-            tk.Label(page, text=f"Az áttekintés nem építhető: {ex}", bg=BG,
+            tk.Label(page, text=_t("idlg.overview_error", error=ex), bg=BG,
                      fg=FG_RED, font=self._sf).pack(anchor="w", padx=12, pady=12)
             return
 
@@ -1905,7 +1891,7 @@ class InstrumentParamsDialog:
         head.pack(anchor="w", fill="x", padx=12, pady=(10, 2))
         tk.Label(head, text=f"{o['symbol']}  ·  {o['strategy']}", bg=BG,
                  fg=FG_WHITE, font=self._hf).pack(side="left")
-        _state_txt = {"live": "ÉL", "stopped": "ÁLLÍTVA"}.get(o["state"], o["state"] or "—")
+        _state_txt = {"live": "ÉL", "stopped": _t("idlg3.allitva")}.get(o["state"], o["state"] or "—")
         _state_fg = FG_GREEN if o["state"] == "live" else FG_GRAY
         tk.Label(head, text=f"   {_state_txt}", bg=BG, fg=_state_fg,
                  font=self._hf).pack(side="left")
@@ -1914,7 +1900,7 @@ class InstrumentParamsDialog:
                      font=self._sf).pack(side="left")
         from dashboard import theme as _th
         _gfg = _th.color(o.get("grade_color_name") or "muted")
-        tk.Label(head, text=f"   Minőség: {o['grade']}", bg=BG, fg=_gfg,
+        tk.Label(head, text=_t("idlg.quality_line", grade=o["grade"]), bg=BG, fg=_gfg,
                  font=self._hf).pack(side="left")
         if o.get("grade_why"):
             tk.Label(head, text=f"  ({o['grade_why']})", bg=BG, fg=FG_GRAY_DIM,
@@ -1989,17 +1975,17 @@ class InstrumentParamsDialog:
                  justify="left", text=(
                      "Kapuk: " + (", ".join(
                          f"{_gt.label_of(k)} ({_gt.EFFECT_LABEL.get(o['gates'][k], '')})"
-                         for k in sorted(act)) if act else "egyik sem aktív"))
+                         for k in sorted(act)) if act else _t("idlg3.egyik_sem_aktiv")))
                  ).pack(anchor="w", padx=12)
         if o["data_from"] is not None:
             tk.Label(body, bg=BG, fg=FG_GRAY, font=self._sf, anchor="w",
-                     text=(f"Előzmény: {str(o['data_from'])[:10]} … "
-                           f"{str(o['data_to'])[:10]}")).pack(anchor="w", padx=12)
+                     text=(_t("idlg.history_span", start=str(o["data_from"])[:10],
+                           end=str(o["data_to"])[:10]))).pack(anchor="w", padx=12)
         _age = o["optimized_age_days"]
         tk.Label(body, bg=BG, fg=FG_GRAY, font=self._sf, anchor="w",
-                 text=(f"Utolsó optimalizálás: {str(o['optimized_at'])[:10]}"
-                       f"  ({_age:.0f} napja)" if _age is not None
-                       else "Utolsó optimalizálás: —")).pack(anchor="w", padx=12,
+                 text=(_t("idlg.last_opt", date=str(o["optimized_at"])[:10],
+                       days=f"{_age:.0f}") if _age is not None
+                       else _t("idlg3.utolso_optimalizalas"))).pack(anchor="w", padx=12,
                                                              pady=(0, 10))
 
     def _draw_hours(self, cv, hours):
@@ -2091,14 +2077,14 @@ class InstrumentParamsDialog:
             eff = _gt.effects_for(self.root_cfg, self.symbol, self.strategy.name)
             n_on = sum(1 for e in eff.values() if e != _gt.EFFECT_NONE)
             if "kapuk" in secs:
-                _txt = f"{n_on} aktív" if n_on else "egyik sem aktív"
+                _txt = _t("idlg.n_active", n=n_on) if n_on else _t("idlg3.egyik_sem_aktiv")
                 # ⚠ Az ELTÉRÉS a becsukott fejlécen is látszik: különben egy
                 # feltáró beállítás (pl. „mérjük meg a lendület-kaput") némán
                 # ott maradna, és a backtest hetekig mást mérne, mint az él.
                 _d = _gt.backtest_differs(self.root_cfg, self.symbol,
                                           self.strategy.name)
                 if _d:
-                    _txt += f" · ⚠ a mérés {len(_d)} kapuban eltér"
+                    _txt += _t("idlg.gates_differ", n=len(_d))
                 secs["kapuk"].set_summary(_txt)
         except Exception:
             pass
@@ -2106,10 +2092,10 @@ class InstrumentParamsDialog:
             hrs = sorted(int(h) for h, on in (self._hour_on or {}).items() if on)
             if "orak" in secs:
                 if len(hrs) == 24 or not hrs:
-                    secs["orak"].set_summary("mind a 24 óra" if hrs else "egy óra sincs engedve")
+                    secs["orak"].set_summary(_t("idlg3.mind_a_24_ora") if hrs else _t("idlg3.egy_ora_sincs_engedve"))
                 else:
                     secs["orak"].set_summary(
-                        f"{hrs[0]:02d}–{hrs[-1]:02d} · {len(hrs)} óra engedve")
+                        _t("idlg.hours_line", first=f"{hrs[0]:02d}", last=f"{hrs[-1]:02d}", n=len(hrs)))
         except Exception:
             pass
         try:
@@ -2118,7 +2104,7 @@ class InstrumentParamsDialog:
             tuned = [r for r in rows if not r["skipped"]]
             if "parameterek" in secs:
                 secs["parameterek"].set_summary(
-                    f"{len(tuned)} hangolt a {len(self._opt_rows)}-ból"
+                    _t("idlg.tuned_of", tuned=len(tuned), total=len(self._opt_rows))
                     if self._opt_rows else "")
         except Exception:
             pass
@@ -2132,8 +2118,8 @@ class InstrumentParamsDialog:
                                               or {}).get("max_trials", 500) or 500))
                 _n = len(_rp["tuned"])
                 secs["futtatas"].set_summary(
-                    "egyetlen futás (backtest)" if _n == 0 else
-                    f"{_n} hangolt · {_rp['runs']} futás")
+                    _t("idlg3.egyetlen_futas_backtest") if _n == 0 else
+                    _t("idlg.tuned_runs", tuned=_n, runs=_rp["runs"]))
         except Exception:
             pass
         # ── EREDMÉNY: a legutóbbi futás egy sorban ─────────────────────────
@@ -2145,7 +2131,7 @@ class InstrumentParamsDialog:
                 from dashboard import trade_list as _tl
                 _rows = getattr(self, "_trade_rows", None)
                 secs["eredmeny"].set_summary(
-                    _tl.summary_line(_rows) if _rows else "még nem futott")
+                    _tl.summary_line(_rows) if _rows else _t("idlg3.meg_nem_futott"))
         except Exception:
             pass
         try:
@@ -2159,12 +2145,12 @@ class InstrumentParamsDialog:
                 if _rn is not None and self._runner_frame.winfo_manager():
                     _bits.append(f"runner: {_rn.get()}")
                 if getattr(self, "_cautious_var", None) is not None                         and self._cautious_var.get():
-                    _bits.append("óvatos méret")
+                    _bits.append(_t("idlg3.ovatos_meret"))
                 if getattr(self, "_cc_var", None) is not None and self._cc_var.get():
                     _bits.append(f"cost-cut {self._cc_bars_var.get()}")
                 _bm = getattr(self, "_build_mode_name", None)
                 if _bm is not None and _bm.get() not in ("Ki", ""):
-                    _bits.append(f"építés: {_bm.get()}")
+                    _bits.append(_t("idlg.build_mode", mode=_bm.get()))
                 secs["kockazat"].set_summary(" · ".join(_bits))
         except Exception:
             pass
@@ -2211,7 +2197,7 @@ class InstrumentParamsDialog:
             from trading.live_trader import viz_diagnose
             rows = viz_diagnose(self.symbol, self.root_cfg)
         except Exception as ex:
-            lbl.config(text=f"Ellenőrzési hiba: {ex}", fg=FG_RED)
+            lbl.config(text=_t("idlg.check_error", error=ex), fg=FG_RED)
             return
         bad = [t for ok, t in rows if not ok]
         _p = self._viz_diag_win if getattr(self, "_viz_diag_win", None) else None
@@ -2219,12 +2205,12 @@ class InstrumentParamsDialog:
             _p.destroy()
         win = tk.Toplevel(self.popup)
         self._viz_diag_win = win
-        win.title(f"{self.symbol} — miért nincs chart-fájl?")
+        win.title(_t("idlg.why_no_chart", symbol=self.symbol))
         win.configure(bg=BG)
         win.transient(self.popup)
         tk.Label(win, bg=BG, fg=(FG_RED if bad else FG_GREEN), font=self._hf,
-                 anchor="w", text=(f"{len(bad)} feltétel NEM teljesül"
-                                   if bad else "Minden feltétel rendben")
+                 anchor="w", text=(_t("idlg.constraints_bad", n=len(bad))
+                                   if bad else _t("idlg3.minden_feltetel_rendben"))
                  ).pack(anchor="w", padx=12, pady=(10, 4))
         for ok, txt in rows:
             tk.Label(win, bg=BG, fg=(FG_GRAY if ok else FG_RED), font=self._sf,
@@ -2234,10 +2220,7 @@ class InstrumentParamsDialog:
         if not bad:
             tk.Label(win, bg=BG, fg=FG_GRAY_DIM, font=self._sf, anchor="w",
                      justify="left", wraplength=760, pady=6,
-                     text=("Minden feltétel teljesül — ilyenkor a „Küldés a "
-                           "charthoz" + chr(0x201D) + " gomb azonnal létrehozza a "
-                           "fájlt. Ha a MOTOR mégsem írja magától: a pár nem fut "
-                           "(Play), vagy még nem telt le a viz-ütem.")
+                     text=(_t("idlg3.minden_feltetel_teljesul_ilyenkor") + chr(0x201D) + _t("idlg3.gomb_azonnal_letrehozza_a"))
                      ).pack(anchor="w", padx=12)
         tk.Button(win, text=_t("btn.close"), bg=BTN_DIS_BG, fg=BTN_DIS_FG, relief="flat",
                   font=self._sf, command=win.destroy).pack(pady=10)
@@ -2264,12 +2247,11 @@ class InstrumentParamsDialog:
             lbl.config(text=" · ".join(r["errors"])[:200], fg=FG_RED)
             return
         _who = ", ".join(f"{n} ({c})" for n, c in r["strategies"]) or "—"
-        _txt = f"Kiküldve: {r['lines']} objektum — {_who}."
+        _txt = _t("idlg.sent", n=r["lines"], who=_who)
         if r["skipped"]:
             # ⚠ NEM néma kihagyás: a kikapcsolt rajzú stratégia hiánya különben
             # úgy nézne ki, mintha a küldés nem működne.
-            _txt += (f"  Kihagyva (a rajzuk ki van kapcsolva): "
-                     f"{', '.join(r['skipped'])}.")
+            _txt += _t("idlg.skipped_off", names=", ".join(r["skipped"]))
         lbl.config(text=_txt, fg=FG_GREEN)
 
     def _build_link_pane(self, name: str):
@@ -2293,7 +2275,7 @@ class InstrumentParamsDialog:
         tgts = _md.targets(name, roots)
 
         # ── 1. MI VAN KINT ─────────────────────────────────────────────────
-        _h(f"{name} indikátorok — mi van a terminálokban")
+        _h(_t("idlg.terminals_title", platform=name))
         if not tgts:
             _n(_t("idlg2.nem_talaltam_terminal_mappat"), FG_RED)
         else:
@@ -2301,10 +2283,11 @@ class InstrumentParamsDialog:
             cnt = Counter(s["state"] for s in st)
             _fg = (FG_RED if cnt.get(_md.ST_STALE) else
                    (FG_YELLOW if cnt.get(_md.ST_MISSING) else FG_GREEN))
-            _n(f"{len(tgts)} terminál-mappa · "
-               f"{_md.state_label(_md.ST_FRESH)} {cnt.get(_md.ST_FRESH, 0)} · "
-               f"{_md.state_label(_md.ST_STALE)} {cnt.get(_md.ST_STALE, 0)} · "
-               f"{_md.state_label(_md.ST_MISSING)} {cnt.get(_md.ST_MISSING, 0)}",
+            _n(_t("idlg.terminal_counts", n=len(tgts),
+               fresh_l=_md.state_label(_md.ST_FRESH), fresh=cnt.get(_md.ST_FRESH, 0),
+               stale_l=_md.state_label(_md.ST_STALE), stale=cnt.get(_md.ST_STALE, 0),
+               missing_l=_md.state_label(_md.ST_MISSING),
+               missing=cnt.get(_md.ST_MISSING, 0)),
                _fg)
             # ⚠ Az ELAVULT a legfontosabb: ott MÁS fut, mint amit a repóban látsz.
             bad = [s for s in st if s["state"] == _md.ST_STALE]
@@ -2349,9 +2332,7 @@ class InstrumentParamsDialog:
         # a config/paraméterek attól még változatlanok maradnak.
         if name == _md.MT5:
             _h(_t("idlg.kuldes_a_charthoz"))
-            _n("A MOSTANI beállításokkal újrarajzolja a chart-fájlt "
-               f"(TFV_{self.symbol}.csv) — a futó motor nélkül is. Így egy kapu "
-               "vagy paraméter átállítása után azonnal látod a hatását.")
+            _n(_t("idlg.redraw_tip", file=f"TFV_{self.symbol}.csv"))
             _n(_t("idlg2.a_kuldes_nem_mentes"), FG_GRAY_DIM)
             _srow = tk.Frame(body, bg=BG)
             _srow.pack(anchor="w", fill="x", padx=10, pady=(4, 0))
@@ -2440,7 +2421,7 @@ class InstrumentParamsDialog:
 
         row = tk.Frame(body, bg=BG)
         row.pack(anchor="w", padx=10, pady=(6, 2))
-        for lbl, var in (("-tól", self._mx_from), ("-ig", self._mx_to)):
+        for lbl, var in ((_t("idlg3.tol"), self._mx_from), ("-ig", self._mx_to)):
             tk.Label(row, text=lbl, bg=BG, fg=FG_GRAY_DIM,
                      font=self._sf).pack(side="left", padx=(0, 3))
             e = tk.Entry(row, textvariable=var, width=11, bg=BG_HEADER,
@@ -2576,11 +2557,10 @@ class InstrumentParamsDialog:
         except Exception as ex:
             self._link_status.config(text=f"Hiba: {ex}", fg=FG_RED)
             return
-        msg = f"{len(res['taken'])} lefordított fájl beolvasva a repóba."
+        msg = _t("idlg.compiled_taken", n=len(res["taken"]))
         if res["missing"]:
-            msg += (f" Nincs lefordítva: {', '.join(res['missing'][:3])}"
-                    f"{'…' if len(res['missing']) > 3 else ''} — nyisd meg a "
-                    f"MetaEditorban és nyomj F7-et.")
+            msg += (_t("idlg.compiled_missing", files=", ".join(res["missing"][:3]),
+                       more=("…" if len(res["missing"]) > 3 else "")))
         self._link_status.config(
             text=msg[:170], fg=(FG_YELLOW if res["missing"] else FG_GREEN))
         try:
@@ -2600,9 +2580,8 @@ class InstrumentParamsDialog:
             self._link_status.config(text=res["errors"][0][:110], fg=FG_RED)
             return
         self._link_status.config(
-            text=(f"{len(res['copied'])} fájl kimásolva "
-                  f"({res['targets']} mappába), {len(res['skipped'])} már friss "
-                  f"volt. Fordítsd újra a MetaEditorban (F7)."),
+            text=(_t("idlg.deployed", n=len(res["copied"]), targets=res["targets"],
+                  skipped=len(res["skipped"]))),
             fg=FG_GREEN)
         # A lap újraépül, hogy az állapot AZONNAL a valóságot mutassa.
         try:
@@ -2627,7 +2606,7 @@ class InstrumentParamsDialog:
                                 {"small": self._sf, "header": self._hf},
                                 on_export=self._open_trials)
         except Exception as ex:
-            self.lbl_err.config(text=f"Az eredménytábla nem építhető: {ex}",
+            self.lbl_err.config(text=_t("idlg.table_error", error=ex),
                                 fg=FG_RED)
 
     def _start_sweep(self):
@@ -2647,9 +2626,7 @@ class InstrumentParamsDialog:
         if plan["kind"] not in (_op.KIND_SWEEP, _op.KIND_GRID):
             # ⚠ Nem csendes tétlenség: megmondjuk, MIT kell tenni.
             self._sw_status.config(
-                text=("A végigpróbáláshoz PONTOSAN 1 vagy 2 paraméter legyen bepipálva "
-                      f"(most {len(plan['tuned'])}). Több dimenziónál az "
-                      f"optimalizálás a helyes eszköz."), fg=FG_YELLOW)
+                text=(_t("idlg.sweep_needs_dims", n=len(plan["tuned"]))), fg=FG_YELLOW)
             return
 
         params = self._collect_params()
@@ -2669,7 +2646,7 @@ class InstrumentParamsDialog:
         self._sw_axes, self._sw_rows = axes, []
         self._sw_stop = threading.Event()
         self._plan_btn.config(text=_t("idlg.leallitas"))
-        self._prog_show(0.0, f"0/{len(combos)} futás")
+        self._prog_show(0.0, _t("idlg.runs_progress", done=0, total=len(combos)))
         # ⚠ Az IDOSZAK a backtest mezoibol jon — EGY helyen allitod. Korabban a
         # sopresnek sajat datum-mezoi voltak, tehat ugyanazt ketszer kellett
         # beirni, es a ket ertek csendben elterhetett.
@@ -2717,11 +2694,11 @@ class InstrumentParamsDialog:
             while True:
                 msg = self._sw_queue.get_nowait()
                 if msg[0] == "progress":
-                    self._sw_status.config(text=f"{msg[1]}/{msg[2]} futás…",
+                    self._sw_status.config(text=_t("idlg.runs_progress_dots", done=msg[1], total=msg[2]),
                                            fg=FG_GRAY)
                     _tot = max(1, int(msg[2]))
                     self._prog_show(100.0 * int(msg[1]) / _tot,
-                                    f"{msg[1]}/{msg[2]} futás")
+                                    _t("idlg.runs_progress", done=msg[1], total=msg[2]))
                 else:
                     self._sweep_done(msg[1], msg[2])
                     finished = True
@@ -2750,7 +2727,7 @@ class InstrumentParamsDialog:
             self._sw_status.config(text=err, fg=FG_RED)
             return
         self._sw_rows = rows
-        self._sw_status.config(text=f"{len(rows)} futás kész.", fg=FG_GREEN)
+        self._sw_status.config(text=_t("idlg.runs_done", n=len(rows)), fg=FG_GREEN)
         # ⚠ A RAJZ LEGYEN LÁTHATÓ, akkor is, ha közben bármi átrendezte a
         # szakaszt. Az `pack` ismételve ártalmatlan (a Tk nem duplikál).
         try:
@@ -2771,8 +2748,7 @@ class InstrumentParamsDialog:
             # felhasználó egy „kész" feliratot látna üres hely fölött.
             try:
                 self._sw_status.config(
-                    text=(f"{len(self._sw_rows)} futás kész, de a rajz tengelyei "
-                          f"elvesztek (a szakasz közben újraépült). Indítsd újra."),
+                    text=(_t("idlg.runs_done_axes", n=len(self._sw_rows))),
                     fg=FG_YELLOW)
             except tk.TclError:
                 pass
@@ -2788,10 +2764,10 @@ class InstrumentParamsDialog:
             where = " · ".join(f"{k}={v}" for k, v in b.items()
                                if k in [a[0] for a in self._sw_axes])
             self._sw_best.config(
-                text=(f"Legjobb ({metric}): {where}  →  {b['trades']} kötés · "
-                      f"P&L {b['total_pnl']:+.0f}$ · PF {b['profit_factor']:.2f} · "
-                      f"DD {b['max_drawdown'] * 100:.1f}%\n"
-                      f"Kattints a rajzra egy pont paramétereinek betöltéséhez."))
+                text=(_t("idlg.sweep_best", metric=metric, where=where, trades=b["trades"],
+                      pnl=_fmtnum(f"{b['total_pnl']:+.0f}"),
+                      pf=_fmtnum(f"{b['profit_factor']:.2f}"),
+                      dd=_fmtnum(f"{b['max_drawdown'] * 100:.1f}"))))
 
     def _apply_sweep_point(self, values: dict):
         """Egy söprés-pont paramétereinek betöltése a Paraméter lap mezőibe.
@@ -2825,7 +2801,7 @@ class InstrumentParamsDialog:
         tuned = [r for r in rows if not r["skipped"]]
         n_sig = sum(1 for r in tuned if r["cls"] == "signal")
         trials = int((self._opt_cfg_cache or {}).get("max_trials", 500) or 500)
-        space_txt = ("gyakorlatilag végtelen" if space >= 10 ** 18
+        space_txt = (_t("idlg3.gyakorlatilag_vegtelen") if space >= 10 ** 18
                      else f"{space:,}".replace(",", " "))
         # ⚠ Ez a legfontosabb szám az egész lapon: az optuna NEM járja be a
         # teret, hanem mintavételez. A trial-szám önmagában semmit nem mond —
@@ -2833,12 +2809,8 @@ class InstrumentParamsDialog:
         # „átnézte” a lehetőségeket.
         try:
             self._space_lbl.config(
-                text=(f"{len(tuned)} hangolt dimenzió ({n_sig} jel + "
-                      f"{len(tuned) - n_sig} végrehajtás), rácson "
-                      f"{space_txt} kombináció.\n"
-                      f"Az optimalizálás ebből {trials} mintát vesz — nem járja be "
-                      f"a teret, hanem tanul belőle. Kevesebb hangolt dimenzió = "
-                      f"sűrűbb minta = megbízhatóbb eredmény."))
+                text=(_t("idlg.space_note", tuned=len(tuned), signal=n_sig,
+                      exec=len(tuned) - n_sig, space=space_txt, trials=trials)))
             # A FUTÁS TÍPUSA a hangolt dimenziók számából adódik — ugyanaz a
             # gépezet 0, 1, 2 vagy több paraméterrel mást JELENT. A levezetés a
             # `core.opt_plan.run_plan`-ban van (tesztelhető, és a jövőbeli
@@ -2848,8 +2820,7 @@ class InstrumentParamsDialog:
             # NEM számítanak — ha ilyenkor is az optimalizálás tervét írnánk ki,
             # a felület mást ígérne, mint ami elindul.
             _mode = self._effective_mode()
-            _bt_txt = ("Egyetlen futás a mostani paraméter-értékekkel "
-                       "(a hangolás-pipák most nem számítanak).")
+            _bt_txt = (_t("idlg3.egyetlen_futas_a_mostani"))
             self._tuned_lbl.config(
                 text=(_bt_txt if _mode == self.RUN_BACKTEST else
                       rp["text"] + chr(10) + "Hangolva: "
@@ -2864,9 +2835,9 @@ class InstrumentParamsDialog:
                 _rb = getattr(self, "_rb_planned", None)
                 if _rb is not None:
                     _rb.config(state=("normal" if _has else "disabled"),
-                               text=("Hangolás — a bepipált paraméterek szerint"
+                               text=(_t("idlg3.hangolas_a_bepipalt_parameterek")
                                      if _has else
-                                     "Hangolás — nincs bepipált paraméter"))
+                                     _t("idlg3.hangolas_nincs_bepipalt_parameter")))
             except (tk.TclError, AttributeError):
                 pass
         except (tk.TclError, AttributeError):
@@ -2908,7 +2879,7 @@ class InstrumentParamsDialog:
                 val = int(round(float(raw))) if isinstance(was, int) else float(raw)
             except (ValueError, TypeError):
                 self._range_err.config(
-                    text=f"{key}: a(z) „{field}” értéke nem szám — a mező visszaállt.",
+                    text=_t("idlg.not_a_number", key=key, field=field),
                     fg=FG_RED)
                 vars_[field].set(self._fmt_range(was))
                 return
@@ -2923,7 +2894,7 @@ class InstrumentParamsDialog:
             # ⚠ NEM mentünk hibás tartományt, és VISSZAÁLLÍTJUK a mezőket. Egy
             # elmentett `min > max` az összes trialt elbuktatná — a felhasználó
             # órákkal később, egy üres eredménytáblából venné észre.
-            self._range_err.config(text=f"{key}: {err} — a mezők visszaálltak.",
+            self._range_err.config(text=_t("idlg.range_reverted", key=key, error=err),
                                    fg=FG_RED)
             for field in ("min", "max", "step"):
                 vars_[field].set(self._fmt_range(orig[field]))
@@ -2936,12 +2907,11 @@ class InstrumentParamsDialog:
             self._range_lbls[key].config(text=str(n))
             orig["values"] = n
             self._range_err.config(
-                text=f"{key}: mentve ({spec['min']:g} … {spec['max']:g} / "
-                     f"{spec['step']:g} → {n} érték)", fg=FG_GREEN)
+                text=_t("idlg.range_saved", key=key, min=f"{spec['min']:g}",
+                     max=f"{spec['max']:g}", step=f"{spec['step']:g}", n=n), fg=FG_GREEN)
             self._refresh_opt_space()
         else:
-            self._range_err.config(text=f"{key}: a mentés nem sikerült "
-                                        f"(lásd a naplót).", fg=FG_RED)
+            self._range_err.config(text=_t("idlg.range_save_failed", key=key), fg=FG_RED)
 
     def _on_skip_change(self, key: str):
         """A pipa AZONNAL a config.json-ba megy (mint a kapu-választók).
@@ -2954,7 +2924,7 @@ class InstrumentParamsDialog:
         try:
             self._save_main_config()
         except Exception as ex:
-            self.lbl_err.config(text=f"Mentési hiba: {ex}", fg=FG_RED)
+            self.lbl_err.config(text=_t("save.error", error=ex), fg=FG_RED)
             return
         self._refresh_opt_space()
         # ⚠ A pipa átállítása MEGVÁLTOZTATJA a mód-konfliktust (pl. Backtest
@@ -3022,7 +2992,7 @@ class InstrumentParamsDialog:
         forrás rövid megnevezése (mentett / #N sor / friss backtest)."""
         for w in self._metrics_frame.winfo_children():
             w.destroy()
-        self._src_lbl.config(text=(f"forrás: {source}" if source else ""))
+        self._src_lbl.config(text=(_t("idlg.source", source=source) if source else ""))
         if not summary or summary.get("trades", 0) == 0:
             self._grade_lbl.config(text=_t("idlg.minosites"), fg=FG_GRAY)
             if summary is not None and summary.get("trades", 0) == 0:
@@ -3031,7 +3001,7 @@ class InstrumentParamsDialog:
             return
         gtxt, gcol, greason = self.strategy.grade(summary, self.cfg)
         self._grade_lbl.config(
-            text=f"Minősítés: {gtxt}" + (f"   ({greason})" if greason else ""),
+            text=_t("bt.grade", grade=gtxt) + (f"   ({greason})" if greason else ""),
             fg=sem_color(gcol))
         mc = metric_colors(summary, self.cfg)
         for label, fn, key in self._METRIC_ORDER:
@@ -3092,9 +3062,9 @@ class InstrumentParamsDialog:
                   font=self._sf, cursor="hand2",
                   command=self._load_current_rank).pack(side="left", padx=(4, 0))
 
-        avail = f"Elérhető: 1–{max(opt_ranks)}" if opt_ranks else "Elérhető: —"
+        avail = _t("idlg.rank_available", max=max(opt_ranks)) if opt_ranks else _t("idlg3.elerheto")
         if man_ranks:
-            avail += f"  (kézi: {_fmt_ranges(man_ranks)})"
+            avail += _t("idlg.rank_manual", ranks=_fmt_ranges(man_ranks))
         tk.Label(bar, text=avail, bg=BG, fg=FG_GRAY_DIM,
                  font=self._sf).pack(side="left", padx=(8, 0))
 
@@ -3128,8 +3098,8 @@ class InstrumentParamsDialog:
         row = self._rank_rows.get(rank)
         if row is None:
             self.lbl_rank.config(
-                text=f"Nincs {rank}. sorszámú sor (elérhető: "
-                     f"{self._ranks[0]}–{self._ranks[-1]}).", fg=FG_RED)
+                text=_t("idlg.rank_missing", rank=rank, lo=self._ranks[0],
+                     hi=self._ranks[-1]), fg=FG_RED)
             return
         for k, e in self.entries.items():
             if k in row:
@@ -3140,14 +3110,15 @@ class InstrumentParamsDialog:
         note = (row.get("note") or "").strip()
         summ = self._summary_from_row(row)
         if summ is None:
-            self._render_metrics(None, f"#{rank} sor — nincs mentett metrika")
+            self._render_metrics(None, _t("idlg.rank_no_metric", rank=rank))
             self.lbl_rank.config(
-                text=f"#{rank} betöltve" + (f" ({note})" if note else "")
-                     + " — nincs mentett metrika.", fg=FG_GRAY)
+                text=_t("idlg.rank_loaded_short", rank=rank)
+                     + (f" ({note})" if note else "")
+                     + _t("idlg.rank_no_metric_suffix"), fg=FG_GRAY)
         else:
-            src = f"#{rank} sor (trials CSV)" + (f", {note}" if note else "")
+            src = _t("idlg.rank_row", rank=rank) + (f", {note}" if note else "")
             self._render_metrics(summ, src)
-            self.lbl_rank.config(text=f"#{rank} betöltve.", fg=FG_GRAY)
+            self.lbl_rank.config(text=_t("idlg.rank_loaded", rank=rank), fg=FG_GRAY)
 
     # ── Óra-rács (trade_hours) ──────────────────────────────────────────────
     def _build_hours(self, popup, ts):
@@ -3254,8 +3225,7 @@ class InstrumentParamsDialog:
                  anchor="w").pack(side="left")
         tk.Frame(hdr, bg=BG_HEADER, height=1).pack(side="left", fill="x",
                                                    expand=True, padx=(8, 0))
-        tk.Label(box, text=f"Mit tegyen a kapu, ha blokkoló állapotban van — "
-                           f"a(z) {self.strategy.name} stratégiára, ezen a páron:",
+        tk.Label(box, text=_t("idlg.gate_question", strategy=self.strategy.name),
                  bg=BG, fg=FG_GRAY, font=self._sf, anchor="w").pack(anchor="w",
                                                                     pady=(2, 4))
         self._gate_vars = {}
@@ -3269,7 +3239,7 @@ class InstrumentParamsDialog:
         # ugyanazt mondta, ami a legördülőben állt. Egyetlen dolgot vitt, amit a
         # legördülő NEM: ha a kapu a Beállításokban globálisan ki van kapcsolva.
         # Az megmaradt — de csak akkor jelenik meg, amikor tényleg ez a helyzet.
-        for _c, _hdr in ((0, "név"), (1, "állapot (élesben)"), (2, "backtest")):
+        for _c, _hdr in ((0, _t("idlg3.nev")), (1, _t("idlg3.allapot_elesben")), (2, "backtest")):
             tk.Label(grid, text=_hdr, bg=BG, fg=FG_GRAY_DIM, font=self._sf,
                      anchor=("center" if _c == 2 else "w")).grid(
                          row=0, column=_c, sticky="we", pady=(0, 2),
@@ -3321,7 +3291,7 @@ class InstrumentParamsDialog:
         kell kitalálni, mit kapsz vissza, ha visszavonod a beállítást."""
         inh, _src = self._g.inherited_effect(self.root_cfg, self.symbol,
                                              self.strategy.name, key)
-        return [f"Örökölt ({self._g.EFFECT_LABEL[inh]})"] + \
+        return [_t("gate.effect.inherited", effect=self._g.EFFECT_LABEL[inh])] + \
                [self._g.EFFECT_LABEL[e] for e in self._g.EFFECTS]
 
     def _gate_choice_text(self, key: str, eff: str) -> str:
@@ -3360,9 +3330,9 @@ class InstrumentParamsDialog:
                                  for_backtest=True)[key]
         if bt != eff:
             lbl.config(fg=FG_YELLOW, text=(
-                "⚠ a mérésből kivéve — élesben szól bele"
+                _t("idlg3.a_meresbol_kiveve_elesben")
                 if bt == self._g.EFFECT_NONE else
-                "⚠ csak a mérésben — élesben nem szól bele"))
+                _t("idlg3.csak_a_meresben_elesben")))
         elif src == self._g.SRC_MASTER_OFF:
             lbl.config(text=_t("idlg.a_beallitasokban_kikapcsolva"), fg=FG_YELLOW)
         else:
@@ -3403,7 +3373,7 @@ class InstrumentParamsDialog:
         try:
             self._save_main_config()
         except Exception as ex:
-            self.lbl_err.config(text=f"Mentési hiba: {ex}", fg=FG_RED)
+            self.lbl_err.config(text=_t("save.error", error=ex), fg=FG_RED)
             return
         self._refresh_gate_source(key)   # az ELTÉRÉS azonnal látszódjék
         self._refresh_section_summaries()
@@ -3420,7 +3390,12 @@ class InstrumentParamsDialog:
         pc = pairs.setdefault(self.symbol, {})
         gates = pc.setdefault("gates", {})
         g = gates.setdefault(key, {})
-        if txt.startswith("Örökölt"):
+        # ⚠ Az „Örökölt" sort a LISTA ELSŐ ELEMÉHEZ hasonlítjuk, nem a felirat
+        # előtagjához. A `startswith("Örökölt")` a fordítás után SOSEM talált
+        # volna: a felülírás visszavonása helyett a kód a hatás-ágra futott
+        # volna, és egy `None`-nál csendben visszatér — a kapu beállítása
+        # látszólag nem történik meg.
+        if txt == self._gate_choices(key)[0]:
             g.pop(self.strategy.name, None)     # felülírás visszavonása
             if not g:
                 gates.pop(key, None)
@@ -3435,7 +3410,7 @@ class InstrumentParamsDialog:
         try:
             self._save_main_config()
         except Exception as ex:
-            self.lbl_err.config(text=f"Kapu-mentési hiba: {ex}", fg=FG_RED)
+            self.lbl_err.config(text=_t("idlg.gate_save_error", error=ex), fg=FG_RED)
             return
         self._refresh_gate_bt(key)
         self._refresh_gate_source(key)   # a hatás váltása ELTÉRÉST szülhet
@@ -3465,7 +3440,7 @@ class InstrumentParamsDialog:
                     fv = _num(v)
                     new_params[k] = fv if (fv is not None and v != "") else v
             except ValueError:
-                self.lbl_err.config(text=f"Hibás érték: {k} = {v!r}")
+                self.lbl_err.config(text=_t("bt.bad_value", key=k, value=repr(v)))
                 return None
         return new_params
 
@@ -3491,7 +3466,7 @@ class InstrumentParamsDialog:
                 json.dump(data, f, indent=2, ensure_ascii=False, default=str)
             tmp.replace(self.pf)
         except Exception as ex:
-            self.lbl_err.config(text=f"Mentési hiba: {ex}")
+            self.lbl_err.config(text=_t("save.error", error=ex))
             return False
         self.data = data
         self.is_new = False
@@ -3540,7 +3515,7 @@ class InstrumentParamsDialog:
             from strategy.settings import save_param_comments
             save_param_comments(self.strategy.name, comments)
         except Exception as ex:
-            self.lbl_err.config(text=f"Megjegyzés-mentési hiba: {ex}", fg=FG_RED)
+            self.lbl_err.config(text=_t("idlg.note_save_error", error=ex), fg=FG_RED)
 
     def _save(self):
         """EGYETLEN Mentés: órák + paraméterek (aktív készlet) + trials CSV (ha a
@@ -3598,7 +3573,7 @@ class InstrumentParamsDialog:
         try:
             self._save_hours()
         except Exception as ex:
-            self.lbl_err.config(text=f"Óra-mentési hiba: {ex}", fg=FG_RED)
+            self.lbl_err.config(text=_t("idlg.hours_save_error", error=ex), fg=FG_RED)
             return
         # A JSON test_summary: friss backtest, vagy a megegyező sor mentett metrikái.
         if self._bt_summary is None and dup is not None:
@@ -3613,7 +3588,7 @@ class InstrumentParamsDialog:
             try:
                 self._append_manual_trial(new_rank, params, self._bt_summary)
             except Exception as ex:
-                self.lbl_err.config(text=f"CSV-mentési hiba: {ex}", fg=FG_RED)
+                self.lbl_err.config(text=_t("idlg.csv_save_error", error=ex), fg=FG_RED)
                 return
             rec = {k: str(v) for k, v in params.items()}
             rec.update({"rank": str(new_rank), "note": "manual"})
@@ -3631,7 +3606,7 @@ class InstrumentParamsDialog:
             try:
                 _execp.save_execution_params(self.symbol, _exec_vals)
             except Exception as ex:
-                self.lbl_err.config(text=f"Végrehajtás-config mentési hiba: {ex}", fg=FG_RED)
+                self.lbl_err.config(text=_t("idlg.exec_save_error", error=ex), fg=FG_RED)
                 return
         strat_params = {k: v for k, v in params.items() if k not in _EXEC_KEYS}
         if not self._write_json(strat_params, extra=extra):
@@ -3705,7 +3680,7 @@ class InstrumentParamsDialog:
             import os
             os.startfile(str(self.trials_csv))   # Windows: alap app (Excel)
         except Exception as ex:
-            self.lbl_err.config(text=f"Megnyitási hiba: {ex}")
+            self.lbl_err.config(text=_t("bt.open_error", error=ex))
 
     # ── Duplikátum-keresés a rangsorban ─────────────────────────────────────
     def _find_matching_rank(self, params: dict):
@@ -3922,11 +3897,8 @@ class InstrumentParamsDialog:
             _tp = _num(_e.get())
         txt = ""
         if _trig is not None and _tp is not None and _trig >= _tp:
-            txt = (f"⚠ A részleges zárás SOHA nem fog életbe lépni: a trigger "
-                   f"{_trig:g} R, a célár (tp_rr_ratio) viszont {_tp:g} R — a "
-                   f"célár ér oda előbb, és a TELJES pozíciót zárja. Tegyél a "
-                   f"triggerbe kisebb értéket (pl. {max(0.1, _tp * 0.8):g}), vagy "
-                   f"told feljebb a tp_rr_ratio-t.")
+            txt = (_t("idlg.partial_never", trigger=f"{_trig:g}", tp=f"{_tp:g}",
+                   suggest=f"{max(0.1, _tp * 0.8):g}"))
         try:
             lbl.config(text=txt)
         except tk.TclError:
@@ -4098,8 +4070,8 @@ class InstrumentParamsDialog:
         except Exception:
             pass
         _pname = self._rr_name.get()
-        _saving = " — mentés a végén" if self._save_after_bt else ""
-        self.lbl_bt.config(text=f"Backtest fut (teljes hist., {_pname}){_saving} — kis türelmet…",
+        _saving = _t("idlg3.mentes_a_vegen") if self._save_after_bt else ""
+        self.lbl_bt.config(text=_t("idlg.bt_running", params=_pname, saving=_saving),
                            fg=FG_GRAY)
 
         def work():
@@ -4109,7 +4081,7 @@ class InstrumentParamsDialog:
                 # Hiányzó előzmény → MAGÁTÓL letölti (frissen felvett instrumentum)
                 df15, df1, err = load_data_ensure(
                     self.symbol, self.cfg,
-                    status=lambda m: self._bt_status(f"Előzmény: {m}"))
+                    status=lambda m: self._bt_status(_t("idlg.history_msg", msg=m)))
                 if df15 is not None:
                     ib = float(self.cfg.get("ml", {}).get("starting_balance_eur", 1000.0))
                     res = run_pair(self.symbol, df15, df1, params, pair_cfg,
@@ -4148,14 +4120,14 @@ class InstrumentParamsDialog:
         # A metrikák a KÖZÖS sávba kerülnek (nincs külön backtest-metrikasor). Az
         # lbl_bt már csak a ténylegesen alkalmazott kockázati technikát mutatja.
         tech = (summary or {}).pop("_rr_tech", None) or {}
-        _names = {"shield": "Pajzs", "halving": "Felező", "risky": "Risky",
+        _names = {"shield": "Pajzs", "halving": _t("tech.halving"), "risky": "Risky",
                   "fibo": "Fibo", "thirds": "Harmados"}
         tech_s = (", ".join(f"{_names.get(k, k)}×{v}" for k, v in tech.items())) if tech else ""
         self._bt_summary = summary or {"trades": 0}
         self._bt_from_saved = False   # ez valódi friss backtest
         self._render_metrics(self._bt_summary, "friss backtest")
         self.lbl_bt.config(
-            text=(f"Ténylegesen alkalmazott technika: {tech_s}" if tech_s else ""),
+            text=(_t("idlg.tech_used", tech=tech_s) if tech_s else ""),
             fg=FG_GRAY_DIM)
         if pending:
             # Auto-mentés folytatása: a friss eredménnyel most már perzisztálunk.

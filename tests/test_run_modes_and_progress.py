@@ -222,7 +222,9 @@ check("elrejthető", not d._prog_box.winfo_manager())
 
 # A gomb STOP-pá alakul, és a haladás az optimalizáló TÉNYLEGES állapotából jön.
 _blk = _func_src(_src, "def _sync_opt_status")
-check("a gomb futás közben leállít", "Optimalizálás leállítása" in _blk)
+# ⚠ A felirat a nyelvi katalogusban van (i18n) — a forrasban a KULCS all.
+check("a gomb futás közben leállít",
+      "idlg3.optimalizalas_leallitasa" in _blk)
 check("a % a KÖZÖS forrásból (opt_activity) jön — mint a főképernyőn",
       "progress_pct" in _blk)
 _g = (ROOT / "dashboard" / "gui.py").read_text(encoding="utf-8")
