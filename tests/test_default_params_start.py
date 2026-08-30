@@ -27,6 +27,17 @@ from core import applog
 applog.harden_console()
 
 results = []
+import json as _json
+_HU_CAT = _json.loads((ROOT / "lang" / "hu.json").read_text(encoding="utf-8"))
+
+
+def _says(key, *words):
+    """A kulcs magyar szovege tartalmazza-e mindet? (i18n utan a felirat mar
+    nem a forrasban van — a teszt a KATALOGUST kerdezi.)"""
+    txt = _HU_CAT.get(key, "")
+    return all(w in txt for w in words)
+
+
 
 
 def check(name, ok, detail=""):
@@ -111,7 +122,8 @@ _start = _gui.split("def _start_strategy")[1].split(chr(10) + "    def ")[0]
 check("a Play MAR NEM tagadja meg parameter hianyaban",
       "előbb futtasd az OPT-ot" not in _start, _start[:120])
 check("...de KIIRJA, hogy alapertelmezettel indul",
-      "ALAPÉRTELMEZETT paramétereivel" in _start)
+      "gui.ctrl.default_params" in _start
+      and _says("gui.ctrl.default_params", "ALAPÉRTELMEZETT paramétereivel"))
 # A strategia-engedelyezettseg kapuja MEGMARAD: az mas kerdes.
 check("az engedelyezettseg kapuja megmaradt",
       "if not self._strategy_enabled(symbol, name):" in _start)
@@ -143,12 +155,19 @@ check("a hozzarendeles MAR NEM tilt parameter hianyaban",
 # motor sosem futtatja — akkor a pozicio valoban kezeletlen maradna.
 check("...de az ENGEDELYEZETTSEGET ellenorzi",
       "_strategy_enabled(symbol, strategy_name)" in _adopt)
+# ⚠ A FELIRATOK a nyelvi katalogusban vannak (i18n) — a forrasban a KULCS all.
+# Ezert ketto kell: a kod hivatkozik-e a kulcsra, ES a magyar szoveg tenyleg azt
+# mondja-e. Csak a forras-szoveget keresve a teszt az atvezetestol bukott volna.
+import json as _json
+_HU = _json.loads((ROOT / "lang" / "hu.json").read_text(encoding="utf-8"))
 check("...es megmondja, hol lehet bekapcsolni",
-      "instrumentum NEVÉRE" in _adopt, "")
+      "gui2.kapcsold_be_az_instrumentum" in _adopt
+      and "instrumentum NEVÉRE" in _HU.get("gui2.kapcsold_be_az_instrumentum", ""), "")
 # ⚠ A hangolatlansag TAJEKOZTATAS, nem tiltas — de kimondva.
+_MEGJ = _HU.get("gui2.megjegyzes_ez_a_strategia", "")
 check("a hangolatlan keszletrol TAJEKOZTAT (nem tilt)",
-      "ALAPÉRTELMEZETT" in _adopt and "kezelni fogja" in _adopt,
-      _adopt[_adopt.find("MEGJEGYZ"):][:90])
+      "gui2.megjegyzes_ez_a_strategia" in _adopt
+      and "ALAPÉRTELMEZETT" in _MEGJ and "kezelni fogja" in _MEGJ, _MEGJ[:90])
 
 
 print()

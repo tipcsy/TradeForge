@@ -33,6 +33,17 @@ from core import applog
 applog.harden_console()
 
 results = []
+import json as _json
+_HU_CAT = _json.loads((ROOT / "lang" / "hu.json").read_text(encoding="utf-8"))
+
+
+def _says(key, *words):
+    """A kulcs magyar szovege tartalmazza-e mindet? (i18n utan a felirat mar
+    nem a forrasban van — a teszt a KATALOGUST kerdezi.)"""
+    txt = _HU_CAT.get(key, "")
+    return all(w in txt for w in words)
+
+
 
 
 def check(name, ok, detail=""):
@@ -168,8 +179,10 @@ _j = _gui.find("\n    # ── Piaci adat", _i)
 _blok = _gui[_i:_j]
 
 check("a `status()`-t használja (nem csak az e-mailt)", "_lic.status()" in _blok)
-check("⚠ a türelmi időt KIÍRJA", "nincs licencszerver" in _blok)
-check("⚠ a közelgő lejáratot is", "licenc lejár" in _blok)
+check("⚠ a türelmi időt KIÍRJA", "gui.hdr.no_licence_server" in _blok
+      and _says("gui.hdr.no_licence_server", "nincs licencszerver"))
+check("⚠ a közelgő lejáratot is", "gui.hdr.licence_expires" in _blok
+      and _says("gui.hdr.licence_expires", "licenc lejár"))
 check("a türelmi idő SZÍNEZVE van (nem szürke sor a szürkék közt)",
       "FG_RED" in _blok and "FG_YELLOW" in _blok)
 check("ellenőrzés nélkül csak az e-mail látszik",

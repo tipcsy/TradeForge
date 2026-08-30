@@ -211,8 +211,13 @@ check("_start_strategy: a kapu az allapot-iras ELOTT van (nem ragad be a run_sta
       _start.index("_strategy_enabled") < _start.index("_rs.set_state"))
 check("_start_strategy: NINCS tobbe params-fajl tiltas",
       "nincs paraméterkészlet" not in _start, _start[:200])
+# ⚠ A felirat a nyelvi katalogusban van (i18n) — a forrasban a KULCS all.
+import json as _json
+_HU_CAT = _json.loads((ROOT / "lang" / "hu.json").read_text(encoding="utf-8"))
 check("_start_strategy: beszedes uzenetet ad (nem nema no-op)",
-      "nincs engedélyezve ezen az" in _start)
+      "gui.ctrl.not_enabled" in _start
+      and "nincs engedélyezve ezen az"
+      in _HU_CAT.get("gui.ctrl.not_enabled", ""))
 
 # ══ 8. row_source: az 'enabled' atkerul a sorba, es metszi a 'live'-ot ════
 

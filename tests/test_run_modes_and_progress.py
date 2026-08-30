@@ -31,6 +31,17 @@ from core import applog
 applog.harden_console()
 
 results = []
+import json as _json
+_HU_CAT = _json.loads((ROOT / "lang" / "hu.json").read_text(encoding="utf-8"))
+
+
+def _says(key, *words):
+    """A kulcs magyar szovege tartalmazza-e mindet? (i18n utan a felirat mar
+    nem a forrasban van — a teszt a KATALOGUST kerdezi.)"""
+    txt = _HU_CAT.get(key, "")
+    return all(w in txt for w in words)
+
+
 
 
 def check(name, ok, detail=""):
@@ -272,8 +283,13 @@ d.on_optimize = lambda s, n, all_params=False: (
 # ⚠ ÉS AZ OK A VEZÉRLŐBŐL JÖN, nem a felület találgatásából: a három korábban
 # NÉMA `return` most mind szöveget ad.
 _blk = _func_src(_g, "def request_optimize")
-for _why in ("kivezetés alatt", "kereskedik", "már fut vagy sorban áll"):
-    check(f"a vezérlő megmondja: {_why!r}", _why in _blk)
+# ⚠ A SZOVEG a nyelvi katalogusban van — a vezerlo a KULCSRA hivatkozik.
+# Ket allitas: hivatkozik-e ra, ES a magyar szoveg tenyleg ezt mondja-e.
+for _key, _why in (("gui.opt.closing", "kivezetés alatt"),
+                   ("gui.opt.trading", "kereskedik"),
+                   ("gui.opt.already", "már fut vagy sorban áll")):
+    check(f"a vezérlő megmondja: {_why!r}",
+          _key in _blk and _says(_key, _why))
 
 
 # ── 6. A TELJES TÉR: a mentett pipák NEM sérülnek ──────────────────────

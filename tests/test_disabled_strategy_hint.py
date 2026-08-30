@@ -29,6 +29,17 @@ from core import applog
 applog.harden_console()
 
 results = []
+import json as _json
+_HU_CAT = _json.loads((ROOT / "lang" / "hu.json").read_text(encoding="utf-8"))
+
+
+def _says(key, *words):
+    """A kulcs magyar szovege tartalmazza-e mindet? (i18n utan a felirat mar
+    nem a forrasban van — a teszt a KATALOGUST kerdezi.)"""
+    txt = _HU_CAT.get(key, "")
+    return all(w in txt for w in words)
+
+
 
 
 def check(name, ok, detail=""):
@@ -135,7 +146,8 @@ if _src:
     check("a Play tovabbra is megtagadja a nem engedelyezettet",
           "if not self._strategy_enabled(symbol, name):" in _src)
     check("...es megmondja, hol lehet bekapcsolni",
-          "beállításainál" in _src, "")
+          "gui.ctrl.not_enabled" in _src
+          and _says("gui.ctrl.not_enabled", "beállításainál"), "")
 else:
     check("ures forras (kihagyva)", True)
 

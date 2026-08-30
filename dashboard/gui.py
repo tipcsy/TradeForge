@@ -49,7 +49,7 @@ from core import pnl_split as _pnl_split
 from core import opt_activity as _opt_activity
 from core import gate_layout as _gate_layout
 from core import quality as _quality
-from core.i18n import t as _t
+from core.i18n import t as _t, num as _fmtnum
 from version import APP_NAME, APP_VERSION
 
 
@@ -62,16 +62,16 @@ LEADING_COLUMNS = [
     Column("symbol", "Symbol",  10, "w",      kind="fixed"),
     Column("bid",    "BID",      9, "center", kind="fixed"),
     Column("ask",    "ASK",      9, "center", kind="fixed"),
-    Column("change", "Vált.%",   7, "center", kind="fixed"),
+    Column("change", _t("col.change"),   7, "center", kind="fixed"),
     Column("spread", "Spread",   9, "center", kind="fixed"),
 ]
 # Pozíció- és vezérlés-szintű oszlopok — hátul
 TRAILING_COLUMNS = [
-    Column("position", "Pozíció",    10, "center", kind="fixed"),
+    Column("position", _t("col.position"),    10, "center", kind="fixed"),
     Column("daily",    "Napi P&L",    9, "center", kind="fixed"),
     Column("market",   "Piac",       10, "center", kind="fixed"),
-    Column("quality",  "Minőség",     9, "center", kind="fixed"),
-    Column("opt",      "Opt státusz",18, "w",      kind="fixed"),
+    Column("quality",  _t("gui2.minoseg"),     9, "center", kind="fixed"),
+    Column("opt",      _t("gui2.opt_statusz"),18, "w",      kind="fixed"),
 ]
 
 
@@ -154,7 +154,7 @@ def build_columns(strategies) -> list[Column]:
             else:
                 mid.append(col)
     # A TF-együttállás („Együtt") oszlop a stratégia-oszlopok ELÉ kerül.
-    tfalign = [Column("tfalign", "Együtt", 10, "center", kind="tfalign")]
+    tfalign = [Column("tfalign", _t("col.align"), 10, "center", kind="tfalign")]
     return LEADING_COLUMNS + tfalign + mid + TRAILING_COLUMNS
 
 
@@ -650,7 +650,7 @@ class HeaderRow:
             # tényleges szélességét a sync_ctrl_width() tükrözi rá (pontos igazítás).
             if col.key == "opt":
                 self._ctrl_hdr = tk.Frame(self.frame, bg=BG_HEADER)
-                _cl = tk.Label(self._ctrl_hdr, text="Vezérlés", anchor="w",
+                _cl = tk.Label(self._ctrl_hdr, text=_t("col.ctrl"), anchor="w",
                                bg=BG_HEADER, fg=FG_BLUE, font=header_font,
                                padx=4, pady=3)
                 _cl.pack(fill="both", expand=True)
@@ -848,19 +848,17 @@ class OptimizerController:
             # stratégia TÉNYLEG kereskedik.
             if (self.instrument_state.get(symbol) == "CLOSING"
                     and self._strategy_live(symbol, strategy)):
-                return (f"{symbol}: kivezetés alatt (nyitott pozíciót kezel) — "
-                        f"az optimalizálás nem indul.")
+                return (_t("gui.opt.closing", symbol=symbol))
             # ⚠ VÉGSŐ VÉDELEM: a felület (`_live2_opt_click`) már leállította a
             # stratégiát, mielőtt idáig jutott. Ha ide MÉGIS kereskedő
             # stratégiával érkezünk (más hívó, sikertelen leállítás), nem
             # optimalizálunk — a paraméterfájl nem íródhat át egy futó
             # stratégia alól.
             if self._strategy_live(symbol, strategy):
-                return (f"{symbol}/{strategy}: kereskedik — a leállítás nem "
-                        f"sikerült, ezért az optimalizálás nem indul.")
+                return (_t("gui.opt.trading", symbol=symbol, strategy=strategy))
             job = (symbol, strategy)
             if job in self._running or job in self._queue:
-                return f"{symbol}/{strategy}: már fut vagy sorban áll."
+                return _t("gui.opt.already", symbol=symbol, strategy=strategy)
             # ⚠ „TELJES tér" kérés: a (pár, stratégia) kihagyás-listáját ennél az
             # EGY futásnál figyelmen kívül hagyjuk. A jelzőt itt jegyezzük meg,
             # mert a munka sorba is kerülhet — a kérés szándéka nem veszhet el a
@@ -884,8 +882,8 @@ class OptimizerController:
                 # az `opt_activity.symbol_state()` vonja össze. Az `instrument_state`-et
                 # NEM írjuk: az a kereskedési szándék, és nem szabad elveszítenie.
                 _opt_activity.set_state(symbol, strategy, _opt_activity.QUEUED,
-                                        f"Várakozik... ({strategy})")
-                self.optimizer_status[symbol] = f"Várakozik... ({strategy})"
+                                        _t("gui.opt.waiting", strategy=strategy))
+                self.optimizer_status[symbol] = _t("gui.opt.waiting", strategy=strategy)
         return ""
 
     def cancel_queued(self, symbol: str, strategy: str = None):
@@ -926,9 +924,9 @@ class OptimizerController:
                 pass
         self.cancel_queued(symbol, strategy)   # a sorban állók is törölve
         for _s, _strat in running:
-            _opt_activity.set_status(_s, _strat, "Leállítás kérve...")
+            _opt_activity.set_status(_s, _strat, _t("gui2.leallitas_kerve"))
         if running:
-            self.optimizer_status[symbol] = "Leállítás kérve..."
+            self.optimizer_status[symbol] = _t("gui2.leallitas_kerve")
 
     def resume_unfinished(self):
         """INDÍTÁSKOR: a fájlrendszerben talált BEFEJEZETLEN study-k (van `_study.db`,
@@ -992,12 +990,12 @@ class OptimizerController:
                 symbol, self.cfg,
                 tuple(t.label for t in job_strat.timeframes()), status=_st)
             self.optimizer_status[symbol] = (
-                "Adat kész, optimalizálás..." if ok else msg)
+                _t("gui2.adat_kesz_optimalizalas") if ok else msg)
 
             df_m15, df_m1 = load_data(symbol)
             if df_m15 is None:
                 self.optimizer_status[symbol] = f"Hiba: nincs adat — {msg}"
-                self._log_error(symbol, f"nincs letöltött adat: {msg}")
+                self._log_error(symbol, _t("gui.opt.no_data", msg=msg))
                 return
 
             # ── KÖZÖS dispatch: az optimize_job (→ optimize_symbol) dönt a
@@ -1011,7 +1009,7 @@ class OptimizerController:
             # hard_timeout_sec (0 = kikapcsolva) opcionális abszolút végső határ.
             stall_sec = opt_cfg.get("stall_timeout_sec", 900)   # 15 perc haladás nélkül
             hard_cap  = opt_cfg.get("hard_timeout_sec", 0)      # 0 = nincs abszolút limit
-            self.optimizer_status[symbol] = "Optimalizálás indul..."
+            self.optimizer_status[symbol] = _t("gui2.optimalizalas_indul")
             args = (symbol, df_m15, df_m1, job_cfg, initial_bal)
 
             if self._pool is not None:
@@ -1029,16 +1027,14 @@ class OptimizerController:
                         if idle > stall_sec:
                             fut.cancel()
                             self._log_error(symbol,
-                                f"BERAGADT: {int(idle)} mp nincs haladás "
-                                f"(stall_timeout_sec={stall_sec}). Lehet lassú (nagy adat) "
-                                f"vagy tényleg elakadt. Nézd meg a trials CSV-t, ha létrejött.")
+                                _t("gui.opt.stuck_log", sec=int(idle), limit=stall_sec))
                             self.optimizer_status[symbol] = \
-                                f"Hiba: beragadt ({int(idle//60)} perc nincs haladás)"
+                                _t("gui.opt.stuck", min=int(idle // 60))
                             return   # a finally STOPPED-ra állít → UI nem ragad be
                         if hard_cap and (now - t_submit) > hard_cap:
                             fut.cancel()
-                            self._log_error(symbol, f"ABSZOLÚT IDŐLIMIT ({hard_cap} mp) elérve.")
-                            self.optimizer_status[symbol] = "Hiba: abszolút időlimit"
+                            self._log_error(symbol, _t("gui.opt.hard_cap", sec=hard_cap))
+                            self.optimizer_status[symbol] = _t("gui2.hiba_abszolut_idolimit")
                             return
             else:
                 entry = optimize_job(*args, _LocalProgress(self.optimizer_status), strategy)
@@ -1046,11 +1042,11 @@ class OptimizerController:
             if "error" in entry:
                 if entry.get("stopped"):
                     # User-cancel (STOP gomb) — nem hiba: rövid státusz, nincs log.
-                    self.optimizer_status[symbol] = "Megszakítva ✋"
+                    self.optimizer_status[symbol] = _t("gui2.megszakitva")
                     return
                 self.optimizer_status[symbol] = f"Hiba: {entry['error']}"
                 self._log_error(
-                    symbol, entry.get("traceback") or f"eredmény hiba: {entry['error']}")
+                    symbol, entry.get("traceback") or _t("gui.opt.result_error", error=entry["error"]))
                 return
 
             full = {
@@ -1157,7 +1153,7 @@ class PortfolioBacktestTab:
         from strategy import available_strategy_names, default_strategy_name
         strat_row = tk.Frame(ctrl, bg=BG_BT)
         strat_row.pack(fill="x", pady=(0, 4))
-        tk.Label(strat_row, text="Stratégia:", bg=BG_BT, fg=FG_BLUE,
+        tk.Label(strat_row, text=_t("gui.strategia"), bg=BG_BT, fg=FG_BLUE,
                  font=self._header).pack(side="left")
         self._strat_var = tk.StringVar(value=default_strategy_name(self.cfg))
         _snames = available_strategy_names(self.cfg)
@@ -1169,7 +1165,7 @@ class PortfolioBacktestTab:
         self._strat_menu["menu"].config(bg=BG_HEADER, fg=FG_WHITE)
         self._strat_menu.pack(side="left", padx=6)
 
-        tk.Label(ctrl, text="Instrumentumok (optimalizáltak):",
+        tk.Label(ctrl, text=_t("gui.instrumentumok_optimalizaltak"),
                  bg=BG_BT, fg=FG_BLUE, font=self._header).pack(anchor="w", pady=(2, 4))
         # A párlista dinamikusan újraépül a stratégiaváltásra.
         self._sym_frame = tk.Frame(ctrl, bg=BG_BT)
@@ -1181,7 +1177,7 @@ class PortfolioBacktestTab:
         form = tk.Frame(ctrl, bg=BG_BT)
         form.pack(fill="x", pady=(8, 0))
 
-        tk.Label(form, text="Tól:", bg=BG_BT, fg=FG_GRAY,
+        tk.Label(form, text=_t("gui.tol"), bg=BG_BT, fg=FG_GRAY,
                  font=self._small).grid(row=0, column=0, sticky="e", pady=6)
         self._entry_from = tk.Entry(form, width=12, bg=BG_HEADER, fg=FG_WHITE,
                                     font=self._small, insertbackground=FG_WHITE)
@@ -1196,7 +1192,7 @@ class PortfolioBacktestTab:
         self._entry_to.insert(0, datetime.now().strftime("%Y-%m-%d"))
         self._entry_to.grid(row=0, column=3, padx=4)
 
-        tk.Label(form, text="Kezdő tőke ($):", bg=BG_BT, fg=FG_GRAY,
+        tk.Label(form, text=_t("gui.kezdo_toke"), bg=BG_BT, fg=FG_GRAY,
                  font=self._small).grid(row=1, column=0, sticky="e", pady=4)
         self._entry_bal = tk.Entry(form, width=10, bg=BG_HEADER, fg=FG_WHITE,
                                    font=self._small, insertbackground=FG_WHITE)
@@ -1214,7 +1210,7 @@ class PortfolioBacktestTab:
         self._entry_slots.grid(row=1, column=3, padx=4, sticky="w")
 
         # Kockázatcsökkentés preset (MIND a párra) — a technikák összevetéséhez.
-        tk.Label(form, text="Kockázatcsökkentés:", bg=BG_BT, fg=FG_GRAY,
+        tk.Label(form, text=_t("gui.kockazatcsokkentes"), bg=BG_BT, fg=FG_GRAY,
                  font=self._small).grid(row=2, column=0, sticky="e", pady=4)
         # ⚠ A legördülő FELIRATOKAT mutat, a döntés KÓDON megy. Amíg a kettő egy
         # volt, a preset-választás egy magyar szöveg megtalálásán múlt: angolul a
@@ -1232,7 +1228,7 @@ class PortfolioBacktestTab:
 
         # Pozícióépítés (piramidális ráépítés a risk-free runnereken) ki/be.
         self._build_var = tk.BooleanVar(value=False)
-        tk.Checkbutton(form, text="Pozícióépítés", variable=self._build_var,
+        tk.Checkbutton(form, text=_t("gui.pozicioepites"), variable=self._build_var,
                        bg=BG_BT, fg=FG_WHITE, selectcolor=BG_HEADER,
                        activebackground=BG_BT, activeforeground=FG_WHITE,
                        font=self._small).grid(row=2, column=2, columnspan=2,
@@ -1242,19 +1238,19 @@ class PortfolioBacktestTab:
         # a portfólió sem nyit olyat, amit egy él-oldali kapu kiszűrne. Per-pár config
         # tiszteletben (ha egy párra ki van kapcsolva az Együtt, arra nem kapuz).
         self._pf_exec_gates_var = tk.BooleanVar(value=True)
-        tk.Checkbutton(form, text="Reális kapuk (TF+spread)",
+        tk.Checkbutton(form, text=_t("gui.realis_kapuk_tf_spread"),
                        variable=self._pf_exec_gates_var,
                        bg=BG_BT, fg=FG_WHITE, selectcolor=BG_HEADER,
                        activebackground=BG_BT, activeforeground=FG_WHITE,
                        font=self._small).grid(row=3, column=2, columnspan=2,
                                               sticky="w", padx=4)
 
-        self._btn_start = tk.Button(form, text="▶  Backtest indítása", width=20,
+        self._btn_start = tk.Button(form, text=_t("gui.backtest_inditasa"), width=20,
                                     bg=BTN_BT_BG, fg=BTN_BT_FG, font=self._small,
                                     relief="flat", command=self._start_bt)
         self._btn_start.grid(row=3, column=0, columnspan=2, pady=8, sticky="w")
 
-        self._btn_stop_bt = tk.Button(form, text="■  Leállítás", width=12,
+        self._btn_stop_bt = tk.Button(form, text=_t("gui.leallitas2"), width=12,
                                       bg=BTN_DIS_BG, fg=BTN_DIS_FG, font=self._small,
                                       relief="flat", command=self._stop_bt,
                                       state="disabled")
@@ -1266,10 +1262,10 @@ class PortfolioBacktestTab:
         prog_frame = tk.Frame(right, bg=BG_BT)
         prog_frame.pack(fill="x")
 
-        self._lbl_status  = tk.Label(prog_frame, text="Kész.", bg=BG_BT,
+        self._lbl_status  = tk.Label(prog_frame, text=_t("bt.done"), bg=BG_BT,
                                      fg=FG_GRAY, font=self._small)
         self._lbl_status.grid(row=0, column=0, sticky="w")
-        self._lbl_date    = tk.Label(prog_frame, text="Dátum: —", bg=BG_BT,
+        self._lbl_date    = tk.Label(prog_frame, text=_t("gui.datum"), bg=BG_BT,
                                      fg=FG_WHITE, font=self._mono)
         self._lbl_date.grid(row=1, column=0, sticky="w")
         self._lbl_bal     = tk.Label(prog_frame, text="Egyenleg: —", bg=BG_BT,
@@ -1278,7 +1274,7 @@ class PortfolioBacktestTab:
         self._lbl_pnl     = tk.Label(prog_frame, text="P&L: —", bg=BG_BT,
                                      fg=FG_WHITE, font=self._mono)
         self._lbl_pnl.grid(row=1, column=2, sticky="w", padx=8)
-        self._lbl_trades  = tk.Label(prog_frame, text="Lezárt: 0  Nyitott: 0",
+        self._lbl_trades  = tk.Label(prog_frame, text=_t("gui.lezart_0_nyitott_0"),
                                      bg=BG_BT, fg=FG_GRAY, font=self._small)
         self._lbl_trades.grid(row=2, column=0, columnspan=2, sticky="w")
 
@@ -1291,14 +1287,14 @@ class PortfolioBacktestTab:
                                             mode="determinate", maximum=100)
         self._progressbar.pack(fill="x", pady=(4, 6))
 
-        tk.Label(right, text="Equity görbe:", bg=BG_BT, fg=FG_GRAY,
+        tk.Label(right, text=_t("gui.equity_gorbe"), bg=BG_BT, fg=FG_GRAY,
                  font=self._small).pack(anchor="w")
         self._canvas = tk.Canvas(right, height=140, bg=CANVAS_BG, highlightthickness=0)
         self._canvas.pack(fill="x", pady=(0, 6))
 
         tk.Frame(p, bg=FG_GRAY_DIM, height=1).pack(fill="x", padx=4, pady=2)
 
-        tk.Label(p, text="Eredmények:", bg=BG_BT, fg=FG_BLUE,
+        tk.Label(p, text=_t("gui.eredmenyek"), bg=BG_BT, fg=FG_BLUE,
                  font=self._header).pack(anchor="w", padx=8, pady=(4, 0))
 
         res_frame = tk.Frame(p, bg=BG_BT)
@@ -1306,8 +1302,8 @@ class PortfolioBacktestTab:
 
         res_header = tk.Frame(res_frame, bg=BG_HEADER)
         res_header.pack(fill="x")
-        for col, w in [("Pár", 10), ("Trade", 6), ("Win%", 7),
-                       ("P&L$", 9), ("MaxDD%", 7), ("PF", 6), ("Végegyenleg", 12)]:
+        for col, w in [(_t("gui2.par"), 10), ("Trade", 6), ("Win%", 7),
+                       ("P&L$", 9), ("MaxDD%", 7), ("PF", 6), (_t("gui2.vegegyenleg"), 12)]:
             tk.Label(res_header, text=col, width=w, anchor="center",
                      bg=BG_HEADER, fg=FG_BLUE, font=self._small,
                      padx=4, pady=3).pack(side="left")
@@ -1341,7 +1337,7 @@ class PortfolioBacktestTab:
                              if not f.stem.endswith("_hours") and f.stem in _pairs]) \
                      if params_dir.exists() else []
         if not optimized:
-            tk.Label(self._sym_frame, text="(Nincs optimalizált instrumentum)",
+            tk.Label(self._sym_frame, text=_t("gui.nincs_optimalizalt_instrumentum"),
                      bg=BG_BT, fg=FG_GRAY, font=self._small).grid(
                          row=0, column=0, columnspan=4, sticky="w")
             return
@@ -1360,7 +1356,7 @@ class PortfolioBacktestTab:
             return
         symbols = [s for s, v in self._sym_vars.items() if v.get()]
         if not symbols:
-            self._lbl_status.config(text="Válassz legalább egy instrumentumot!", fg=FG_RED)
+            self._lbl_status.config(text=_t("gui.valassz_legalabb_egy_instrumentumot"), fg=FG_RED)
             return
         date_from = self._entry_from.get().strip()
         date_to   = self._entry_to.get().strip()
@@ -1384,7 +1380,7 @@ class PortfolioBacktestTab:
         self._btn_start.config(state="disabled", bg=BTN_DIS_BG, fg=BTN_DIS_FG)
         self._btn_stop_bt.config(state="normal", bg=BTN_STOP_BG, fg=BTN_STOP_FG)
         self._progressbar["value"] = 0
-        self._lbl_status.config(text=f"Fut... ({len(symbols)} pár)", fg=FG_YELLOW)
+        self._lbl_status.config(text=_t("gui.pbt.running", n=len(symbols)), fg=FG_YELLOW)
 
         self._thread = threading.Thread(
             target=self._run_thread,
@@ -1397,7 +1393,7 @@ class PortfolioBacktestTab:
 
     def _stop_bt(self):
         self._stop_flag.set()
-        self._lbl_status.config(text="Leállítás...", fg=FG_ORANGE)
+        self._lbl_status.config(text=_t("gui.leallitas"), fg=FG_ORANGE)
 
     def _rr_spec(self):
         """A választott preset → kockázatcsökkentő spec (mind a párra), vagy None
@@ -1462,11 +1458,11 @@ class PortfolioBacktestTab:
             n_closed  = prog.get("n_closed", 0)
             pct       = prog.get("pct", 0.0)
 
-            self._lbl_date.config(text=f"Dátum: {date_str}")
+            self._lbl_date.config(text=_t("gui.pbt.date", date=date_str))
             self._lbl_bal.config(text=f"Egyenleg: ${balance:,.2f}")
             pnl_fg = FG_GREEN if pnl >= 0 else FG_RED
             self._lbl_pnl.config(text=f"P&L: {pnl:+.2f}$ ({pnl_pct:+.1f}%)", fg=pnl_fg)
-            self._lbl_trades.config(text=f"Lezárt: {n_closed}   Nyitott: {n_open}")
+            self._lbl_trades.config(text=_t("gui.pbt.counts", closed=n_closed, open=n_open))
             self._progressbar["value"] = pct
 
             self._draw_equity(self._equity_pts, init_bal)
@@ -1486,12 +1482,13 @@ class PortfolioBacktestTab:
                 final    = result.get("final_balance", init_bal)
                 pnl      = final - init_bal
                 self._lbl_status.config(
-                    text=f"Kész! {n} trade | P&L: {pnl:+.2f}$ ({pnl/init_bal*100:+.1f}%)",
+                    text=_t("gui.pbt.done", n=n, pnl=_fmtnum(f"{pnl:+.2f}"),
+                        pct=_fmtnum(f"{pnl / init_bal * 100:+.1f}")),
                     fg=FG_GREEN if pnl >= 0 else FG_RED)
                 self._show_results(result)
                 self._draw_equity(result.get("equity_curve", []), init_bal)
             else:
-                self._lbl_status.config(text="Leállítva.", fg=FG_GRAY)
+                self._lbl_status.config(text=_t("gui.leallitva"), fg=FG_GRAY)
 
     def _draw_equity(self, points: list, init_bal: float = 1000.0):
         c = self._canvas
@@ -1599,9 +1596,9 @@ class PortfolioBacktestTab:
         risky_note  = (f"   ·   ⚠R risky ({len(risky_pairs)}): {', '.join(risky_pairs)}"
                        if risky_pairs else "")
         self._lbl_res_total.config(
-            text=f"ÖSSZESEN  |  Trade: {n_all}  |  Win: {wr_all:.0%}  |  "
-                 f"P&L: {total_pnl:+.2f}$  |  MaxDD: {mdd:.1f}%  |  "
-                 f"PF: {pf_str}  |  Végegyenleg: ${final_bal:.0f}{risky_note}",
+            text=_t("gui.pbt.total", trades=n_all, win=f"{wr_all:.0%}",
+                 pnl=_fmtnum(f"{total_pnl:+.2f}"), mdd=_fmtnum(f"{mdd:.1f}"),
+                 pf=pf_str, final=_fmtnum(f"{final_bal:.0f}"), note=risky_note),
             fg=FG_GREEN if total_pnl >= 0 else FG_RED,
         )
 
@@ -1612,16 +1609,16 @@ class PortfolioBacktestTab:
 
 POSITION_COLUMNS = [
     ("symbol",  "Symbol",     10, "w"),
-    ("strategy","Stratégia",   9, "center"),
-    ("exit",    "Kiszállás",  18, "w"),        # a kiszállási terv: hol tart + mi jön
-    ("type",    "Irány",       6, "center"),
+    ("strategy",_t("signals.col.strategy"),   9, "center"),
+    ("exit",    _t("gui2.kiszallas"),  18, "w"),        # a kiszállási terv: hol tart + mi jön
+    ("type",    _t("signals.col.dir"),       6, "center"),
     ("volume",  "Lot",         6, "center"),
-    ("open",    "Nyitó",      10, "center"),
+    ("open",    _t("gui2.nyito"),      10, "center"),
     ("current", "Akt.",       10, "center"),
     ("sl",      "SL",         10, "center"),
     ("sl_pnl",  "SL P&L",     12, "center"),   # ha az SL bekövetkezik: R + $
     ("tp",      "TP",         10, "center"),
-    ("tp_pnl",  "TP cél",     12, "center"),   # a TP-nél várható eredmény: R + $
+    ("tp_pnl",  _t("gui2.tp_cel"),     12, "center"),   # a TP-nél várható eredmény: R + $
     ("orig_sl", "Er. SL",     10, "center"),
     ("pnl",     "P&L",        13, "center"),   # folyó eredmény: $ + R (egy cellában)
 ]
@@ -1668,10 +1665,10 @@ def _exit_plan(symbol: str, pstate: dict | None, ctx: dict | None = None) -> dic
 
     _IND = {"supertrend": "ST", "wpr": "WPR", "divergence": "Div"}
     _RUNNER_DESC = {
-        _rrx.RUNNER_TRAILING: "a maradék trailinggel fut",
-        _rrx.RUNNER_KEEP:     "a stop a távoli (eredeti) helyén marad",
-        _rrx.RUNNER_BREAKEVEN: "a stop a belépőre (BE) kerül",
-        _rrx.RUNNER_EXIT:     f"kiszállási jelre zár ({_IND.get(exind, exind)})",
+        _rrx.RUNNER_TRAILING: _t("gui2.a_maradek_trailinggel_fut"),
+        _rrx.RUNNER_KEEP:     _t("gui2.a_stop_a_tavoli"),
+        _rrx.RUNNER_BREAKEVEN: _t("gui2.a_stop_a_belepore"),
+        _rrx.RUNNER_EXIT:     _t("gui.exit.on_signal", indicator=_IND.get(exind, exind)),
     }
     _RUNSH = {_rrx.RUNNER_TRAILING: "Trail", _rrx.RUNNER_KEEP: "Marad",
               _rrx.RUNNER_BREAKEVEN: "BE",
@@ -1723,37 +1720,34 @@ def _exit_plan(symbol: str, pstate: dict | None, ctx: dict | None = None) -> dic
         if not be_done:
             rem = r_to(be_price)
             text = "Ki →BE"
-            tip = (f"Ki (alap kezelés): amikor az ár a belépő→TP táv {be_pct*100:.0f}%-át "
-                   f"megteszi, a stop a költség-tudatos breakevenre kerül, utána a "
-                   f"trailing követi az árat a TP-ig." + prog(rem))
+            tip = (_t("gui.exit.be_trail", pct=f"{be_pct * 100:.0f}") + prog(rem))
         else:
             text = "Ki: Trail fut"
-            tip = "A BE megvolt — a trailing követi az árat a TP-ig."
+            tip = _t("gui2.a_be_megvolt_a")
     elif eff == _rrx.PRESET_RISKY:
         color = FG_ORANGE
         rem = (1.0 - cur_r) if cur_r is not None else None
         if not be_done:
             text = "Risky →1R"
-            tip = ("Risky: felezett belépő-méret; 1R-nél a stop a belépőre, és azonnal "
-                   "(feleződő) trailing indul." + prog(rem))
+            tip = (_t("gui2.risky_felezett_belepo_meret") + prog(rem))
         else:
             text = "Risky: Trail fut"
-            tip = "1R megvolt — a stop a belépőn, a trailing követi az árat."
+            tip = _t("gui2.1r_megvolt_a_stop")
     elif is_partial:
         frac = 0.75 if eff == _rrx.PRESET_SHIELD else 0.5
-        pname = "Pajzs" if eff == _rrx.PRESET_SHIELD else "Felező"
+        pname = "Pajzs" if eff == _rrx.PRESET_SHIELD else _t("tech.halving")
         color = FG_TEAL if runner == _rrx.RUNNER_EXIT else FG_CYAN
         if not reduced:
             rem = (1.0 - cur_r) if cur_r is not None else None
             text = f"{pname} →1R {frac*100:.0f}%"
             _u = usd(frac)
-            _ur = f" (≈{_u:.0f}$ realizál)" if _u is not None else ""
-            tip = (f"{pname}: 1R-nél a pozíció {frac*100:.0f}%-át lezárja{_ur}, a maradék "
-                   f"{(1-frac)*100:.0f}% a runner szerint fut: {run_desc}." + prog(rem))
+            _ur = _t("gui.exit.realise", amount=_fmtnum(f"{_u:.0f}")) if _u is not None else ""
+            tip = (_t("gui.exit.partial_plan", preset=pname, pct=f"{frac * 100:.0f}",
+                   realise=_ur, rest=f"{(1 - frac) * 100:.0f}", desc=run_desc) + prog(rem))
         else:
             text = f"{pname}✓ →{runsh}"
-            tip = (f"A részleges zárás ({frac*100:.0f}%) megtörtént — a maradék a runner "
-                   f"({_rrs.RUNNER_NAME.get(runner, runner)}) szerint fut: {run_desc}.")
+            tip = (_t("gui.exit.partial_done", pct=f"{frac * 100:.0f}",
+                   runner=_rrs.RUNNER_NAME.get(runner, runner), desc=run_desc))
     elif is_fibo:
         color = FG_PURPLE
         lvl = spec.get("fibo_level", 0.618)
@@ -1763,36 +1757,32 @@ def _exit_plan(symbol: str, pstate: dict | None, ctx: dict | None = None) -> dic
         if not ps.get("rr_fibo_done"):
             rem = r_to(trig_price)
             text = f"Fibo →{lvl*100:.0f}% ⇒{stop_desc}"
-            tip = (f"Fibo: amikor az ár a belépő→TP táv {lvl*100:.0f}%-át megteszi, a stop a "
-                   f"{stop_desc} szintre áll és OTT MARAD — nincs részleges zárás, nincs "
-                   f"trailing; a TP fut." + prog(rem))
+            tip = (_t("gui.exit.fibo", pct=f"{lvl * 100:.0f}", stop=stop_desc) + prog(rem))
         else:
             text = "Fibo ✓ · TP fut"
-            tip = "A Fibo-stop beállt (rögzítve) — a TP fut."
+            tip = _t("gui2.a_fibo_stop_beallt")
     elif is_thirds:
         color = FG_PURPLE
         if not ps.get("rr_thirds1"):
             rem = (1.0 - cur_r) if cur_r is not None else None
             text = "Harmados →1R ⅓"
-            tip = ("Harmados: 1R-nél a stop az alap-táv 1/3-ára (profitban); a célárnál a "
-                   "2/3-ra lép. Nincs részleges zárás, nincs trailing." + prog(rem))
+            tip = (_t("gui2.harmados_1r_nel_a") + prog(rem))
         elif not ps.get("rr_thirds2"):
             text = "Harmados ⅓ →TP ⅔"
-            tip = "Az 1/3-stop beállt — a célár érintésekor a stop a 2/3-ra lép."
+            tip = _t("gui2.az_1_3_stop")
         else:
             text = "Harmados ⅔ · TP fut"
-            tip = "A 2/3-stop beállt — a TP fut."
+            tip = _t("gui2.a_2_3_stop")
     elif undecided_sf:
         color = FG_CYAN
         text = "Pajzs↔Fibo ?"
-        tip = ("Pajzs↔Fibo: belépéskor dől el — nagy mozgásnál (ATR) Fibo (nem trailel), "
-               "különben Pajzs (1R-nél 75% zár).")
+        tip = (_t("gui2.pajzs_fibo_belepeskor_dol"))
     else:
         color, text, tip = FG_GRAY, str(preset), ""
 
     if cost_cut:
         text += " +CC"
-        tip += f"  Cost-cut: {cc_bars} fő-gyertya után, ha még veszteséges, piaci zárás."
+        tip += _t("gui.exit.costcut", bars=cc_bars)
 
     return {"text": text, "color": color, "trails": trails, "tooltip": tip}
 
@@ -1852,7 +1842,7 @@ class PositionRow:
         self.btn_be.bind("<Leave>", self._be_tip_hide)
         # Építés MÓD-váltó (Ki/Kézi/Auto) — per SZIMBÓLUM (a soron állítható, nem kell
         # az instrumentum-ablak). Kattintásra körben vált; a szín jelzi az állapotot.
-        self.btn_bmode = tk.Button(self.frame, text="Ép:—", width=7, font=small_font,
+        self.btn_bmode = tk.Button(self.frame, text=_t("gui.ep"), width=7, font=small_font,
                                    relief="flat", bg=BTN_DIS_BG, fg=FG_GRAY,
                                    command=(lambda: self._symbol and on_build_mode(self._symbol))
                                            if on_build_mode else None)
@@ -1890,7 +1880,7 @@ class PositionRow:
         # vezérlő-sávban levágódott) — a mezőre/gombra állva látszik.
         self.ent_trail.bind("<Enter>", self._trail_tip_show)
         self.ent_trail.bind("<Leave>", self._trail_tip_hide)
-        self.btn_panic = tk.Button(self.frame, text="Zár", width=4, font=small_font,
+        self.btn_panic = tk.Button(self.frame, text=_t("gui.zar"), width=4, font=small_font,
                                    relief="flat", bg=BTN_STOP_BG, fg=BTN_STOP_FG,
                                    command=lambda: on_panic(ticket))
         self.btn_panic.pack(side="left", padx=(1, 4))
@@ -2106,8 +2096,7 @@ class PositionRow:
             self._be_tip_text = ""
         elif not be_feasible:
             self.btn_be.config(text="BE", bg=BTN_DIS_BG, fg=FG_GRAY, state="disabled")
-            self._be_tip_text = ("BE még nem lehetséges — a nyereség nem fedezi a "
-                                 "spread + jutalék + swap költséget.")
+            self._be_tip_text = (_t("gui2.be_meg_nem_lehetseges"))
         else:
             self.btn_be.config(text="BE", bg=BTN_OPT_BG, fg=BTN_OPT_FG, state="normal")
             self._be_tip_text = ""
@@ -2133,31 +2122,25 @@ class PositionRow:
                 _mode = _bst.get_mode(sym) if sym else "off"
             except Exception:
                 _mode = "off"
-        _MODE_LBL = {"off": "Ép:Ki", "manual": "Ép:Kézi", "auto": "Ép:Auto"}
+        _MODE_LBL = {"off": _t("gui2.ep_ki"), "manual": _t("gui2.ep_kezi"), "auto": _t("gui2.ep_auto")}
         _MODE_COL = {"off": FG_GRAY, "manual": FG_WHITE, "auto": FG_CYAN}
-        self.btn_bmode.config(text=_MODE_LBL.get(_mode, "Ép:Ki"),
+        self.btn_bmode.config(text=_MODE_LBL.get(_mode, _t("gui2.ep_ki")),
                               fg=_MODE_COL.get(_mode, FG_GRAY),
                               relief="sunken" if _mode in ("manual", "auto") else "flat")
         if _mode == "manual" and _rt and _rt.get("ready"):
             self.btn_build.config(state="normal", bg=BTN_OPT_BG, fg=BTN_OPT_FG)
-            self._build_tip_text = (f"Ráépítés: +{_rt.get('next_lot', 0):.2f} lot azonos "
-                                    f"irányba, az összes stop az átlagárra "
-                                    f"(≈{_rt.get('avg_price', 0):.5f}).")
+            self._build_tip_text = (_t("gui.pos.build_add", lot=_fmtnum(f"{_rt.get('next_lot', 0):.2f}"),
+                                    price=_fmtnum(f"{_rt.get('avg_price', 0):.5f}")))
         elif _mode == "manual":
             self.btn_build.config(state="disabled", bg=BTN_DIS_BG, fg=FG_GRAY)
-            self._build_tip_text = ("Építés (Kézi): a +gomb akkor aktív, ha a pozíció "
-                                    "kockázatmentes ÉS a gyertya új csúcsra/mélyre zár. "
-                                    "Ekkor a +gomb hozzáad még egy (csökkenő méretű) "
-                                    "pozíciót, és minden stopot az átlagárra húz.")
+            self._build_tip_text = (_t("gui2.epites_kezi_a_gomb"))
         elif _mode == "auto":
             # Auto: a motor magától épít → a gomb tiltva, de cián jelzi, hogy aktív.
             self.btn_build.config(text="＋", state="disabled", bg=BTN_DIS_BG, fg=FG_CYAN)
-            self._build_tip_text = "Építés: Auto — a motor magától ráépít a jel-gyertyán."
+            self._build_tip_text = _t("gui2.epites_auto_a_motor")
         else:
             self.btn_build.config(state="disabled", bg=BTN_DIS_BG, fg=FG_GRAY)
-            self._build_tip_text = ("Építés (pozícióépítés) kikapcsolva. Az Ép-gombbal "
-                                    "kapcsold Kézi vagy Auto módba. Kézinél a +gomb "
-                                    "hozzáad még egy pozíciót a jel-gyertyán.")
+            self._build_tip_text = (_t("gui2.epites_pozicioepites_kikapcsolva_az"))
 
         # Trail gomb — a MOTOR valódi feltételét tükrözi (nem csak a be_done-t):
         #   • KI (lapos, szürke):        kézzel kikapcsoltad (trailing_enabled=False)
@@ -2175,22 +2158,19 @@ class PositionRow:
         if not trail_on:
             self.btn_trail.config(text="Trail", relief="flat",
                                   bg=BTN_DIS_BG, fg=FG_GRAY)
-            _trail_state = ("Kikapcsolva (a Trail gombbal visszakapcsolható). "
-                            "A stop ott marad, ahol most van.")
+            _trail_state = (_t("gui2.kikapcsolva_a_trail_gombbal"))
         elif not plan["trails"]:
             self.btn_trail.config(text="Trail", relief="flat",
                                   bg=BTN_DIS_BG, fg=FG_PURPLE)
-            _trail_state = ("Ennél a beállításnál NINCS trailing — a stop a kijelölt "
-                            "szinten marad (Fibo/Harmados, vagy a runner nem Trailing).")
+            _trail_state = (_t("gui2.ennel_a_beallitasnal_nincs"))
         elif rf_now:
             self.btn_trail.config(text="Trail", relief="sunken",
                                   bg=FG_GREEN, fg=FG_ON_ACCENT)
-            _trail_state = "HÚZ: a pozíció kockázatmentes, a stop követi az árat."
+            _trail_state = _t("gui2.huz_a_pozicio_kockazatmentes")
         else:
             self.btn_trail.config(text="Trail", relief="sunken",
                                   bg=FG_ORANGE, fg=FG_ON_ACCENT)
-            _trail_state = ("VÁR: amint a pozíció kockázatmentes lesz (BE megvan / 1R "
-                            "részleges zárás), a trailing elindul.")
+            _trail_state = (_t("gui2.var_amint_a_pozicio"))
 
         # Trail távolság mező — PONTBAN, egész szám. A kézi felülírás, ha van;
         # egyébként az optimalizált alapérték. Gépelés közben NEM írjuk felül.
@@ -2219,13 +2199,11 @@ class PositionRow:
                 _rr_txt += f" / {_r_of_trail * _risk_usd:.0f}$"
 
         # A Trail gomb + táv-mező közös tooltipje: a távolság ÉS mikor húz.
-        _tip = f"Trailing követési távolság: {int(eff)} pont" if eff else \
-               "Trailing követés (nincs beállított távolság)."
+        _tip = _t("gui.pos.trail_dist", points=int(eff)) if eff else \
+               _t("gui2.trailing_kovetes_nincs_beallitott")
         if _rr_txt:
             _tip += f"  ({_rr_txt.strip()})"
-        _tip += (".\nAkkor húz, ha a pozíció kockázatmentes ÉS az ár tovább mozdul a "
-                 "javadra; a bróker minimum stop-távolságánál közelebb nem tud húzni.\n"
-                 f"Most: {_trail_state}\nKiszállás: {plan['tooltip']}")
+        _tip += (_t("gui.pos.trail_tip", state=_trail_state, plan=plan["tooltip"]))
         self._trail_tip_text = _tip
 
 
@@ -2263,10 +2241,10 @@ class PositionsTab:
         p.configure(bg=BG)
         top = tk.Frame(p, bg=BG, pady=4)
         top.pack(fill="x", padx=8)
-        tk.Button(top, text="⚠  ÖSSZES ZÁRÁSA", font=self._small,
+        tk.Button(top, text=_t("gui.osszes_zarasa"), font=self._small,
                   bg=BTN_STOP_BG, fg=BTN_STOP_FG, relief="flat", cursor="hand2",
                   command=self._on_close_all).pack(side="left")
-        self._lbl_total = tk.Label(top, text="Összes P&L: —", bg=BG,
+        self._lbl_total = tk.Label(top, text=_t("gui.osszes_p_l"), bg=BG,
                                    fg=FG_WHITE, font=self._header)
         self._lbl_total.pack(side="right", padx=8)
 
@@ -2278,20 +2256,14 @@ class PositionsTab:
         legend = tk.Frame(p, bg=BG)
         legend.pack(fill="x", padx=10, pady=(0, 4))
         tk.Label(legend, text="Trail:", bg=BG, fg=FG_GRAY, font=self._small).pack(side="left")
-        for txt, col in [("■ húz", FG_GREEN), ("■ vár (kockázatmentesre)", FG_ORANGE),
+        for txt, col in [(_t("gui2.huz"), FG_GREEN), (_t("gui2.var_kockazatmentesre"), FG_ORANGE),
                          ("■ nem trailel (Fibo/Harmados…)", FG_PURPLE),
                          ("■ kikapcsolva", FG_GRAY)]:
             tk.Label(legend, text=txt, bg=BG, fg=col, font=self._small, padx=4).pack(side="left")
-        tk.Label(legend, text="   SL ⇘T = trailing mozgatta   |   SL P&L / TP cél = "
-                              "R + $, ha az SL / a TP bekövetkezik   |   P&L = a folyó "
-                              "eredmény ($ + R)   |   a Trail-tooltip ≈R/$ = a követési "
-                              "táv a kockázathoz mérve",
+        tk.Label(legend, text=_t("gui.sl_t_trailing_mozgatta"),
                  bg=BG, fg=FG_GRAY, font=self._small).pack(side="left")
-        tk.Label(p, text="Kiszállás = hol tart a terv és mi jön (pl. „Pajzs →1R 75%" +
-                         "” = 1R-nél 75% zár).  A cellára ÁLLVA a teljes életciklus "
-                         "(mennyit zár, mivel megy tovább, most hol tart); a cellára "
-                         "KATTINTVA a preset állítható (a pár minden pozíciójára).  ·  A "
-                         "Stratégia cellára kattintva kézi pozíció stratégiához rendelhető (⇩).",
+        tk.Label(p, text=_t("gui2.kiszallas_hol_tart_a") +
+                         _t("gui2.1r_nel_75_zar"),
                  bg=BG, fg=FG_GRAY_DIM, font=self._small, anchor="w",
                  justify="left").pack(fill="x", padx=10, pady=(0, 4))
 
@@ -2301,7 +2273,7 @@ class PositionsTab:
         for key, label, w, anchor in POSITION_COLUMNS:
             tk.Label(hdr, text=label, width=w, anchor=anchor, bg=BG_HEADER,
                      fg=FG_BLUE, font=self._header, padx=4, pady=3).pack(side="left")
-        tk.Label(hdr, text="Vezérlés (BE / Ép:mód / ＋ / Trail / táv=pont / Zár)", width=40, anchor="w",
+        tk.Label(hdr, text=_t("gui.vezerles_be_ep_mod"), width=40, anchor="w",
                  bg=BG_HEADER, fg=FG_BLUE, font=self._header).pack(side="left")
         tk.Frame(p, bg=FG_GRAY_DIM, height=1).pack(fill="x", padx=2)
 
@@ -2361,13 +2333,13 @@ class PositionsTab:
             a[0] += p["profit"]
             a[1] += 1
         self._lbl_total.config(
-            text=f"Összes P&L: {total:+.2f}$   |   {len(positions)} pozíció",
+            text=_t("gui.pos.total", pnl=_fmtnum(f"{total:+.2f}"), n=len(positions)),
             fg=FG_GREEN if total >= 0 else FG_RED)
         if by_sym:
             parts = [f"{s}: {v[0]:+.2f}$ ({v[1]})" for s, v in sorted(by_sym.items())]
             self._lbl_breakdown.config(text="   |   ".join(parts), fg=FG_GRAY)
         else:
-            self._lbl_breakdown.config(text="Nincs nyitott pozíció.", fg=FG_GRAY)
+            self._lbl_breakdown.config(text=_t("gui.nincs_nyitott_pozicio"), fg=FG_GRAY)
 
 
 # ---------------------------------------------------------------------------
@@ -2376,12 +2348,12 @@ class PositionsTab:
 
 CLOSED_COLUMNS = [
     ("symbol",   "Symbol",     10, "w"),
-    ("strategy", "Stratégia",   9, "center"),
-    ("type",     "Irány",       6, "center"),
+    ("strategy", _t("signals.col.strategy"),   9, "center"),
+    ("type",     _t("signals.col.dir"),       6, "center"),
     ("volume",   "Lot",         6, "center"),
-    ("open",     "Nyitó",      10, "center"),
-    ("close",    "Záró",       10, "center"),
-    ("time",     "Zárás",       8, "center"),
+    ("open",     _t("gui2.nyito"),      10, "center"),
+    ("close",    _t("gui2.zaro"),       10, "center"),
+    ("time",     _t("gui2.zaras"),       8, "center"),
     ("pnl",      "P&L",         9, "center"),
     ("r",        "R",           6, "center"),
 ]
@@ -2439,10 +2411,10 @@ class ClosedTab:
         p.configure(bg=BG)
         top = tk.Frame(p, bg=BG, pady=4)
         top.pack(fill="x", padx=8)
-        self._lbl_title = tk.Label(top, text="Lezárt kereskedések  (MT5 szerver-idő)",
+        self._lbl_title = tk.Label(top, text=_t("gui.lezart_kereskedesek_mt5_szerver"),
                                    bg=BG, fg=FG_WHITE, font=self._header)
         self._lbl_title.pack(side="left")
-        self._lbl_total = tk.Label(top, text="Összes P&L: —", bg=BG, fg=FG_WHITE,
+        self._lbl_total = tk.Label(top, text=_t("gui.osszes_p_l"), bg=BG, fg=FG_WHITE,
                                    font=self._header)
         self._lbl_total.pack(side="right", padx=8)
 
@@ -2455,7 +2427,7 @@ class ClosedTab:
         sel.pack(fill="x", padx=10, pady=(0, 2))
         self._range_var = tk.StringVar(value="today")
         for _val, _txt in (("today", "Ma"), ("7", "7 nap"), ("30", "30 nap"),
-                           ("custom", "Tól–ig:")):
+                           ("custom", _t("range.custom"))):
             tk.Radiobutton(sel, text=_txt, value=_val, variable=self._range_var,
                            bg=BG, fg=FG_WHITE, selectcolor=BG_HEADER,
                            activebackground=BG, activeforeground=FG_WHITE,
@@ -2468,7 +2440,7 @@ class ClosedTab:
             tk.Entry(sel, textvariable=_v, width=11, bg=BG_HEADER, fg=FG_WHITE,
                      font=self._small, insertbackground=FG_WHITE,
                      relief="flat").pack(side="left", padx=2)
-        tk.Button(sel, text="Betölt", bg=BTN_OPT_BG, fg=BTN_OPT_FG, relief="flat",
+        tk.Button(sel, text=_t("range.load"), bg=BTN_OPT_BG, fg=BTN_OPT_FG, relief="flat",
                   font=self._small, command=self._on_range_change).pack(side="left",
                                                                        padx=6)
         self._lbl_range_err = tk.Label(sel, text="", bg=BG, fg=FG_RED,
@@ -2535,7 +2507,8 @@ class ClosedTab:
         total_r = sum(r for r in r_vals if r is not None)
         r_txt   = f"   |   {total_r:+.2f}R" if any(r is not None for r in r_vals) else ""
         self._lbl_total.config(
-            text=f"Összes P&L: {total:+.2f}${r_txt}   |   {len(closed)} trade   |   {wins}W / {losses}L",
+            text=_t("gui.closed.total", pnl=_fmtnum(f"{total:+.2f}"), r=r_txt,
+            n=len(closed), wins=wins, losses=losses),
             fg=FG_GREEN if total >= 0 else FG_RED)
 
         by_strat: dict = {}
@@ -2550,9 +2523,9 @@ class ClosedTab:
             self._lbl_breakdown.config(text="   |   ".join(parts), fg=FG_GRAY)
         else:
             self._lbl_breakdown.config(
-                text=(f"{self._custom_label}: nincs lezárt kereskedés."
+                text=(_t("gui.closed.none", label=self._custom_label)
                       if self._custom is not None
-                      else "Ma még nincs lezárt kereskedés."), fg=FG_GRAY)
+                      else _t("gui2.ma_meg_nincs_lezart")), fg=FG_GRAY)
 
     def _on_range_change(self):
         """Az időszak-választó kezelője: betölti a kért intervallumot az MT5-ből.
@@ -2567,7 +2540,7 @@ class ClosedTab:
         if mode == "today":
             self._custom, self._custom_label = None, ""
             self._pending_reset = True
-            self._lbl_title.config(text="Lezárt kereskedések — MA  (MT5 szerver-idő)")
+            self._lbl_title.config(text=_t("gui.lezart_kereskedesek_ma_mt5"))
             self.refresh()
             return
         if self._range_provider is None:
@@ -2588,19 +2561,19 @@ class ClosedTab:
             except ValueError:
                 # A hibát KIÍRJUK, nem nyeljük el: enélkül a felület csak annyit
                 # mutatna, hogy „nincs lezárt kereskedés" — ami hazugság lenne.
-                self._lbl_range_err.config(text="dátum: ÉÉÉÉ-HH-NN")
+                self._lbl_range_err.config(text=_t("gui.datum_eeee_hh_nn"))
                 return
         try:
             data = self._range_provider(d_from, d_to) or []
         except Exception as e:
-            self._lbl_range_err.config(text=f"lekérés: {e}")
+            self._lbl_range_err.config(text=_t("gui.closed.fetch_error", error=e))
             return
         self._custom = data
         self._custom_label = (str(d_from) if d_from == d_to
                               else f"{d_from} … {d_to}")
         self._pending_reset = True
         self._lbl_title.config(
-            text=f"Lezárt kereskedések — {self._custom_label}  (MT5 szerver-idő)")
+            text=_t("gui.closed.title", label=self._custom_label))
         self.refresh()
 
     def _make_row(self, c):
@@ -2700,7 +2673,7 @@ class DashboardWindow:
         self.lbl_time = tk.Label(top_bar, text="", bg=BG_HEADER, fg=FG_GRAY, font=info_font)
         self.lbl_time.pack(side="right", padx=10)
         self._btn_connect = tk.Button(
-            top_bar, text="⟳  Kapcsolódás", font=small_font,
+            top_bar, text=_t("gui.kapcsolodas2"), font=small_font,
             bg=BTN_OPT_BG, fg=BTN_OPT_FG, relief="flat", command=self._handle_connect)
         self._btn_connect.pack(side="right", padx=6)
         self._btn_connect.pack_forget()
@@ -2741,7 +2714,7 @@ class DashboardWindow:
         # Kockázat/számla állítása — a slotok PÁRJA: a `max_open_slots` azt mondja
         # meg, HÁNY felé osztjuk, ez pedig azt, MENNYIT. A kettő együtt adja egy
         # slot keretét (egyenleg × risk_pct / max_slots).
-        self.lbl_risk = tk.Label(info_bar, text="Kockázat: —",
+        self.lbl_risk = tk.Label(info_bar, text=_t("gui.kockazat"),
                                  bg=BG_HEADER, fg=FG_WHITE, font=info_font)
         self.lbl_risk.pack(side="left", padx=(10, 2))
         tk.Button(info_bar, text="▼", font=small_font, width=2,
@@ -2781,7 +2754,7 @@ class DashboardWindow:
         self._build_live_tab(live_frame, mono_font, header_font, small_font)
 
         pos_frame = tk.Frame(self._notebook, bg=BG)
-        self._notebook.add(pos_frame, text="  Pozíciók  ")
+        self._notebook.add(pos_frame, text=_t("gui.poziciok"))
         from trading.live_trader import position_state as _pos_state
         self._pos_tab = PositionsTab(
             pos_frame, cfg, mono_font, small_font, header_font,
@@ -2803,7 +2776,7 @@ class DashboardWindow:
 
         closed_frame = tk.Frame(self._notebook, bg=BG)
         # A fül neve már nem „(ma)": időszak is választható.
-        self._notebook.add(closed_frame, text="  Lezárt  ")
+        self._notebook.add(closed_frame, text=_t("gui.lezart"))
         self._closed_tab = ClosedTab(
             closed_frame, mono_font, small_font, header_font,
             closed_provider=lambda: getattr(self, "_mt5_cache", {}).get("closed_today", []),
@@ -2813,7 +2786,7 @@ class DashboardWindow:
             risk_provider=self._closed_risk)
 
         sig_frame = tk.Frame(self._notebook, bg=BG)
-        self._notebook.add(sig_frame, text="  Jelzések  ")
+        self._notebook.add(sig_frame, text=_t("gui.jelzesek"))
         from dashboard.signals_tab import SignalsTab
         from trading.live_trader import TRADES_CSV as _TCSV
         self._signals_tab = SignalsTab(
@@ -2825,7 +2798,7 @@ class DashboardWindow:
             max_age_hours=self._signal_max_age_hours)
 
         bt_frame = tk.Frame(self._notebook, bg=BG_BT)
-        self._notebook.add(bt_frame, text="  Portfólió Backtest  ")
+        self._notebook.add(bt_frame, text=_t("gui.portfolio_backtest"))
         self._bt_tab = PortfolioBacktestTab(bt_frame, cfg, mono_font, small_font, header_font)
 
         self._balance    = 0.0
@@ -2852,7 +2825,7 @@ class DashboardWindow:
 
         toolbar = tk.Frame(parent, bg=BG, pady=3)
         toolbar.pack(fill="x", padx=6)
-        tk.Label(toolbar, text="Keresés:", bg=BG, fg=FG_GRAY,
+        tk.Label(toolbar, text=_t("gui.kereses"), bg=BG, fg=FG_GRAY,
                  font=small_font).pack(side="left")
         self._search_var = tk.StringVar()
         self._search_var.trace_add("write", lambda *_: self._apply_filter_sort())
@@ -2860,17 +2833,17 @@ class DashboardWindow:
                  bg=BG_HEADER, fg=FG_WHITE, font=small_font,
                  insertbackground=FG_WHITE, relief="flat").pack(side="left", padx=(3, 12))
         self._hide_stopped_var = tk.BooleanVar(value=False)
-        tk.Checkbutton(toolbar, text="STOPPED elrejtése", variable=self._hide_stopped_var,
+        tk.Checkbutton(toolbar, text=_t("gui.stopped_elrejtese"), variable=self._hide_stopped_var,
                        bg=BG, fg=FG_GRAY, selectcolor=BG_HEADER,
                        activebackground=BG, activeforeground=FG_WHITE, font=small_font,
                        command=self._apply_filter_sort).pack(side="left", padx=4)
         tk.Button(toolbar, text="  +  Instrumentum", font=small_font,
                   bg=BTN_OPT_BG, fg=BTN_OPT_FG, relief="flat", cursor="hand2",
                   command=self._show_add_instrument).pack(side="right", padx=4)
-        tk.Button(toolbar, text="  ⚙  Beállítás", font=small_font,
+        tk.Button(toolbar, text=_t("gui.beallitas"), font=small_font,
                   bg=BG_INACTIVE, fg=FG_WHITE, relief="flat", cursor="hand2",
                   command=self._show_settings).pack(side="right", padx=4)
-        tk.Button(toolbar, text="  🎨  Megjelenés", font=small_font,
+        tk.Button(toolbar, text=_t("gui.megjelenes2"), font=small_font,
                   bg=BG_INACTIVE, fg=FG_WHITE, relief="flat", cursor="hand2",
                   command=self._show_appearance).pack(side="right", padx=4)
 
@@ -2887,11 +2860,11 @@ class DashboardWindow:
         if self._show_legend():
             for text, col in [
                 ("■ LIVE", FG_GREEN), ("■ STOPPED", FG_GRAY),
-                ("⏹ Kivezetés (nincs új belépő)", FG_ORANGE),
-                ("■ Nem tanított", FG_GRAY_DIM),
-                ("■ Optimalizálás", FG_YELLOW), ("✦ Kockázatmentes", FG_CYAN),
-                ("Kockázatcsökk. (kattints):", FG_GRAY),
-                ("R Risky", FG_ORANGE), ("F Felező", FG_CYAN), ("P Pajzs", FG_GREEN),
+                (_t("gui2.kivezetes_nincs_uj_belepo"), FG_ORANGE),
+                (_t("gui2.nem_tanitott"), FG_GRAY_DIM),
+                (_t("gui2.optimalizalas"), FG_YELLOW), (_t("gui2.kockazatmentes"), FG_CYAN),
+                (_t("gui2.kockazatcsokk_kattints"), FG_GRAY),
+                ("R Risky", FG_ORANGE), (_t("gui2.f_felezo"), FG_CYAN), ("P Pajzs", FG_GREEN),
                 ("Fi Fibo", FG_YELLOW), ("H Harmados", FG_PURPLE),
                 ("PF Pajzs↔Fibo", FG_TEAL),
             ]:
@@ -2910,7 +2883,7 @@ class DashboardWindow:
             self._countdown_tfs = [(tf.minutes, tf.label) for tf in self.strategy.timeframes()]
         self._countdown_lbls = {}
         for minutes, label in self._countdown_tfs:
-            lbl = tk.Label(legend, text=f"{label} zárás: --:--", bg=BG,
+            lbl = tk.Label(legend, text=_t("gui.tf.close_unknown", label=label), bg=BG,
                            fg=FG_CYAN, font=header_font, padx=8)
             lbl.pack(side="right")
             self._countdown_lbls[minutes] = lbl
@@ -2945,7 +2918,7 @@ class DashboardWindow:
             self.rows: dict[str, PairRow] = {}
             self._build_live2(self._table_frame)
             tk.Frame(parent, bg=FG_GRAY_DIM, height=1).pack(fill="x", padx=2, pady=2)
-            self.lbl_status = tk.Label(parent, text="Indulás...", bg=BG,
+            self.lbl_status = tk.Label(parent, text=_t("gui.indulas"), bg=BG,
                                        fg=FG_GRAY, font=small_font)
             self.lbl_status.pack(side="bottom", pady=4)
             self._make_error_badge(parent, small_font)
@@ -2993,7 +2966,7 @@ class DashboardWindow:
         if self._is_table_layout():
             self._build_live2(self._table_frame)
             tk.Frame(parent, bg=FG_GRAY_DIM, height=1).pack(fill="x", padx=2, pady=2)
-            self.lbl_status = tk.Label(parent, text="Indulás...", bg=BG,
+            self.lbl_status = tk.Label(parent, text=_t("gui.indulas"), bg=BG,
                                        fg=FG_GRAY, font=small_font)
             self.lbl_status.pack(side="bottom", pady=4)
             self._make_error_badge(parent, small_font)
@@ -3017,7 +2990,7 @@ class DashboardWindow:
         self._apply_filter_sort()
 
         tk.Frame(parent, bg=FG_GRAY_DIM, height=1).pack(fill="x", padx=2, pady=2)
-        self.lbl_status = tk.Label(parent, text="Indulás...", bg=BG, fg=FG_GRAY, font=small_font)
+        self.lbl_status = tk.Label(parent, text=_t("gui.indulas"), bg=BG, fg=FG_GRAY, font=small_font)
         self.lbl_status.pack(side="bottom", pady=4)
         self._make_error_badge(parent, small_font)
 
@@ -3374,8 +3347,7 @@ class DashboardWindow:
         try:
             if self._opt_ctrl._strategy_live(symbol, name):
                 self._stop_strategy(symbol, name)
-                _stopped = (f"{name} LEÁLLÍTVA az optimalizálás idejére "
-                            f"(magától nem indul újra). ")
+                _stopped = (_t("gui.ctrl.stopped_for_opt", name=name))
         except Exception:
             import logging as _logging
             _logging.getLogger(__name__).exception(
@@ -3526,11 +3498,11 @@ class DashboardWindow:
     # ── Instrumentum hozzáadása ──────────────────────────────────────────
     def _show_add_instrument(self):
         popup = tk.Toplevel(self.root)
-        popup.title("Instrumentum hozzáadása")
+        popup.title(_t("gui2.instrumentum_hozzaadasa"))
         popup.configure(bg=BG)
         popup.resizable(False, False)
         popup.grab_set()
-        tk.Label(popup, text="Elérhető szimbólumok (MT5):", bg=BG, fg=FG_BLUE,
+        tk.Label(popup, text=_t("gui.elerheto_szimbolumok_mt5"), bg=BG, fg=FG_BLUE,
                  font=self._header_font).pack(padx=12, pady=(10, 4), anchor="w")
         search_var = tk.StringVar()
         tk.Entry(popup, textvariable=search_var, width=28, bg=BG_HEADER, fg=FG_WHITE,
@@ -3563,7 +3535,7 @@ class DashboardWindow:
                 shown_names.append(name)
         search_var.trace_add("write", refresh_list)
 
-        lbl_info = tk.Label(popup, text="Szimbólumok betöltése...", bg=BG,
+        lbl_info = tk.Label(popup, text=_t("gui.szimbolumok_betoltese"), bg=BG,
                             fg=FG_GRAY, font=self._small_font)
         lbl_info.pack(pady=(4, 0))
 
@@ -3585,10 +3557,9 @@ class DashboardWindow:
                 refresh_list()
                 if not result:
                     lbl_info.config(
-                        text="Minden MT5 szimbólum már szerepel a listában.", fg=FG_YELLOW)
+                        text=_t("gui.minden_mt5_szimbolum_mar"), fg=FG_YELLOW)
                 else:
-                    lbl_info.config(text=f"{len(result)} elérhető szimbólum "
-                                         f"(név + leírás).", fg=FG_GRAY)
+                    lbl_info.config(text=_t("gui.ctrl.symbols_found", n=len(result)), fg=FG_GRAY)
             try:
                 self.root.after(0, _apply)
             except Exception:
@@ -3604,10 +3575,10 @@ class DashboardWindow:
 
         btn_frame = tk.Frame(popup, bg=BG)
         btn_frame.pack(pady=10)
-        tk.Button(btn_frame, text="Hozzáadás", bg=BTN_PLAY_BG, fg=BTN_PLAY_FG,
+        tk.Button(btn_frame, text=_t("gui.hozzaadas"), bg=BTN_PLAY_BG, fg=BTN_PLAY_FG,
                   font=self._small_font, relief="flat",
                   command=add_selected).pack(side="left", padx=6)
-        tk.Button(btn_frame, text="Mégse", bg=BTN_DIS_BG, fg=BTN_DIS_FG,
+        tk.Button(btn_frame, text=_t("btn.cancel"), bg=BTN_DIS_BG, fg=BTN_DIS_FG,
                   font=self._small_font, relief="flat",
                   command=popup.destroy).pack(side="left", padx=6)
         listbox.bind("<Double-Button-1>", lambda _: add_selected())
@@ -3720,11 +3691,11 @@ class DashboardWindow:
         def _short(line: str) -> str:
             """A letöltő stdout-sorából tömör sor-státusz (a cella keskeny)."""
             s = line.strip()
-            if s.startswith("[státusz]"):
-                return s[len("[státusz]"):].strip() or "letöltés…"
+            if s.startswith(_t("gui2.statusz")):
+                return s[len(_t("gui2.statusz")):].strip() or _t("gui2.letoltes")
             # havi haladás: „2025-08 ... 7,704,574 tick -> 42,214 bar  (5.5s)"
             if len(s) >= 8 and s[4] == "-" and s[7] == " " and s[:4].isdigit():
-                return f"Letöltés: {s[:7]} …"
+                return _t("gui.ctrl.downloading", symbol=s[:7])
             # naplósor: „… INFO  BTCJPY M1 — … mentve …" → az üzenet-rész
             for lvl in ("WARNING", "ERROR", "INFO"):
                 i = s.find(lvl)
@@ -3776,14 +3747,16 @@ class DashboardWindow:
                 _log.info("[%s] %s", symbol, line)   # a napló is lássa a haladást
             ok = (proc.wait() == 0)
             self.optimizer_status[symbol] = (
-                "Adat kész ✓" if ok else f"Hiba: {_short(last) or 'letöltés sikertelen'}")
+                _t("gui2.adat_kesz") if ok else
+                _t("gui.download_failed",
+                   msg=_short(last) or _t("gui.download_failed_generic")))
             if on_done is not None:
                 try:
                     self.root.after(0, lambda: on_done(ok, last))
                 except Exception:
                     pass
 
-        self.optimizer_status[symbol] = "Előzmény letöltése..."
+        self.optimizer_status[symbol] = _t("gui2.elozmeny_letoltese")
         threading.Thread(target=_reader, daemon=True,
                          name=f"History-{symbol}").start()
 
@@ -3856,7 +3829,7 @@ class DashboardWindow:
         from strategy.settings import save_main_config as _save
         err = _save(self.cfg, ROOT / "config.json")
         if err:
-            self._set_status(f"⚠ A beállítás NEM mentődött el: {err}")
+            self._set_status(_t("gui.ctrl.not_saved", error=err))
             return False
         return True
 
@@ -3873,7 +3846,7 @@ class DashboardWindow:
         A háttér és a betűszínek EGY témából jönnek, ezért nem állítható be
         „fehér alapon fehér szöveg": nincs olyan állapot, ahol a kettő szétesne."""
         popup = tk.Toplevel(self.root)
-        popup.title("Megjelenés")
+        popup.title(_t("gui.megjelenes"))
         popup.configure(bg=BG)
         popup.resizable(False, False)
         popup.grab_set()
@@ -3884,14 +3857,14 @@ class DashboardWindow:
         _dash0       = (self.cfg.get("dashboard") or {})
         _orig_theme  = _dash0.get("theme", _theme.ACTIVE_THEME)
 
-        tk.Label(popup, text="Megjelenés", bg=BG, fg=FG_WHITE,
+        tk.Label(popup, text=_t("gui.megjelenes"), bg=BG, fg=FG_WHITE,
                  font=self._header_font).pack(anchor="w", padx=12, pady=(12, 6))
 
         frm = tk.Frame(popup, bg=BG)
         frm.pack(anchor="w", padx=12)
 
         # ── Téma ────────────────────────────────────────────────────────────
-        tk.Label(frm, text="Téma:", bg=BG, fg=FG_GRAY,
+        tk.Label(frm, text=_t("gui.tema"), bg=BG, fg=FG_GRAY,
                  font=self._small_font).grid(row=0, column=0, sticky="e", pady=3)
         # ⚠ A legördülő FELIRATOKAT mutat, a config KÓDOT tárol. A kettő közt a
         # `theme_code()` fordít — így a mentett érték nyelvfüggetlen marad, és a
@@ -3916,7 +3889,7 @@ class DashboardWindow:
         _fams = [f for f in _theme.FONT_FAMILIES if not _avail or f in _avail]
         if _orig_family not in _fams:
             _fams.insert(0, _orig_family)
-        tk.Label(frm, text="Betűtípus:", bg=BG, fg=FG_GRAY,
+        tk.Label(frm, text=_t("gui.betutipus"), bg=BG, fg=FG_GRAY,
                  font=self._small_font).grid(row=1, column=0, sticky="e", pady=3)
         fam_var = tk.StringVar(value=_orig_family)
         _omf = tk.OptionMenu(frm, fam_var, *_fams)
@@ -3926,7 +3899,7 @@ class DashboardWindow:
         _omf.grid(row=1, column=1, sticky="w", padx=6, pady=3)
 
         # ── Betűméret ───────────────────────────────────────────────────────
-        tk.Label(frm, text="Betűméret:", bg=BG, fg=FG_GRAY,
+        tk.Label(frm, text=_t("gui.betumeret"), bg=BG, fg=FG_GRAY,
                  font=self._small_font).grid(row=2, column=0, sticky="e", pady=3)
         size_var = tk.IntVar(value=_orig_size)
         tk.Spinbox(frm, from_=_theme.FONT_SIZE_MIN, to=_theme.FONT_SIZE_MAX,
@@ -3961,12 +3934,11 @@ class DashboardWindow:
             try:
                 self._save_main_config()
             except Exception as ex:
-                lbl_note.config(text=f"Mentési hiba: {ex}", fg=FG_RED)
+                lbl_note.config(text=_t("save.error", error=ex), fg=FG_RED)
                 return
             _preview()          # a betű már él; a szín csak indítás után
             if _theme.theme_code(theme_var.get()) != _theme.ACTIVE_THEME:
-                lbl_note.config(text="Mentve. A betű azonnal érvényes; a TÉMA SZÍNEI "
-                                     "a program következő indításakor jelennek meg.",
+                lbl_note.config(text=_t("gui.mentve_a_betu_azonnal"),
                                 fg=FG_YELLOW)
             else:
                 lbl_note.config(text="Mentve.", fg=FG_GREEN)
@@ -3979,9 +3951,9 @@ class DashboardWindow:
 
         btns = tk.Frame(popup, bg=BG)
         btns.pack(pady=12)
-        tk.Button(btns, text="Mentés", bg=BTN_PLAY_BG, fg=BTN_PLAY_FG, relief="flat",
+        tk.Button(btns, text=_t("btn.save"), bg=BTN_PLAY_BG, fg=BTN_PLAY_FG, relief="flat",
                   font=self._small_font, command=_save).pack(side="left", padx=6)
-        tk.Button(btns, text="Mégse", bg=BTN_DIS_BG, fg=BTN_DIS_FG, relief="flat",
+        tk.Button(btns, text=_t("btn.cancel"), bg=BTN_DIS_BG, fg=BTN_DIS_FG, relief="flat",
                   font=self._small_font, command=_cancel).pack(side="left", padx=6)
         popup.protocol("WM_DELETE_WINDOW", _cancel)
 
@@ -4005,7 +3977,7 @@ class DashboardWindow:
 
     def _show_settings(self):
         popup = tk.Toplevel(self.root)
-        popup.title("Beállítások — config.json")
+        popup.title(_t("gui2.beallitasok_config_json"))
         popup.configure(bg=BG)
         popup.geometry("720x640")
         popup.grab_set()
@@ -4021,10 +3993,10 @@ class DashboardWindow:
         lbl_err = tk.Label(popup, text="", bg=BG, fg=FG_RED, font=self._small_font,
                            anchor="w", justify="left", wraplength=660)
         lbl_err.pack(side="bottom", fill="x", padx=10)
-        _btn_save = tk.Button(btns, text="Mentés", bg=BTN_PLAY_BG, fg=BTN_PLAY_FG,
+        _btn_save = tk.Button(btns, text=_t("btn.save"), bg=BTN_PLAY_BG, fg=BTN_PLAY_FG,
                               relief="flat", font=self._small_font)
         _btn_save.pack(side="left", padx=(10, 6))
-        tk.Button(btns, text="Mégse", bg=BTN_DIS_BG, fg=BTN_DIS_FG, relief="flat",
+        tk.Button(btns, text=_t("btn.cancel"), bg=BTN_DIS_BG, fg=BTN_DIS_FG, relief="flat",
                   font=self._small_font,
                   command=popup.destroy).pack(side="left", padx=6)
 
@@ -4039,24 +4011,18 @@ class DashboardWindow:
         from core import gates as _gts, gate_layout as _glay
         from dashboard.order_editor import OrderEditor
         _kp = _page["gates"]
-        tk.Label(_kp, text="Mely kapuk látszanak és milyen sorrendben",
+        tk.Label(_kp, text=_t("gui.mely_kapuk_latszanak_es"),
                  bg=BG, fg=FG_BLUE, font=self._header_font, anchor="w").pack(
                  anchor="w", padx=10, pady=(10, 4))
         _gate_ed = OrderEditor(
             _kp, {k: _gts.label_of(k) for k in _gts.KEYS},
             _glay.enabled_gates(self.cfg),
-            note="A KIKAPCSOLT kapu oszlopa eltűnik, ÉS a kapu egyetlen "
-                 "instrumentumon sem szól bele a kereskedésbe. A per-pár "
-                 "beállítások nem vesznek el: felfüggesztjük őket, és "
-                 "visszakapcsolaskor ujra elnek. "
-                 "A bekapcsolt oszlop AKKOR IS látszik, ha épp nincs mért érték "
-                 "(nincs többé automatikus elrejtés — így egy oka van annak, ha "
-                 "valami nem látszik: te kapcsoltad ki).")
+            note=_t("gui2.a_kikapcsolt_kapu_oszlopa"))
         _gate_ed.frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
         # ── STRATÉGIÁK lap ───────────────────────────────────────────────
         _st = _page["strategies"]
-        tk.Label(_st, text="Mely stratégiák elérhetők és milyen sorrendben",
+        tk.Label(_st, text=_t("gui.mely_strategiak_elerhetok_es"),
                  bg=BG, fg=FG_BLUE, font=self._header_font, anchor="w").pack(
                  anchor="w", padx=10, pady=(10, 4))
         from strategy import strategy_availability as _savail
@@ -4064,9 +4030,7 @@ class DashboardWindow:
         _strat_ed = OrderEditor(
             _st, {n: n for n in _av_now},
             [n for n, on in _av_now.items() if on],
-            note="A program a bekapcsoltakat kínálja fel (per-pár választó) és "
-                 "ezekbol kepez oszlopot. A sorrend a tabla oszlop-sorrendje. "
-                 "Az oszlop-változás ÚJRAINDÍTÁS után látszik.")
+            note=_t("gui2.a_program_a_bekapcsoltakat"))
         _strat_ed.frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
         # ── JSON lap (a korábbi tartalom) ────────────────────────────────
@@ -4077,11 +4041,9 @@ class DashboardWindow:
         json_page = _page["json"]
         _shell.show("json")
 
-        tk.Label(json_page, text="config.json szerkesztése (mentéskor JSON-validálás):",
+        tk.Label(json_page, text=_t("gui.config_json_szerkesztese_menteskor"),
                  bg=BG, fg=FG_BLUE, font=self._header_font).pack(anchor="w", padx=10, pady=(10, 2))
-        tk.Label(json_page, text="Megjegyzés: itt csak a VÁZ-config szerkeszthető. A stratégia "
-                 "beállításai (indicators, sltp, position_mgmt, quality, optimizer-tér) a "
-                 "stratégia saját fájljában élnek: strategy/config/<name>.json.",
+        tk.Label(json_page, text=_t("gui.megjegyzes_itt_csak_a"),
                  bg=BG, fg=FG_GRAY, font=self._small_font, justify="left",
                  wraplength=680).pack(anchor="w", padx=10)
 
@@ -4119,7 +4081,7 @@ class DashboardWindow:
             try:
                 new = json.loads(text.get("1.0", "end"))
             except Exception as e:
-                lbl_err.config(text=f"Érvénytelen JSON: {e}")
+                lbl_err.config(text=_t("gui.json.invalid", error=e))
                 return
             # Az 'Elérhető stratégiák' jelölőnégyzetek az irányadók az
             # available_strategies kulcsra (a szerkesztő JSON-ját felülírják).
@@ -4135,7 +4097,7 @@ class DashboardWindow:
             # mi tér el az alapértelmezéstől).
             _on = _strat_ed.get()
             if not _on:
-                lbl_err.config(text="Legalább egy stratégia legyen elérhető.")
+                lbl_err.config(text=_t("gui.legalabb_egy_strategia_legyen2"))
                 return
             chosen_av = {n: True for n in _on}
             for n in _strat_ed.disabled():
@@ -4213,7 +4175,7 @@ class DashboardWindow:
         from core import viz_prefs as _vp
         from core import trade_mode as _tm
         popup = tk.Toplevel(self.root)
-        popup.title(f"{symbol} — instrumentum beállítások")
+        popup.title(_t("gui.ctrl.dialog_title", symbol=symbol))
         popup.configure(bg=BG)
         popup.grab_set()
         tk.Label(popup, text=symbol, bg=BG, fg=FG_WHITE,
@@ -4230,9 +4192,9 @@ class DashboardWindow:
                      padx=8).grid(row=0, column=c)
         # (sor-címke, kezdőérték-függvény) — a sorrend a táblázat sorrendje.
         _ROWS = [
-            ("Aktív stratégia",      lambda n: n in cur),
-            ("Vizualizáció látszik", lambda n: _vp.viz_on(self.cfg, symbol, n)),
-            ("Kötések látszanak",    lambda n: _vp.trades_on(self.cfg, symbol, n)),
+            (_t("gui2.aktiv_strategia"),      lambda n: n in cur),
+            (_t("gui2.vizualizacio_latszik"), lambda n: _vp.viz_on(self.cfg, symbol, n)),
+            (_t("gui2.kotesek_latszanak"),    lambda n: _vp.trades_on(self.cfg, symbol, n)),
         ]
         # Jelölőnégyzetek — ugyanaz a recept, mint az ablak többi kapcsolójánál:
         # az `fg` ADJA A PIPA SZÍNÉT, ezért kötelező megadni. Nélküle a rendszer
@@ -4253,7 +4215,7 @@ class DashboardWindow:
         # Nem pipa, hanem legördülő: a „nem kereskedik" állapot legyen KIÍRVA,
         # ne egy üres checkbox — ez pénzt érintő beállítás.
         _r_mode = len(_ROWS) + 1
-        tk.Label(tbl, text="Kötés módja", bg=BG, fg=FG_GRAY, font=self._small_font,
+        tk.Label(tbl, text=_t("gui.kotes_modja"), bg=BG, fg=FG_GRAY, font=self._small_font,
                  anchor="w").grid(row=_r_mode, column=0, sticky="w", pady=(4, 1))
         _mode_vars = {}
         for c, n in enumerate(_names, start=1):
@@ -4267,20 +4229,17 @@ class DashboardWindow:
             _om2["menu"].config(bg=BG_HEADER, fg=FG_WHITE)
             _om2.grid(row=_r_mode, column=c, padx=4, pady=(4, 1), sticky="ew")
 
-        tk.Label(popup, text='A tényleges MT5-kötések a „Kötések látszanak" pipától '
-                             'függetlenül mindig látszanak (az a jel-replay réteget '
-                             'kapcsolja).',
+        tk.Label(popup, text=_t("gui.a_tenyleges_mt5_kotesek"),
                  bg=BG, fg=FG_GRAY_DIM, font=self._small_font,
                  wraplength=360, justify="left").pack(anchor="w", padx=12, pady=(0, 2))
-        tk.Label(popup, text='„Jelzés" módban a motor mindent kiszámol, de NEM köt: '
-                             'riasztást ad a charton (MT5 Alert) és naplóz. Teszteléshez.',
+        tk.Label(popup, text=_t("gui.jelzes_modban_a_motor"),
                  bg=BG, fg=FG_YELLOW, font=self._small_font,
                  wraplength=360, justify="left").pack(anchor="w", padx=12, pady=(0, 4))
 
         # ── Piac-előszűrő (piac-állapot osztályozó) — instrumentumonként EGY ──
         from core import market_strategy as _ms
         _pc0 = (self.cfg.get("pairs", {}).get(symbol, {}) or {})
-        tk.Label(popup, text="Piac-előszűrő (piac-állapot osztályozó — 1/instrumentum):",
+        tk.Label(popup, text=_t("gui.piac_eloszuro_piac_allapot"),
                  bg=BG, fg=FG_GRAY, font=self._small_font).pack(anchor="w", padx=12, pady=(8, 2))
         ms_var = tk.StringVar(value=(_ms.market_name_of(_pc0) or "Nincs"))
         _om = tk.OptionMenu(popup, ms_var, *(["Nincs"] + _ms.registered_market_names()))
@@ -4289,7 +4248,7 @@ class DashboardWindow:
         _om["menu"].config(bg=BG_HEADER, fg=FG_WHITE)
         _om.pack(anchor="w", padx=20)
         viz_var = tk.BooleanVar(value=bool(_pc0.get("market_viz", True)))
-        tk.Checkbutton(popup, text="Piac-állapot sáv a charton (Viz)", variable=viz_var,
+        tk.Checkbutton(popup, text=_t("gui.piac_allapot_sav_a"), variable=viz_var,
                        bg=BG, fg=FG_WHITE, selectcolor=BG_HEADER, font=self._small_font,
                        activebackground=BG, activeforeground=FG_WHITE).pack(anchor="w", padx=20)
 
@@ -4316,8 +4275,7 @@ class DashboardWindow:
             max(_lots_now) if _lots_now else None,
             float(_pl.get("min_lot", 0.01) or 0.01),
             float(_pl.get("lot_step", 0.01) or 0.01), _netting)
-        tk.Label(popup, text="Kockázatcsökkentés (a pár MINDEN mostani és jövőbeli "
-                             "pozíciójára hat):",
+        tk.Label(popup, text=_t("gui.kockazatcsokkentes_a_par_minden"),
                  bg=BG, fg=FG_GRAY, font=self._small_font).pack(anchor="w", padx=12,
                                                                 pady=(8, 2))
         _rr_choices = [_rrs.NAME[p] + (f"  — {_blocked_rr[p]}" if p in _blocked_rr else "")
@@ -4353,12 +4311,11 @@ class DashboardWindow:
             "rr_preset":  _rr_cur,
         }
         all_var = tk.BooleanVar(value=False)
-        tk.Checkbutton(popup, text="A MÓDOSÍTOTT sorokat minden instrumentumra",
+        tk.Checkbutton(popup, text=_t("gui.a_modositott_sorokat_minden"),
                        variable=all_var, bg=BG, fg=FG_YELLOW, selectcolor=BG_HEADER,
                        font=self._small_font, activebackground=BG,
                        activeforeground=FG_YELLOW).pack(anchor="w", padx=12, pady=(10, 0))
-        tk.Label(popup, text="Csak azok a sorok kerülnek át, amiket ebben az ablakban "
-                             "megváltoztattál. Mentés előtt megmutatom, mi és hol változna.",
+        tk.Label(popup, text=_t("gui.csak_azok_a_sorok"),
                  bg=BG, fg=FG_GRAY_DIM, font=self._small_font,
                  wraplength=360, justify="left").pack(anchor="w", padx=32, pady=(0, 2))
 
@@ -4459,7 +4416,7 @@ class DashboardWindow:
         def _save():
             chosen = [n for n in _names if _vars[(1, n)].get()]
             if not chosen:
-                lbl.config(text="Legalább egy stratégia legyen aktív.", fg=FG_RED)
+                lbl.config(text=_t("gui.legalabb_egy_strategia_legyen"), fg=FG_RED)
                 return
             now = _current()
             changed = _ba.changed_rows(_init, now)
@@ -4467,22 +4424,18 @@ class DashboardWindow:
             targets = [symbol]
             if all_var.get():
                 if not changed:
-                    lbl.config(text="Nincs módosított sor — nincs mit átvinni a "
-                                    "többi instrumentumra.", fg=FG_YELLOW)
+                    lbl.config(text=_t("gui.nincs_modositott_sor_nincs"), fg=FG_YELLOW)
                     return
                 others = _ba.targets(self.cfg.get("pairs"), symbol, True)[1:]
                 # MEGERŐSÍTÉS: tételesen kiírjuk, MI és HÁNY páron változik. Enélkül
                 # egy pipa csendben átírná 10 instrumentum kötés-módját.
-                _warn = ("\n\nEZ PÉNZT ÉRINT: a változás valódi megbízásokat "
-                         "kapcsolhat be/ki minden páron."
+                _warn = (_t("gui2.ez_penzt_erint_a")
                          if _ba.affects_money(changed) else "")
                 from tkinter import messagebox
                 if not messagebox.askyesno(
                         "Minden instrumentumra",
-                        f"A következő sorok kerülnek át {len(others)} további "
-                        f"instrumentumra:\n\n{_ba.summary(changed)}\n\n"
-                        f"Érintett: {', '.join(others)}\n\n"
-                        f"A többi beállításukhoz NEM nyúlok.{_warn}\n\nMehet?",
+                        _t("gui.bulk.confirm", n=len(others), rows=_ba.summary(changed),
+                        symbols=", ".join(others), warn=_warn),
                         parent=popup):
                     return
                 targets += others
@@ -4493,29 +4446,25 @@ class DashboardWindow:
             try:
                 self._save_main_config()
                 _mstxt = (now["market"] if now["market"] != "Nincs"
-                          else "nincs piac-előszűrő")
+                          else _t("gui2.nincs_piac_eloszuro"))
                 if len(targets) > 1:
                     _rows = ", ".join(sorted(_ba.label_of(k) for k in changed))
-                    lbl.config(text=f"Mentve {len(targets)} instrumentumra: {_rows}. "
-                                    f"A tábla azonnal követi; a kereskedés a "
-                                    f"következő botindításkor.", fg=FG_GREEN)
+                    lbl.config(text=_t("gui.bulk.saved", n=len(targets), rows=_rows), fg=FG_GREEN)
                 else:
-                    lbl.config(text=f"Mentve: {', '.join(chosen)} | piac: {_mstxt}. "
-                                    f"A tábla azonnal követi; a kereskedés a "
-                                    f"következő botindításkor.", fg=FG_GREEN)
+                    lbl.config(text=_t("gui.bulk.saved_one", names=", ".join(chosen), market=_mstxt), fg=FG_GREEN)
                 # Az ablak állapota lesz az ÚJ kiindulás: különben egy második
                 # Mentés ugyanazokat a sorokat „módosítottnak" látná, és a pipa
                 # újra szétterítené őket.
                 _init.update({k: (dict(v) if isinstance(v, dict) else v)
                               for k, v in now.items()})
             except Exception as ex:
-                lbl.config(text=f"Mentési hiba: {ex}", fg=FG_RED)
+                lbl.config(text=_t("save.error", error=ex), fg=FG_RED)
 
         btns = tk.Frame(popup, bg=BG)
         btns.pack(pady=10)
-        tk.Button(btns, text="Mentés", bg=BTN_PLAY_BG, fg=BTN_PLAY_FG, relief="flat",
+        tk.Button(btns, text=_t("btn.save"), bg=BTN_PLAY_BG, fg=BTN_PLAY_FG, relief="flat",
                   font=self._small_font, command=_save).pack(side="left", padx=6)
-        tk.Button(btns, text="Bezárás", bg=BTN_DIS_BG, fg=BTN_DIS_FG, relief="flat",
+        tk.Button(btns, text=_t("btn.close"), bg=BTN_DIS_BG, fg=BTN_DIS_FG, relief="flat",
                   font=self._small_font, command=popup.destroy).pack(side="left", padx=6)
 
     # ── Opt státusz részletek (a státusz-cellára kattintva) ──────────────
@@ -4581,16 +4530,16 @@ class DashboardWindow:
     def _show_opt_log(self, symbol: str):
         """Részletes optimalizálási állapot: státusz + trials CSV + hibalog."""
         popup = tk.Toplevel(self.root)
-        popup.title(f"{symbol} — Optimalizálás állapota")
+        popup.title(_t("gui.opt.title", symbol=symbol))
         popup.configure(bg=BG)
         popup.geometry("780x540")
         popup.grab_set()
 
         state  = self._display_state(symbol)
         status = self.optimizer_status.get(symbol, "—")
-        tk.Label(popup, text=f"{symbol}   —   állapot: {state}", bg=BG, fg=FG_BLUE,
+        tk.Label(popup, text=_t("gui.opt.state", symbol=symbol, state=state), bg=BG, fg=FG_BLUE,
                  font=self._header_font).pack(anchor="w", padx=10, pady=(10, 2))
-        tk.Label(popup, text=f"Státusz (teljes): {status}", bg=BG, fg=FG_WHITE,
+        tk.Label(popup, text=_t("gui.opt.status_full", status=status), bg=BG, fg=FG_WHITE,
                  font=self._small_font, anchor="w", justify="left",
                  wraplength=740).pack(anchor="w", padx=10)
 
@@ -4607,15 +4556,14 @@ class DashboardWindow:
                 n = "?"
             tk.Label(row, text=f"Trials CSV: {n} sor  —  {csv.name}", bg=BG,
                      fg=FG_GREEN, font=self._small_font).pack(side="left")
-            tk.Button(row, text="Megnyitás", bg=BTN_BT_BG, fg=BTN_BT_FG, relief="flat",
+            tk.Button(row, text=_t("gui.megnyitas"), bg=BTN_BT_BG, fg=BTN_BT_FG, relief="flat",
                       font=self._small_font,
                       command=lambda: self._open_file(csv)).pack(side="left", padx=8)
         else:
-            tk.Label(row, text="Trials CSV: nincs (még nem futott le, vagy egy trial "
-                               "sem készült el).", bg=BG, fg=FG_YELLOW,
+            tk.Label(row, text=_t("gui.trials_csv_nincs_meg"), bg=BG, fg=FG_YELLOW,
                      font=self._small_font).pack(side="left")
 
-        tk.Label(popup, text="Legutóbbi hibák/események (data/opt_error.log):",
+        tk.Label(popup, text=_t("gui.legutobbi_hibak_esemenyek_data"),
                  bg=BG, fg=FG_GRAY, font=self._small_font).pack(anchor="w", padx=10, pady=(8, 0))
 
         # FONTOS a sorrend: az alsó sáv (visszajelzés + gombok) LENTRŐL foglalja a
@@ -4634,9 +4582,7 @@ class DashboardWindow:
                        font=self._mono_font, wrap="word", yscrollcommand=sb.set)
         text.pack(side="left", fill="both", expand=True)
         sb.config(command=text.yview)
-        _EMPTY = ("(Nincs naplózott hiba ehhez az instrumentumhoz. "
-                  "Ha a Trials CSV létezik, az optimalizálás lefutott — "
-                  "nyisd meg és nézd meg a score oszlopot.)")
+        _EMPTY = (_t("gui2.nincs_naplozott_hiba_ehhez"))
         text.insert("1.0", self._read_opt_log_for(symbol) or _EMPTY)
         text.config(state="disabled")
 
@@ -4645,12 +4591,12 @@ class DashboardWindow:
             törlése — a lemezre is AZONNAL kiírva, nem csak a nézetből."""
             n, err = self._clear_opt_log_for(symbol)
             if err:
-                lbl_res.config(text=f"A napló nem írható: {err}", fg=FG_RED)
+                lbl_res.config(text=_t("gui.opt.log_unwritable", error=err), fg=FG_RED)
             elif n:
-                lbl_res.config(text=f"{n} napló-bejegyzés törölve és elmentve.",
+                lbl_res.config(text=_t("gui.opt.log_cleared", n=n),
                                fg=FG_GREEN)
             else:
-                lbl_res.config(text="Nem volt törölhető bejegyzés.", fg=FG_GRAY)
+                lbl_res.config(text=_t("gui.nem_volt_torolheto_bejegyzes"), fg=FG_GRAY)
             lbl_res.pack(side="bottom", pady=(0, 6), before=btns)
             # A nézet kövesse: friss (immár üres) tartalom.
             text.config(state="normal")
@@ -4658,10 +4604,10 @@ class DashboardWindow:
             text.insert("1.0", self._read_opt_log_for(symbol) or _EMPTY)
             text.config(state="disabled")
 
-        tk.Button(btns, text="🗑 Log törlése", bg=BTN_BT_BG, fg=BTN_BT_FG,
+        tk.Button(btns, text=_t("gui.log_torlese"), bg=BTN_BT_BG, fg=BTN_BT_FG,
                   relief="flat", font=self._small_font, cursor="hand2",
                   command=_clear_log).pack(side="left", padx=6)
-        tk.Button(btns, text="Bezár", bg=BTN_DIS_BG, fg=BTN_DIS_FG, relief="flat",
+        tk.Button(btns, text=_t("gui.bezar"), bg=BTN_DIS_BG, fg=BTN_DIS_FG, relief="flat",
                   font=self._small_font, command=popup.destroy).pack(side="left", padx=6)
 
     @staticmethod
@@ -4710,9 +4656,7 @@ class DashboardWindow:
         # mutatta volna, a `run_state` pedig `live`-ban ragadt volna a configban.
         # Néma no-op helyett megmondjuk, hol lehet bekapcsolni.
         if not self._strategy_enabled(symbol, name):
-            self._set_status(f"{symbol}\\{name}: nincs engedélyezve ezen az "
-                             f"instrumentumon — kapcsold be az instrumentum "
-                             f"beállításainál (kattints a nevére).")
+            self._set_status(_t("gui.ctrl.not_enabled", symbol=symbol, name=name))
             return
         # ⚠ MENTETT KÉSZLET NÉLKÜL IS INDULHAT — a stratégia SAJÁT alapértékeivel
         # (`live_trader.default_params`). Korábban itt egy tiltás állt („előbb
@@ -4726,13 +4670,10 @@ class DashboardWindow:
         # Egy hangolt és egy hangolatlan pár ránézésre egyforma volna.
         _untuned = _lt.params_source(symbol, name) == "default"
         if _opt_activity.busy(symbol, name):
-            self._set_status(f"{symbol}/{name}: optimalizálás fut — "
-                             f"előbb állítsd le (OPT).")
+            self._set_status(_t("gui.ctrl.opt_running", symbol=symbol, name=name))
             return
         if _untuned:
-            self._set_status(f"{symbol}/{name}: indul a stratégia "
-                             f"ALAPÉRTELMEZETT paramétereivel (nincs "
-                             f"optimalizálva ezen a páron).")
+            self._set_status(_t("gui.ctrl.default_params", symbol=symbol, name=name))
         _rs.set_state(self.cfg, symbol, name, _rs.LIVE)
         _saved = self._save_main_config()
         # A pár szintjén is engedni kell, különben a motor hozzá sem nyúl.
@@ -4745,10 +4686,9 @@ class DashboardWindow:
         # elindul (a futásidejű cfg-t a motor ugyanabból a dictből olvassa), de a
         # SZÁNDÉK nem perzisztált — újraindítás után nem folytatódna.
         if _saved:
-            self._set_status(f"{symbol}/{name}: elindítva.")
+            self._set_status(_t("gui.ctrl.started", symbol=symbol, name=name))
         else:
-            self._set_status(f"{symbol}/{name}: elindítva, DE a szándék NEM "
-                             f"mentődött el — újraindítás után nem folytatódik.")
+            self._set_status(_t("gui.ctrl.started_unsaved", symbol=symbol, name=name))
         self._apply_filter_sort()
 
     def _stop_strategy(self, symbol: str, name: str):
@@ -4778,20 +4718,18 @@ class DashboardWindow:
             # Mint az indításnál: a hibaüzenetet nem nyomjuk el. A leállítás MOST
             # érvényes, de újraindítás után a stratégia visszaindulna.
             self._set_status(
-                f"{symbol}/{name}: leállítva (a pár többi stratégiája fut)."
+                _t("gui.ctrl.stopped_one", symbol=symbol, name=name)
                 if _saved else
-                f"{symbol}/{name}: leállítva, DE a szándék NEM mentődött el — "
-                f"újraindítás után visszaindulna.")
+                _t("gui.ctrl.stopped_unsaved", symbol=symbol, name=name))
             self._apply_filter_sort()
             return
         ds = self.dashboard_ref.get(symbol)
         if ds is not None and ds.position_pnl is not None:
             self.instrument_state[symbol] = "CLOSING"
-            self._set_status(f"{symbol}: kivezetés — a nyitott pozíciót "
-                             f"tovább kezeljük, új belépő nem nyílik.")
+            self._set_status(_t("gui.ctrl.closing", symbol=symbol))
         else:
             self.instrument_state[symbol] = "STOPPED"
-            self._set_status(f"{symbol}: leállítva.")
+            self._set_status(_t("gui.ctrl.stopped", symbol=symbol))
             if self._on_stop:
                 self._on_stop(symbol)
         self._apply_filter_sort()
@@ -4915,7 +4853,7 @@ class DashboardWindow:
         felirat is jelzi (Opt = tanítás)."""
         from strategy import get_strategy_by_name
         menu = tk.Menu(self.root, tearoff=0)
-        menu.add_command(label=f"— {symbol} optimalizálása —", state="disabled")
+        menu.add_command(label=_t("gui.opt.header", symbol=symbol), state="disabled")
         # A KERESKEDŐ stratégiát nem optimalizáljuk (a futás végén felülíródna a
         # paraméterfájlja) — de ez PER STRATÉGIA dől el, tehát a pár többi
         # stratégiája menüből indítható akkor is, ha a pár épp kereskedik.
@@ -4925,10 +4863,11 @@ class DashboardWindow:
         free = []
         for sn in names:
             trainable = callable(getattr(get_strategy_by_name(sn), "fit", None))
-            label = f"▶ {sn} (tanítás)" if trainable else f"▶ {sn}"
+            label = (_t("gui.opt.start_one", name=sn) if trainable
+                     else f"▶ {sn}")
             if _closing or self._opt_ctrl._strategy_live(symbol, sn):
                 menu.add_command(
-                    label=f"   {sn} — kereskedik, előbb Stop", state="disabled")
+                    label=_t("gui.opt.trading_stop_first", name=sn), state="disabled")
                 continue
             free.append(sn)
             menu.add_command(
@@ -5023,8 +4962,8 @@ class DashboardWindow:
             return
         from tkinter import messagebox
         if not messagebox.askyesno(
-                "Törlés megerősítése",
-                f"Biztosan törlöd a(z) {symbol} instrumentumot a listából?"):
+                _t("gui.torles_megerositese"),
+                _t("gui.ctrl.delete_confirm", symbol=symbol)):
             return
         self.cfg["pairs"].pop(symbol, None)
         self._save_main_config()
@@ -5104,25 +5043,25 @@ class DashboardWindow:
         sym = str(row.get("symbol") or "")
         irany = str(row.get("direction") or "")
         if irany not in ("BUY", "SELL") or not sym:
-            return None, "Hiányos jelzés-sor (instrumentum vagy irány)."
+            return None, _t("gui2.hianyos_jelzes_sor_instrumentum")
         try:
             # a lotot a megerősítő ablak adja (ott állítható); ha nincs, a jelzésé
             lot = float(lot) if lot is not None else float(row.get("lot"))
             jelzett = float(row.get("price"))
             sl0, tp0 = float(row.get("sl")), float(row.get("tp"))
         except (TypeError, ValueError):
-            return None, "A jelzés-sor ára / SL / TP / lot nem szám."
+            return None, _t("manual.bad_row")
         if lot <= 0:
-            return None, "A jelzésben nincs érvényes lot."
+            return None, _t("gui2.a_jelzesben_nincs_ervenyes")
 
         ar = self._signal_price_of(sym)
         if not ar:
-            return None, "Nincs élő ár (MT5 kapcsolat?)."
+            return None, _t("gui2.nincs_elo_ar_mt5")
         belepo = ar[1] if irany == "BUY" else ar[0]
 
         sl_tav, tp_tav = abs(jelzett - sl0), abs(tp0 - jelzett)
         if sl_tav <= 0:
-            return None, "A jelzés stop-távolsága nulla."
+            return None, _t("gui2.a_jelzes_stop_tavolsaga")
         if irany == "BUY":
             sl, tp = belepo - sl_tav, belepo + tp_tav
         else:
@@ -5140,8 +5079,7 @@ class DashboardWindow:
                      "TP=%.5g (a jelzés ideje: %s)", sym, irany, lot, sl, tp,
                      row.get("time"))
             return ticket, ""
-        return None, ("A megbízás nem ment ki — a részletes ok (retcode) a "
-                      "naplóban.")
+        return None, (_t("gui2.a_megbizas_nem_ment"))
 
     def _closed_in_range(self, date_from, date_to) -> list:
         """LEZÁRT pozíciók egy dátum-intervallumra (a „Lezárt" fül tól–ig nézete).
@@ -5242,17 +5180,17 @@ class DashboardWindow:
                        activebackground=BTN_OPT_BG, activeforeground=FG_ON_ACCENT)
         if native != "—" and not cur_adopted:
             # A bot SAJÁT (magicjével nyitott) pozíciója — nincs mit hozzárendelni.
-            menu.add_command(label=f"A(z) {native} nyitotta (magic) — nem módosítható",
+            menu.add_command(label=_t("gui.adopt.native", native=native),
                              state="disabled")
         else:
-            menu.add_command(label="Kezelje ez a stratégia:", state="disabled")
+            menu.add_command(label=_t("gui.kezelje_ez_a_strategia"), state="disabled")
             for name in enabled_strategy_names(self.cfg, symbol):
                 menu.add_command(
                     label=("✓ " if name == cur_adopted else "    ") + name,
                     command=lambda n=name: self._adopt_position(ticket, symbol, n))
             if cur_adopted:
                 menu.add_separator()
-                menu.add_command(label="Hozzárendelés visszavonása (kézi marad)",
+                menu.add_command(label=_t("gui.hozzarendeles_visszavonasa_kezi_marad"),
                                  command=lambda: self._release_position(ticket))
         try:
             menu.tk_popup(widget.winfo_rootx(),
@@ -5275,12 +5213,10 @@ class DashboardWindow:
         # pozíció valóban kezeletlen maradna.
         if not self._strategy_enabled(symbol, strategy_name):
             messagebox.showwarning(
-                "Nincs engedélyezve",
-                f"A(z) {strategy_name} nincs bekapcsolva a(z) {symbol} páron, így "
-                f"a motor sosem futtatja — a hozzárendelt pozíciót nem kezelné."
+                _t("gui.nincs_engedelyezve"),
+                _t("gui.adopt.not_enabled", strategy=strategy_name, symbol=symbol)
                 + chr(10) + chr(10) +
-                "Kapcsold be az instrumentum beállításainál (kattints a sorban az "
-                "instrumentum NEVÉRE), majd próbáld újra.")
+                _t("gui2.kapcsold_be_az_instrumentum"))
             return
         _untuned = not params_file(symbol, strategy_name).exists()
         pos = next((p for p in getattr(self, "_mt5_cache", {}).get("positions_detail", [])
@@ -5290,25 +5226,13 @@ class DashboardWindow:
             # ⚠ NEM tiltás, hanem TÁJÉKOZTATÁS — de kimondva. Egy hangolatlan
             # stratégia KEZELI a pozíciót, csak nem erre az instrumentumra
             # hangolt számokkal; ezt tudni kell, mielőtt rábízod.
-            warn += (chr(10) + chr(10) + "MEGJEGYZÉS: ez a stratégia NINCS "
-                     "optimalizálva ezen a páron, tehát a SAJÁT ALAPÉRTELMEZETT "
-                     "paramétereivel fogja kezelni a pozíciót — kezelni fogja, "
-                     "csak nem erre az instrumentumra hangolt értékekkel.")
+            warn += (chr(10) + chr(10) + _t("gui2.megjegyzes_ez_a_strategia"))
         if pos is not None and not pos.get("sl"):
-            warn = ("\n\nFIGYELEM: ennek a pozíciónak NINCS stop-lossa. A kockázat-"
-                    "csökkentés (1R-es részleges zárás, Fibo/Harmados stop-lépcsők) "
-                    "az eredeti SL-távolságból számol — SL nélkül ezek nem lépnek "
-                    "működésbe, csak a TP-alapú breakeven és a trailing.")
+            warn = (_t("gui2.figyelem_ennek_a_pozicionak"))
         if not messagebox.askyesno(
-                "Pozíció hozzárendelése",
-                f"A(z) #{ticket} ({symbol}) pozíciót a(z) {strategy_name} stratégia "
-                f"kezelje ezentúl?\n\n"
-                f"A motor ugyanúgy bánik vele, mintha ő nyitotta volna: breakeven, "
-                f"trailing, kockázatcsökkentés, kiszállási jel, cost-cut, "
-                f"pozícióépítés — és foglal egy slotot.\n\n"
-                f"A bróker oldalán a pozíció magicje/megjegyzése VÁLTOZATLAN marad "
-                f"(az MT5 ezt utólag nem engedi átírni) — a hozzárendelést a program "
-                f"tartja nyilván.{warn}"):
+                _t("gui.pozicio_hozzarendelese"),
+                _t("gui.adopt.confirm", ticket=ticket, symbol=symbol,
+                   strategy=strategy_name, warn=warn)):
             return
         _adopted.adopt(ticket, strategy_name, symbol)
         # A BELÉPÉSKORI kockázat (1 R) rögzítése a kézi pozícióra is — a motor
@@ -5332,10 +5256,8 @@ class DashboardWindow:
         """A hozzárendelés visszavonása — a motor elengedi a pozíciót."""
         from tkinter import messagebox
         if not messagebox.askyesno(
-                "Hozzárendelés visszavonása",
-                f"A(z) #{ticket} pozíciót a motor NE kezelje tovább?\n\n"
-                f"A pozíció NEM zárul be — csak magára marad (a bróker SL/TP-je védi). "
-                f"A már elmozgatott stop ott marad, ahol most van."):
+                _t("gui.hozzarendeles_visszavonasa"),
+                _t("gui.adopt.release", ticket=ticket)):
             return
         _adopted.release(ticket)
         self._pos_tab.refresh()
@@ -5377,15 +5299,16 @@ class DashboardWindow:
 
         menu = tk.Menu(self.root, tearoff=0, bg=BG_HEADER, fg=FG_WHITE,
                        activebackground=BTN_OPT_BG, activeforeground=FG_ON_ACCENT)
-        menu.add_command(label=f"Kiszállás — a(z) {symbol} MINDEN pozíciójára hat:",
+        menu.add_command(label=_t("gui.close.title", symbol=symbol),
                          state="disabled")
         if _netting:
             menu.add_command(
-                label=f"  (a számla {_mc.margin_mode_name()} → a részleges zárás nem működik)",
+                label=_t("gui.close.margin_mode", mode=_mc.margin_mode_name()),
                 state="disabled")
         elif not halvable:
             menu.add_command(
-                label=f"  (a lot {cur_lot:.2f} < 2× min {min_lot:.2f} → Felező/Pajzs nem osztható)",
+                label=_t("gui.close.lot_small", lot=_fmtnum(f"{cur_lot:.2f}"),
+                    min=_fmtnum(f"{min_lot:.2f}")),
                 state="disabled")
         for preset in _rrs.CYCLE:
             if preset in _blocked:
@@ -5409,15 +5332,15 @@ class DashboardWindow:
                 rsub.add_command(
                     label=("● " if r == cur_runner else "    ") + _rrs.RUNNER_NAME[r],
                     command=lambda rr=r: self._set_exit_runner(symbol, rr))
-            menu.add_cascade(label="Runner (a maradék stopja)", menu=rsub)
+            menu.add_cascade(label=_t("gui.runner_a_maradek_stopja"), menu=rsub)
 
         menu.add_separator()
         _cc = _rrs.get_cost_cut(symbol)
         menu.add_command(
-            label=("✓ " if _cc else "    ") + f"Cost-cut (idő-stop, {_rrs.get_cost_cut_bars(symbol)} gyertya)",
+            label=("✓ " if _cc else "    ") + _t("gui.close.costcut", bars=_rrs.get_cost_cut_bars(symbol)),
             command=lambda: self._toggle_exit_cost_cut(symbol))
         menu.add_separator()
-        menu.add_command(label="Részletes… (Stratégia paraméterek)",
+        menu.add_command(label=_t("gui.reszletes_strategia_parameterek"),
                          command=lambda: self._show_instrument_params(symbol))
         try:
             menu.tk_popup(widget.winfo_rootx(),
@@ -5449,8 +5372,8 @@ class DashboardWindow:
     # ── Pozíciókezelő handlerek (Pozíciók fül) ──────────────────────────
     def _pos_panic(self, ticket: int):
         from tkinter import messagebox
-        if not messagebox.askyesno("Pozíció zárása",
-                                   f"Biztosan lezárod a #{ticket} pozíciót?"):
+        if not messagebox.askyesno(_t("gui.pozicio_zarasa"),
+                                   _t("gui.close.one", ticket=ticket)):
             return
         def _w():
             from core import mt5_connector
@@ -5463,8 +5386,8 @@ class DashboardWindow:
         if not positions:
             return
         if not messagebox.askyesno(
-                "ÖSSZES pozíció zárása",
-                f"Biztosan lezárod MIND a {len(positions)} nyitott pozíciót?"):
+                _t("gui.osszes_pozicio_zarasa"),
+                _t("gui.close.all", n=len(positions))):
             return
         tickets = [p["ticket"] for p in positions]
         def _w():
@@ -5615,7 +5538,7 @@ class DashboardWindow:
     def _handle_connect(self):
         # A connect() blokkoló MT5-login — háttérszálon, hogy a UI ne fagyjon.
         # Az eredményt a bg-poller (5 mp) és a _refresh úgyis felkapja a cache-ből.
-        self.lbl_conn.config(text="● Kapcsolódás...", fg=FG_YELLOW)
+        self.lbl_conn.config(text=_t("gui.kapcsolodas"), fg=FG_YELLOW)
 
         def _work():
             try:
@@ -5650,9 +5573,9 @@ class DashboardWindow:
         txt  = f"Szabad slotok: {_f}/{self._max_slots}"
         if self._open_total:
             rf = self._open_total - self._open_occupied
-            txt += (f"  ·  nyitva {self._open_total} "
-                    f"({self._open_occupied} kockázatos"
-                    + (f" + {rf} biztosított)" if rf else ")"))
+            txt += (_t("gui.hdr.open", open=self._open_total,
+                       occupied=self._open_occupied)
+                    + (_t("gui.hdr.riskfree", n=rf) if rf else ")"))
         # Tényleges terhelés: a lekötött keret a számla %-ában. Ha ez a beállított
         # risk_pct fölé megy, azt LÁTNI kell — a `min_lot` kis számlán fölé viheti,
         # és korábban ez sehol nem látszott.
@@ -5660,7 +5583,7 @@ class DashboardWindow:
         _cfg_pct = float(self.cfg.get("trading", {}).get("account_risk_pct", 0.0))
         over = _load > _cfg_pct * 100 + 1e-9
         if _load > 0:
-            txt += f"  ·  terhelés {_load:.2f}%"
+            txt += _t("gui.hdr.load", pct=_fmtnum(f"{_load:.2f}"))
         self.lbl_slots.config(
             text=txt, fg=FG_RED if (free <= 0 or over) else FG_GREEN)
 
@@ -5693,7 +5616,7 @@ class DashboardWindow:
             return
         pct = float(self.cfg.get("trading", {}).get("account_risk_pct", 0.0))
         per_slot = self._per_slot_risk()
-        txt = f"Kockázat: {pct * 100:.1f}%"
+        txt = _t("gui.hdr.risk", pct=_fmtnum(f"{pct * 100:.1f}"))
         if per_slot > 0:
             txt += f" ({per_slot:.2f}/slot)"
         self.lbl_risk.config(text=txt, fg=FG_WHITE)
@@ -5759,7 +5682,7 @@ class DashboardWindow:
     def _update_connection_ui(self, info: dict):
         self._connected = info.get("connected", False)
         if info["connected"]:
-            demo_tag = "  [DEMO]" if info.get("is_demo") else "  [ÉLES!]"
+            demo_tag = "  [DEMO]" if info.get("is_demo") else _t("gui2.eles2")
             demo_fg  = FG_YELLOW if info.get("is_demo") else FG_RED
             # Számlatípus (NETTING / HEDGE / EXCHANGE) — NETTING-nél a részleges
             # záráson alapuló technikák (Felező/Pajzs) tiltva vannak, ezért kiírjuk.
@@ -5775,7 +5698,7 @@ class DashboardWindow:
         else:
             self.lbl_conn.config(text="● Offline", fg=FG_RED)
             broker = self.cfg.get("broker", {})
-            demo_tag = "  [DEMO]" if broker.get("is_demo") else "  [ÉLES]"
+            demo_tag = "  [DEMO]" if broker.get("is_demo") else _t("gui2.eles")
             self.lbl_account.config(
                 text=f"#{broker.get('login','—')}  {broker.get('server','—')}{demo_tag}",
                 fg=FG_GRAY)
@@ -5813,14 +5736,14 @@ class DashboardWindow:
         if st.get("allapot") == "grace":
             # A szerver nem válaszolt: mentésből futunk, és ez VÉGES.
             ora = st.get("turelmi_ora")
-            szoveg = f"{_email} · nincs licencszerver: még {ora} óra"
+            szoveg = _t("gui.hdr.no_licence_server", email=_email, hours=ora)
             szin = FG_RED if (ora is None or ora <= 12) else FG_YELLOW
         elif st.get("allapot") == "ok":
             # ⚠ A közelgő lejárat is ide tartozik: azt AZELŐTT kell látni, hogy
             # megállítana. 30 nap alatt szólunk, 7 nap alatt pirosan.
             nap = st.get("lejar_nap")
             if nap is not None and nap <= 30:
-                szoveg = f"{_email} · licenc lejár: {nap} nap"
+                szoveg = _t("gui.hdr.licence_expires", email=_email, days=nap)
                 szin = FG_RED if nap <= 7 else FG_YELLOW
 
         # ⚠ Csak VÁLTOZÁSKOR nyúlunk a widgethez: ez másodpercenként fut, és a
@@ -6386,7 +6309,7 @@ class DashboardWindow:
         _off = getattr(self, "_mt5_cache", {}).get("server_offset_sec")
         if _off is not None:
             bt = now + timedelta(seconds=_off)
-            self.lbl_time.config(text=f"Bróker {bt:%H:%M:%S}  ·  UTC {now:%H:%M}")
+            self.lbl_time.config(text=_t("gui.hdr.clock", broker=f"{bt:%H:%M:%S}", utc=f"{now:%H:%M}"))
         else:
             self.lbl_time.config(text=now.strftime("%Y-%m-%d %H:%M:%S UTC"))
 
@@ -6407,7 +6330,8 @@ class DashboardWindow:
                     ds.timeframe_remaining[tf.minutes] = rem
                 lbl = getattr(self, "_countdown_lbls", {}).get(tf.minutes)
                 if lbl is not None:
-                    lbl.config(text=f"{tf.label} zárás: {rem//60}:{rem%60:02d}")
+                    lbl.config(text=_t("gui.tf.close_in", label=tf.label, min=rem // 60,
+                                     sec=f"{rem % 60:02d}"))
         except Exception:
             pass
 
@@ -6554,7 +6478,7 @@ class DashboardWindow:
             # "Utolsó frissítés" = lokális UI-esemény → HELYI idő (nem UTC/bróker).
             local_now = datetime.now().strftime("%H:%M:%S")
             self.lbl_status.config(
-                text=f"Utolsó frissítés: {local_now}  |  LIVE: {live_count}")
+                text=_t("gui.hdr.updated", time=local_now, n=live_count))
 
         # Pozíciók fül frissítése
         if hasattr(self, "_pos_tab"):
@@ -6598,7 +6522,7 @@ class DashboardWindow:
             return
         try:
             if n:
-                _lbl.config(text=f"⚠ {n} hiba a naplóban — kattints",
+                _lbl.config(text=_t("gui.hdr.errors", n=n),
                             fg=FG_RED, cursor="hand2")
                 _lbl.pack(side="bottom")
                 self._err_tip = last
@@ -6640,7 +6564,7 @@ class DashboardWindow:
             os.startfile(str(LOG_PATH))               # Windows
         except Exception as ex:
             try:
-                self.lbl_status.config(text=f"A napló nem nyitható meg: {ex}")
+                self.lbl_status.config(text=_t("gui.log.open_error", error=ex))
             except tk.TclError:
                 pass
 
@@ -6664,7 +6588,7 @@ class DashboardWindow:
         for tid in sorted(frames, key=lambda i: (i != main_id, alive.get(i, ""))):
             if tid not in alive:
                 continue          # időközben véget ért szál
-            head = "FŐ SZÁL" if tid == main_id else alive[tid]
+            head = _t("gui2.fo_szal") if tid == main_id else alive[tid]
             stack = "".join(_tb.format_stack(frames[tid])[-6:]).rstrip()
             body = "\n".join(f"    {ln}" for ln in stack.splitlines())
             out.append(f"    [{head}]\n{body}")
@@ -6697,13 +6621,13 @@ class DashboardWindow:
                 lag = time.monotonic() - getattr(self, "_last_heartbeat", time.monotonic())
                 if lag > threshold:
                     if not warned:
-                        msg = f"⚠ A FŐ SZÁL {lag:.1f} mp-ig nem frissült (blokkoló hívás?)."
+                        msg = _t("gui.hdr.mainthread_lag", sec=_fmtnum(f"{lag:.1f}"))
                         report = ""
                         if want_stacks:
                             try:
                                 report = self._stall_report()
                             except Exception as ex:
-                                report = f"    (a vermek kiírása elbukott: {ex})"
+                                report = _t("gui.hdr.stacks_failed", error=ex)
                         log.warning(msg + ("\n" + report if report else ""))
                         try:
                             with open(ROOT / "data" / "ui_watchdog.log", "a",

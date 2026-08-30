@@ -24,6 +24,17 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 results = []
+import json as _json
+_HU_CAT = _json.loads((ROOT / "lang" / "hu.json").read_text(encoding="utf-8"))
+
+
+def _says(key, *words):
+    """A kulcs magyar szovege tartalmazza-e mindet? (i18n utan a felirat mar
+    nem a forrasban van — a teszt a KATALOGUST kerdezi.)"""
+    txt = _HU_CAT.get(key, "")
+    return all(w in txt for w in words)
+
+
 
 
 def check(name, ok, detail=""):
@@ -112,7 +123,8 @@ check("_save_main_config: a TORZSBEN nincs tobbe nema 'except Exception: pass'",
       "except Exception:" not in _sm_body and "pass" not in _sm_body,
       _sm_body.strip()[:160])
 check("_save_main_config: hibanal az ALLAPOTSORBA ir",
-      "_set_status" in _sm and "NEM mentődött el" in _sm)
+      "_set_status" in _sm and "gui.ctrl.not_saved" in _sm
+      and _says("gui.ctrl.not_saved", "NEM mentődött el"))
 check("_save_main_config: bool-t ad vissza (a hivo tud rola)",
       "-> bool:" in _sm and "return False" in _sm and "return True" in _sm)
 
@@ -123,12 +135,14 @@ _start = gsrc.split("def _start_strategy")[1].split("\n    def ")[0]
 check("_start_strategy: figyeli a mentes eredmenyet",
       "_saved = self._save_main_config()" in _start)
 check("_start_strategy: sikertelen mentesnel MAS uzenetet ad",
-      "if _saved:" in _start and "nem folytatódik" in _start)
+      "if _saved:" in _start and "gui.ctrl.started_unsaved" in _start
+      and _says("gui.ctrl.started_unsaved", "nem folytatódik"))
 _stop = gsrc.split("def _stop_strategy")[1].split("\n    def ")[0]
 check("_stop_strategy: figyeli a mentes eredmenyet",
       "_saved = self._save_main_config()" in _stop)
 check("_stop_strategy: sikertelen mentesnel MAS uzenetet ad",
-      "if _saved else" in _stop and "visszaindulna" in _stop)
+      "if _saved else" in _stop and "gui.ctrl.stopped_unsaved" in _stop
+      and _says("gui.ctrl.stopped_unsaved", "visszaindulna"))
 
 # A ⚙ szerkeszto is atomikusan ir (es a nyers irot hasznalja: a `new` mar vaz)
 # v2.9.0: a ⚙ ablak HAROM bal oldali fulre bomlott (Json / Kapuk / Strategiak);
