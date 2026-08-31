@@ -407,6 +407,7 @@ class TrendPullbackStrategy(Strategy):
         # `on_bar_close`-ban). A `_BAND_BARS` H1-nyi múltra nézünk vissza.
         _kezd = max(1, len(idx) - _BAND_BARS * TF_TREND)
         pip = p.get("point_size", 0.0001)
+        _recs: list = []
         try:
             hi, _lo = self.bt_indicators((md.bars or {}).get("M15"), df1, p)
         except Exception:
@@ -437,12 +438,20 @@ class TrendPullbackStrategy(Strategy):
             # kapcsolja, nem a történést — különben a chart előzménye csendben
             # lyukas lenne azokon az időszakokon, amikor a jelölők ki voltak
             # kapcsolva.
-            rec = {"t": t, "d": "BUY", "e": entry, "sl": sl, "tp": tp,
-                   "lab": _lab}
-            _sink = getattr(md, "on_entry_record", None)
+            _recs.append({"t": t, "d": "BUY", "e": entry, "sl": sl, "tp": tp,
+                          "lab": _lab})
+
+        # ⚠ KÉT MENET, mert a „kötne-e" kérdés csak a TELJES sorozat ismeretében
+        # dönthető el: egy jelzés akkor marad ki, ha egy KORÁBBI belépő pozíciója
+        # még nyitva van. Egyesével rajzolva ez sosem derülne ki — pontosan ezért
+        # olvasott a felhasználó egy öt-jeles csomóból hármat kötésnek.
+        viz.mark_blocked(_recs, df1, self.name)
+        _sink = getattr(md, "on_entry_record", None)
+        _rajzol = getattr(md, "show_signals", True)
+        for rec in _recs:
             if callable(_sink):
                 _sink(rec)
-            if getattr(md, "show_signals", True):
+            if _rajzol:
                 objs += viz.entry_marks(rec)
         return objs
 

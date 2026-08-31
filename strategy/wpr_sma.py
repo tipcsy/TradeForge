@@ -518,6 +518,7 @@ class WprSmaStrategy(Strategy):
         # lenne minden olyan időszakon, amikor a felhasználó elrejtette a jeleket.
         _draw_sig = getattr(md, "show_signals", True)
         _sink = getattr(md, "on_entry_record", None)
+        _recs: list = []
         if tl_t:
             p = 0
             # PERZISZTENS M1-állapot: az M1 belépő állapotgép (felfegyverez az extrémnél
@@ -630,12 +631,19 @@ class WprSmaStrategy(Strategy):
                 # centrálva + függőleges irány-vonal + címke), hogy a naplóból
                 # visszatöltött múlt BITRE ugyanúgy nézzen ki, mint a most
                 # újraszámolt jelen.
-                rec = {"t": t, "d": sig, "e": entry, "sl": sl, "tp": tp,
-                       "lab": _lab}
-                if callable(_sink):
-                    _sink(rec)
-                if _draw_sig:
-                    objects += viz.entry_marks(rec)
+                _recs.append({"t": t, "d": sig, "e": entry, "sl": sl,
+                              "tp": tp, "lab": _lab})
+
+        # ⚠ KÉT MENET: a „kötne-e" kérdés csak a TELJES sorozat ismeretében
+        # dönthető el — egy jelzés akkor marad ki, ha egy KORÁBBI belépő
+        # pozíciója még nyitva van. Egyesével rajzolva ez sosem derülne ki, és a
+        # chart minden jelzést kötésnek mutatna (2026-08-31-i lelet).
+        viz.mark_blocked(_recs, m1, self.name)
+        for rec in _recs:
+            if callable(_sink):
+                _sink(rec)
+            if _draw_sig:
+                objects += viz.entry_marks(rec)
 
         # ── Beállítás-táblázat (bal-felső sarok) ───────────────────────────
         rows = [

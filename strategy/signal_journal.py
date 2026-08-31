@@ -62,7 +62,7 @@ _lock = threading.Lock()
 # fogná. Lásd a kijelzés-út mély warmup tanulságát.
 _seen: dict[str, set] = {}
 
-_FIELDS = ("t", "d", "e", "sl", "tp", "lab", "fp")
+_FIELDS = ("t", "d", "e", "sl", "tp", "lab", "fp", "skip")
 
 
 def path_of(symbol: str, strategy: str) -> Path:
@@ -108,6 +108,12 @@ def _norm(r: dict) -> "dict | None":
             out["lab"] = str(r["lab"])[:64]
         if r.get("fp"):
             out["fp"] = str(r["fp"])[:16]
+        # ⚠ A KIMARADT jelzés jelölése (`visual.mark_blocked`) — enélkül az
+        # ablakon KÍVÜLI múlt megint úgy nézne ki, mintha minden jelzésből
+        # kötés lett volna. A döntés a jelzés pillanatában VÉGLEGES (azt nézi,
+        # nyitva volt-e akkor pozíció), tehát utólag nem kell frissíteni.
+        if r.get("skip"):
+            out["skip"] = 1
         return out
     except (KeyError, TypeError, ValueError):
         # Egy hibás rekord ne vigye el a többit — de a naplóban maradjon nyoma.

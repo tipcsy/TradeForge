@@ -678,6 +678,7 @@ class BollingerSqueezeStrategy(Strategy):
                                       color=_col, width=1))
 
         st = SqueezeState(symbol=md.symbol)
+        _recs: list = []
         for i in range(len(ind) - 1):              # csak ZÁRT gyertyák
             row = ind.iloc[i]
             st = _advance(st, row, md.params)
@@ -711,16 +712,26 @@ class BollingerSqueezeStrategy(Strategy):
                 # perzisztens naploba is (`strategy.signal_journal`). A gyujtes a
                 # rajz-kapu ELOTT all: a „K" gomb a RAJZOT kapcsolja ki, nem a
                 # tortenest — kulonben a chart elozmenye csendben lyukas lenne.
-                rec = {"t": t, "d": st.pending, "e": entry, "sl": sl, "tp": tp,
-                       "lab": _lab}
-                _sink = getattr(md, "on_entry_record", None)
-                if callable(_sink):
-                    _sink(rec)
-                # ⚠ A KOZOS rajzolo (`viz.entry_marks`) — ugyanaz, amit a
-                # `wpr_sma` es a naplobol visszatoltott mult is hasznal. Igy a
-                # jelolok strategiak kozott is EGYFORMAK (ugyanaz a zold, ugyanaz
-                # a vonalvastagsag), es a naplo nem tud elcsuszni a rajztol.
-                if getattr(md, "show_signals", True):
-                    objs += viz.entry_marks(rec)
+                _recs.append({"t": t, "d": st.pending, "e": entry,
+                              "sl": sl, "tp": tp, "lab": _lab})
             st.pending = "NONE"
+
+        # ⚠ KET MENET: a „kotne-e" kerdes csak a TELJES sorozat ismereteben
+        # dontheto el (egy jelzes akkor marad ki, ha egy KORABBI belepo pozicioja
+        # meg nyitva van). A kilepes-kereses a legfinomabb elerheto baron megy —
+        # M15-on egy M15 gyertyan beluli SL/TP nem latszana.
+        _fin = (md.bars or {}).get("M1")
+        viz.mark_blocked(_recs, _fin if (_fin is not None and len(_fin) > 1) else df,
+                         self.name)
+        _sink = getattr(md, "on_entry_record", None)
+        _rajzol = getattr(md, "show_signals", True)
+        for rec in _recs:
+            if callable(_sink):
+                _sink(rec)
+            # ⚠ A KOZOS rajzolo (`viz.entry_marks`) — ugyanaz, amit a
+            # `wpr_sma` es a naplobol visszatoltott mult is hasznal. Igy a
+            # jelolok strategiak kozott is EGYFORMAK (ugyanaz a zold, ugyanaz
+            # a vonalvastagsag), es a naplo nem tud elcsuszni a rajztol.
+            if _rajzol:
+                objs += viz.entry_marks(rec)
         return objs

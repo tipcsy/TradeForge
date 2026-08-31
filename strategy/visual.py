@@ -14,7 +14,12 @@ objektum (pl. SMA-doboz) csak NŐ, amíg tart a feltétel.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
+
+import numpy as np
+
+log = logging.getLogger(__name__)
 
 # Minden objektum neve ezzel a prefixszel kezdődik — az indikátor ez alapján
 # ismeri fel a SAJÁT objektumait (kézzel rajzolt objektumhoz nem nyúl).
@@ -337,6 +342,19 @@ def entry_marks(rec: dict, span_sec: int = 180) -> list:
     """
     t = int(rec["t"])
     buy = str(rec.get("d", "")).upper() == "BUY"
+    # ⚠ AMI KIMARAD, AZ NE NÉZZEN KI KÖTÉSNEK. Egy páron egyszerre EGY pozíció
+    # lehet, tehát a jelzések többsége élesben sosem lesz kötés (`mark_blocked`).
+    # Az ilyen jelzés VÉKONY, SZÜRKE vonalat kap — látszik, hogy volt jel, de
+    # nincs se címke, se belépő/SL/TP vonal, ami kötést sugallna.
+    #
+    # ⚠ A NÉV UGYANAZ (`m1sig_<t>`), tehát az MT5 upsert-je ÁTSZÍNEZI a meglévő
+    # vonalat, ha egy jelzés később mégis kötővé válik (a blokkoló pozíció
+    # kigörgült az ablakból). A fordított irány — kötőből kimaradó — csak
+    # ablak-MÉLYÍTÉS vagy hangolás után fordulhat elő; olyankor a korábbi
+    # SL/TP-vonalak a charton maradnak (az indikátor sosem töröl), amíg az MT5
+    # újra nem indul. Ugyanaz az elévülés, mint egy hangolás utáni régi jelölőnél.
+    if rec.get("skip"):
+        return [VLine(name=f"m1sig_{t}", t1=t, color="muted", width=1)]
     col = "green" if buy else "red"
     entry = float(rec["e"])
     sl, tp = rec.get("sl"), rec.get("tp")
@@ -358,3 +376,93 @@ def entry_marks(rec: dict, span_sec: int = 180) -> list:
         out.append(Trend(name=f"sl_{t}", t1=t0, p1=float(sl), t2=t_end,
                          p2=float(sl), color="red", width=2))
     return out
+
+
+# ── MELYIK JELZÉSBŐL LESZ TÉNYLEGES KÖTÉS ─────────────────────────────────
+def mark_blocked(recs: list, bars, strategy: str = "") -> int:
+    """A rekordokba beírja, melyik jelzés maradna KI (`skip` = 1).
+
+    ⚠ MIÉRT KELL. A chart eddig MINDEN jelzést ugyanúgy rajzolt ki — pedig egy
+    páron egyszerre egy pozíció lehet, tehát a jelzések többsége élesben sosem
+    lesz kötés. 2026-08-31-én a felhasználó egy öt-jeles csomóból hármat olvasott
+    kötésnek, holott a motor kettőt kötött volna (és a csomó nettó +1,00 R volt,
+    nem veszteséges). A rajz nem hazudott, csak nem mondta el a különbséget —
+    ugyanaz a néma osztály, mint a viz-sáv és a warmup-mélység leleteinél.
+    Mérve ugyanezen a napon: 10 jelzésből 1 kötés, 5-ből 2.
+
+    A MODELL: a belépő utáni első bár, amelyik megüti az SL-t vagy a TP-t, zárja
+    a pozíciót; amíg nyitva van, a következő jelzés kimarad. Ha egy báron belül
+    mindkettő teljesül, a STOP nyer — ugyanaz a konzervatív konvenció, mint a
+    kutató-labor szimulátorában (`tools/research/lab.simulate`), hogy a chart és
+    a mérés ne mondjon mást ugyanarra a csomóra.
+
+    ⚠ AMIT NEM TUD, ÉS AMERRE TÉVED:
+      * A tiltás élesben a PÁRRA vonatkozik, nem a stratégiára. Ha egy MÁSIK
+        stratégia tart nyitott pozíciót ugyanazon a páron, a „kötne" jelölő is
+        kimaradhat — a zöld jelölők tehát FELSŐ becslést adnak.
+      * A kilépés élesben lehet BE/trailing/kiszállás-jel is, nem csak SL/TP.
+        Azok KORÁBBAN zárnak, tehát a valóságban a kötések száma csak nőhet.
+      * `t` konvenció: a `trend_pullback`/`bollinger_squeeze` a belépő gyertya
+        ZÁRÁSÁT írja a rekordba, a `wpr_sma` a NYITÁSÁT. Utóbbinál a kilépést
+        kereső ablak a belépő gyertyát is tartalmazza (egy bár optimizmus).
+
+    Visszaadja, hány jelzés kapott `skip` jelölést.
+    """
+    if not recs:
+        return 0
+    recs.sort(key=lambda r: int(r["t"]))
+    for r in recs:                       # újraszámolás: a régi jelölés nem él túl
+        r.pop("skip", None)
+    try:
+        _t = np.asarray(bars.index.asi8, dtype="int64") // 1_000_000_000
+        hi = np.asarray(bars["high"], dtype=float)
+        lo = np.asarray(bars["low"], dtype=float)
+    except Exception:
+        # ⚠ NEM néma: enélkül a chart visszaesne a régi képre (minden jelzés
+        # kötésnek látszik), és pontosan azt a félreolvasást hozná vissza,
+        # amiért ez a függvény készült.
+        log.warning("a KÖTNE/KIMARAD jelölés kimarad (%s): a bárok nem "
+                    "olvashatók — a chart MINDEN jelzést kötésként rajzol",
+                    strategy or "?", exc_info=True)
+        return 0
+    if len(_t) < 2:
+        return 0
+
+    _nincs_sl = 0
+    kimarad = 0
+    foglalt = -1                          # eddig (epoch mp) tart a nyitott pozíció
+    _VEGTELEN = 1 << 62
+    for r in recs:
+        t = int(r["t"])
+        if t <= foglalt:
+            r["skip"] = 1
+            kimarad += 1
+            continue
+        if t < int(_t[0]):
+            # Az ablak ELŐTTI jelzés (naplóból visszatöltött múlt): nem tudjuk
+            # végigjátszani, tehát nem is állítunk róla semmit.
+            continue
+        sl, tp = r.get("sl"), r.get("tp")
+        if sl is None:
+            # Stop nélkül nem tudjuk, meddig tart a pozíció -> nem foglal le
+            # semmit. A jelölőknek EGYÉBKÉNT IS van SL-vonala (teszt őrzi), ez
+            # az ág adathiánynál fut.
+            _nincs_sl += 1
+            continue
+        j = int(np.searchsorted(_t, t, side="left"))
+        if j >= len(_t):
+            foglalt = _VEGTELEN
+            continue
+        buy = str(r.get("d", "")).upper() == "BUY"
+        h, l = hi[j:], lo[j:]
+        m = (l <= float(sl)) if buy else (h >= float(sl))
+        if tp is not None:
+            m = m | ((h >= float(tp)) if buy else (l <= float(tp)))
+        # ⚠ Ha a pozíció az ablak VÉGÉIG nyitva marad, az utána jövő jelzések
+        # jogosan maradnak ki — élesben is nyitva volna.
+        foglalt = int(_t[j + int(np.argmax(m))]) if bool(m.any()) else _VEGTELEN
+    if _nincs_sl:
+        log.warning("a KÖTNE/KIMARAD jelölés %d jelzésnél kimaradt (%s): "
+                    "nincs SL a rekordban, így a pozíció hossza ismeretlen",
+                    _nincs_sl, strategy or "?")
+    return kimarad

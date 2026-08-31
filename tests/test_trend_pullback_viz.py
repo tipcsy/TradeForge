@@ -135,10 +135,21 @@ check("vannak belépő-jelölők", bool(_sig), f"{len(_sig)} db")
 # ⚠ MINDEGYIKNEK legyen SL/TP vonala. A méret az M15 ATR-ből jön: ha az M15
 # ablak sekélyebb, mint a rajzolt szakasz, a régebbi jelölők NÉMÁN vonal
 # nélkül maradnának (mérve: 17-ből 2-nek volt csak).
-check("⚠ MINDEN jelölőhöz tartozik SL vonal", len(_sl) == len(_sig),
-      f"{len(_sl)} SL / {len(_sig)} jelölő")
-check("⚠ ...és TP vonal is", len(_tp) == len(_sig),
-      f"{len(_tp)} TP / {len(_sig)} jelölő")
+# ⚠ 2026-08-31 ÓTA a jelölő KÉTFÉLE: ami ténylegesen kötne (színes, vastag
+# vonal + SL/TP), és ami egy még NYITOTT pozíció miatt kimarad (vékony szürke
+# vonal, SL/TP NÉLKÜL — az kötést sugallna). Az eredeti lelet ettől érvényben
+# marad, csak a KÖTŐ jelölőkre vonatkozik: a sekély M15 ablaknál a régebbi
+# belépők NÉMÁN vonal nélkül maradtak (17-ből 2-nek volt csak).
+_kot = [o for o in _sig if getattr(o, "color", "") != "muted"]
+_kim = [o for o in _sig if getattr(o, "color", "") == "muted"]
+check("⚠ a jelölők egy része KIMARAD (nyitott pozíció miatt)",
+      0 < len(_kim) < len(_sig), f"{len(_kot)} kötne / {len(_sig)} jelzés")
+check("⚠ MINDEN KÖTŐ jelölőhöz tartozik SL vonal", len(_sl) == len(_kot),
+      f"{len(_sl)} SL / {len(_kot)} kötő jelölő")
+check("⚠ ...és TP vonal is", len(_tp) == len(_kot),
+      f"{len(_tp)} TP / {len(_kot)} kötő jelölő")
+check("⚠ ...a KIMARADÓ jelölő viszont vékony és szürke",
+      all(getattr(o, "width", 0) == 1 for o in _kim))
 
 # A jelölők a MOTOR jelével egyeznek (ugyanaz a `signal_column`, nem másolat).
 _sc = T.signal_column(d1, p)
