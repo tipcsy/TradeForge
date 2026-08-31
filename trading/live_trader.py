@@ -268,6 +268,39 @@ build_runtime: dict[tuple, dict] = {}
 _run_cfg: dict = {}
 _run_slot_mgr = None
 
+# ── ÉLETJEL és LEÁLLÍTÁS (a fej nélküli futáshoz) ──────────────────────────
+# ⚠ MIÉRT KELL AZ ÉLETJEL. A 2026-08-XX-i NÉMA SZÁL-HALÁL (egy hiányzó
+# `point_size` megölte ezt a szálat, 11 pár leállt, a napló hallgatott) kívülről
+# megkülönböztethetetlen volt a nyugalomtól. Egy időbélyeg, amit minden kör
+# frissít, ezt eldönti: ha ELAVULT, a motor nem dolgozik — akkor is, ha a
+# processz él. A konzol `state` parancsa és (a következő körben) a Telegram
+# `/heart` ebből válaszol.
+last_cycle_ts: float = 0.0
+
+# ⚠ MIÉRT KELL A LEÁLLÍTÁS-KÉRÉS. A grafikus felület bezárásakor a processz
+# egyben megszűnik; a konzolos módban viszont a `quit` után a motornak
+# BEFEJEZNIE kell a kört, nem a közepén meghalnia. Az esemény a `sleep` helyén
+# vár, tehát a kilépés azonnali, de mindig KÖRHATÁRON.
+_STOP = threading.Event()
+
+
+def request_stop() -> None:
+    """A motor fejezze be a mostani kört, és lépjen ki."""
+    _STOP.set()
+
+
+def stop_requested() -> bool:
+    return _STOP.is_set()
+
+
+def engine_alive(max_age: float = 60.0) -> bool:
+    """Dolgozik-e a motor? `last_cycle_ts` frissessége alapján.
+
+    ⚠ SZÁNDÉKOSAN nem a szál `is_alive()`-ja: az akkor is `True`, ha a szál egy
+    végtelen várakozásban ragadt. A kérdés nem az, hogy LÉTEZIK-e, hanem hogy
+    HALAD-e."""
+    return last_cycle_ts > 0 and (time.time() - last_cycle_ts) <= max_age
+
 # MT5 chart-vizualizáció: engedélyezés + írásgyakoriság (run() tölti a configból),
 # és a per-szimbólum utolsó írás ideje (throttle — ne írjunk minden 10 mp-ben mélyet).
 VIZ_ENABLED:      bool  = True
@@ -3089,7 +3122,7 @@ def manual_build(symbol: str, strategy_name: "str | None" = None) -> bool:
 
 
 def run(cfg: dict, slot_mgr: SlotManager):
-    global VIZ_ENABLED, VIZ_INTERVAL_SEC, _run_cfg, _run_slot_mgr
+    global VIZ_ENABLED, VIZ_INTERVAL_SEC, _run_cfg, _run_slot_mgr, last_cycle_ts
     _run_cfg = cfg
     _run_slot_mgr = slot_mgr
     trading_cfg = cfg["trading"]
@@ -3402,15 +3435,20 @@ def run(cfg: dict, slot_mgr: SlotManager):
     except Exception as _e:
         log.debug("config-frissesség ellenőrzés kihagyva: %s", _e)
 
-    while True:
+    while not _STOP.is_set():
         try:
+            # ⚠ ÉLETJEL a kör ELEJÉN: ez az az időbélyeg, amiből kívülről
+            # (konzol `state`, Telegram `/heart`) eldönthető, hogy a motor
+            # halad-e. A kör végére tenni hiba volna: egy félbeszakadt körnél
+            # sosem frissülne, és a motor holtnak látszana, miközben dolgozik.
+            last_cycle_ts = time.time()
             # ── Kapcsolat-felügyelet ─────────────────────────────────────────
             # Ha nincs használható MT5-kapcsolat, ezt a kört KIHAGYJUK (és az
             # `ensure_connected` a háttérben újrakapcsolódik, növekvő várakozással).
             # Enélkül a motor csendben tétlen maradt, a nyitott pozíciók pedig
             # menedzsment nélkül — most legalább naplózza, és magától helyreáll.
             if not mt5_connector.ensure_connected(cfg):
-                time.sleep(10)
+                _STOP.wait(10)
                 continue
 
             balance = mt5_connector.account_balance()
@@ -3654,14 +3692,16 @@ def run(cfg: dict, slot_mgr: SlotManager):
             # betöltése nem tolja ki a kör idejét a 10 mp fölé.
             _publish_viz_jobs(all_pairs, strats_by_symbol, pair_states)
 
-            time.sleep(10)
+            # ⚠ `wait` és nem `sleep`: a leállítás-kérés azonnal felébreszti, de
+            # csak KÖRHATÁRON — a folyamatban lévő pozíció-kezelés lefut.
+            _STOP.wait(10)
 
         except KeyboardInterrupt:
             log.info("Leállítás...")
             break
         except Exception as e:
             log.error("Hiba a fő ciklusban: %s", e, exc_info=True)
-            time.sleep(30)
+            _STOP.wait(30)
 
 
 # ---------------------------------------------------------------------------

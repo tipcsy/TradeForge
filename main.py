@@ -5,6 +5,7 @@ Parancsok:
   python main.py download     — historikus adatok letöltése MT5-ből
   python main.py optimize     — AI paraméter optimalizálás / tanítás
   python main.py live         — élő kereskedés + dashboard
+  python main.py console      — élő kereskedés FELÜLET NÉLKÜL (gyenge gép, VM, SSH)
   python main.py dashboard    — csak dashboard (demo mód, MT5 nélkül)
   python main.py backtest     — backtest futtatás az alapértelmezett paraméterekkel
 
@@ -184,11 +185,121 @@ def cmd_dashboard():
     win.run()
 
 
+def cmd_console():
+    """FEJ NÉLKÜLI élő kereskedés + egyszerű parancssor.
+
+    ⚠ MIÉRT VAN EZ KÜLÖN PARANCS. A `live` a tkinter-felületet a FŐSZÁLON
+    futtatja (a tkinter csak onnan mehet), a motort pedig szálban — gyenge
+    gépen (VM) viszont épp a felület a fölösleges. Itt fordítva: a motor megy
+    szálban, a főszálon pedig egy parancssor ül. **A motor kódja ugyanaz**; a
+    `trading.live_trader.run` nem ismeri, ki figyeli.
+
+    ⚠ A PARANCSOK NEM ITT LAKNAK. A szabályok (`play`/`stop`/`close`) a
+    `core.console_cmd`-ben vannak — ugyanonnan fogja használni a TUI és a
+    Telegram is. Ez a függvény csak beolvas, kiír, és rákérdez."""
+    from core import console_cmd, licence, live_lock, mt5_connector
+    from core.risk_manager import SlotManager
+    from trading.live_trader import run
+    from trading import live_trader as lt
+    from version import APP_VERSION
+
+    _setup_log()
+    cfg = load_cfg()
+
+    if not mt5_connector.connect(cfg):
+        print(_t("console.mt5.failed"))
+        return 1
+
+    _acc = mt5_connector.connection_info(cfg)
+    _szamla = str(_acc.get("login") or "")
+
+    # ⚠ A FUTÁS-ZÁR A LICENC ELŐTT. Egy második példány ne is kopogtasson a
+    # licencszerveren — és a felhasználó a VALÓDI okot lássa elsőként.
+    _ok, _akadaly = live_lock.acquire(_szamla, note="console")
+    if not _ok:
+        print(_t("console.lock.held", account=_szamla,
+                 info=live_lock.describe(_akadaly),
+                 path=live_lock.lock_path(_szamla)))
+        mt5_connector.disconnect()
+        return 1
+    # ⚠ A ZÁR VÉDELEM, NEM FELTÉTEL: ha nem sikerült KIÍRNI (írásvédett mappa,
+    # tele lemez), az `acquire` szándékosan enged — egy fájlhiba miatt ne álljon
+    # le a kereskedés. De akkor SZÓLUNK: a védelem elveszett, és a felhasználó
+    # ne higgye, hogy egy második indítás fel fog akadni rajta.
+    if not live_lock.lock_path(_szamla).exists():
+        print(_t("console.lock.unprotected", path=live_lock.lock_path(_szamla)))
+
+    # ⚠ `interactive=False`: a licenc-kapu belépő-ablaka TKINTER — SSH-n meg sem
+    # jelenne, a program pedig egy láthatatlan ablakra várva állna. Fej nélkül
+    # inkább megmondjuk, mit kell tenni.
+    from core.licence_gate import ensure_licence
+    if not ensure_licence(cfg, _szamla,
+                          account_name=str(_acc.get("name") or ""),
+                          broker_server=str(_acc.get("server") or ""),
+                          app_version=APP_VERSION, interactive=False):
+        _r = licence.last_result()
+        if _r is not None and _r.needs_login:
+            print(_t("console.licence.missing"))
+        elif _r is not None:
+            print(_r.message)
+        live_lock.release(_szamla)
+        mt5_connector.disconnect()
+        return 1
+
+    slot_mgr = SlotManager(cfg["trading"]["max_open_slots"])
+    szal = threading.Thread(target=run, args=(cfg, slot_mgr),
+                            daemon=True, name="LiveTrader")
+    szal.start()
+
+    ctx = console_cmd.live_context(cfg, CFG_PATH)
+    print(_t("console.banner", version=APP_VERSION))
+
+    def _leallit():
+        lt.request_stop()
+        szal.join(timeout=15)
+        print(_t("console.stopped"))
+
+    try:
+        # ⚠ NEM INTERAKTÍV indulásnál (szolgáltatás, átirányított bemenet) az
+        # `input()` azonnal EOF-ot adna, és a program kilépne — pont akkor, ha
+        # a legkevésbé akarjuk. Ott a motor prompt nélkül fut.
+        if not sys.stdin or not sys.stdin.isatty():
+            print(_t("console.noninteractive"))
+            while szal.is_alive():
+                szal.join(timeout=1.0)
+            return 0
+        while True:
+            try:
+                sor = input(_t("console.prompt"))
+            except EOFError:
+                break
+            res = console_cmd.dispatch(ctx, sor)
+            if res.confirm:
+                valasz = input(_t("console.confirm", text=res.confirm))
+                if valasz.strip().lower() != _t("console.confirm_yes"):
+                    print(_t("console.cancelled"))
+                    continue
+                res = console_cmd.dispatch(ctx, sor, confirmed=True)
+            for ln in res.lines:
+                print(ln)
+            if res.quit:
+                break
+    except KeyboardInterrupt:
+        pass
+    finally:
+        print(_t("console.quit"))
+        _leallit()
+        live_lock.release(_szamla)
+        mt5_connector.disconnect()
+    return 0
+
+
 COMMANDS = {
     "download":  (cmd_download,   []),
     "optimize":  (cmd_optimize,   "symbols"),
     "backtest":  (cmd_backtest,   []),
     "live":      (cmd_live,       []),
+    "console":   (cmd_console,    []),
     "dashboard": (cmd_dashboard,  []),
 }
 
@@ -223,6 +334,16 @@ def parse_optimize_args(argv: list) -> tuple:
 
 
 if __name__ == "__main__":
+    # ⚠ A KONZOL-KÓDLAP MÁR A SÚGÓ ELŐTT. A Windows-konzol cp1250: a súgó
+    # nyilai (→) és gondolatjelei `UnicodeEncodeError`-ral szálltak el, tehát
+    # `python main.py` ARGUMENTUM NÉLKÜL egy stack trace-t adott a parancsok
+    # listája helyett. Épp azt, amivel egy konzolos felhasználó kezdi.
+    try:
+        from core import applog as _applog
+        _applog.harden_console()
+    except Exception:
+        pass
+
     if len(sys.argv) < 2 or sys.argv[1] not in COMMANDS:
         print(__doc__)
         sys.exit(0)

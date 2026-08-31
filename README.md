@@ -250,11 +250,27 @@ Minden parancs a projekt gyökeréből fut (ahol a `main.py` van):
 | `python main.py download` | historikus adatok letöltése MT5-ből (`data/`) |
 | `python main.py dashboard` | csak a felület, demo adatokkal — **MT5 nélkül is** |
 | `python main.py live` | élő motor + dashboard |
+| `python main.py console` | élő motor **felület nélkül** + parancssor (gyenge gép, VM, SSH) |
 | `python main.py backtest` | backtest az alapértelmezett paraméterekkel |
 | `python main.py optimize` | optimalizálás minden aktív párra, páronként a saját stratégiáival |
 | `python main.py optimize EURUSD GBPJPY` | optimalizálás csak a megadott párokra |
 | `python main.py optimize Ger40 --strategy ml_ai` | egy pár, egy stratégia (tanítható stratégiánál = tanítás) |
 | `python main.py optimize -s wpr_sma,ml_ai` | minden pár, csak a felsorolt stratégiák |
+
+### Felület nélküli futás (`console`)
+
+Ugyanaz a motor, csak dashboard helyett egy parancssorral (`help` felsorolja a
+parancsokat: `pairs`, `pos`, `close`, `play`, `stop`, `balance`, `state`).
+
+Két dolgot érdemes tudni:
+
+* **Egy számlán egy motor.** A program `data/live_<számlaszám>.lock` fájllal
+  zárja ki, hogy két példány kereskedjen ugyanazon a számlán — a licenc ezt
+  **nem** akadályozná meg, mert az a számlához szól, nem a géphez. Más számlán
+  párhuzamosan futhat.
+* **A licenc-belépés nem itt történik.** A konzolos mód szándékosan nem nyit
+  belépő-ablakot (SSH-n nem is látszana): jelentkezz be egyszer a grafikus
+  felületen, és másold a `data/licence_token.json`-t a másik gépre.
 
 Argumentum nélkül (`python main.py`) kiírja ezt a listát.
 
@@ -800,11 +816,27 @@ Every command runs from the project root (where `main.py` is):
 | `python main.py download` | download history from MT5 (into `data/`) |
 | `python main.py dashboard` | UI only, with demo data — **works without MT5** |
 | `python main.py live` | live engine + dashboard |
+| `python main.py console` | live engine **without a UI** + a command prompt (weak machine, VM, SSH) |
 | `python main.py backtest` | backtest with the default parameters |
 | `python main.py optimize` | optimise every active pair, each with its own strategies |
 | `python main.py optimize EURUSD GBPJPY` | optimise the given pairs only |
 | `python main.py optimize Ger40 --strategy ml_ai` | one pair, one strategy (for a trainable strategy this means training) |
 | `python main.py optimize -s wpr_sma,ml_ai` | every pair, only the listed strategies |
+
+### Running without a UI (`console`)
+
+The same engine, with a command prompt instead of the dashboard (`help` lists
+the commands: `pairs`, `pos`, `close`, `play`, `stop`, `balance`, `state`).
+
+Two things worth knowing:
+
+* **One engine per account.** A `data/live_<account>.lock` file prevents two
+  instances from trading the same account — the licence would **not** stop
+  that, because it is bound to the account, not to the machine. A different
+  account may run in parallel.
+* **Licence sign-in does not happen here.** Console mode deliberately does not
+  open a sign-in window (it would not show over SSH): sign in once in the GUI
+  and copy `data/licence_token.json` to the other machine.
 
 With no argument (`python main.py`) it prints this list.
 

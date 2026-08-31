@@ -236,13 +236,38 @@ _kod = chr(10).join(l for l in _main.splitlines()
                     if not l.strip().startswith("#"))
 _hivas = _kod.count("ensure_licence(")
 
-check("a licenc-kapu legfeljebb EGY helyen van bekötve", _hivas <= 1,
-      f"{_hivas} hívás")
+# ⚠ AZ INVARIÁNS NEM A HÍVÁSOK SZÁMA, HANEM A HELYE. Élő kereskedést TÖBB
+# parancs is indíthat (`live` = motor + felület, `console` = motor felület
+# nélkül), és mindegyiknek KELL a kapu — a szám tehát nőhet. Amit őrizni kell:
+# a backtest, az optimalizálás és az adatletöltés SOSEM kapuzott. Azok nem
+# nyúlnak a brókerszámlához, és ha egy lejárt licenc a backtestet is blokkolná,
+# épp akkor nem tudnál dolgozni a rendszeren, amikor a megújításról döntesz.
+_KAPUZOTT   = ("cmd_live", "cmd_console")     # élő kereskedés → KELL a kapu
+_KAPUZATLAN = ("cmd_backtest", "cmd_optimize", "cmd_download", "cmd_dashboard")
+
+
+def _fv_torzs(nev: str) -> str:
+    """Egy `def <nev>` törzse a KÖVETKEZŐ `def`-ig (kommentek nélküli forrásból)."""
+    i = _kod.find(f"def {nev}")
+    if i < 0:
+        return ""
+    j = _kod.find(chr(10) + "def ", i + 5)
+    return _kod[i:j if j > 0 else len(_kod)]
+
+
 if _hivas:
-    _i = _kod.find("def cmd_live")
-    _j = _kod.find("def cmd_", _i + 5)
-    check("⚠ ...és csakis a `live` parancsban (a backtest/optimize NEM kapuzott)",
-          "ensure_licence(" in _kod[_i:_j if _j > 0 else len(_kod)])
+    _hol = [n for n in (_KAPUZOTT + _KAPUZATLAN)
+            if "ensure_licence(" in _fv_torzs(n)]
+    check("⚠ a licenc-kapu CSAK élő kereskedésnél van bekötve",
+          all(n in _KAPUZOTT for n in _hol), f"bekötve: {_hol}")
+    check("⚠ ...és a backtest/optimalizálás/letöltés NEM kapuzott",
+          not [n for n in _KAPUZATLAN if "ensure_licence(" in _fv_torzs(n)])
+    check("...a `live` parancs kapuzott", "ensure_licence(" in _fv_torzs("cmd_live"))
+    # ⚠ A `console` UGYANAZT a motort indítja, mint a `live` — ha ott kimaradna
+    # a kapu, a licenc egyetlen paranccsal megkerülhető lenne.
+    check("⚠ ...és a `console` is (különben megkerülhető a licenc)",
+          "ensure_licence(" in _fv_torzs("cmd_console")
+          if "def cmd_console" in _kod else True)
 else:
     # Nem hiba, hanem ÁLLAPOT — de legyen látható, ne csak a kód olvasásából
     # derüljön ki. A visszakapcsolás mintája a main.py-ban, kommentben áll.
