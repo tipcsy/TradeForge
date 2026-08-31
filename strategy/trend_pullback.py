@@ -34,6 +34,7 @@ from core.i18n import t as _t
 import numpy as np
 import pandas as pd
 
+from strategy import visual as viz
 from strategy.base import (Cell, Column, MarkerColumn, MarketData, Strategy,
                            Timeframe)
 
@@ -52,6 +53,10 @@ _MARKS_EMPTY = {k: Cell(_CIRCLE, "muted") for k, _ in _STAGES}
 # A három feltétel időkerete. NEM paraméter: a keresés ezeken találta, és a
 # kombináció együtt érvényes — külön hangolva elveszne a jelentése.
 TF_BELEP, TF_VOL, TF_TREND = 5, 30, 60
+
+# Hany H1 gyertyara rajzoljuk a Keltner-vonalakat. A teljes ablak
+# ezres nagysagrendu objektumot jelentene; 300 H1 = ~12 nap.
+_BAND_BARS = 300
 
 
 # ---------------------------------------------------------------------------
@@ -308,6 +313,138 @@ class TrendPullbackStrategy(Strategy):
             return None
         sl = (float(params.get("sl_atr_mult", 1.5) or 1.5) * float(a)) / point_size
         return sl, sl * float(params.get("tp_rr_ratio", 2.0) or 2.0)
+
+    # --- MT5 chart-vizualizáció ------------------------------------------
+
+    def visual_lookback_bars(self, params: dict, timeframe_label: str) -> int:
+        """Mennyi gyertya kell a RAJZHOZ (a jelzés-warmup fölött).
+
+        ⚠ A H1 vonalak az M1-ből képződnek (`_resample`), ezért az M1 ablaknak
+        kell mélynek lennie — nem az M15-nek. `_BAND_BARS` H1 gyertya = 300 × 60
+        perc, plusz a warmup, ami a Keltner EMA/ATR-hez kell."""
+        if timeframe_label == "M1":
+            return self._m1_warmup(params) + _BAND_BARS * TF_TREND
+        # ⚠ AZ M15-NEK IS LE KELL FEDNIE A TELJES RAJZ-SZAKASZT. Az SL/TP méret
+        # az M15 ATR-ből jön, tehát minden kirajzolt belépőhöz kell egy M15 sor
+        # a saját időpontjából. Egy sekély M15 ablaknál a régebbi jelölők
+        # NÉMÁN SL/TP-vonal nélkül maradnának — mérve: 17 belépőből 2-nek volt
+        # csak. `_BAND_BARS` H1 = ugyanennyi × 4 M15 gyertya.
+        return max(self.warmup_bars(params, "M15"),
+                   _BAND_BARS * (TF_TREND // 15) + 50)
+
+    def visual_objects(self, md: MarketData) -> list:
+        """A H1 Keltner-vonalak + a hármas együttállás sávja + belépő-jelölők.
+
+        ⚠ CSAK MEGLÉVŐ rajz-primitíveket használ (`Trend`, `BarState`, a közös
+        `viz.entry_marks`) — nincs MQL5-újrafordítás.
+
+        ⚠ MIÉRT KELL EZ EGYÁLTALÁN. A „H1 felső sáv fölött" kör a percek 3-6%-án
+        ég, és a felhasználó jogosan kérdezte, mit jelent pontosan. Egy kör nem
+        tudja megmutatni, hogy az ár MENNYIRE van közel a sávhoz — a chartra
+        rajzolt vonal igen.
+
+        ⚠ AZ ALSÓ SÁVOT SZÁNDÉKOSAN NEM RAJZOLJUK. A stratégia LONG-ONLY, és
+        egyedül a FELSŐ sáv szerepel a feltételben (`c60 > EMA + k·ATR`). Egy
+        alsó vonal azt sugallná, hogy az is számít — a chart pontosan annyit
+        mutasson, amennyit a döntés használ."""
+        df1 = (md.bars or {}).get("M1")
+        if df1 is None or len(df1) < TF_TREND * 3:
+            return []
+        p = md.params or {}
+        p_kel = int(p.get("keltner_period", 14) or 14)
+        k_mul = float(p.get("keltner_mult", 2.0) or 2.0)
+
+        d60 = _resample(df1, TF_TREND)
+        if len(d60) < p_kel + 2:
+            return []
+        c60 = d60["close"].to_numpy(float)
+        ema = _ema(c60, p_kel)
+        atr = _atr(d60["high"].to_numpy(float), d60["low"].to_numpy(float),
+                   c60, p_kel)
+        felso = ema + k_mul * atr
+
+        objs: list = []
+        # ── A KÉT VONAL a charton ──────────────────────────────────────────
+        # Szakaszokból (`Trend`), csak a legutóbbi `_BAND_BARS` H1 gyertyára.
+        _n = min(_BAND_BARS, len(d60))
+        _t60 = [int(t.timestamp()) for t in d60.index[-_n:]]
+        # ⚠ A NÉV NEM LEHET `tp_…`: az MT5 objektumokat a NEVÜK azonosítja, és a
+        # közös rajzoló a take-profit vonalat `tp_<időbélyeg>` néven teszi ki. Egy
+        # `tp_` előtagú vonal itt összekeverhető volna vele — a chart némán
+        # felülírná az egyiket a másikkal. Ezért `tpk_` (trend-pullback Keltner).
+        for _nev, _sor, _szin, _w in (("tpk_mid", ema[-_n:], "blue", 1),
+                                      ("tpk_up", felso[-_n:], "orange", 2)):
+            for i in range(len(_sor) - 1):
+                a, b = _sor[i], _sor[i + 1]
+                if a != a or b != b:               # NaN-szűrő
+                    continue
+                objs.append(viz.Trend(name=f"{_nev}_{_t60[i]}",
+                                      t1=_t60[i], p1=float(a),
+                                      t2=_t60[i + 1], p2=float(b),
+                                      color=_szin, width=_w))
+
+        # ── A HÁRMAS EGYÜTTÁLLÁS sávja + a belépők ─────────────────────────
+        # ⚠ UGYANAZ a `signal_column`, amivel a motor dolgozik — nem egy
+        # második képlet. Így a charton látott jelölő és az élő belépő nem
+        # tud szétcsúszni.
+        try:
+            m = _stage_masks(df1, p)
+            sig = signal_column(df1, p)
+        except Exception:
+            return objs
+        idx = df1.index
+        _m1_sec = 60
+        # A sáv a H1-feltételt mutatja (ez a „kontextus"): amíg világít, a
+        # stratégia egyáltalán szóba jöhet. Óránként EGY rekord elég — az M1
+        # felbontás itt ezres objektumszámot jelentene.
+        _lep = TF_TREND
+        for i in range(len(idx) - 1, max(0, len(idx) - _BAND_BARS * _lep), -_lep):
+            _tr = bool(m["trend"][i])
+            objs.append(viz.BarState(t=int(idx[i].timestamp()), notrade=0,
+                                     dir=1 if _tr else 0, window=1 if _tr else 0))
+
+        # Belépő: a hármas együttállás FELFUTÓ ÉLE (ugyanaz, mint az
+        # `on_bar_close`-ban). A `_BAND_BARS` H1-nyi múltra nézünk vissza.
+        _kezd = max(1, len(idx) - _BAND_BARS * TF_TREND)
+        pip = p.get("point_size", 0.0001)
+        try:
+            hi, _lo = self.bt_indicators((md.bars or {}).get("M15"), df1, p)
+        except Exception:
+            hi = None
+        for i in range(_kezd, len(idx) - 1):        # csak ZÁRT M1 gyertyák
+            if not (bool(sig[i]) and not bool(sig[i - 1])):
+                continue
+            t = int(idx[i].timestamp()) + _m1_sec
+            entry = float(df1["close"].iloc[i])
+            sl = tp = None
+            sl_p = None
+            if hi is not None and len(hi):
+                # A méret az M15 ATR-ből jön (`sl_tp_points`) — a belépő
+                # időpontjához tartozó utolsó ZÁRT M15 sorból.
+                _h = hi[hi.index <= idx[i]]
+                if len(_h):
+                    _plan = self.sl_tp_points(_h.iloc[-1], p, pip)
+                    if _plan:
+                        sl_p, tp_p = _plan
+                        sl = entry - sl_p * pip
+                        tp = entry + tp_p * pip
+            _lab = f"{self.short_name} BUY"
+            if sl_p and callable(getattr(md, "lot_of", None)):
+                _l = md.lot_of(sl_p)
+                if _l and _l > 0:
+                    _lab += f" {_l:.2f} lot"
+            # ⚠ A rekord a rajz-kapu ELŐTT megy a naplóba: a „K" gomb a RAJZOT
+            # kapcsolja, nem a történést — különben a chart előzménye csendben
+            # lyukas lenne azokon az időszakokon, amikor a jelölők ki voltak
+            # kapcsolva.
+            rec = {"t": t, "d": "BUY", "e": entry, "sl": sl, "tp": tp,
+                   "lab": _lab}
+            _sink = getattr(md, "on_entry_record", None)
+            if callable(_sink):
+                _sink(rec)
+            if getattr(md, "show_signals", True):
+                objs += viz.entry_marks(rec)
+        return objs
 
     def bt_entry(self, hi_row, params, point_size):
         return self.sl_tp_points(hi_row, params, point_size)

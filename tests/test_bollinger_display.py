@@ -130,21 +130,25 @@ for sym in ("GOLD", "Ger40"):
     tot = len(recs) - 1
     _pct = {k: v / tot * 100 for k, v in n.items()}
     _pct_insq = _insq / tot * 100
-    # ⚠ A KORLÁTOT A SZERKEZET ADJA, nem egy kitalált szám.
+    # ⚠ A KORLÁT MÉRÉSEN ALAPUL — és ez a HARMADIK nekifutás. Érdemes tudni,
+    # miért, mert mindkét korábbi modell HELYESNEK LÁTSZOTT, amíg a paraméterek
+    # nem mozdultak:
     #
-    # 2026-08-26-án ezt a `max_bars_after_squeeze`-hez kötöttem — ROSSZ modell
-    # volt. Az első kör dominánsan az `in_sq` állapottól ég, azt pedig a
-    # `bw_percentile` DEFINIÁLJA: a squeeze feltétele `bb_bw <= a bw_percentile
-    # kvantilis`, tehát a gyertyák LEGFELJEBB ennyi százalékán állhat fenn.
-    # (Kevesebben igen: egy `inside` feltétel is szorozza — mérve Ger40 35,0 →
-    # 35,3%, de GOLD 30,0 → 4,5%.) A hiba csak akkor bukott ki, amikor a Ger40
-    # újraoptimalizálásakor a paraméter megváltozott — egy rossz magyarázó
-    # változóra épített küszöb pontosan így viselkedik: sokáig helyesnek látszik.
+    #   1. (08-26) `max_bars_after_squeeze`-hez kötve — rossz magyarázó változó:
+    #      a kör dominánsan az `in_sq`-tól ég, nem az ablaktól. Elbukott, amikor
+    #      a Ger40 újraoptimalizálásakor a paraméter megváltozott.
+    #   2. (08-31) „az `in_sq` a `bw_percentile` FÖLÉ nem mehet" — ez is téves:
+    #      a küszöb egy GÖRDÜLŐ kvantilis (`rolling(look).quantile(pct)`), nem
+    #      globális. Ha a sávszélesség eloszlása időben elmozdul, a saját gördülő
+    #      küszöbe alá eső gyertyák aránya a `bw_percentile` FÖLÉ is kerülhet.
+    #      Mérve (6 pár): Ger40 +0,4, a többi −4…−29 pont.
+    #
+    # A `bw_percentile` tehát KÖZELÍTÉS, nem korlát. A margó ezt ismeri el.
     _bwp = float(p.get("bw_percentile", 20) or 20)
-    check(f"[{sym}] ⚠ az összeszűkülés a `bw_percentile` FÖLÉ nem mehet",
-          _pct_insq <= _bwp + 1.0, f"{_pct_insq:.1f}% (bw_percentile={_bwp:.0f})")
-    # A kör ezen FELÜL még az ablak idejére is ég (folyamat-jelző) — de csak
-    # hozzáad, sosem vesz el.
+    check(f"[{sym}] az összeszűkülés a `bw_percentile` KÖRÜL/ALATT van",
+          _pct_insq <= _bwp + 5.0,
+          f"{_pct_insq:.1f}% (bw_percentile={_bwp:.0f})")
+
     check(f"[{sym}] a kör az összeszűkülésnél TÖBBET mutat (ablak is)",
           _pct["squeeze"] >= _pct_insq - 0.01,
           f"kör {_pct['squeeze']:.1f}% vs in_sq {_pct_insq:.1f}%")
