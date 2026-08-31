@@ -321,7 +321,7 @@ python main.py live
 
 ### A felület nyelve
 
-**⚙ → 🎨 Megjelenés → Nyelv** — magyar vagy angol. A választás a
+**⚙ Beállítás → Nyelv** fül — magyar vagy angol. A választás a
 `config.json`-ba (`dashboard.language`) kerül, és a **program következő
 indításakor** lép életbe, ugyanúgy, mint a téma színei: a tkinter a feliratot a
 widget megépítésekor kapja meg, futás közbeni váltásnál a felület fele magyar,
@@ -330,6 +330,10 @@ fele angol lenne.
 A nyelvek a **saját nevükön** szerepelnek a listában (Magyar / English) — így
 akkor is megtalálod a sajátodat, ha véletlenül egy olvashatatlan nyelvre
 kapcsoltál.
+
+A **téma** és a **betűtípus** ugyanennek az ablaknak a
+**Megjelenés** fülén állítható. (2026-08-31 előtt mindkettő egy külön
+`🎨 Megjelenés` gomb alatt volt az eszközsávon — az a gomb megszűnt.)
 
 > Ami még nincs lefordítva, az **magyarul** jelenik meg, nem üresen. A napló, a
 > `tools/` szkriptek kimenete és a config-ellenőrző szándékosan magyar marad.
@@ -867,7 +871,7 @@ python main.py live
 
 ### The interface language
 
-**⚙ → 🎨 Appearance → Language** — Hungarian or English. The choice is written to
+**⚙ Settings → Language** tab — Hungarian or English. The choice is written to
 `config.json` (`dashboard.language`) and takes effect **the next time the program
 starts**, just like the theme colours: tkinter gives a widget its label when the
 widget is built, so switching mid-run would leave half the interface Hungarian
@@ -875,6 +879,10 @@ and half English.
 
 The languages appear under their **own names** in the list (Magyar / English) —
 so you can find yours even if you switched to one you cannot read by accident.
+
+The **theme** and the **font** are on the **Appearance** tab of the same
+window. (Before 2026-08-31 both lived under a separate `🎨 Appearance` button
+on the toolbar — that button is gone.)
 
 > Whatever is not translated yet appears **in Hungarian**, not empty. The log,
 > the output of the `tools/` scripts and the config checker deliberately stay

@@ -44,6 +44,7 @@ import math
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from core.i18n import t as _t
 import numpy as np
 import pandas as pd
 
@@ -128,9 +129,9 @@ _CIRCLE = "●"
 # haromszor ezer objektumot jelentene; ennyi bőven lefedi a lathato reszt.
 _BAND_BARS = 300
 
-_STAGES = (("squeeze", "Összeszűkülés"),
-           ("release", "Feloldás + trend"),
-           ("entry",   "Kitörés (belépő)"))
+_STAGES = (("squeeze", _t("stage.squeeze")),
+           ("release", _t("stage.release")),
+           ("entry",   _t("stage.entry")))
 
 
 # ---------------------------------------------------------------------------

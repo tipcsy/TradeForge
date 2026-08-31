@@ -119,25 +119,37 @@ for sym in ("GOLD", "Ger40"):
     recs = ind.to_dict("records")
     s = B.SqueezeState(symbol=sym)
     n = {"squeeze": 0, "release": 0, "entry": 0}
+    _insq = 0
     for i, r in enumerate(recs[:-1]):
         s = B._advance(s, r, p)
+        if bool(r.get("squeeze", False)):
+            _insq += 1            # a NYERS squeeze-állapot (a kör forrása)
         for k, c in st._marks(s, recs[i + 1], p).items():
             if c.color != "muted":
                 n[k] += 1
     tot = len(recs) - 1
     _pct = {k: v / tot * 100 for k, v in n.items()}
-    # ⚠ A FELSŐ KORLÁT A PARAMÉTERTŐL FÜGG, nem fix. A kör 2026-08-25 óta
-    # FOLYAMAT-JELZŐ: akkor is ég, amíg a szűkülésből nyílt ABLAK tart. Az ablak
-    # hossza pedig `max_bars_after_squeeze` — ami páronként eltér.
+    _pct_insq = _insq / tot * 100
+    # ⚠ A KORLÁTOT A SZERKEZET ADJA, nem egy kitalált szám.
     #
-    # Mérve (11 pár): a `max_bars = 5` párok 10-18%, a `max_bars = 12`-esek
-    # (Ger40, UsaTec, EURGBP) 36-43%. Ez NEM kijelzési hiba, hanem a beállítás
-    # következménye: annyi ideig ég, ameddig a beállítás szerint felfegyverzett
-    # az állapot. Egy FIX 25%-os korlát ezt hibának minősítette volna.
-    _felso = 25 + 2.0 * int(p.get("max_bars_after_squeeze", 5))
-    check(f"[{sym}] az osszeszukules-kor ESEMENY (1..{_felso:.0f}%)",
-          1 < _pct["squeeze"] < _felso,
-          f"{_pct['squeeze']:.1f}% (max_bars={p.get('max_bars_after_squeeze')})")
+    # 2026-08-26-án ezt a `max_bars_after_squeeze`-hez kötöttem — ROSSZ modell
+    # volt. Az első kör dominánsan az `in_sq` állapottól ég, azt pedig a
+    # `bw_percentile` DEFINIÁLJA: a squeeze feltétele `bb_bw <= a bw_percentile
+    # kvantilis`, tehát a gyertyák LEGFELJEBB ennyi százalékán állhat fenn.
+    # (Kevesebben igen: egy `inside` feltétel is szorozza — mérve Ger40 35,0 →
+    # 35,3%, de GOLD 30,0 → 4,5%.) A hiba csak akkor bukott ki, amikor a Ger40
+    # újraoptimalizálásakor a paraméter megváltozott — egy rossz magyarázó
+    # változóra épített küszöb pontosan így viselkedik: sokáig helyesnek látszik.
+    _bwp = float(p.get("bw_percentile", 20) or 20)
+    check(f"[{sym}] ⚠ az összeszűkülés a `bw_percentile` FÖLÉ nem mehet",
+          _pct_insq <= _bwp + 1.0, f"{_pct_insq:.1f}% (bw_percentile={_bwp:.0f})")
+    # A kör ezen FELÜL még az ablak idejére is ég (folyamat-jelző) — de csak
+    # hozzáad, sosem vesz el.
+    check(f"[{sym}] a kör az összeszűkülésnél TÖBBET mutat (ablak is)",
+          _pct["squeeze"] >= _pct_insq - 0.01,
+          f"kör {_pct['squeeze']:.1f}% vs in_sq {_pct_insq:.1f}%")
+    check(f"[{sym}] ...de nem dísz (a `bw_percentile` + 20 pont alatt)",
+          _pct["squeeze"] < _bwp + 20, f"{_pct['squeeze']:.1f}%")
     # ⚠ A trend-szuro allapotatol FUGGETLENUL vilagitania kell, ha az ablak nyitva.
     check(f"[{sym}] a felfegyverzes-kor is ESEMENY (>0)",
           _pct["release"] > 0, f"{_pct['release']:.1f}% "

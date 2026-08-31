@@ -34,6 +34,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
+from core.i18n import t as _t
 import numpy as np
 import pandas as pd
 
@@ -360,7 +361,7 @@ _CIRCLE = "●"
 # Az ML-belépőnek nincs többlépcsős állapotgépe (mint a wpr_sma 3 köre): a
 # releváns állapot a modell megléte és a jel. A session-kapu a jelbe van
 # beszámítva (session-en kívül nem születik jel).
-_STAGES = (("model", "Modell betöltve"), ("sig", "ML belépő jel"))
+_STAGES = (("model", _t("stage.model")), ("sig", _t("stage.ml_sig")))
 _MARKS_EMPTY = {k: Cell(_CIRCLE, "muted") for k, _ in _STAGES}
 
 

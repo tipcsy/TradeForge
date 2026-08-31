@@ -2844,9 +2844,6 @@ class DashboardWindow:
         tk.Button(toolbar, text=_t("gui.beallitas"), font=small_font,
                   bg=BG_INACTIVE, fg=FG_WHITE, relief="flat", cursor="hand2",
                   command=self._show_settings).pack(side="right", padx=4)
-        tk.Button(toolbar, text=_t("gui.megjelenes2"), font=small_font,
-                  bg=BG_INACTIVE, fg=FG_WHITE, relief="flat", cursor="hand2",
-                  command=self._show_appearance).pack(side="right", padx=4)
 
         legend = tk.Frame(parent, bg=BG, pady=2)
         legend.pack(fill="x", padx=6)
@@ -3834,165 +3831,12 @@ class DashboardWindow:
             return False
         return True
 
-    # ── Megjelenés (téma + betűtípus) ────────────────────────────────────
-    def _show_appearance(self):
-        """Téma és betűtípus beállítása.
-
-        A BETŰ azonnal érvényesül (a `theme.fonts()` objektumok élők, minden
-        widget követi őket) — a legördülő/méret változtatása egyből látszik, így
-        élőben lehet belőni. A SZÍNEK viszont csak újraindításkor: a modulok
-        `from dashboard.theme import BG, …` formában ÉRTÉK szerint kötik a
-        neveket, így a futásidejű átírás nem propagálna. Az ablak ezt ki is írja.
-
-        A háttér és a betűszínek EGY témából jönnek, ezért nem állítható be
-        „fehér alapon fehér szöveg": nincs olyan állapot, ahol a kettő szétesne."""
-        popup = tk.Toplevel(self.root)
-        popup.title(_t("gui.megjelenes"))
-        popup.configure(bg=BG)
-        popup.resizable(False, False)
-        popup.grab_set()
-
-        # A megnyitáskori állapot — a Mégse ide állít vissza (az élő előnézet miatt).
-        _orig_family = _theme.FONT_FAMILY
-        _orig_size   = _theme.FONT_SIZE
-        _dash0       = (self.cfg.get("dashboard") or {})
-        _orig_theme  = _dash0.get("theme", _theme.ACTIVE_THEME)
-
-        tk.Label(popup, text=_t("gui.megjelenes"), bg=BG, fg=FG_WHITE,
-                 font=self._header_font).pack(anchor="w", padx=12, pady=(12, 6))
-
-        frm = tk.Frame(popup, bg=BG)
-        frm.pack(anchor="w", padx=12)
-
-        # ── Téma ────────────────────────────────────────────────────────────
-        # ── Nyelv ───────────────────────────────────────────────────────────
-        # ⚠ A NYELVEK SAJÁT NEVÜKÖN állnak („Magyar", „English") — sosem
-        # fordítjuk le őket. Aki véletlenül egy számára olvashatatlan nyelvre
-        # kapcsolt, ezen a listán akkor is megtalálja a sajátját.
-        tk.Label(frm, text=_t("lang.label") + ":", bg=BG, fg=FG_GRAY,
-                 font=self._small_font).grid(row=0, column=0, sticky="e", pady=3)
-        _lang_codes = list(_i18n.LANGUAGES)
-        _orig_lang = _i18n.language()
-        lang_var = tk.StringVar(value=_i18n.LANGUAGES.get(_orig_lang, _orig_lang))
-        _oml = tk.OptionMenu(frm, lang_var, *_i18n.LANGUAGES.values())
-        _oml.config(bg=BG_HEADER, fg=FG_WHITE, font=self._small_font, relief="flat",
-                    highlightthickness=0, activebackground=BG_HEADER, width=18)
-        _oml["menu"].config(bg=BG_HEADER, fg=FG_WHITE)
-        _oml.grid(row=0, column=1, sticky="w", padx=6, pady=3)
-
-        def _lang_code():
-            """A választott felirat → nyelvkód (a legördülő saját neveket mutat)."""
-            _lbl = lang_var.get()
-            return next((c for c, n in _i18n.LANGUAGES.items() if n == _lbl),
-                        _orig_lang)
-
-        tk.Label(frm, text=_t("gui.language_note"), bg=BG, fg=FG_GRAY_DIM,
-                 font=self._small_font, wraplength=300, justify="left").grid(
-                 row=1, column=1, sticky="w", padx=6, pady=(0, 4))
-
-        tk.Label(frm, text=_t("gui.tema"), bg=BG, fg=FG_GRAY,
-                 font=self._small_font).grid(row=2, column=0, sticky="e", pady=3)
-        # ⚠ A legördülő FELIRATOKAT mutat, a config KÓDOT tárol. A kettő közt a
-        # `theme_code()` fordít — így a mentett érték nyelvfüggetlen marad, és a
-        # régi, magyar nevű mentés is felismerhető.
-        theme_var = tk.StringVar(value=_theme.theme_label(
-            _theme.theme_code(str(_orig_theme))))
-        _omt = tk.OptionMenu(frm, theme_var,
-                             *[_theme.theme_label(c) for c in _theme.THEMES])
-        _omt.config(bg=BG_HEADER, fg=FG_WHITE, font=self._small_font, relief="flat",
-                    highlightthickness=0, activebackground=BG_HEADER, width=18)
-        _omt["menu"].config(bg=BG_HEADER, fg=FG_WHITE)
-        _omt.grid(row=2, column=1, sticky="w", padx=6, pady=3)
-
-        # ── Betűtípus ───────────────────────────────────────────────────────
-        # Csak a rendszeren TÉNYLEGESEN elérhető családokat kínáljuk (a hiányzót a
-        # tkinter némán helyettesítené, ami zavaró: „beállítottam, de nem változott").
-        try:
-            from tkinter import font as _tkf
-            _avail = set(_tkf.families(self.root))
-        except Exception:
-            _avail = set()
-        _fams = [f for f in _theme.FONT_FAMILIES if not _avail or f in _avail]
-        if _orig_family not in _fams:
-            _fams.insert(0, _orig_family)
-        tk.Label(frm, text=_t("gui.betutipus"), bg=BG, fg=FG_GRAY,
-                 font=self._small_font).grid(row=3, column=0, sticky="e", pady=3)
-        fam_var = tk.StringVar(value=_orig_family)
-        _omf = tk.OptionMenu(frm, fam_var, *_fams)
-        _omf.config(bg=BG_HEADER, fg=FG_WHITE, font=self._small_font, relief="flat",
-                    highlightthickness=0, activebackground=BG_HEADER, width=18)
-        _omf["menu"].config(bg=BG_HEADER, fg=FG_WHITE)
-        _omf.grid(row=3, column=1, sticky="w", padx=6, pady=3)
-
-        # ── Betűméret ───────────────────────────────────────────────────────
-        tk.Label(frm, text=_t("gui.betumeret"), bg=BG, fg=FG_GRAY,
-                 font=self._small_font).grid(row=4, column=0, sticky="e", pady=3)
-        size_var = tk.IntVar(value=_orig_size)
-        tk.Spinbox(frm, from_=_theme.FONT_SIZE_MIN, to=_theme.FONT_SIZE_MAX,
-                   textvariable=size_var, width=5, bg=BG_HEADER, fg=FG_WHITE,
-                   font=self._small_font, relief="flat", justify="center",
-                   buttonbackground=BG_INACTIVE,
-                   command=lambda: _preview()).grid(row=4, column=1, sticky="w",
-                                                    padx=6, pady=3)
-
-        lbl_note = tk.Label(popup, text="", bg=BG, fg=FG_YELLOW,
-                            font=self._small_font, wraplength=340, justify="left")
-        lbl_note.pack(anchor="w", padx=12, pady=(8, 0))
-
-        def _preview(*_a):
-            """Betű-előnézet ÉLŐBEN (a méret/típus azonnal átüt a felületen)."""
-            try:
-                _theme.apply_fonts(fam_var.get(), int(size_var.get()))
-            except Exception:
-                pass
-
-        fam_var.trace_add("write", _preview)
-        try:
-            size_var.trace_add("write", _preview)
-        except Exception:
-            pass
-
-        def _save():
-            dash = self.cfg.setdefault("dashboard", {})
-            dash["language"]    = _lang_code()
-            dash["theme"]       = _theme.theme_code(theme_var.get())
-            dash["font_family"] = fam_var.get()
-            dash["font_size"]   = int(size_var.get())
-            try:
-                self._save_main_config()
-            except Exception as ex:
-                lbl_note.config(text=_t("save.error", error=ex), fg=FG_RED)
-                return
-            _preview()          # a betű már él; a szín és a nyelv indítás után
-            # ⚠ A NYELVET NEM ÁLLÍTJUK ÁT MENET KÖZBEN (`set_language`), pedig
-            # technikailag lehetne. A már megépült widgetek felirata nem
-            # változna, az ezután nyílóké igen — a felület fele magyar, fele
-            # angol lenne. Egy KEVERT felület rosszabb, mint egy egynyelvű:
-            # ugyanaz a fogalom két néven szerepelne egyszerre.
-            _restart = []
-            if _lang_code() != _orig_lang:
-                _restart.append(_t("gui.restart.language"))
-            if _theme.theme_code(theme_var.get()) != _theme.ACTIVE_THEME:
-                _restart.append(_t("gui.restart.theme"))
-            if _restart:
-                lbl_note.config(text=_t("gui.saved_restart",
-                                        what=" + ".join(_restart)), fg=FG_YELLOW)
-            else:
-                lbl_note.config(text=_t("gui.saved"), fg=FG_GREEN)
-
-        def _cancel():
-            # Az élő előnézetet vissza kell állítani, különben a Mégse után is
-            # a kipróbált betű maradna a felületen.
-            _theme.apply_fonts(_orig_family, _orig_size)
-            popup.destroy()
-
-        btns = tk.Frame(popup, bg=BG)
-        btns.pack(pady=12)
-        tk.Button(btns, text=_t("btn.save"), bg=BTN_PLAY_BG, fg=BTN_PLAY_FG, relief="flat",
-                  font=self._small_font, command=_save).pack(side="left", padx=6)
-        tk.Button(btns, text=_t("btn.cancel"), bg=BTN_DIS_BG, fg=BTN_DIS_FG, relief="flat",
-                  font=self._small_font, command=_cancel).pack(side="left", padx=6)
-        popup.protocol("WM_DELETE_WINDOW", _cancel)
+    # ── Megjelenés + Nyelv ───────────────────────────────────────────────
+    # ⚠ NINCS külön „Megjelenés" ablak és nincs saját eszközsáv-gomb. 2026-08-31
+    # óta mindkettő a `⚙ Beállítás` ablak KÜLÖN-KÜLÖN lapja (`appearance`,
+    # `language`) — a felhasználó kérésére. A kódot szándékosan NEM hagytuk itt
+    # másodpéldányban: két forrás előbb-utóbb elcsúszna, és a felület két helyen
+    # mást mutatna ugyanarra a beállításra.
 
     # ── Beállítás-szerkesztő (config.json) ───────────────────────────────
     def _apply_gate_columns(self):
@@ -4011,6 +3855,111 @@ class DashboardWindow:
             import logging as _logging
             _logging.getLogger(__name__).warning(
                 "A kapu-oszlopok frissítése elbukott.", exc_info=True)
+
+    # ── Megjelenés + Nyelv lap (a ⚙ Beállítás ablakban) ──────────────────
+    def _build_appearance_tab(self, parent) -> dict:
+        """Téma + betűtípus egy meglévő lapra. Visszaadja a változóit.
+
+        A BETŰ azonnal érvényesül (a `theme.fonts()` objektumok élők, minden
+        widget követi őket) — így élőben lehet belőni. A SZÍNEK viszont csak
+        újraindításkor: a modulok `from dashboard.theme import BG, …` alakban
+        ÉRTÉK szerint kötik a neveket, a futásidejű átírás nem propagálna."""
+        _orig_family = _theme.FONT_FAMILY
+        _orig_size   = _theme.FONT_SIZE
+        _orig_theme  = (self.cfg.get("dashboard") or {}).get(
+            "theme", _theme.ACTIVE_THEME)
+
+        frm = tk.Frame(parent, bg=BG)
+        frm.pack(anchor="w", padx=12, pady=12)
+
+        tk.Label(frm, text=_t("gui.tema"), bg=BG, fg=FG_GRAY,
+                 font=self._small_font).grid(row=0, column=0, sticky="e", pady=3)
+        # ⚠ A legördülő FELIRATOKAT mutat, a config KÓDOT tárol. A `theme_code`
+        # fordít köztük — így a mentett érték nyelvfüggetlen marad, és a régi,
+        # magyar nevű mentés is felismerhető.
+        theme_var = tk.StringVar(value=_theme.theme_label(
+            _theme.theme_code(str(_orig_theme))))
+        _omt = tk.OptionMenu(frm, theme_var,
+                             *[_theme.theme_label(c) for c in _theme.THEMES])
+        _omt.config(bg=BG_HEADER, fg=FG_WHITE, font=self._small_font, relief="flat",
+                    highlightthickness=0, activebackground=BG_HEADER, width=20)
+        _omt["menu"].config(bg=BG_HEADER, fg=FG_WHITE)
+        _omt.grid(row=0, column=1, sticky="w", padx=6, pady=3)
+
+        # Csak a rendszeren TÉNYLEGESEN elérhető családokat kínáljuk: a hiányzót
+        # a tkinter némán helyettesítené („beállítottam, de nem változott").
+        try:
+            from tkinter import font as _tkf
+            _avail = set(_tkf.families(self.root))
+        except Exception:
+            _avail = set()
+        _fams = [f for f in _theme.FONT_FAMILIES if not _avail or f in _avail]
+        if _orig_family not in _fams:
+            _fams.insert(0, _orig_family)
+        tk.Label(frm, text=_t("gui.betutipus"), bg=BG, fg=FG_GRAY,
+                 font=self._small_font).grid(row=1, column=0, sticky="e", pady=3)
+        fam_var = tk.StringVar(value=_orig_family)
+        _omf = tk.OptionMenu(frm, fam_var, *_fams)
+        _omf.config(bg=BG_HEADER, fg=FG_WHITE, font=self._small_font, relief="flat",
+                    highlightthickness=0, activebackground=BG_HEADER, width=20)
+        _omf["menu"].config(bg=BG_HEADER, fg=FG_WHITE)
+        _omf.grid(row=1, column=1, sticky="w", padx=6, pady=3)
+
+        tk.Label(frm, text=_t("gui.betumeret"), bg=BG, fg=FG_GRAY,
+                 font=self._small_font).grid(row=2, column=0, sticky="e", pady=3)
+        size_var = tk.IntVar(value=_orig_size)
+
+        def _preview(*_a):
+            """Betű-előnézet ÉLŐBEN (a méret/típus azonnal átüt a felületen)."""
+            try:
+                _theme.apply_fonts(fam_var.get(), int(size_var.get()))
+            except Exception:
+                pass
+
+        tk.Spinbox(frm, from_=_theme.FONT_SIZE_MIN, to=_theme.FONT_SIZE_MAX,
+                   textvariable=size_var, width=5, bg=BG_HEADER, fg=FG_WHITE,
+                   font=self._small_font, relief="flat", justify="center",
+                   buttonbackground=BG_INACTIVE,
+                   command=lambda: _preview()).grid(row=2, column=1, sticky="w",
+                                                    padx=6, pady=3)
+        fam_var.trace_add("write", _preview)
+        try:
+            size_var.trace_add("write", _preview)
+        except Exception:
+            pass
+        return {"theme_var": theme_var, "fam_var": fam_var, "size_var": size_var,
+                "orig_family": _orig_family, "orig_size": _orig_size,
+                "preview": _preview}
+
+    def _build_language_tab(self, parent) -> dict:
+        """Nyelvválasztó egy meglévő lapra. Visszaadja a változóit.
+
+        ⚠ A NYELVEK SAJÁT NEVÜKÖN állnak („Magyar", „English") — sosem fordítjuk
+        le őket. Aki véletlenül egy számára olvashatatlan nyelvre kapcsolt, ezen
+        a listán akkor is megtalálja a sajátját."""
+        frm = tk.Frame(parent, bg=BG)
+        frm.pack(anchor="w", padx=12, pady=12)
+        tk.Label(frm, text=_t("lang.label") + ":", bg=BG, fg=FG_GRAY,
+                 font=self._small_font).grid(row=0, column=0, sticky="e", pady=3)
+        _orig_lang = _i18n.language()
+        lang_var = tk.StringVar(value=_i18n.LANGUAGES.get(_orig_lang, _orig_lang))
+        _oml = tk.OptionMenu(frm, lang_var, *_i18n.LANGUAGES.values())
+        _oml.config(bg=BG_HEADER, fg=FG_WHITE, font=self._small_font, relief="flat",
+                    highlightthickness=0, activebackground=BG_HEADER, width=20)
+        _oml["menu"].config(bg=BG_HEADER, fg=FG_WHITE)
+        _oml.grid(row=0, column=1, sticky="w", padx=6, pady=3)
+
+        def _lang_code():
+            """A választott felirat → nyelvkód (a legördülő saját neveket mutat)."""
+            _lbl = lang_var.get()
+            return next((c for c, n in _i18n.LANGUAGES.items() if n == _lbl),
+                        _orig_lang)
+
+        tk.Label(frm, text=_t("gui.language_note"), bg=BG, fg=FG_GRAY_DIM,
+                 font=self._small_font, wraplength=380, justify="left").grid(
+                 row=1, column=1, sticky="w", padx=6, pady=(2, 0))
+        return {"lang_var": lang_var, "lang_code": _lang_code,
+                "orig_lang": _orig_lang}
 
     def _show_settings(self):
         popup = tk.Toplevel(self.root)
@@ -4033,15 +3982,26 @@ class DashboardWindow:
         _btn_save = tk.Button(btns, text=_t("btn.save"), bg=BTN_PLAY_BG, fg=BTN_PLAY_FG,
                               relief="flat", font=self._small_font)
         _btn_save.pack(side="left", padx=(10, 6))
-        tk.Button(btns, text=_t("btn.cancel"), bg=BTN_DIS_BG, fg=BTN_DIS_FG, relief="flat",
-                  font=self._small_font,
-                  command=popup.destroy).pack(side="left", padx=6)
+        # ⚠ A Mégse a BETŰ-ELŐNÉZETET is visszaállítja. Enélkül a kipróbált betű
+        # a Mégse után is a felületen maradna — a felhasználó azt hinné, mégis
+        # mentett. A `_megse` a lapok felépítése UTÁN kap tartalmat (a
+        # `_orig_family` csak ott jön létre), ezért itt csak a keret áll.
+        _btn_cancel = tk.Button(btns, text=_t("btn.cancel"), bg=BTN_DIS_BG,
+                                fg=BTN_DIS_FG, relief="flat",
+                                font=self._small_font)
+        _btn_cancel.pack(side="left", padx=6)
 
         # ── BAL OLDALI FÜLEK (közös váz: `dashboard/tab_shell.py`) ───────
         from dashboard.tab_shell import TabShell
+        # ⚠ A MEGJELENÉS és a NYELV KÜLÖN lap. Egy ablakba kerültek (a
+        # felhasználó kérésére: „ne a főképernyőn legyen"), de nem EGY lapra:
+        # a nyelv ritkán állított, egyszeri döntés, a betű/téma viszont
+        # kísérletezős. Egy lapon a ritka beállítás elveszne a gyakori mellett.
         _shell = TabShell(popup, (("json", _t("tab.json")),
                                   ("gates", _t("tab.gates")),
-                                  ("strategies", _t("tab.strategies"))))
+                                  ("strategies", _t("tab.strategies")),
+                                  ("appearance", _t("gui.megjelenes")),
+                                  ("language", _t("lang.label"))))
         _page = {n: _shell.page(n) for n in _shell.names()}
 
         # ── KAPUK lap ────────────────────────────────────────────────────
@@ -4113,6 +4073,19 @@ class DashboardWindow:
             self._hl_after_id = popup.after(200, lambda: self._highlight_json(text))
         text.bind("<KeyRelease>", _schedule_hl)
 
+        # ⚠ A két lap KÜLÖN metódusban épül (`_build_appearance_tab`,
+        # `_build_language_tab`). Nem stílus: így a teszt önmagában is meg tudja
+        # nyitni és MEGNYOMNI őket, a teljes Beállítás-ablak (JSON-szerkesztő,
+        # kapu- és stratégia-editor) felépítése nélkül. Enélkül csak a forrás
+        # szövegét lehetne vizsgálni — az pedig nem viselkedést mér.
+        _megj = self._build_appearance_tab(_page["appearance"])
+        _nyelv = self._build_language_tab(_page["language"])
+        theme_var, fam_var, size_var = (_megj["theme_var"], _megj["fam_var"],
+                                        _megj["size_var"])
+        _orig_family, _orig_size = _megj["orig_family"], _megj["orig_size"]
+        _preview = _megj["preview"]
+        lang_var, _lang_code = _nyelv["lang_var"], _nyelv["lang_code"]
+        _orig_lang = _nyelv["orig_lang"]
 
         def save():
             try:
@@ -4142,6 +4115,15 @@ class DashboardWindow:
             new["available_strategies"] = chosen_av
             # A „Kapuk" fül: mely kapuk látszanak/hatnak, milyen sorrendben.
             _glay.apply_order(new, _gate_ed.get())
+            # ── A MEGJELENÉS és a NYELV lap ────────────────────────────
+            # ⚠ EZEKET IS a `new`-ba kell írni, nem a `self.cfg`-be: a mentés a
+            # JSON-szerkesztő szövegéből építi újra a configot, tehát bármit,
+            # amit közben a `self.cfg`-n állítanánk, NÉMÁN felülírna.
+            _dash = new.setdefault("dashboard", {})
+            _dash["language"]    = _lang_code()
+            _dash["theme"]       = _theme.theme_code(theme_var.get())
+            _dash["font_family"] = fam_var.get()
+            _dash["font_size"]   = int(size_var.get())
             # A `new` MÁR váz-config (a szerkesztő a `main_config_view`-t mutatta),
             # ezért a nyers írót hívjuk — a nézet-szűrés pontosan egyszer fut.
             from strategy.settings import write_config_file as _write
@@ -4158,11 +4140,41 @@ class DashboardWindow:
             # A kapu-oszlopok AZONNAL kövessék a beállítást (a stratégia-lista
             # változása továbbra is újraindítást kíván — az mélyebben ül).
             self._apply_gate_columns()
+            _preview()          # a betű már él; a szín és a nyelv indítás után
+            # ⚠ A NYELVET NEM ÁLLÍTJUK ÁT MENET KÖZBEN (`set_language`), pedig
+            # technikailag lehetne. A már megépült widgetek felirata nem
+            # változna, az ezután nyílóké igen — a felület fele magyar, fele
+            # angol lenne. Egy KEVERT felület rosszabb, mint egy egynyelvű.
+            _restart = []
+            if _lang_code() != _orig_lang:
+                _restart.append(_t("gui.restart.language"))
+            if _theme.theme_code(theme_var.get()) != _theme.ACTIVE_THEME:
+                _restart.append(_t("gui.restart.theme"))
+            if _restart:
+                # ⚠ AZ ABLAK NYITVA MARAD, ha van mit elmondani. Bezárva az
+                # üzenet a bezárással együtt tűnne el, és a felhasználó azt
+                # hinné, a nyelv azonnal átvált.
+                lbl_err.config(text=_t("gui.saved_restart",
+                                       what=" + ".join(_restart)), fg=FG_YELLOW)
+                _btn_save.config(state="disabled")
+                return
+            popup.destroy()
+
+        def _megse():
+            # Az élő előnézetet vissza kell állítani, különben a Mégse után is
+            # a kipróbált betű maradna a felületen.
+            try:
+                _theme.apply_fonts(_orig_family, _orig_size)
+            except Exception:
+                pass
             popup.destroy()
 
         # A gombsor FENT készült el (hogy kis ablaknál se szoruljon ki); a
-        # mentés-függvény csak most áll rendelkezésre, ezért itt kötjük rá.
+        # mentés- és mégse-függvény csak most áll rendelkezésre, ezért itt
+        # kötjük rájuk.
         _btn_save.config(command=save)
+        _btn_cancel.config(command=_megse)
+        popup.protocol("WM_DELETE_WINDOW", _megse)
 
     # ── Stratégia Paraméterek (a KÖRRE kattintva — az adott stratégiáé) ──
     def _show_strategy_params(self, symbol: str, strategy_name: str = ""):

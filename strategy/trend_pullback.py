@@ -30,6 +30,7 @@ cost_cut 24 M15 gyertyánál — a PÁR rr-beállítása, nem a stratégiáé.
 
 from __future__ import annotations
 
+from core.i18n import t as _t
 import numpy as np
 import pandas as pd
 
@@ -39,8 +40,13 @@ from strategy.base import (Cell, Column, MarkerColumn, MarketData, Strategy,
 MAGIC_OFFSET = 3          # 0=wpr_sma, 1=ml_ai, 2=bollinger, 30=candle_level_break
 
 _CIRCLE = "●"
-_STAGES = (("trend", "H1 trend"), ("vol", "M30 volatilitás"),
-           ("belep", "M5 beszállás"))
+# ⚠ A FELIRAT PONTOS: a feltétel az ár a H1 Keltner FELSŐ sávja fölött —
+# egy szűk állapot (mérve: a percek 3-6%-a), NEM „van-e trend és merre".
+# A régi „H1 trend" azt sugallta, hogy a kör IRÁNYT mutat, és a felhasználó
+# jogosan hiányolta a zöld/piros színezést. A stratégia LONG-ONLY — piros
+# állapot nem is létezik benne (lásd `docs/trend_pullback.md`).
+_STAGES = (("trend", _t("stage.tp_trend")), ("vol", _t("stage.tp_vol")),
+           ("belep", _t("stage.tp_entry")))
 _MARKS_EMPTY = {k: Cell(_CIRCLE, "muted") for k, _ in _STAGES}
 
 # A három feltétel időkerete. NEM paraméter: a keresés ezeken találta, és a

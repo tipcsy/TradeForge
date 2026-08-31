@@ -1,6 +1,5 @@
 {
   "_comment": "A trend_pullback stratégia SAJÁT beállításai. A holdout-kereséssel talált minta: erős H1 trendben (ár a Keltner felső sávja fölött), élénk M30 volatilitás mellett (ATR > 200-as átlaga) egy M5 stochastic visszahúzódásra vásárolunk. CSAK LONG — a short irányt a kutatás külön mérte és nem működött.",
-
   "quality": {
     "_comment": "Minősítési küszöbök. A min_trades MÉRT érték (lásd wpr_sma.json): 50 alatt a PF zaja akkora, hogy semmitől nem véd.",
     "min_trades": 50,
@@ -13,7 +12,6 @@
     "winrate_weak": 0.35,
     "winrate_good": 0.45
   },
-
   "indicators": {
     "_comment": "A három feltétel paraméterei. Az IDŐKERETEK (M5 belépő / M30 volatilitás / H1 trend) NEM paraméterek — a keresés ezeken találta, és a kombináció együtt érvényes.",
     "stoch_period": 14,
@@ -22,31 +20,54 @@
     "keltner_period": 14,
     "keltner_mult": 2.0
   },
-
   "sltp": {
     "_comment": "ATR-alapú SL/TP: SL = M15 ATR × sl_atr_mult, TP = SL × tp_rr_ratio. Az atr_period a KÖZÖS execution configban van (core/execution_params.py).",
     "sl_atr_mult": 1.5,
     "tp_rr_ratio": 2.0
   },
-
   "position_mgmt": {
     "_comment": "⚠ A BELÉPÉS UTÁNI dolgok NEM ezé a modulé. A mérésben talált legjobb kilépés — breakeven a TP 50%-ánál 3× spread pufferrel (be_buffer_points), trailing KI, cost_cut 24 M15 gyertyánál — a KOCKÁZATCSÖKKENTŐ modulé (core/risk_reduction.py + data/risk_mode.json, per pár). Itt csak emlékeztetőül szerepel."
   },
-
   "optimizer": {
     "_comment": "Óvatos tartományok a mért érték körül. A stoch_period és a keltner_mult a jel LÉNYEGE — széles tartomány itt illesztéshez vezet, nem javuláshoz.",
-    "ranges": {
-      "stoch_period":    {"min": 9,   "max": 21,  "step": 1},
-      "stoch_d":         {"min": 3,   "max": 5,   "step": 1},
-      "atr_ref_period":  {"min": 100, "max": 300, "step": 50},
-      "keltner_period":  {"min": 10,  "max": 20,  "step": 2},
-      "keltner_mult":    {"min": 1.5, "max": 2.5, "step": 0.25},
-      "sl_atr_mult":     {"min": 1.0, "max": 2.5, "step": 0.25},
-      "tp_rr_ratio":     {"min": 1.5, "max": 3.0, "step": 0.25}
+    "_comment_ranges": "A tartomanyok KOZVETLENUL az `optimizer` alatt allnak, nem egy `ranges` alkulcs alatt. A generate_grid_params/generate_random_params es a parameter-ablak is INNEN olvas -- egy beagyazott `ranges` NEMAN ures keresesi teret adna (1 kombinacio, 0 dimenzio).",
+    "stoch_period": {
+      "min": 9,
+      "max": 21,
+      "step": 1
+    },
+    "stoch_d": {
+      "min": 3,
+      "max": 5,
+      "step": 1
+    },
+    "atr_ref_period": {
+      "min": 100,
+      "max": 300,
+      "step": 50
+    },
+    "keltner_period": {
+      "min": 10,
+      "max": 20,
+      "step": 2
+    },
+    "keltner_mult": {
+      "min": 1.5,
+      "max": 2.5,
+      "step": 0.25
+    },
+    "sl_atr_mult": {
+      "min": 1.0,
+      "max": 2.5,
+      "step": 0.25
+    },
+    "tp_rr_ratio": {
+      "min": 1.5,
+      "max": 3.0,
+      "step": 0.25
     },
     "constraints": []
   },
-
   "param_meta": {
     "_comment": "A Paraméterek ablak csoportosítása + megjegyzései.",
     "categories": [

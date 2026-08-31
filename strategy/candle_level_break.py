@@ -48,6 +48,7 @@ from __future__ import annotations
 import logging
 import math
 
+from core.i18n import t as _t
 import numpy as np
 import pandas as pd
 
@@ -60,9 +61,9 @@ log = logging.getLogger(__name__)
 # hangolja (idősík-váltás új stratégia, nem paraméter).
 LEVEL_TF_MIN = 240
 
-_STAGES = (("level",  "Élő szint"),
-           ("broken", "Szinttörés"),
-           ("cons",   "Konszolidáció (belépő közel)"))
+_STAGES = (("level",  _t("stage.level")),
+           ("broken", _t("stage.broken")),
+           ("cons",   _t("stage.cons")))
 
 
 def _to_level_tf(df: pd.DataFrame) -> pd.DataFrame:

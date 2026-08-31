@@ -57,13 +57,12 @@ check("minden nyelvnek EGYEDI a neve (a visszafejtes egyertelmu)",
 check("van magyar es angol", {"hu", "en"} <= set(i18n.LANGUAGES))
 
 # ── 2. A FORRAS szerzodese ────────────────────────────────────────────────
-_src = inspect.getsource(gui.DashboardWindow._show_appearance)
-# ⚠ Szokoz-turo: a mentes-blokk oszlopba igazitott (`dash["language"]    = ...`).
+# ⚠ 2026-08-31 ota a nyelv es a megjelenes a `⚙ Beallitas` ablak KET KULON
+# lapja, nem egy sajat `🎨 Megjelenes` gomb az eszkozsavon (felhasznaloi keres).
+_src = inspect.getsource(gui.DashboardWindow._show_settings)
 import re as _re
 check("a mentes a KODOT irja a configba",
-      bool(_re.search(r'dash\["language"\]\s*=\s*_lang_code\(\)', _src)))
-check("a legordulo a sajat neveket kinalja",
-      "_i18n.LANGUAGES.values()" in _src)
+      bool(_re.search(r'_dash\["language"\]\s*=\s*_lang_code\(\)', _src)))
 check("valtaskor UJRAINDITAST ker", "gui.restart.language" in _src
       and "gui.saved_restart" in _src)
 # ⚠ A menet kozbeni valtas KEVERT feluletet adna: a mar megepult widgetek
@@ -73,10 +72,23 @@ check("valtaskor UJRAINDITAST ker", "gui.restart.language" in _src
 check("menet kozben NEM allitja at a nyelvet",
       not _re.search(r"^\s*[\w.]*set_language\(", _src, _re.M),
       "a felulet fele magyar, fele angol lenne")
+check("a nyelv KULON lapon van (nem a megjelenes alatt)",
+      '("language", _t("lang.label"))' in _src)
+check("...es a megjelenes is sajat lapon",
+      '("appearance", _t("gui.megjelenes"))' in _src)
 
-# ── 3. AZ ABLAK mindket nyelven ───────────────────────────────────────────
+# ⚠ AZ ESZKOZSAVON MAR NINCS gomb. Ha visszakerulne, ket helyrol lehetne
+# ugyanazt allitani -- a ket ut elobb-utobb elcsuszna.
+_gui_src = (ROOT / "dashboard" / "gui.py").read_text(encoding="utf-8")
+check("nincs tobbe `_show_appearance` (egy forras maradt)",
+      "_show_appearance" not in _gui_src)
+check("...es nincs eszkozsav-gomb ra", "gui.megjelenes2" not in _gui_src)
+
+# ── 3. A KET LAP mindket nyelven ─────────────────────────────────────────
+# A lapokat KULON metodus epiti (`_build_*_tab`) -- igy a teljes Beallitas-ablak
+# (JSON-szerkeszto, kapu- es strategia-editor) nelkul is megnyithatok, es a
+# teszt a VISELKEDEST meri, nem a forras szoveget.
 cfg = {"dashboard": {}}
-saved = {"n": 0}
 
 
 class _Fake:
@@ -84,10 +96,6 @@ class _Fake:
     cfg = cfg
     _small_font = ("Segoe UI", 9)
     _header_font = ("Segoe UI", 10, "bold")
-
-    def _save_main_config(self):
-        saved["n"] += 1
-        return True
 
 
 _root = tk.Tk()
@@ -97,8 +105,8 @@ _orig = i18n.language()
 
 for _lang in ("hu", "en"):
     i18n.set_language(_lang)
-    gui.DashboardWindow._show_appearance(_Fake())
-    _top = [w for w in _root.winfo_children() if isinstance(w, tk.Toplevel)][-1]
+    _top = tk.Toplevel(_root)
+    _nyelv = gui.DashboardWindow._build_language_tab(_Fake(), _top)
     _txt = texts(_top)
     check(f"[{_lang}] a nyelv sajat neven latszik",
           i18n.LANGUAGES[_lang] in _txt, str(_txt[:4]))
@@ -106,42 +114,38 @@ for _lang in ("hu", "en"):
           any("magyarul" in t or "Hungarian" in t for t in _txt))
     _top.destroy()
 
-# ── 3b. A MENTES tenyleg KODOT ir ────────────────────────────────────────
+# ── 3b. A visszafejtes tenyleg KODOT ad ──────────────────────────────────
 # ⚠ Ez a teszt lelke. A legordulo a nyelv SAJAT nevet mutatja („Magyar"), a
 # configba viszont a KODNAK („hu") kell kerulnie — kulonben egy masik nyelvu
 # gepen a mentett ertek ismeretlen lenne, es a program csendben alapnyelvre
-# esne vissza. A gombot TENYLEG megnyomjuk, nem a forrast olvassuk.
-def _buttons(w, out=None):
-    out = [] if out is None else out
-    if isinstance(w, tk.Button):
-        out.append(w)
-    for c in w.winfo_children():
-        _buttons(c, out)
-    return out
-
-
+# esne vissza.
 i18n.set_language("hu")
-gui.DashboardWindow._show_appearance(_Fake())
-_top = [w for w in _root.winfo_children() if isinstance(w, tk.Toplevel)][-1]
-_save_btn = next((b for b in _buttons(_top)
-                  if b.cget("text") == i18n.t("btn.save")), None)
-check("van Mentes gomb", _save_btn is not None)
-if _save_btn is not None:
-    _save_btn.invoke()
-    check("a mentes lefutott", saved["n"] == 1, str(saved))
-    check("a configba a KOD kerult, nem a felirat",
-          cfg["dashboard"].get("language") in i18n.LANGUAGES,
-          repr(cfg["dashboard"].get("language")))
-    check("...es a tema is kodkent",
-          cfg["dashboard"].get("theme") not in i18n.LANGUAGES.values(),
-          repr(cfg["dashboard"].get("theme")))
+_top = tk.Toplevel(_root)
+_ny = gui.DashboardWindow._build_language_tab(_Fake(), _top)
+for _kod, _nev in i18n.LANGUAGES.items():
+    _ny["lang_var"].set(_nev)
+    check(f"a(z) {_nev} felirat -> {_kod} kod",
+          _ny["lang_code"] == _kod if isinstance(_ny["lang_code"], str)
+          else _ny["lang_code"]() == _kod)
+_top.destroy()
+
+# A megjelenes-lap is a KODOT adja vissza (nem a feliratot).
+_top = tk.Toplevel(_root)
+_mg = gui.DashboardWindow._build_appearance_tab(_Fake(), _top)
+from dashboard import theme as _th
+check("a tema legordulo FELIRATOT mutat", _mg["theme_var"].get() in
+      [_th.theme_label(c) for c in _th.THEMES], _mg["theme_var"].get())
+check("...de a kod visszafejtheto belole",
+      _th.theme_code(_mg["theme_var"].get()) in _th.THEMES,
+      _th.theme_code(_mg["theme_var"].get()))
+check("a betu-elonezet hivhato", callable(_mg["preview"]))
 _top.destroy()
 
 i18n.set_language(_orig)
 _root.destroy()
 
 # ── 4. A KATALOGUS kulcsai ────────────────────────────────────────────────
-for _k in ("lang.label", "gui.saved", "gui.saved_restart",
+for _k in ("lang.label", "gui.saved_restart",
            "gui.restart.language", "gui.restart.theme", "gui.language_note"):
     check(f"van kulcs: {_k}", i18n.has(_k))
 
