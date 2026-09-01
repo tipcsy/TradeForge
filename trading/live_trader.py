@@ -683,6 +683,31 @@ def log_trade(row: dict):
             df.to_csv(TRADES_CSV, mode="a", header=False, index=False)
 
 
+def today_trade_rows() -> list:
+    """A MAI `trades.csv` sorai szótárként. Üres lista, ha nincs vagy hibás.
+
+    ⚠ UGYANABBÓL A NAPLÓBÓL, amiből a Telegram-értesítések is mennek: így a
+    napi összesítő és az egyedi üzenetek nem tudnak eltérő képet adni ugyanarról
+    a napról. A dátum a HELYI nap — a felhasználó ebben gondolkodik, amikor azt
+    kérdezi, „mi volt ma"."""
+    if not TRADES_CSV.exists():
+        return []
+    try:
+        df = pd.read_csv(TRADES_CSV)
+        if "time" not in df.columns or df.empty:
+            return []
+        _t_ser = pd.to_datetime(df["time"], errors="coerce", utc=True)
+        _ma = datetime.now().astimezone().date()
+        _helyi = _t_ser.dt.tz_convert(datetime.now().astimezone().tzinfo)
+        return df[_helyi.dt.date == _ma].to_dict("records")
+    except Exception:
+        # ⚠ NEM néma: a napi összesítő enélkül üresen jönne, és az
+        # megkülönböztethetetlen volna a „ma nem történt semmi"-től.
+        _warn_once("today_rows", "a mai kereskedési sorok nem olvashatók (%s) — "
+                   "a napi összesítő üresnek fog látszani", TRADES_CSV.name)
+        return []
+
+
 # ---------------------------------------------------------------------------
 # Egy pár állapota futás közben
 # ---------------------------------------------------------------------------
@@ -3248,6 +3273,14 @@ def run(cfg: dict, slot_mgr: SlotManager):
         notify.setup(cfg, health=lambda: health_report(cfg))
     except Exception:
         log.debug("értesítés: nem indult el", exc_info=True)
+    # ⚠ A BEJÖVŐ oldal is itt indul, hogy a GRAFIKUS és a KONZOLOS futás
+    # egyformán megkapja — a parancsok a közös `console_cmd` rétegen mennek,
+    # tehát a bot ugyanazt látja és ugyanazt teszi, mint a parancssor.
+    try:
+        from core import console_cmd as _cc, telegram_cmd as _tgc
+        _tgc.setup(cfg, _cc.live_context(cfg, ROOT / "config.json"))
+    except Exception:
+        log.debug("telegram-parancsok: nem indultak el", exc_info=True)
     risky_mode.load()                      # induló risky állapot
     last_risky_reload = time.time()
     risky_reload_sec  = cfg.get("trading", {}).get("risky_reload_sec", 3600)

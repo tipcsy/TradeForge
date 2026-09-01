@@ -78,6 +78,11 @@ class Context:
     mt5_ok: Callable[[], bool] = lambda: True
     licence_status: Callable[[], dict] = dict
     cycle_work: Callable[[], tuple] = lambda: (0.0, 0.0)
+    # A MAI kereskedési sorok (`trades.csv`): `[{event, symbol, strategy,
+    # direction, pnl_usd, …}]`. ⚠ Ugyanabból a naplóból, amiből a Telegram-
+    # üzenetek is mennek — így a napi összesítő és az egyedi értesítések nem
+    # tudnak eltérő képet adni ugyanarról a napról.
+    today_rows: Callable[[], list] = list
     cycle_sec: float = 10.0
 
 
@@ -374,6 +379,50 @@ def cmd_state(ctx: Context, args: list, confirmed: bool = False) -> Result:
     return Result(sorok)
 
 
+def cmd_today(ctx: Context, args: list, confirmed: bool = False) -> Result:
+    """A MAI nap: kötések, eredmény — és hány jelzés maradt ki.
+
+    ⚠ A KIMARADT JELZÉS IS INFORMÁCIÓ. A chart-lelet (2026-08-31) épp arról
+    szólt, hogy a jelzések többsége sosem lesz kötés; ha a napi kép csak a
+    kötéseket mutatná, ugyanaz a félreolvasás jönne vissza szövegben."""
+    sorok = ctx.today_rows() or []
+    _nyit = [r for r in sorok if str(r.get("event")) == "open"]
+    _zar = [r for r in sorok if str(r.get("event")) == "close"]
+    _jel = [r for r in sorok if str(r.get("event")) == "signal"]
+    if not sorok:
+        return Result([_t("console.today.none")])
+    _ossz = 0.0
+    for r in _zar:
+        try:
+            _ossz += float(r.get("pnl_usd") or 0)
+        except (TypeError, ValueError):
+            pass
+    ki = [_t("console.today.head", opened=len(_nyit), closed=len(_zar),
+             pnl=f"{_ossz:+.2f}", signals=len(_jel))]
+    for r in _zar:
+        try:
+            _p = f"{float(r.get('pnl_usd') or 0):+.2f}"
+        except (TypeError, ValueError):
+            _p = "?"
+        ki.append(_t("console.today.row", symbol=r.get("symbol"),
+                     strategy=r.get("strategy"), pnl=_p))
+    return Result(ki)
+
+
+def cmd_heart(ctx: Context, args: list, confirmed: bool = False) -> Result:
+    """ÉLETJEL: egy soros ítélet, alatta a mért sorok.
+
+    ⚠ A „minden rendben" csak akkor mondható ki, ha MINDEN sor rendben van —
+    egy zöld pipa, ami nem néz semmit, rosszabb a semminél."""
+    sorok = state_rows(ctx)
+    rendben = all(ok for _c, _e, ok in sorok)
+    ki = [_t("console.heart.ok" if rendben else "console.heart.bad")]
+    for cimke, ertek, ok in sorok:
+        ki.append(f"  {cimke:<18} {ertek}" + ("" if ok else "  "
+                                              + _t("console.state.late")))
+    return Result(ki, ok=rendben)
+
+
 def cmd_quit(ctx: Context, args: list, confirmed: bool = False) -> Result:
     return Result([_t("console.quit")], quit=True)
 
@@ -405,7 +454,9 @@ COMMANDS: dict = {
     "play":    cmd_play,
     "stop":    cmd_stop,
     "balance": cmd_balance,
+    "today":   cmd_today,
     "state":   cmd_state,
+    "heart":   cmd_heart,
     "quit":    cmd_quit,
 }
 
@@ -420,7 +471,9 @@ _HELP = (
     ("play <pár> [stratégia]", "console.help.play"),
     ("stop <pár> [stratégia]", "console.help.stop"),
     ("balance", "console.help.balance"),
+    ("today", "console.help.today"),
     ("state", "console.help.state"),
+    ("heart", "console.help.heart"),
     ("quit", "console.help.quit"),
 )
 
@@ -478,6 +531,7 @@ def live_context(cfg: dict, config_path) -> Context:
         engine_alive=lt.engine_alive,
         last_cycle_ts=lambda: lt.last_cycle_ts,
         cycle_work=lt.cycle_work_stats,
+        today_rows=lt.today_trade_rows,
         mt5_ok=lambda: bool(mt5_connector.is_connected()),
         licence_status=licence.status,
     )

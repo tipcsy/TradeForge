@@ -116,6 +116,50 @@ def send(token: str, chat_ids, szoveg: str) -> bool:
     return ment
 
 
+def send_buttons(token: str, chat_id, szoveg: str, gombok) -> bool:
+    """Üzenet GOMBOKKAL (`inline_keyboard`). `gombok`: `[(felirat, adat), …]`.
+
+    ⚠ MIÉRT GOMB, ÉS NEM „írd be, hogy igen". Három okból, és mindhárom
+    számít: (1) a gomb felirata a katalógusból jön, tehát a nyelvvel együtt
+    mozog; (2) nincs elgépelés („igen"/„Igen"/„i"/„ok" mind ugyanaz a szándék,
+    de mind külön kezelendő szöveg volna); (3) ⚠ a gomb MAGÁVAL VISZI az
+    ajánlat azonosítóját — egy szöveges „igen" két egyidejű ajánlatnál
+    kétértelmű lenne, és épp egy rossz páron csinálna valamit.
+
+    ⚠ A `callback_data` legfeljebb 64 BÁJT lehet, ezért rövid azonosítót adunk
+    át, nem a parancsot magát."""
+    ok, res = _hivas(token, "sendMessage", {
+        "chat_id": str(chat_id), "text": str(szoveg)[:MAX_HOSSZ],
+        "disable_web_page_preview": True,
+        "reply_markup": {"inline_keyboard": [[
+            {"text": str(f), "callback_data": str(a)[:64]} for f, a in gombok]]},
+    })
+    if ok and isinstance(res, dict) and res.get("ok"):
+        return True
+    log.warning("telegram: a gombos üzenet nem ment ki (%s): %s", chat_id, res)
+    return False
+
+
+def answer_callback(token: str, callback_id: str, szoveg: str = "") -> bool:
+    """A gombnyomás NYUGTÁZÁSA. ⚠ Enélkül a Telegram a gombon pörgő órát mutat
+    ~30 másodpercig, és a felhasználó azt hiszi, elakadt."""
+    ok, res = _hivas(token, "answerCallbackQuery",
+                     {"callback_query_id": str(callback_id),
+                      "text": str(szoveg)[:200]})
+    return bool(ok and isinstance(res, dict) and res.get("ok"))
+
+
+def edit_message(token: str, chat_id, message_id: int, szoveg: str) -> bool:
+    """Egy elküldött üzenet ÁTÍRÁSA (a gombok eltűnnek vele).
+
+    ⚠ EZ AKADÁLYOZZA MEG A KÉTSZERI VÉGREHAJTÁST: a megnyomott gomb helyén
+    onnantól az EREDMÉNY áll, tehát nincs mit még egyszer megnyomni."""
+    ok, res = _hivas(token, "editMessageText", {
+        "chat_id": str(chat_id), "message_id": int(message_id),
+        "text": str(szoveg)[:MAX_HOSSZ]})
+    return bool(ok and isinstance(res, dict) and res.get("ok"))
+
+
 def updates(token: str, offset: int = 0, timeout: int = 0) -> tuple:
     """`(sikerult, frissitesek_listaja)` — a bejövő üzenetek (`getUpdates`).
 

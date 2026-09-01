@@ -297,6 +297,24 @@ zavartalanul megy tovább.
 ⚠ A `token` birtokosa **olvassa a botodnak küldött üzeneteket** — a
 `config.json` `.gitignore`-olt, oda kerülhet, de máshova ne másold.
 
+**Parancsok a botnak** (a válasz a beállított nyelven jön):
+
+| parancs | mit ad |
+|---|---|
+| `/help` | a parancsok listája |
+| `/balance` | egyenleg és a mai eredmény |
+| `/pos` | nyitott pozíciók |
+| `/today` | a mai kötések, eredmény, és hány jelzés volt |
+| `/state` | mely stratégiák futnak melyik páron + a motor állapota |
+| `/heart` | életjel — minden rendben van-e |
+| `/play <pár>` · `/stop <pár>` | stratégia indítása/leállítása |
+
+⚠ A bot **kizárólag** a configban felsorolt `chat_ids`-tól fogad parancsot;
+minden más üzenetre **némán** hallgat. A `/stop` nyitott pozíciónál
+**gombbal kérdez rá** (a gomb 10 perc után lejár), és a megerősítésig semmi nem
+történik. Pozíciót zárni és a motort leállítani távolról **nem lehet** — a
+parancslista szándékosan engedélyező, nem tiltó.
+
 **Beüzemelés:** hozz létre egy botot a @BotFather `/newbot` parancsával, a
 tokent írd a `config.json`-ba, majd:
 
@@ -907,6 +925,24 @@ thread sends them; if Telegram is unreachable, the engine cycle carries on.
 
 ⚠ Whoever holds the `token` **can read the messages sent to your bot** —
 `config.json` is git-ignored so it belongs there, but do not copy it elsewhere.
+
+**Commands** (replies come in the configured language):
+
+| command | what it gives |
+|---|---|
+| `/help` | the command list |
+| `/balance` | balance and today's result |
+| `/pos` | open positions |
+| `/today` | today's trades, result, and how many signals there were |
+| `/state` | which strategies run on which pair + engine status |
+| `/heart` | heartbeat — is everything OK |
+| `/play <pair>` · `/stop <pair>` | start/stop a strategy |
+
+⚠ The bot accepts commands **only** from the `chat_ids` listed in the config;
+every other message is met with **silence**. With an open position `/stop` asks
+with a **button** (which expires after 10 minutes), and nothing happens until
+you confirm. Closing a position or stopping the engine remotely is **not
+possible** — the command list is deliberately an allowlist, not a blocklist.
 
 **Setup:** create a bot with @BotFather's `/newbot`, put the token into
 `config.json`, then:
