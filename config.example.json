@@ -97,6 +97,24 @@
   "licence": {
     "api_url": "https://licence.tipcsy.hu/api/v1"
   },
+  "_comment_notify": "Telegram-ertesites. A `token` a @BotFather-tol, a `chat_ids` a @userinfobot-tol. FIGYELEM: a bot CSAK az itt felsorolt chat_id-knak kuld, es a token birtokosa olvassa a botnak kuldott uzeneteket -- ne masold publikus helyre. `quiet_hours`: HELYI ido szerint; a csendben keletkezo JELZESEK elvesznek, a KOTESEK reggel osszesitve jonnek. `heartbeat_times`: ures lista = nincs eletjel. Per par+strategia a `pairs.<sym>.strategy_notify_trade` / `strategy_notify_signal` kapcsol (a jelzes alapbol KI, a kotes alapbol BE).",
+  "notify": {
+    "enabled": false,
+    "telegram": {
+      "token": "",
+      "chat_ids": []
+    },
+    "quiet_hours": {
+      "from": "22:00",
+      "to": "07:00"
+    },
+    "heartbeat_times": [
+      "08:00",
+      "20:00"
+    ],
+    "daily_summary_time": "",
+    "licence_warn_days": 14
+  },
   "gates": {
     "_comment": "BELÉPŐ-KAPUK és a HATÁSUK, per (instrumentum × stratégia). A hatás: 'block' (nincs belépő) | 'reduce' (belép, de FELEZETT mérettel) | 'none' (a kapu nem szól bele). Öröklés (a legszűkebb nyer): pairs.<SYM>.gates.<kapu>.<stratégia> → pairs.<SYM>.gates.<kapu>.default → gates.<kapu>.<stratégia> → gates.<kapu>.default → beépített. A v1.97.0 óta a MOTOR is eszerint dönt (él + backtest + portfólió-backtest); korábban minden bekapcsolt kapu kemény blokk volt, a 'reduce' pedig csak kijelzés.",
     "_comment_market": "A piac-kapu akkor 'bukik', ha az aktuális besorolás benne van az 'adverse' listában (core/regime.py kategóriái: clean_bull, clean_bear, volatile_bull, volatile_bear, ranging, dead, uncertain, transition). Alap: dead + uncertain. Ez CSAK akkor számít, ha a piac-kapu hatását 'block'/'reduce'-ra állítod — alapból 'none'. FIGYELEM: a hatás beállítása önmagában kevés — a páron KI IS KELL VÁLASZTANI egy piac-előszűrőt (pairs.<SYM>.market_strategy), különben a kapunak nincs mit mérnie, és sosem tüzel. A config-ellenőrző szól, ha ez az állapot előáll.",

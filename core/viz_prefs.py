@@ -24,9 +24,26 @@ a táblázathoz. Nincs migráció — a legacy kulcsokat szándékosan nem tör�
 
 from __future__ import annotations
 
-# (per-stratégia térkép kulcsa, legacy pár-szintű kulcs) tengelyenként.
-VIZ    = ("strategy_viz", "viz_enabled")
-TRADES = ("strategy_trades", "show_trades")
+# (per-stratégia térkép kulcsa, legacy pár-szintű kulcs, ALAPÉRTÉK) tengelyenként.
+#
+# ⚠ AZ ALAPÉRTÉK TENGELYENKÉNT MÁS LEHET. A megjelenítés alapból BE (ami eddig
+# látszott, ezután is látszik), a zajos ÉRTESÍTÉSEK viszont alapból KI — egy
+# frissítés után senki ne kapjon váratlanul üzenetáradatot.
+VIZ    = ("strategy_viz", "viz_enabled", True)
+TRADES = ("strategy_trades", "show_trades", True)
+
+# ⚠ TELEGRAM-ÉRTESÍTÉS, ugyanezzel a mechanizmussal (pár + stratégia). Nem
+# „megjelenítés", de PONTOSAN ugyanaz a kapcsoló-alak, és a felületen is ugyanaz
+# az oszlop-minta — külön modulban két helyen kellene karbantartani ugyanazt.
+#
+# ⚠ ÉS MIÉRT KETTŐ, NEM EGY. A „szólj, ha JELZÉS van" (sok, zajos) és a „szólj,
+# ha KÖTÉS van" (ritka, fontos) NEM ugyanaz a kérdés. Egyetlen kapcsolóval a
+# jelzés-zaj miatt kikapcsolnád — és onnantól a KÖTÉSEKRŐL sem kapnál hírt.
+NOTIFY_TRADE  = ("strategy_notify_trade", "notify_trade", True)
+NOTIFY_SIGNAL = ("strategy_notify_signal", "notify_signal", False)
+
+# Minden tengely — a `prune` és a felület ezen megy végig.
+AXES = (VIZ, TRADES, NOTIFY_TRADE, NOTIFY_SIGNAL)
 
 
 def _pair(cfg: dict, symbol: str) -> dict:
@@ -34,14 +51,21 @@ def _pair(cfg: dict, symbol: str) -> dict:
     return pc if isinstance(pc, dict) else {}
 
 
-def _on(cfg: dict, symbol: str, strategy_name: str, axis: tuple) -> bool:
-    """Egy tengely (VIZ/TRADES) állapota az adott pár+stratégia párosra."""
-    per_key, legacy_key = axis
+def axis_on(cfg: dict, symbol: str, strategy_name: str, axis: tuple) -> bool:
+    """Egy tengely állapota az adott pár+stratégia párosra.
+
+    ⚠ NYILVÁNOS, mert nem csak a megjelenítés használja: az értesítés-tengelyek
+    (`NOTIFY_*`) ugyanezt a mechanizmust viszik tovább. Egy második, „ugyanilyen"
+    modul két helyen romlana el."""
+    per_key, legacy_key, alap = axis
     pc  = _pair(cfg, symbol)
     per = pc.get(per_key)
     if isinstance(per, dict) and strategy_name in per:
         return bool(per[strategy_name])
-    return bool(pc.get(legacy_key, True))     # legacy pár-szintű, alap: látszik
+    return bool(pc.get(legacy_key, alap))     # legacy pár-szintű visszaesés
+
+
+_on = axis_on                                  # régi, modulon belüli név
 
 
 def viz_on(cfg: dict, symbol: str, strategy_name: str) -> bool:
@@ -55,6 +79,16 @@ def trades_on(cfg: dict, symbol: str, strategy_name: str) -> bool:
     return _on(cfg, symbol, strategy_name, TRADES)
 
 
+def notify_trade_on(cfg: dict, symbol: str, strategy_name: str) -> bool:
+    """Küldjünk-e ÉRTESÍTÉST a tényleges kötésekről és pozíció-eseményekről."""
+    return axis_on(cfg, symbol, strategy_name, NOTIFY_TRADE)
+
+
+def notify_signal_on(cfg: dict, symbol: str, strategy_name: str) -> bool:
+    """Küldjünk-e értesítést a JELZÉSEKRŐL. ⚠ Alapból KI: ebből sok van."""
+    return axis_on(cfg, symbol, strategy_name, NOTIFY_SIGNAL)
+
+
 def any_viz_on(cfg: dict, symbol: str, strategy_names) -> bool:
     """Kell-e egyáltalán viz-t írni erre a szimbólumra: legalább egy stratégia
     rajza látszik-e. Ez a PÁR-szintű kapu (throttle / CLEAR) — ha egyik sem
@@ -66,7 +100,7 @@ def set_on(cfg: dict, symbol: str, strategy_name: str, axis: tuple, value: bool)
     """Egy tengely beállítása per stratégia (a hívó menti a configot). A legacy
     pár-szintű kulcshoz NEM nyúl: az marad a térképben nem szereplő (pl. később
     hozzáadott) stratégiák visszaesése."""
-    per_key, _ = axis
+    per_key = axis[0]
     pc = cfg.setdefault("pairs", {}).setdefault(symbol, {})
     per = pc.get(per_key)
     if not isinstance(per, dict):
@@ -80,7 +114,7 @@ def prune(cfg: dict, symbol: str, known_names) -> None:
     stratégia-neveket, hogy a config ne gyűjtsön szemetet. Üres térképet töröl."""
     known = set(known_names)
     pc = _pair(cfg, symbol)
-    for per_key, _ in (VIZ, TRADES):
+    for per_key, _, _alap in AXES:
         per = pc.get(per_key)
         if not isinstance(per, dict):
             continue

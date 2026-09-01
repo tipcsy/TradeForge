@@ -273,6 +273,30 @@ Két dolgot érdemes tudni:
   belépő-ablakot (SSH-n nem is látszana): jelentkezz be egyszer a grafikus
   felületen, és másold a `data/licence_token.json`-t a másik gépre.
 
+### Telegram-értesítés
+
+A motor szólni tud a kötésekről, a pozíció-eseményekről és a bajról. A
+`config.json` → `notify` blokk kapcsolja be (a `config.example.json`
+dokumentálja); alapból **ki van kapcsolva**.
+
+| esemény | mikor megy |
+|---|---|
+| kötés nyílt / lezárult, stop mozdult, kockázatmentesítés | ha a pár+stratégia **kötés-értesítése** be van kapcsolva (alap: BE) |
+| jelzés (csak jelzés módban) | ha a **jelzés-értesítés** be van kapcsolva (alap: **KI** — abból sok van) |
+| a motor nem halad · MT5 elveszett · napi veszteséglimit · lejáró licenc | **mindig**, naponta legfeljebb egyszer |
+| indulás, ütemezett életjel | a `heartbeat_times` szerint (üres lista = nincs) |
+
+**Csendes órák** (`quiet_hours`, **helyi** idő szerint): a jelzések elvesznek —
+alvás közben úgysem lépnél be —, a kötések viszont reggel **összesítve**
+megjönnek. A kritikus hiba a csendet is átüti.
+
+⚠ **Az értesítés sosem állítja meg a kereskedést.** Az események egy sorba
+kerülnek, és külön szál küldi őket; ha a Telegram elérhetetlen, a motor köre
+zavartalanul megy tovább.
+
+⚠ A `token` birtokosa **olvassa a botodnak küldött üzeneteket** — a
+`config.json` `.gitignore`-olt, oda kerülhet, de máshova ne másold.
+
 **Két nézet, egy parancskészlet.** A `--tui` egy magától frissülő táblázatot ad
 (instrumentumok, futó stratégiák, nyitott pozíciók, a motor életjele) a
 terminál saját képernyő-pufferében; billentyűleütésre a kép megáll, és
@@ -848,6 +872,29 @@ Two things worth knowing:
 * **Licence sign-in does not happen here.** Console mode deliberately does not
   open a sign-in window (it would not show over SSH): sign in once in the GUI
   and copy `data/licence_token.json` to the other machine.
+
+### Telegram notifications
+
+The engine can tell you about trades, position events and trouble. The
+`config.json` → `notify` block turns it on (documented in
+`config.example.json`); it is **off by default**.
+
+| event | when it is sent |
+|---|---|
+| trade opened / closed, stop moved, risk removed | if the pair+strategy **trade notification** is on (default: ON) |
+| signal (in signal-only mode) | if the **signal notification** is on (default: **OFF** — there are many) |
+| engine not advancing · MT5 lost · daily loss limit · licence expiring | **always**, at most once a day |
+| startup, scheduled heartbeat | per `heartbeat_times` (empty list = none) |
+
+**Quiet hours** (`quiet_hours`, in **local** time): signals are dropped — you
+would not enter while asleep — but trades arrive **summarised** in the morning.
+A critical error breaks through the quiet hours.
+
+⚠ **Notification never stops trading.** Events go into a queue and a separate
+thread sends them; if Telegram is unreachable, the engine cycle carries on.
+
+⚠ Whoever holds the `token` **can read the messages sent to your bot** —
+`config.json` is git-ignored so it belongs there, but do not copy it elsewhere.
 
 **Two views, one command set.** `--tui` gives a self-refreshing table
 (instruments, running strategies, open positions, the engine's heartbeat) in the

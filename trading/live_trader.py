@@ -651,7 +651,19 @@ TRADES_COLUMNS = ["time", "event", "strategy", "symbol", "direction", "lot",
 
 def log_trade(row: dict):
     """Egy sor a trades.csv-be, a kanonikus sémára igazítva. Ha a meglévő fájl
-    fejléce eltér (régi formátum), egyszer átírja a kanonikus sémára."""
+    fejléce eltér (régi formátum), egyszer átírja a kanonikus sémára.
+
+    ⚠ ÉS INNEN MEGY AZ ÉRTESÍTÉS IS. A kötés, a zárás és a jelzés MÁR MA is
+    ezen az egy csatornán jön; ha az értesítés máshonnan dolgozna, a
+    Telegram-üzenet és a `trades.csv` elcsúszhatna egymástól — ez a projekt
+    visszatérő hibaosztálya. Az értesítés SOSEM állíthatja meg a naplózást:
+    a `notify.trade_event` kivételt nem enged ki, és azonnal visszatér (a
+    tényleges küldés külön szálon megy)."""
+    try:
+        from core import notify
+        notify.trade_event(row)
+    except Exception:
+        log.debug("értesítés: a kereskedési esemény kimaradt", exc_info=True)
     df = pd.DataFrame([row]).reindex(columns=TRADES_COLUMNS)
     if not TRADES_CSV.exists():
         df.to_csv(TRADES_CSV, index=False)
@@ -736,9 +748,20 @@ def _warn_once(key, msg: str, *args) -> None:
     log.warning(msg, *args)
 
 
-def sl_journal_append(symbol: str, ticket: int, t_server: int, sl: float) -> None:
+def sl_journal_append(symbol: str, ticket: int, t_server: int, sl: float,
+                     breakeven: bool = False, strategy: str = "") -> None:
     """Egy SL-mozgás hozzáfűzése a `data/sl_moves/<SYM>.csv`-hez. Az idő a
-    `pos.time_update` (a módosítás SZERVER-ideje) → egyezik a gyertya-idővel."""
+    `pos.time_update` (a módosítás SZERVER-ideje) → egyezik a gyertya-idővel.
+
+    ⚠ ÉS INNEN MEGY AZ ÉRTESÍTÉS IS: az MT5 nem tárolja az SL-módosításokat,
+    tehát ez az EGYETLEN hely, ahol a breakeven és a trailing egyáltalán
+    nyomot hagy. Ha az értesítés máshonnan figyelné, a kettő elcsúszna."""
+    try:
+        from core import notify
+        notify.sl_moved(symbol, strategy or (strategy_of_ticket(ticket) or ""),
+                        ticket, sl, breakeven=breakeven)
+    except Exception:
+        log.debug("értesítés: az SL-mozgás kimaradt", exc_info=True)
     try:
         SL_MOVES_DIR.mkdir(parents=True, exist_ok=True)
         with open(SL_MOVES_DIR / f"{symbol}.csv", "a", encoding="ascii") as fh:
@@ -2168,7 +2191,16 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
             pstate["last_sl"] = pos.sl
         elif abs(pos.sl - _prev_sl) > 1e-9:
             pstate["last_sl"] = pos.sl
-            sl_journal_append(symbol, ticket, int(pos.time_update), pos.sl)
+            # ⚠ A „kockázatmentes-e" kérdést az ÁRBÓL döntjük el, nem az OKBÓL.
+            # A `be_done` kilenc helyen áll be (BE, költség-tudatos BE, kézi
+            # húzás, risky-ág, szünet-ág…), és a sorrendjük körönként eltér —
+            # abból következtetni néma elcsúszás lenne. Az viszont mindig igaz,
+            # hogy ha a stop a belépő NYERESÉG-oldalán van, a pozíció már nem
+            # tud veszíteni. Ezt jelenti a felhasználónak a „BE behúzva".
+            _be = bool(pos.sl) and (pos.sl >= pos.price_open if pos.type == 0
+                                    else pos.sl <= pos.price_open)
+            sl_journal_append(symbol, ticket, int(pos.time_update), pos.sl,
+                              breakeven=_be, strategy=strategy.name)
         # Kézi/külső SL-húzás felismerése: ha a JELENLEGI SL már eléri a költség-
         # tudatos BE-szintet a profit oldalon (bárki mozgatta — pl. a felhasználó a
         # charton), az ugyanúgy „BE kész". A naiv (költséget nem fedező) BE-t NEM
@@ -3138,6 +3170,64 @@ def manual_build(symbol: str, strategy_name: "str | None" = None) -> bool:
     return True
 
 
+def health_report(cfg: dict) -> list:
+    """A NÉGY kritikus esemény — `[(dedup_kulcs, szöveg), …]`, üres, ha minden jó.
+
+    ⚠ MIÉRT KÜLÖN FÜGGVÉNY, ÉS MIÉRT NEM A MOTOR SZÓL. Egy elhalt szál nem tud
+    üzenni magáról: a 2026-08-XX-i NÉMA SZÁL-HALÁLNÁL (egy hiányzó `point_size`
+    megölte a LiveTradert, 11 pár leállt) a napló hallgatott, és nem volt MIÉRT
+    megkérdezni. Ezért ezt a listát az ÉRTESÍTŐ szála kérdezi meg
+    periodikusan — az akkor is fut, ha a motor már nem.
+
+    ⚠ A négy elem SZÁNDÉKOSAN kevés. A felhasználó (jogosan) félt a
+    Telegram-szeméttől; ezért csak az kerül ide, aminek PÉNZÜGYI vagy
+    működési következménye van, és mindegyik naponta legfeljebb egyszer megy ki
+    (a dedup-kulcs miatt). Minden más a `/state` alatt marad."""
+    ki = []
+    _nap = time.strftime("%Y-%m-%d")
+    # 1. A motor HALAD-e (nem az, hogy a szál létezik: egy beragadt szál is „él")
+    if last_cycle_ts > 0 and not engine_alive():
+        ki.append((f"thread|{_nap}",
+                   _t("notify.err.thread",
+                      sec=f"{max(0.0, time.time() - last_cycle_ts):.0f}")))
+    # ⚠ EGYETLEN ELBUKÓ PRÓBA NE VIGYE EL A TÖBBIT — de NÉMÁN se maradjon. Egy
+    # figyelőben a csendes elnyelés a legrosszabb: pont az veszne el, ami a
+    # bajról szólna. Ezért mindegyik ág külön fut, és a hibája naplóba kerül.
+    #
+    # ⚠ ÉS AMIÉRT A HIBÁS PRÓBÁBÓL NEM CSINÁLUNK RIASZTÁST: egy elbukó
+    # `is_connected()` nem bizonyítja, hogy nincs kapcsolat — a téves riasztás
+    # pedig gyorsan megtanítja a felhasználót, hogy hagyja figyelmen kívül az
+    # üzeneteket. A valóban halott motort az 1. pont (nem halad) fogja meg.
+    # 2. MT5-kapcsolat
+    try:
+        if not mt5_connector.is_connected():
+            ki.append((f"mt5|{_nap}", _t("notify.err.mt5")))
+    except Exception:
+        log.debug("állapot-figyelő: az MT5-kapcsolat nem kérdezhető le",
+                  exc_info=True)
+    # 3. Napi veszteséglimit
+    try:
+        from trading.backtest import daily_limit_usd as _dlim
+        _bal = mt5_connector.account_balance()
+        _pnl = mt5_connector.daily_pnl_cached()
+        if _bal and _pnl is not None and _pnl <= -_dlim(cfg.get("trading") or {}, _bal):
+            ki.append((f"daily|{_nap}", _t("notify.err.daily_limit")))
+    except Exception:
+        log.debug("állapot-figyelő: a napi limit nem számolható", exc_info=True)
+    # 4. Licenc lejárata
+    try:
+        from core import licence
+        _nap_hatra = (licence.status() or {}).get("lejar_nap")
+        _kuszob = int(((cfg.get("notify") or {}).get("licence_warn_days") or 14))
+        if _nap_hatra is not None and int(_nap_hatra) <= _kuszob:
+            ki.append((f"licence|{_nap}",
+                       _t("notify.err.licence", days=int(_nap_hatra))))
+    except Exception:
+        log.debug("állapot-figyelő: a licenc állapota nem olvasható",
+                  exc_info=True)
+    return ki
+
+
 def run(cfg: dict, slot_mgr: SlotManager):
     global VIZ_ENABLED, VIZ_INTERVAL_SEC, _run_cfg, _run_slot_mgr, last_cycle_ts
     _run_cfg = cfg
@@ -3151,6 +3241,13 @@ def run(cfg: dict, slot_mgr: SlotManager):
     # Stratégia-hatókörű params: az elsődleges stratégia az aktív + egyszeri migráció.
     set_active_strategy(primary_name)
     migrate_flat_layout(primary_name)
+    # ⚠ AZ ÉRTESÍTŐ A MOTORTÓL FÜGGETLEN SZÁLON FUT, és ő kérdezi meg a
+    # `health_report`-ot — így akkor is szól, ha ez a szál közben elhal.
+    try:
+        from core import notify
+        notify.setup(cfg, health=lambda: health_report(cfg))
+    except Exception:
+        log.debug("értesítés: nem indult el", exc_info=True)
     risky_mode.load()                      # induló risky állapot
     last_risky_reload = time.time()
     risky_reload_sec  = cfg.get("trading", {}).get("risky_reload_sec", 3600)
@@ -3434,6 +3531,20 @@ def run(cfg: dict, slot_mgr: SlotManager):
 
     log.info("Élő kereskedés indul | %d LIVE pár (%d stratégia-állapot)",
              len({_s for (_s, _n) in pair_states}), len(pair_states))
+    # ⚠ AZ INDULÁS IS HÍR. Egy fej nélküli gépen (VM) semmi nem árulja el, hogy
+    # a program újraindult — pedig egy hajnali újraindulás pont az, amiről tudni
+    # akarsz. Itt már ismerjük a valóban futó párok számát, tehát az üzenet nem
+    # a SZÁNDÉKOT mondja, hanem a tényt.
+    try:
+        from core import notify as _notify
+        from version import APP_VERSION as _ver
+        _notify._kuld(_notify.Event(
+            kind=_notify.HEARTBEAT,
+            text=_t("notify.start", version=_ver,
+                    pairs=len({_s for (_s, _n) in pair_states}),
+                    account=str(mt5_connector.connection_info(cfg).get("login") or "?"))))
+    except Exception:
+        log.debug("értesítés: az indulás-üzenet kimaradt", exc_info=True)
 
     # A chart-rajzolás DEDIKÁLT szálon (lásd `_viz_worker`) — így a mély
     # adatablakok betöltése nem késlelteti a breakeven/trailing/kiszállás útját.

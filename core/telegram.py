@@ -1,0 +1,128 @@
+"""Telegram Bot API — a legkisebb réteg, ami az üzenetküldéshez kell.
+
+⚠ SZÁNDÉKOSAN NINCS ÚJ FÜGGŐSÉG. A Bot API sima HTTPS+JSON; a `urllib` elég
+hozzá, és a `core.licence` mintája (saját `User-Agent`, `(sikerult, valasz)`
+visszatérés) itt is érvényes — egy CDN/WAF mögötti szolgáltatásnál a
+`Python-urllib` alapértelmezett user-agent **működési feltétellé** vált, és ez
+a projektben már egyszer pénzbe került (a licencszerver 403-at adott rá).
+
+⚠ ÉS MIÉRT KÜLÖN MODUL a `core.notify`-tól: az értesítés DÖNTÉSI logikája
+(csendes órák, dedup, per-pár kapcsolók) hálózat nélkül tesztelhető kell
+maradjon. Itt van minden, ami hálózat; ott semmi.
+
+⚠ A HIBA NEM SZÁLL FEL. Minden függvény `False`/üres értékkel tér vissza, ha
+baj van — egy elérhetetlen Telegram nem állíthatja meg a kereskedést. Ami
+elveszett, az egy üzenet; ami nem veszhet el, az a pozíció menedzsmentje.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import urllib.error
+import urllib.parse
+import urllib.request
+
+log = logging.getLogger(__name__)
+
+API = "https://api.telegram.org"
+TIMEOUT_SEC = 15
+
+# A Telegram üzenet-hossza 4096 karakter. Ennél hosszabbat DARABOLUNK, nem
+# vágunk: egy félbevágott napi összefoglaló rosszabb, mint két üzenet.
+MAX_HOSSZ = 4000
+
+
+def _user_agent() -> str:
+    try:
+        from version import APP_VERSION
+        return f"TradeForge/{APP_VERSION}"
+    except Exception:
+        return "TradeForge"
+
+
+def _hivas(token: str, metodus: str, body: dict) -> tuple:
+    """`(sikerult, valasz_vagy_hibauzenet)`. Kivételt SOSEM enged ki."""
+    if not token:
+        return False, "nincs token"
+    req = urllib.request.Request(
+        f"{API}/bot{token}/{metodus}",
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json",
+                 "User-Agent": _user_agent()},
+        method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=TIMEOUT_SEC) as r:
+            return True, json.loads(r.read().decode("utf-8"))
+    except urllib.error.HTTPError as ex:
+        # ⚠ A Telegram a HIBÁT IS JSON-ban indokolja (`description`), és az
+        # üzenet a felhasználóé: „chat not found", „bot was blocked by the
+        # user". Enélkül csak egy 400-as kód maradna, amiből nem derül ki,
+        # hogy a `chat_id` rossz-e vagy a bot van letiltva.
+        try:
+            _b = json.loads(ex.read().decode("utf-8"))
+            _d = _b.get("description") or ""
+        except Exception:
+            _d = ""
+        return False, f"HTTP {ex.code}{': ' + str(_d) if _d else ''}"
+    except Exception as ex:
+        return False, f"{type(ex).__name__}: {ex}"
+
+
+def _darabol(szoveg: str) -> list:
+    """Hosszú szöveg → üzenet-darabok, SORHATÁRON vágva."""
+    if len(szoveg) <= MAX_HOSSZ:
+        return [szoveg]
+    ki, akt = [], ""
+    for sor in szoveg.split(chr(10)):
+        # ⚠ EGY TÚL HOSSZÚ SOR IS DARABOLANDÓ, nem levágandó. Az első változat
+        # `sor[:MAX_HOSSZ]`-t írt: egy sortörés nélküli hosszú szöveg (például
+        # egy kivétel nyoma egyetlen sorban) NÉMÁN elveszítette a végét — pont
+        # azt a részt, ami a hibakereséshez kellett volna.
+        while len(sor) > MAX_HOSSZ:
+            if akt:
+                ki.append(akt)
+                akt = ""
+            ki.append(sor[:MAX_HOSSZ])
+            sor = sor[MAX_HOSSZ:]
+        if len(akt) + len(sor) + 1 > MAX_HOSSZ:
+            if akt:
+                ki.append(akt)
+            akt = sor
+        else:
+            akt = (akt + chr(10) + sor) if akt else sor
+    if akt:
+        ki.append(akt)
+    return ki
+
+
+def send(token: str, chat_ids, szoveg: str) -> bool:
+    """Üzenet MINDEN engedélyezett címzettnek. `True`, ha legalább egynek ment.
+
+    ⚠ A RÉSZLEGES SIKER IS SIKER: ha két címzettből az egyik letiltotta a
+    botot, a másiknak akkor is menjen — és a hibáról legyen napló-nyom."""
+    if isinstance(chat_ids, (str, int)):
+        chat_ids = [chat_ids]
+    ment = False
+    for cid in (chat_ids or ()):
+        for darab in _darabol(str(szoveg)):
+            ok, res = _hivas(token, "sendMessage",
+                             {"chat_id": str(cid), "text": darab,
+                              "disable_web_page_preview": True})
+            if ok and isinstance(res, dict) and res.get("ok"):
+                ment = True
+            else:
+                log.warning("telegram: a küldés nem sikerült (%s): %s", cid, res)
+    return ment
+
+
+def me(token: str) -> tuple:
+    """`(sikerult, bot_neve_vagy_hiba)` — a token ELLENŐRZÉSE.
+
+    ⚠ Ez az egyetlen olcsó módja megmondani, hogy egy elgépelt token miatt
+    hallgat-e a bot. Enélkül a felhasználó csak annyit látna, hogy nem jön
+    üzenet — és a kereskedésben keresné a hibát."""
+    ok, res = _hivas(token, "getMe", {})
+    if ok and isinstance(res, dict) and res.get("ok"):
+        return True, str((res.get("result") or {}).get("username") or "?")
+    return False, str(res)
