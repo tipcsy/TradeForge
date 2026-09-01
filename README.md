@@ -301,6 +301,11 @@ esik, az összefoglaló reggel jön meg.
 kerülnek, és külön szál küldi őket; ha a Telegram elérhetetlen, a motor köre
 zavartalanul megy tovább.
 
+**Melyik párról szóljon:** az instrumentum nevére kattintva, a stratégia-
+táblázatban két új sor — *Telegram: kötés* és *Telegram: jelzés* —, ugyanott,
+ahol a vizualizáció és a kötés-mód. A „minden instrumentumra" pipa ezekre is
+érvényes.
+
 ⚠ A `token` birtokosa **olvassa a botodnak küldött üzeneteket** — a
 `config.json` `.gitignore`-olt, oda kerülhet, de máshova ne másold.
 
@@ -961,6 +966,11 @@ arrives in the morning.
 
 ⚠ **Notification never stops trading.** Events go into a queue and a separate
 thread sends them; if Telegram is unreachable, the engine cycle carries on.
+
+**Which pair should speak:** click the instrument name — the strategy table
+has two new rows, *Telegram: trades* and *Telegram: signals*, right where the
+visualisation and trade-mode switches are. The "apply to every instrument"
+checkbox covers them too.
 
 ⚠ Whoever holds the `token` **can read the messages sent to your bot** —
 `config.json` is git-ignored so it belongs there, but do not copy it elsewhere.

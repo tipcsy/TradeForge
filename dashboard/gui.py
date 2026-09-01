@@ -4239,23 +4239,34 @@ class DashboardWindow:
         for c, n in enumerate(_names, start=1):
             tk.Label(tbl, text=n, bg=BG, fg=FG_WHITE, font=self._small_font,
                      padx=8).grid(row=0, column=c)
-        # (sor-címke, kezdőérték-függvény) — a sorrend a táblázat sorrendje.
+        # (KULCS, sor-címke, kezdőérték-függvény) — a sorrend a táblázat sorrendje.
+        # ⚠ A KULCS NEM DÍSZ. Korábban a `_vars` a SOR INDEXÉVEL volt kulcsozva
+        # (`_vars[(2, n)]` = vizualizáció), tehát egy új sor beszúrása némán
+        # elcsúsztatta volna az összes alatta lévőt — a mentés MÁS kapcsolót
+        # írt volna, mint amit a felhasználó átállított.
         _ROWS = [
-            (_t("gui2.aktiv_strategia"),      lambda n: n in cur),
-            (_t("gui2.vizualizacio_latszik"), lambda n: _vp.viz_on(self.cfg, symbol, n)),
-            (_t("gui2.kotesek_latszanak"),    lambda n: _vp.trades_on(self.cfg, symbol, n)),
+            ("strategies", _t("gui2.aktiv_strategia"),
+             lambda n: n in cur),
+            ("viz", _t("gui2.vizualizacio_latszik"),
+             lambda n: _vp.viz_on(self.cfg, symbol, n)),
+            ("trades", _t("gui2.kotesek_latszanak"),
+             lambda n: _vp.trades_on(self.cfg, symbol, n)),
+            ("notify_trade", _t("gui2.telegram_kotes"),
+             lambda n: _vp.notify_trade_on(self.cfg, symbol, n)),
+            ("notify_signal", _t("gui2.telegram_jelzes"),
+             lambda n: _vp.notify_signal_on(self.cfg, symbol, n)),
         ]
         # Jelölőnégyzetek — ugyanaz a recept, mint az ablak többi kapcsolójánál:
         # az `fg` ADJA A PIPA SZÍNÉT, ezért kötelező megadni. Nélküle a rendszer
         # alapértelmezett (sötét) pipája rajzolódna a sötét `selectcolor`-ra, és
         # gyakorlatilag láthatatlan lenne.
-        _vars = {}          # (sor-index, stratégia-név) → BooleanVar
-        for r, (label, initial) in enumerate(_ROWS, start=1):
+        _vars = {}          # (sor-KULCS, stratégia-név) → BooleanVar
+        for r, (_kulcs, label, initial) in enumerate(_ROWS, start=1):
             tk.Label(tbl, text=label, bg=BG, fg=FG_GRAY, font=self._small_font,
                      anchor="w").grid(row=r, column=0, sticky="w", pady=1)
             for c, n in enumerate(_names, start=1):
                 v = tk.BooleanVar(value=bool(initial(n)))
-                _vars[(r, n)] = v
+                _vars[(_kulcs, n)] = v
                 tk.Checkbutton(tbl, variable=v, bg=BG, fg=FG_WHITE,
                                selectcolor=BG_HEADER, activebackground=BG,
                                activeforeground=FG_WHITE).grid(row=r, column=c)
@@ -4283,6 +4294,9 @@ class DashboardWindow:
                  wraplength=360, justify="left").pack(anchor="w", padx=12, pady=(0, 2))
         tk.Label(popup, text=_t("gui.jelzes_modban_a_motor"),
                  bg=BG, fg=FG_YELLOW, font=self._small_font,
+                 wraplength=360, justify="left").pack(anchor="w", padx=12, pady=(0, 4))
+        tk.Label(popup, text=_t("gui.telegram_ertesites_magyarazat"),
+                 bg=BG, fg=FG_GRAY_DIM, font=self._small_font,
                  wraplength=360, justify="left").pack(anchor="w", padx=12, pady=(0, 4))
 
         # ── Piac-előszűrő (piac-állapot osztályozó) — instrumentumonként EGY ──
@@ -4354,6 +4368,10 @@ class DashboardWindow:
             "strategies": sorted(cur),
             "viz":    {n: bool(_vp.viz_on(self.cfg, symbol, n))    for n in _names},
             "trades": {n: bool(_vp.trades_on(self.cfg, symbol, n)) for n in _names},
+            "notify_trade":  {n: bool(_vp.notify_trade_on(self.cfg, symbol, n))
+                              for n in _names},
+            "notify_signal": {n: bool(_vp.notify_signal_on(self.cfg, symbol, n))
+                              for n in _names},
             "mode":   {n: _tm.mode_of(self.cfg, symbol, n)         for n in _names},
             "market":     (_ms.market_name_of(_pc0) or "Nincs"),
             "market_viz": bool(_pc0.get("market_viz", True)),
@@ -4377,9 +4395,14 @@ class DashboardWindow:
             hogy a kettő közvetlenül összevethető legyen."""
             _l2m = {v: k for k, v in _tm.LABELS.items()}
             return {
-                "strategies": sorted(n for n in _names if _vars[(1, n)].get()),
-                "viz":    {n: bool(_vars[(2, n)].get()) for n in _names},
-                "trades": {n: bool(_vars[(3, n)].get()) for n in _names},
+                "strategies": sorted(n for n in _names
+                                     if _vars[("strategies", n)].get()),
+                "viz":    {n: bool(_vars[("viz", n)].get()) for n in _names},
+                "trades": {n: bool(_vars[("trades", n)].get()) for n in _names},
+                "notify_trade":  {n: bool(_vars[("notify_trade", n)].get())
+                                  for n in _names},
+                "notify_signal": {n: bool(_vars[("notify_signal", n)].get())
+                                  for n in _names},
                 "mode":   {n: _l2m.get(_mode_vars[n].get(), _tm.MODE_LIVE)
                            for n in _names},
                 "market":     ms_var.get(),
@@ -4398,12 +4421,17 @@ class DashboardWindow:
             A `rows` szűkítése miatt egy tömeges mentés nem nyúl a nem piszkált
             beállításokhoz — ezért lehet biztonságosan minden párra ráengedni."""
             pc = self.cfg.setdefault("pairs", {}).setdefault(sym, {})
-            if "viz" in rows or "trades" in rows:
+            # ⚠ A NÉGY PER-STRATÉGIA KAPCSOLÓ EGY TÁBLÁBÓL. Külön `if`-ekkel
+            # egy új tengely hozzáadásakor könnyű kihagyni valamelyiket — és a
+            # mentés utána NÉMÁN nem írná ki azt az egyet.
+            _TENGELYEK = (("viz", _vp.VIZ), ("trades", _vp.TRADES),
+                          ("notify_trade", _vp.NOTIFY_TRADE),
+                          ("notify_signal", _vp.NOTIFY_SIGNAL))
+            if any(k in rows for k, _a in _TENGELYEK):
                 for n in _names:
-                    if "viz" in rows:
-                        _vp.set_on(self.cfg, sym, n, _vp.VIZ, cur_vals["viz"][n])
-                    if "trades" in rows:
-                        _vp.set_on(self.cfg, sym, n, _vp.TRADES, cur_vals["trades"][n])
+                    for _k, _axis in _TENGELYEK:
+                        if _k in rows:
+                            _vp.set_on(self.cfg, sym, n, _axis, cur_vals[_k][n])
                 _vp.prune(self.cfg, sym, _names)
             if "mode" in rows:
                 for n in _names:
@@ -4463,7 +4491,7 @@ class DashboardWindow:
                     ds.market_strategy = pc.get("market_strategy")
 
         def _save():
-            chosen = [n for n in _names if _vars[(1, n)].get()]
+            chosen = [n for n in _names if _vars[("strategies", n)].get()]
             if not chosen:
                 lbl.config(text=_t("gui.legalabb_egy_strategia_legyen"), fg=FG_RED)
                 return

@@ -244,6 +244,41 @@ check("a rövid üzenet egy darab", telegram._darabol("rövid") == ["rövid"])
 check("⚠ saját User-Agent (nem `Python-urllib`)",
       "TradeForge" in telegram._user_agent())
 
+# ── 7b. A FELÜLETI KAPCSOLÓ ──────────────────────────────────────────────
+# ⚠ A KÉT ÉRTESÍTÉS-TENGELY az instrumentum-ablakban is állítható legyen: eddig
+# CSAK a `config.json`-ban lehetett, tehát gyakorlatilag elérhetetlen volt.
+_gui = (ROOT / "dashboard" / "gui.py").read_text(encoding="utf-8")
+check("⚠ a kötés-értesítés sor ott van az instrumentum-ablakban",
+      '"notify_trade", _t("gui2.telegram_kotes")' in _gui)
+check("⚠ ...és a jelzés-értesítés is",
+      '"notify_signal", _t("gui2.telegram_jelzes")' in _gui)
+check("⚠ a mentés MIND A NÉGY tengelyt egy táblából írja (nem külön if-ekkel)",
+      "_TENGELYEK = ((\"viz\", _vp.VIZ)" in _gui)
+
+# ⚠ A SOROK KULCSRA HIVATKOZNAK, NEM INDEXRE. Korábban a `_vars` a sor
+# INDEXÉVEL volt kulcsozva (`_vars[(2, n)]` = vizualizáció): egy új sor
+# beszúrása némán elcsúsztatta volna az alatta lévőket, és a mentés MÁS
+# kapcsolót írt volna, mint amit a felhasználó átállított.
+import re as _re
+# ⚠ A KOMMENTEKET KI KELL SZŰRNI: a régi alak MAGYARÁZATKÉNT ott áll a kódban
+# (épp azért, hogy ne kerüljön vissza) — egy szöveges keresés kódnak látná.
+_gui_kod = chr(10).join(l for l in _gui.splitlines()
+                        if not l.strip().startswith("#"))
+check("⚠ nincs SOR-INDEXRE hivatkozó `_vars` (a beszúrás ne csússzon el)",
+      not _re.search(r"_vars\[\(\d", _gui_kod),
+      str(_re.findall(r"_vars\[\(\d+, n\)\]", _gui_kod)[:3]))
+
+# A tömeges alkalmazás („minden instrumentumra") is ismerje a két sort —
+# különben átállítanád, és NÉMÁN csak ezen a páron érvényesülne.
+from core import bulk_apply as _ba
+check("⚠ a tömeges alkalmazás ismeri a két értesítés-sort",
+      "notify_trade" in _ba.ROWS and "notify_signal" in _ba.ROWS)
+check("...és NEM jelöli pénzt érintőnek (csak szól, nem köt)",
+      not _ba.affects_money(["notify_trade", "notify_signal"]))
+check("a változás-felismerés meglátja őket",
+      _ba.changed_rows({"notify_signal": {"a": False}},
+                       {"notify_signal": {"a": True}}) == {"notify_signal"})
+
 # ── 8b. NAPI ZÁRÁS-ÖSSZEFOGLALÓ ──────────────────────────────────────────
 # ⚠ CSAK HA KÉRTED: üres `daily_summary_time` → nincs esti üzenet.
 _ido = [datetime(2026, 9, 1, 23, 1).timestamp()]

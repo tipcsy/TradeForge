@@ -31,6 +31,11 @@ ROWS = {
     "strategies": (_t("bulk.strategies"),   True),
     "viz":        (_t("bulk.viz"),          False),
     "trades":     (_t("bulk.trades"),       False),
+    # ⚠ NEM „pénzt érint": az értesítés csak SZÓL. A jelzés-értesítés tömeges
+    # bekapcsolása viszont sok üzenetet jelent, ezért külön sorként látszik a
+    # megerősítő ablakban — ne mellékhatásként kapd meg.
+    "notify_trade":  (_t("bulk.notify_trade"),  False),
+    "notify_signal": (_t("bulk.notify_signal"), False),
     "mode":       (_t("bulk.mode"),         True),
     "market":     (_t("bulk.market"),       False),
     "market_viz": (_t("bulk.market_viz"),   False),
