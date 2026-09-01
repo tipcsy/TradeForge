@@ -244,6 +244,79 @@ check("a rövid üzenet egy darab", telegram._darabol("rövid") == ["rövid"])
 check("⚠ saját User-Agent (nem `Python-urllib`)",
       "TradeForge" in telegram._user_agent())
 
+# ── 8b. NAPI ZÁRÁS-ÖSSZEFOGLALÓ ──────────────────────────────────────────
+# ⚠ CSAK HA KÉRTED: üres `daily_summary_time` → nincs esti üzenet.
+_ido = [datetime(2026, 9, 1, 23, 1).timestamp()]
+_hivva = []
+n = notify.Notifier(notify.Config(enabled=True, token="T", chat_ids=("1",)),
+                    transport=lambda t: (_hivva.append(t) or True),
+                    ora=lambda: _ido[0], daily=lambda: "Ma: 3 nyitás")
+notify._cfg_json = {"pairs": {}}
+n._idozitett()
+check("⚠ időpont nélkül NINCS napi összefoglaló", not _hivva)
+
+_ido = [datetime(2026, 9, 1, 23, 1).timestamp()]
+_hivva = []
+n = notify.Notifier(notify.Config(enabled=True, token="T", chat_ids=("1",),
+                                  daily_time="23:00"),
+                    transport=lambda t: (_hivva.append(t) or True),
+                    ora=lambda: _ido[0], daily=lambda: "Ma: 3 nyitás")
+n._idozitett()
+check("a megadott időpontban KIMEGY", len(_hivva) == 1, str(_hivva)[:60])
+check("...a dátummal a fejlécében", "2026-09-01" in _hivva[0])
+check("...és a NAP TARTALMÁVAL", "3 nyitás" in _hivva[0])
+# ⚠ NAPONTA EGYSZER: a szál 30 mp-enként néz oda, az ablak öt perc — enélkül
+# tízszer menne ki ugyanaz.
+_ido[0] += 60
+n._utolso_ellenorzes = 0
+n._idozitett()
+check("⚠ ...de NAPONTA CSAK EGYSZER", len(_hivva) == 1, f"{len(_hivva)} üzenet")
+_ido[0] = datetime(2026, 9, 2, 23, 1).timestamp()
+n._utolso_ellenorzes = 0
+n._idozitett()
+check("...másnap viszont újra", len(_hivva) == 2)
+
+# ⚠ A CSENDES ÓRÁT TISZTELETBEN TARTJA: ha 23:00-ra állítod és a csend 22:00-kor
+# kezdődik, az összefoglaló REGGEL jön meg — a halasztott kötésekkel együtt.
+_ido = [datetime(2026, 9, 1, 23, 1).timestamp()]
+_hivva = []
+n = notify.Notifier(notify.Config(enabled=True, token="T", chat_ids=("1",),
+                                  daily_time="23:00", quiet_from="22:00",
+                                  quiet_to="07:00"),
+                    transport=lambda t: (_hivva.append(t) or True),
+                    ora=lambda: _ido[0], daily=lambda: "Ma: 3 nyitás")
+n._csend_volt = True
+n._idozitett()
+check("⚠ csendes órában NEM csörög az esti összefoglaló", not _hivva)
+check("...de FÉLRETESSZÜK", len(n._halasztott) == 1)
+_ido[0] = datetime(2026, 9, 2, 7, 30).timestamp()
+n._utolso_ellenorzes = 0
+n._idozitett()
+check("⚠ ...és reggel, a csend végén megjön", len(_hivva) == 1
+      and "3 nyitás" in _hivva[0], str(_hivva)[:60])
+
+# ⚠ A TARTALOM ELŐÁLLÍTÁSA NEM VIHETI EL A SZÁLAT.
+_ido = [datetime(2026, 9, 1, 23, 1).timestamp()]
+
+
+def _robban_daily():
+    raise RuntimeError("a mai sorok nem olvashatók")
+
+
+n = notify.Notifier(notify.Config(enabled=True, token="T", chat_ids=("1",),
+                                  daily_time="23:00"),
+                    transport=lambda t: True, ora=lambda: _ido[0],
+                    daily=_robban_daily)
+n._idozitett()
+check("⚠ hibás tartalom-előállítás sem dob", True)
+
+# A napi összefoglaló UGYANABBÓL a `cmd_today`-ből épül, mint a `/today`.
+_lt = (ROOT / "trading" / "live_trader.py").read_text(encoding="utf-8")
+check("⚠ az esti üzenet a KÖZÖS `cmd_today`-ből jön",
+      "cmd_today(_ctx" in _lt and "daily=_napi_szoveg" in _lt)
+check("⚠ ...és a Telegram-parancsok UGYANAZT a környezetet kapják",
+      _lt.count("_cc.live_context(") == 1 and "_tgc.setup(cfg, _ctx)" in _lt)
+
 # ── 9b. A CHAT_ID MEGTALÁLÁSA ────────────────────────────────────────────
 # ⚠ MIÉRT A BOT KERESI MEG. A bot ÚGYSEM tud írni annak, aki nem kezdeményezett
 # vele beszélgetést — ha tehát valaki írt már neki, a `chat_id`-ja a

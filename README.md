@@ -285,10 +285,17 @@ dokumentálja); alapból **ki van kapcsolva**.
 | jelzés (csak jelzés módban) | ha a **jelzés-értesítés** be van kapcsolva (alap: **KI** — abból sok van) |
 | a motor nem halad · MT5 elveszett · napi veszteséglimit · lejáró licenc | **mindig**, naponta legfeljebb egyszer |
 | indulás, ütemezett életjel | a `heartbeat_times` szerint (üres lista = nincs) |
+| **napi zárás-összefoglaló** | a `daily_summary_time` szerint (üres = nincs) |
 
 **Csendes órák** (`quiet_hours`, **helyi** idő szerint): a jelzések elvesznek —
 alvás közben úgysem lépnél be —, a kötések viszont reggel **összesítve**
 megjönnek. A kritikus hiba a csendet is átüti.
+
+A **napi zárás** ugyanazt tartalmazza, amit a `/today` parancs: nyitások,
+zárások, nettó eredmény, a **legjobb és a legrosszabb** kötés, hány jelzés volt
+kötés nélkül, és mi maradt nyitva. ⚠ Egy nettó szám elrejtené, hogy egyetlen
+nagy vesztes vitte-e el a napot, vagy sok apró. Ha az időpont a csendes órába
+esik, az összefoglaló reggel jön meg.
 
 ⚠ **Az értesítés sosem állítja meg a kereskedést.** Az események egy sorba
 kerülnek, és külön szál küldi őket; ha a Telegram elérhetetlen, a motor köre
@@ -940,10 +947,17 @@ The engine can tell you about trades, position events and trouble. The
 | signal (in signal-only mode) | if the **signal notification** is on (default: **OFF** — there are many) |
 | engine not advancing · MT5 lost · daily loss limit · licence expiring | **always**, at most once a day |
 | startup, scheduled heartbeat | per `heartbeat_times` (empty list = none) |
+| **daily close summary** | per `daily_summary_time` (empty = none) |
 
 **Quiet hours** (`quiet_hours`, in **local** time): signals are dropped — you
 would not enter while asleep — but trades arrive **summarised** in the morning.
 A critical error breaks through the quiet hours.
+
+The **daily close** contains exactly what `/today` shows: opens, closes, net
+result, the **best and worst** trade, how many signals produced no trade, and
+what is still open. ⚠ A single net number would hide whether one big loser took
+the day or many small ones. If the time falls inside quiet hours, the summary
+arrives in the morning.
 
 ⚠ **Notification never stops trading.** Events go into a queue and a separate
 thread sends them; if Telegram is unreachable, the engine cycle carries on.

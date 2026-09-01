@@ -3392,19 +3392,23 @@ def run(cfg: dict, slot_mgr: SlotManager):
     migrate_flat_layout(primary_name)
     # ⚠ AZ ÉRTESÍTŐ A MOTORTÓL FÜGGETLEN SZÁLON FUT, és ő kérdezi meg a
     # `health_report`-ot — így akkor is szól, ha ez a szál közben elhal.
+    # ⚠ EGY KÖRNYEZET MINDHÁROMNAK. A napi összefoglaló, a Telegram-parancsok és
+    # a konzolos parancssor UGYANAZT a `console_cmd.Context`-et használja: így az
+    # esti üzenet és a kézzel lekérdezett `/today` nem mondhat mást ugyanarról a
+    # napról.
     try:
-        from core import notify
-        notify.setup(cfg, health=lambda: health_report(cfg))
+        from core import console_cmd as _cc, notify, telegram_cmd as _tgc
+        _ctx = _cc.live_context(cfg, ROOT / "config.json")
+
+        def _napi_szoveg() -> str:
+            return chr(10).join(_cc.cmd_today(_ctx, []).lines)
+
+        notify.setup(cfg, health=lambda: health_report(cfg), daily=_napi_szoveg)
+        # A BEJÖVŐ oldal is itt indul, hogy a GRAFIKUS és a KONZOLOS futás
+        # egyformán megkapja.
+        _tgc.setup(cfg, _ctx)
     except Exception:
-        log.debug("értesítés: nem indult el", exc_info=True)
-    # ⚠ A BEJÖVŐ oldal is itt indul, hogy a GRAFIKUS és a KONZOLOS futás
-    # egyformán megkapja — a parancsok a közös `console_cmd` rétegen mennek,
-    # tehát a bot ugyanazt látja és ugyanazt teszi, mint a parancssor.
-    try:
-        from core import console_cmd as _cc, telegram_cmd as _tgc
-        _tgc.setup(cfg, _cc.live_context(cfg, ROOT / "config.json"))
-    except Exception:
-        log.debug("telegram-parancsok: nem indultak el", exc_info=True)
+        log.debug("értesítés/telegram: nem indult el", exc_info=True)
     risky_mode.load()                      # induló risky állapot
     last_risky_reload = time.time()
     risky_reload_sec  = cfg.get("trading", {}).get("risky_reload_sec", 3600)

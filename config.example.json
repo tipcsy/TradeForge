@@ -114,8 +114,9 @@
       "08:00",
       "20:00"
     ],
-    "daily_summary_time": "",
-    "licence_warn_days": 14
+    "daily_summary_time": "23:00",
+    "licence_warn_days": 14,
+    "_comment_notify_times": "`heartbeat_times`: eletjel-uzenetek idopontjai (ures lista = nincs). `daily_summary_time`: a napi zaras-osszefoglalo ideje, HELYI ido (ures = nincs). ⚠ Ha a csendes oraba esik, reggel jon meg -- a halasztott kotesekkel egyutt."
   },
   "gates": {
     "_comment": "BELÉPŐ-KAPUK és a HATÁSUK, per (instrumentum × stratégia). A hatás: 'block' (nincs belépő) | 'reduce' (belép, de FELEZETT mérettel) | 'none' (a kapu nem szól bele). Öröklés (a legszűkebb nyer): pairs.<SYM>.gates.<kapu>.<stratégia> → pairs.<SYM>.gates.<kapu>.default → gates.<kapu>.<stratégia> → gates.<kapu>.default → beépített. A v1.97.0 óta a MOTOR is eszerint dönt (él + backtest + portfólió-backtest); korábban minden bekapcsolt kapu kemény blokk volt, a 'reduce' pedig csak kijelzés.",

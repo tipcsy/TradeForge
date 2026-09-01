@@ -151,7 +151,8 @@ class Notifier:
     (csendes órák, dedup, összevonás, életjel) hálózat és várakozás nélkül
     lejátszható tesztben."""
 
-    def __init__(self, cfg: Config, transport=None, ora=None, health=None):
+    def __init__(self, cfg: Config, transport=None, ora=None, health=None,
+                 daily=None):
         self.cfg = cfg
         self.transport = transport
         self.ora = ora or time.time
@@ -160,6 +161,11 @@ class Notifier:
         # meg periodikusan. A `health()` `[(kulcs, szöveg), …]` listát ad: ami
         # benne van, az BAJ. A motort nem ismerjük, a hívó köti be.
         self.health = health
+        # ⚠ A NAPI ÖSSZEFOGLALÓ SZÖVEGÉT A HÍVÓ ADJA. Ez a modul nem ismeri a
+        # kereskedést; a tartalom ugyanabból a `console_cmd.cmd_today`-ből jön,
+        # amit a `/today` parancs is használ — így a 23:00-kor kapott üzenet és
+        # a kézzel lekérdezett nap nem mondhat mást.
+        self.daily = daily
         self._q: "queue.Queue" = queue.Queue(maxsize=500)
         self._szal = None
         self._leall = threading.Event()
@@ -283,6 +289,34 @@ class Notifier:
                 log.debug("értesítés: az állapot-figyelő hibára futott",
                           exc_info=True)
 
+        # ── NAPI ZÁRÁS-ÖSSZEFOGLALÓ ────────────────────────────────────────
+        # ⚠ CSAK HA KÉRTED: üres `daily_summary_time` → nincs üzenet.
+        _dp = _perc(self.cfg.daily_time)
+        if _dp is not None and callable(self.daily):
+            _jel = now.strftime("%Y-%m-%d")
+            _p_most = now.hour * 60 + now.minute
+            if _dp <= _p_most < _dp + 5 and self._utolso_daily != _jel:
+                self._utolso_daily = _jel
+                try:
+                    _szoveg = self.daily()
+                except Exception:
+                    log.warning("napi összefoglaló: a tartalom nem állt elő",
+                                exc_info=True)
+                    _szoveg = ""
+                if _szoveg:
+                    ev = Event(kind=DAILY,
+                               text=_t("notify.daily.head",
+                                       date=now.strftime("%Y-%m-%d"))
+                                    + chr(10) + _szoveg)
+                    # ⚠ A napi zárás a CSENDES ÓRÁT tiszteletben tartja: ha 23:00-ra
+                    # állítod és a csend 22:00-kor kezdődik, reggel jön meg — a
+                    # halasztott kötésekkel együtt.
+                    ok, _ = self.kimehet(ev, _cfg_json, now)
+                    if ok:
+                        self._kuld(ev)
+                    else:
+                        self._halasztott.append(ev.text)
+
         # ── Ütemezett életjel ──────────────────────────────────────────────
         # ⚠ EZ A VALÓDI HALÁL-ÉRZÉKELŐ: egy halott program a `/heart`-ra sem
         # válaszol, tehát a hallgatás és a „minden rendben" különben
@@ -338,7 +372,7 @@ _aktiv: "Notifier | None" = None
 _cfg_json: dict = {}
 
 
-def setup(cfg: dict, health=None) -> "Notifier | None":
+def setup(cfg: dict, health=None, daily=None) -> "Notifier | None":
     """Az értesítés bekapcsolása a `config.json` alapján. `None`, ha nincs
     beállítva — a hívó ilyenkor sem kap hibát, csak nem megy üzenet."""
     global _aktiv, _cfg_json
@@ -350,7 +384,7 @@ def setup(cfg: dict, health=None) -> "Notifier | None":
         return None
     from core import telegram
     _aktiv = Notifier(c, transport=lambda szoveg: telegram.send(
-        c.token, c.chat_ids, szoveg), health=health)
+        c.token, c.chat_ids, szoveg), health=health, daily=daily)
     _aktiv.start()
     log.info("értesítés: BEKAPCSOLVA (%d címzett)", len(c.chat_ids))
     return _aktiv

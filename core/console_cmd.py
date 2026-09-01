@@ -380,32 +380,47 @@ def cmd_state(ctx: Context, args: list, confirmed: bool = False) -> Result:
 
 
 def cmd_today(ctx: Context, args: list, confirmed: bool = False) -> Result:
-    """A MAI nap: kötések, eredmény — és hány jelzés maradt ki.
+    """A MAI nap: kötések, eredmény, a legjobb/legrosszabb — és hány jelzés volt.
 
     ⚠ A KIMARADT JELZÉS IS INFORMÁCIÓ. A chart-lelet (2026-08-31) épp arról
     szólt, hogy a jelzések többsége sosem lesz kötés; ha a napi kép csak a
-    kötéseket mutatná, ugyanaz a félreolvasás jönne vissza szövegben."""
+    kötéseket mutatná, ugyanaz a félreolvasás jönne vissza szövegben.
+
+    ⚠ ÉS EZ A NAPI ÖSSZEFOGLALÓ TARTALMA IS. A Telegram esti üzenete ugyanezt
+    a függvényt hívja: ha külön épülne, a 23:00-kor kapott üzenet és a `/today`
+    MÁST mondhatna ugyanarról a napról."""
     sorok = ctx.today_rows() or []
     _nyit = [r for r in sorok if str(r.get("event")) == "open"]
     _zar = [r for r in sorok if str(r.get("event")) == "close"]
     _jel = [r for r in sorok if str(r.get("event")) == "signal"]
     if not sorok:
         return Result([_t("console.today.none")])
-    _ossz = 0.0
-    for r in _zar:
+
+    def _pnl(r):
         try:
-            _ossz += float(r.get("pnl_usd") or 0)
+            return float(r.get("pnl_usd") or 0)
         except (TypeError, ValueError):
-            pass
+            return 0.0
+
+    _ossz = sum(_pnl(r) for r in _zar)
     ki = [_t("console.today.head", opened=len(_nyit), closed=len(_zar),
              pnl=f"{_ossz:+.2f}", signals=len(_jel))]
     for r in _zar:
-        try:
-            _p = f"{float(r.get('pnl_usd') or 0):+.2f}"
-        except (TypeError, ValueError):
-            _p = "?"
         ki.append(_t("console.today.row", symbol=r.get("symbol"),
-                     strategy=r.get("strategy"), pnl=_p))
+                     strategy=r.get("strategy"), pnl=f"{_pnl(r):+.2f}"))
+    # ⚠ A LEGJOBB ÉS A LEGROSSZABB KÜLÖN SOR. Egy napi nettó szám elrejti, hogy
+    # egyetlen nagy vesztes vitte-e el a napot, vagy sok apró — pedig a kettő
+    # egészen mást jelent.
+    if len(_zar) >= 2:
+        _j = max(_zar, key=_pnl)
+        _r = min(_zar, key=_pnl)
+        ki.append(_t("console.today.best", symbol=_j.get("symbol"),
+                     pnl=f"{_pnl(_j):+.2f}", worst_symbol=_r.get("symbol"),
+                     worst_pnl=f"{_pnl(_r):+.2f}"))
+    # Ami MÉG NYITVA van: a nap eredménye nem teljes kép, amíg fut valami.
+    _nyitva = len(position_rows(ctx))
+    if _nyitva:
+        ki.append(_t("console.today.open", n=_nyitva))
     return Result(ki)
 
 
