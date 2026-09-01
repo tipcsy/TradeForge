@@ -77,6 +77,7 @@ class Context:
     last_cycle_ts: Callable[[], float] = lambda: 0.0
     mt5_ok: Callable[[], bool] = lambda: True
     licence_status: Callable[[], dict] = dict
+    cycle_work: Callable[[], tuple] = lambda: (0.0, 0.0)
     cycle_sec: float = 10.0
 
 
@@ -173,6 +174,16 @@ def state_rows(ctx: Context) -> list:
         kor = max(0.0, time.time() - ts)
         out.append((_t("console.state.cycle"), f"{kor:.0f} mp",
                     kor <= 3 * ctx.cycle_sec))
+    # ⚠ A KÖR KORA ÉS A KÖR MUNKAIDEJE KÉT KÜLÖNBÖZŐ DOLOG. A kor a 10 mp-es
+    # várakozás miatt 0 és 10 között hullámzik — abból NEM derül ki, mennyit
+    # dolgozott a motor. Épp ez a szám kell, amikor a felület költségét mérjük
+    # (a kijelzés-út egyszer már GIL-fogást okozott: 7,64 → 0,31 mp/kör).
+    _atl, _max = ctx.cycle_work()
+    if _atl > 0:
+        out.append((_t("console.state.work"),
+                    _t("console.state.work_val", avg=f"{_atl:.2f}",
+                       max=f"{_max:.2f}"),
+                    _atl < ctx.cycle_sec))
     _mt5 = bool(ctx.mt5_ok())
     out.append((_t("console.state.mt5"),
                 _t("console.yes") if _mt5 else _t("console.no"), _mt5))
@@ -466,6 +477,7 @@ def live_context(cfg: dict, config_path) -> Context:
         strategies_of=lambda s: enabled_strategy_names(cfg, s) or [],
         engine_alive=lt.engine_alive,
         last_cycle_ts=lambda: lt.last_cycle_ts,
+        cycle_work=lt.cycle_work_stats,
         mt5_ok=lambda: bool(mt5_connector.is_connected()),
         licence_status=licence.status,
     )

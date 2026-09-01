@@ -94,7 +94,7 @@ def fejlec(ctx: cc.Context):
     return t
 
 
-def par_tabla(ctx: cc.Context):
+def par_tabla(ctx: cc.Context, max_sor: "int | None" = None, sorok=None):
     from rich.table import Table
     from rich.text import Text
 
@@ -107,7 +107,15 @@ def par_tabla(ctx: cc.Context):
     t.add_column(_t("console.tui.col.pnl"), justify="right", no_wrap=True, width=10)
     t.add_column(_t("console.tui.col.strategies"), ratio=1)
 
-    for r in cc.pair_rows(ctx):
+    _sorok = cc.pair_rows(ctx) if sorok is None else list(sorok)
+    # ⚠ AMI NEM FÉR KI, AZ NE TOLJA SZÉT A KÉPET. Egy a képernyőnél magasabb
+    # élő terület nem frissíthető helyben — a rich ilyenkor törli és újrarajzol,
+    # ami LÁTHATÓAN ugrál. Inkább levágjuk, és MEGMONDJUK, mennyi maradt ki.
+    _kimaradt = 0
+    if max_sor is not None and len(_sorok) > max_sor:
+        _kimaradt = len(_sorok) - max_sor + 1
+        _sorok = _sorok[:max_sor - 1]
+    for r in _sorok:
         # ⚠ A FUTÓ stratégia kiemelve, a többi halványan. A megkülönböztetés
         # ugyanaz, mint a szöveges nézet `*`-a: engedélyezett ÉS szándék=live.
         strat = Text()
@@ -120,14 +128,22 @@ def par_tabla(ctx: cc.Context):
         t.add_row(r["symbol"],
                   Text(str(r["state"]), style=_szin_allapot(r["state"])),
                   _pnl_szoveg(r["pnl"]), strat)
+    if _kimaradt:
+        t.add_row(Text(_t("console.tui.more", n=_kimaradt), style="dim"),
+                  "", "", "")
     return t
 
 
-def pozicio_tabla(ctx: cc.Context):
+def pozicio_tabla(ctx: cc.Context, max_sor: "int | None" = None, sorok=None):
     from rich.table import Table
     from rich.text import Text
 
-    poz = cc.position_rows(ctx)
+    _mind = cc.position_rows(ctx) if sorok is None else list(sorok)
+    poz = _mind
+    _kimaradt = 0
+    if max_sor is not None and len(poz) > max_sor:
+        _kimaradt = len(poz) - max_sor + 1
+        poz = poz[:max_sor - 1]
     if not poz:
         # ⚠ NEM üres táblát rajzolunk: egy fejlécekkel teli, sor nélküli tábla
         # úgy néz ki, mintha a lekérdezés nem sikerült volna. És a „nincs
@@ -139,7 +155,7 @@ def pozicio_tabla(ctx: cc.Context):
             Text("  " + _t("console.pos.none"), style="dim"),
         )
     t = Table(expand=True, pad_edge=False, header_style="bold",
-              title=_t("console.tui.positions", n=len(poz)),
+              title=_t("console.tui.positions", n=len(_mind)),
               title_justify="left", title_style="bold")
     for cim, jobbra, sz in ((_t("console.tui.col.ticket"), False, 10),
                             (_t("console.tui.col.symbol"), False, 13),
@@ -160,23 +176,62 @@ def pozicio_tabla(ctx: cc.Context):
                   f"{float(p.get('sl') or 0):g}" if p.get("sl") else "-",
                   f"{float(p.get('tp') or 0):g}" if p.get("tp") else "-",
                   _pnl_szoveg(p.get("profit")))
+    if _kimaradt:
+        t.add_row(Text(_t("console.tui.more", n=_kimaradt), style="dim"),
+                  *[""] * 7)
     return t
 
 
-def kep(ctx: cc.Context):
+# A kép ÁLLANDÓ része sorokban: fejléc (2) + a pár-tábla kerete és fejléce (4)
+# + pozíció-cím (1) + a pozíció-tábla kerete és fejléce (4) + tipp-sor (1) +
+# egy sor tartalék. Ebből jön ki, hány ADATSOR fér ki.
+#
+# ⚠ A fejléc körül KORÁBBAN keret volt, a két tábla között üres sor: együtt
+# három sor, ami 24 soros terminálon három instrumentummal kevesebbet
+# jelentett. Egy teli képernyőn a tartalom többet ér a díszítésnél.
+KERET_SOR = 13
+
+
+def _sor_keret(magassag: int, n_par: int, n_poz: int) -> tuple:
+    """Hány pár- és hány pozíció-sor fér ki `magassag` sorba? `(pár, pozíció)`.
+
+    ⚠ A POZÍCIÓ AZ ELSŐBB: abból általában kevés van, és az a fontosabb — valódi
+    pénz van benne. A pár-listát vágjuk, mert ott a lényeg úgyis a néhány aktív
+    sor, és a `pairs` paranccsal bármikor kilistázható az egész."""
+    hely = max(4, int(magassag) - KERET_SOR)
+    poz = min(n_poz, max(2, hely // 2))
+    par = max(3, hely - poz)
+    return par, poz
+
+
+def kep(ctx: cc.Context, magassag: "int | None" = None):
     """A TELJES képernyő egyetlen renderelhető objektumként.
+
+    `magassag`: a terminál sorainak száma. ⚠ NEM DÍSZ. Ha a kép MAGASABB a
+    képernyőnél, a rich nem tudja helyben frissíteni az élő területet, hanem
+    törli és újrarajzolja az egészet — ezt látja a felhasználó „ugrálásként"
+    (15 instrumentumnál jelentkezett). A magasság ismeretében levágjuk, ami nem
+    fér ki, és MEGMONDJUK, mennyi maradt le.
 
     ⚠ Szándékosan TISZTA FÜGGVÉNY (csak a `ctx`-ből dolgozik): így a teszt egy
     sztringbe rajzolja, és ellenőrizni tudja, MI látszik — a `Live`-hurok nélkül."""
     from rich.console import Group
-    from rich.panel import Panel
     from rich.text import Text
 
+    # ⚠ EGYSZER kérdezzük le, és úgy adjuk tovább. A sor-keret számításához és
+    # a rajzoláshoz is kell a lista; külön lekérdezve a POZÍCIÓK kétszer jönnének
+    # le az MT5-ből minden képnél (és az `open_positions_detailed` pozíciónként
+    # egy `symbol_info`-t is kér). A kijelzés-út terhelése ebben a projektben már
+    # okozott GIL-fogást — ne termeljünk feleslegeset.
+    _parok = cc.pair_rows(ctx)
+    _pozok = cc.position_rows(ctx)
+    _par = _poz = None
+    if magassag:
+        _par, _poz = _sor_keret(magassag, len(_parok), len(_pozok))
     return Group(
-        Panel(fejlec(ctx), padding=(0, 1)),
-        par_tabla(ctx),
-        Text(),
-        pozicio_tabla(ctx),
+        fejlec(ctx),
+        par_tabla(ctx, _par, _parok),
+        pozicio_tabla(ctx, _poz, _pozok),
         Text(_t("console.tui.hint"), style="dim"),
     )
 
@@ -197,18 +252,34 @@ def fut(ctx: cc.Context, megall=None) -> None:
         msvcrt = None
 
     while not (megall and megall()):
-        with Live(kep(ctx), console=con, refresh_per_second=4,
-                  screen=False, transient=False) as live:
+        # ⚠ `screen=True` — KÜLÖN képernyő-puffer (mint a `less` vagy a `top`).
+        # Enélkül a rich a görgethető kimenetbe rajzol, és egy a terminálnál
+        # MAGASABB kép frissítésekor törölni + újrarajzolni kényszerül: pontosan
+        # ez az „ugrálás", amit 15 instrumentumnál látni lehetett. Kilépéskor a
+        # képernyő visszaáll, tehát a parancsok kimenete a megszokott,
+        # görgethető területre megy.
+        #
+        # ⚠ `auto_refresh=False` — MI mondjuk meg, mikor rajzoljon. A 4/mp-es
+        # automatikus frissítés VÁLTOZATLAN tartalmat is újrarajzolt, tehát
+        # nyolcszor annyit dolgozott, mint amennyi látszott belőle.
+        with Live(kep(ctx, con.size.height), console=con, screen=True,
+                  auto_refresh=False, transient=False) as live:
+            _ch = None
+            _utolso = 0.0
             while not (megall and megall()):
-                time.sleep(FRISSITES_MP)
-                live.update(kep(ctx))
+                if time.monotonic() - _utolso >= FRISSITES_MP:
+                    live.update(kep(ctx, con.size.height), refresh=True)
+                    _utolso = time.monotonic()
                 if msvcrt is not None and msvcrt.kbhit():
                     # ⚠ Az első leütött karaktert MI olvassuk ki, különben a
                     # `input()` elé kerülne, és a felhasználó azt hinné, hogy
                     # elveszett. Ezért a promptba visszaírjuk.
                     _ch = msvcrt.getwch()
                     break
-                _ch = None
+                # ⚠ SŰRŰN figyelünk billentyűre, RITKÁN rajzolunk. Korábban a
+                # kettő egy ütemen ment (2 mp), tehát a leütésre akár két
+                # másodpercet is várni kellett — az elakadásnak látszott.
+                time.sleep(0.05)
             else:
                 return
         if _ch in ("\r", "\n"):

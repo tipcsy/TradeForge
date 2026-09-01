@@ -18,6 +18,7 @@ import logging
 import sys
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -276,6 +277,22 @@ _run_slot_mgr = None
 # processz él. A konzol `state` parancsa és (a következő körben) a Telegram
 # `/heart` ebből válaszol.
 last_cycle_ts: float = 0.0
+
+# ⚠ ÉS A MUNKA-IDŐ KÜLÖN. A kör KORA (`last_cycle_ts`) a 10 mp-es várakozás
+# miatt 0 és 10 között hullámzik — abból NEM derül ki, mennyi ideig DOLGOZOTT a
+# motor. Márpedig épp ez a kérdés, amikor a felület költségét mérjük: a
+# kijelzés-út egyszer már GIL-fogást okozott (7,64 → 0,31 mp/kör). A munka-időt
+# ezért külön mérjük, a legutóbbi körökre — egy sorozatból látszik, ha valami
+# tartósan lassít, egyetlen mintából nem.
+_CYCLE_MINTA = 30
+_cycle_times: "deque" = deque(maxlen=_CYCLE_MINTA)
+
+
+def cycle_work_stats() -> tuple:
+    """`(átlag, max)` a legutóbbi körök MUNKA-idejéből, mp-ben. Üresen `(0, 0)`."""
+    if not _cycle_times:
+        return 0.0, 0.0
+    return sum(_cycle_times) / len(_cycle_times), max(_cycle_times)
 
 # ⚠ MIÉRT KELL A LEÁLLÍTÁS-KÉRÉS. A grafikus felület bezárásakor a processz
 # egyben megszűnik; a konzolos módban viszont a `quit` után a motornak
@@ -3691,6 +3708,10 @@ def run(cfg: dict, slot_mgr: SlotManager):
             # frissítjük (egy atomi referencia-csere). Így a mély adatablakok
             # betöltése nem tolja ki a kör idejét a 10 mp fölé.
             _publish_viz_jobs(all_pairs, strats_by_symbol, pair_states)
+
+            # A kör MUNKA-ideje (a várakozás nélkül) — ebből mérhető, mennyibe
+            # kerül a felület, és látszik, ha a motor nem bírja a 10 mp-es ütemet.
+            _cycle_times.append(time.time() - last_cycle_ts)
 
             # ⚠ `wait` és nem `sleep`: a leállítás-kérés azonnal felébreszti, de
             # csak KÖRHATÁRON — a folyamatban lévő pozíció-kezelés lefut.

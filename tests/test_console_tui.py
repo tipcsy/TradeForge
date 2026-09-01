@@ -88,12 +88,31 @@ def ctx_epit(poz=POZ, kor=3.0, mt5=True, szamla=True):
     )
 
 
-def rajzol(ctx, width=110) -> str:
+def rajzol(ctx, width=110, height=None) -> str:
     """A kép SZÖVEGKÉNT — így ellenőrizhető, mi látszik."""
     buf = io.StringIO()
-    Console(file=buf, width=width, force_terminal=False,
-            no_color=True).print(tui.kep(ctx))
+    Console(file=buf, width=width, height=height or 60, force_terminal=False,
+            no_color=True).print(tui.kep(ctx, height))
     return buf.getvalue()
+
+
+def sok_par_ctx(n=15, n_poz=3):
+    nev = [f"SYM{i:02d}" for i in range(n)]
+    cfg = {"pairs": {x: {"strategies": ["wpr_sma"],
+                         "run_state": {"wpr_sma": "live"}} for x in nev},
+           "strategy": {"name": "wpr_sma"}}
+    poz = [{"ticket": 100 + i, "symbol": nev[i], "type": "BUY", "volume": 0.1,
+            "price_open": 100.0, "sl": 95.0, "tp": 110.0, "profit": 1.0}
+           for i in range(min(n_poz, n))]
+    return cc.Context(
+        cfg=cfg, save_config=lambda: True, positions=lambda: poz,
+        close_position=lambda t: True,
+        account=lambda: {"balance": 981.0, "currency": "EUR", "daily_pnl": -1.0},
+        dashboard={x: _DS(1.0) for x in nev},
+        instrument_state={x: "LIVE" for x in nev},
+        strategies_of=lambda s: ["wpr_sma"],
+        last_cycle_ts=lambda: time.time() - 3,
+        licence_status=lambda: {"allapot": "ok", "lejar_nap": 358})
 
 
 ctx = ctx_epit()
@@ -170,6 +189,70 @@ check("80 oszlopon is olvasható marad",
       "Ger40" in _szuk and "981.23" in _szuk
       and max(len(l) for l in _szuk.splitlines()) <= 80,
       f"leghosszabb sor: {max(len(l) for l in _szuk.splitlines())}")
+
+# ── 4b. A KÉP NEM LÓGHAT TÚL A KÉPERNYŐN ──────────────────────────────────
+# ⚠ EZ A LEGFONTOSABB MÉRETSZABÁLY, és élesben derült ki. 15 instrumentumnál a
+# kép magasabb lett a terminálnál; egy a képernyőnél magasabb élő területet a
+# rich nem tud helyben frissíteni, ezért TÖRLI és ÚJRARAJZOLJA az egészet — a
+# felhasználó ezt „ugrálásként" látta. A javítás: a magasság ismeretében
+# levágjuk, ami nem fér ki.
+for _n, _h in ((15, 24), (15, 30), (40, 24), (3, 24), (40, 60)):
+    _sorok = rajzol(sok_par_ctx(_n), width=100,
+                    height=_h).rstrip(chr(10)).split(chr(10))
+    check(f"⚠ {_n} pár / {_h} soros terminál: a kép BELEFÉR",
+          len(_sorok) <= _h, f"{len(_sorok)} sor")
+
+# ...és ami lemaradt, arról SZÓL — nem csendben tűnik el.
+_vagott = rajzol(sok_par_ctx(40), width=100, height=24)
+check("⚠ a levágott instrumentumok száma KI VAN ÍRVA",
+      "még" in _vagott or "more" in _vagott, "")
+
+# ⚠ A POZÍCIÓ AZ ELSŐBB: abban valódi pénz van, a pár-lista a `pairs`
+# paranccsal bármikor teljesen kilistázható.
+_szuk_h = rajzol(sok_par_ctx(40, n_poz=3), width=100, height=24)
+check("⚠ szűk képernyőn is MINDEN nyitott pozíció látszik",
+      all(f"10{i}" in _szuk_h for i in range(3)))
+
+# Magasság nélkül (pl. napló, teszt) a régi viselkedés: nincs vágás.
+check("magasság nélkül nincs vágás",
+      all(f"SYM{i:02d}" in rajzol(sok_par_ctx(15), width=100) for i in range(15)))
+
+# ── 4c. A HUROK: miért nem ugrál ──────────────────────────────────────────
+# ⚠ A `fut()` egy valódi terminált vezérel — azt teszttel nem lehet hűen
+# utánozni. Amit viszont ELLENŐRIZHETÜNK: a három beállítás, ami a villogást és
+# az akadozást megszünteti, tényleg ott van.
+_tui_src = (ROOT / "core" / "console_tui.py").read_text(encoding="utf-8")
+check("⚠ KÜLÖN képernyő-puffer (`screen=True`) — nem a görgethető kimenetbe rajzol",
+      "screen=True" in _tui_src)
+check("⚠ a frissítés KÉZI (`auto_refresh=False`) — változatlan tartalmat nem rajzol újra",
+      "auto_refresh=False" in _tui_src)
+check("⚠ a kép a terminál MAGASSÁGÁVAL rajzolódik",
+      "kep(ctx, con.size.height)" in _tui_src)
+# ⚠ A billentyű-figyelés SŰRŰBB, mint a rajzolás: korábban egy ütemen mentek,
+# és a leütésre akár 2 másodpercet kellett várni — ami elakadásnak látszott.
+import re as _re
+_poll = _re.search(r"time\.sleep\(([\d.]+)\)", _tui_src)
+check("⚠ a billentyűre sűrűbben figyel, mint ahogy rajzol",
+      _poll and float(_poll.group(1)) < tui.FRISSITES_MP,
+      f"{_poll.group(1) if _poll else '?'} mp vs {tui.FRISSITES_MP} mp")
+
+# ⚠ EGY KÉPHEZ EGY LEKÉRDEZÉS. A pozíció-lista az MT5-ből jön (és pozíciónként
+# egy `symbol_info`-t is kér); ha a sor-keret számítása és a rajzolás külön
+# kérdezné le, minden kép KÉTSZER terhelné a terminált. A kijelzés-út ebben a
+# projektben már okozott GIL-fogást (7,64 → 0,31 mp/kör).
+_hivas = {"par": 0, "poz": 0}
+_c = sok_par_ctx(15)
+_eredeti_poz = _c.positions
+_c.positions = lambda: (_hivas.__setitem__("poz", _hivas["poz"] + 1)
+                        or _eredeti_poz())
+_eredeti_str = _c.strategies_of
+_c.strategies_of = lambda s: (_hivas.__setitem__("par", _hivas["par"] + 1)
+                              or _eredeti_str(s))
+rajzol(_c, width=100, height=30)
+check("⚠ egy képhez EGYSZER kérdezzük le a pozíciókat", _hivas["poz"] == 1,
+      f"{_hivas['poz']} lekérdezés")
+check("⚠ ...és a pár-listát is (nem instrumentumonként kétszer)",
+      _hivas["par"] == 15, f"{_hivas['par']} hívás 15 párra")
 
 # ── 5. A katalógus ────────────────────────────────────────────────────────
 import json

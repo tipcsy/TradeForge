@@ -284,6 +284,26 @@ check("⚠ elavult kör → NEM halad (a szál élhet, mégsem dolgozik)",
       not lt.engine_alive())
 lt.last_cycle_ts = 0.0
 
+# ⚠ A KÖR MUNKAIDEJE külön mérőszám: a kör KORA a 10 mp-es várakozás miatt
+# 0 és 10 között hullámzik, tehát abból nem derül ki, mennyit DOLGOZOTT a motor.
+# Márpedig épp ez a szám kell a felület költségének méréséhez (a kijelzés-út
+# egyszer már GIL-fogást okozott: 7,64 → 0,31 mp/kör).
+lt._cycle_times.clear()
+check("kör nélkül nincs munkaidő-adat", lt.cycle_work_stats() == (0.0, 0.0))
+lt._cycle_times.extend([0.20, 0.40, 1.20])
+_atl, _mx = lt.cycle_work_stats()
+check("⚠ a munkaidő ÁTLAGA és MAXIMUMA is látszik (egy minta félrevezetne)",
+      abs(_atl - 0.6) < 1e-9 and _mx == 1.20, f"{_atl:.2f} / {_mx:.2f}")
+_c2 = ctx_epit()[2]
+_c2.cycle_work = lambda: (0.31, 1.2)
+check("...és a `state` ki is írja",
+      any("0.31" in x for x in cc.dispatch(_c2, "state").lines))
+# ⚠ Ha a munka TÖBB, mint a kör üteme, a motor nem bírja — ezt meg kell jelölni.
+_c2.cycle_work = lambda: (14.0, 20.0)
+check("⚠ a ciklusidőt MEGHALADÓ munka meg van jelölve",
+      any("⚠" in x for x in cc.dispatch(_c2, "state").lines))
+lt._cycle_times.clear()
+
 check("a leállítás-kérés jelezhető és lekérdezhető",
       not lt.stop_requested())
 lt.request_stop()

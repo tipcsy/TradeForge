@@ -274,9 +274,10 @@ Két dolgot érdemes tudni:
   felületen, és másold a `data/licence_token.json`-t a másik gépre.
 
 **Két nézet, egy parancskészlet.** A `--tui` egy magától frissülő táblázatot ad
-(instrumentumok, futó stratégiák, nyitott pozíciók, a motor életjele);
-billentyűleütésre a kép megáll, és ugyanazok a parancsok mennek, mint a
-parancssoros módban. A `rich` **nem kötelező**: nélküle a parancssor
+(instrumentumok, futó stratégiák, nyitott pozíciók, a motor életjele) a
+terminál saját képernyő-pufferében; billentyűleütésre a kép megáll, és
+ugyanazok a parancsok mennek, mint a parancssoros módban. Ami nem fér ki a
+képernyőre, azt levágja — és kiírja, mennyi maradt le. A `rich` **nem kötelező**: nélküle a parancssor
 változatlanul működik, a program pedig megmondja, mit kell telepíteni.
 Mérve: a táblázatos nézet +6,6 MB memória (a tkinter-felület importjainak a
 negyede).
@@ -849,8 +850,10 @@ Two things worth knowing:
   and copy `data/licence_token.json` to the other machine.
 
 **Two views, one command set.** `--tui` gives a self-refreshing table
-(instruments, running strategies, open positions, the engine's heartbeat); any
-key pauses the view and the same commands work as in the plain prompt. `rich`
+(instruments, running strategies, open positions, the engine's heartbeat) in the
+terminal's own screen buffer; any key pauses the view and the same commands work
+as in the plain prompt. Anything that does not fit on screen is trimmed — and it
+tells you how much was left out. `rich`
 is **not required**: without it the prompt works unchanged and the program tells
 you what to install. Measured: the table view costs +6.6 MB of memory (a quarter
 of what the tkinter UI's imports cost).

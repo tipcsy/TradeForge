@@ -113,7 +113,12 @@ try:
     # azt mókoljuk ki — itt nem az aláírást teszteljük, hanem az ÁLLAPOTOT.
     _eredeti_verify = licence.verify
     licence.verify = lambda *a, **k: True
-    _issued = int(time.time()) - 20 * 3600          # 20 órája kelt
+    # ⚠ NEM PONTOSAN 20 óra: a `status()` ÓRÁRA KEREKÍT LEFELÉ, tehát egy pontos
+    # órahatáron a két `time.time()` hívás közti EGY másodperc is átbillenti az
+    # eredményt (52 → 51). Ez a teszt 2026-08-31-én pontosan így bukott el, egy
+    # olyan futásban, ahol semmi nem változott körülötte. Egy perccel a határ
+    # BELSŐ oldalára tesszük: az eredmény ugyanaz, de nem múlik másodperceken.
+    _issued = int(time.time()) - 20 * 3600 + 60     # ~20 órája kelt
     licence._write_json(licence.CACHE_PATH, {
         "payload": {"ok": True, "account_number": "123", "issued_at": _issued,
                     "grace_seconds": 72 * 3600,
