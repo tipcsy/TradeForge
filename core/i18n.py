@@ -128,6 +128,31 @@ def set_language(code: str) -> None:
     _active = code if code in LANGUAGES else BASE_LANG
 
 
+def text_in(code: str, key: str, /, **kw) -> str:
+    """A `key` szövege EGY MEGADOTT nyelven — az aktív nyelv érintése nélkül.
+
+    ⚠ MIÉRT KELL, ÉS MIÉRT NEM `set_language` + `t` + vissza. A nyelv GLOBÁLIS
+    állapot: ha egy háttérszál átbillentené egy pillanatra (pl. a Telegram
+    parancs-menüjének mindkét nyelvű kiadásához), egy épp rajzolódó felirat
+    MÁS nyelven jelenne meg — és utólag megmagyarázhatatlan lenne. Ez a
+    függvény csak OLVAS.
+
+    Visszaesés: a kért nyelv → magyar → maga a kulcs (mint a `t`)."""
+    code = str(code or "").strip().lower()
+    s = _load(code).get(key) if code in LANGUAGES else None
+    if s is None:
+        s = _load(BASE_LANG).get(key)
+    if s is None:
+        return key
+    if not kw:
+        return s
+    try:
+        return s.format(**kw)
+    except Exception:
+        log.error("i18n: helykitöltő-hiba (%s / %s)", code, key)
+        return s
+
+
 def t(key: str, /, **kw) -> str:
     """A `key` szövege az aktív nyelven, `{név}` helykitöltőkkel.
 

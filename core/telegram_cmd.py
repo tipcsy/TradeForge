@@ -52,6 +52,51 @@ AJANLAT_MP = 600
 POLL_MP = 25
 
 
+# A parancs-menü sorrendje. ⚠ NEM ábécé: a leggyakrabban használt kerül előre,
+# és a két ÁLLÍTÓ parancs (`play`/`stop`) a végére — hogy ne azokra essen a
+# mutatóujj, amikor csak megnézni akarsz valamit.
+MENU_SORREND = ("state", "pos", "today", "balance", "heart", "help",
+                "play", "stop")
+
+
+def parancs_lista(nyelv: str = "") -> list:
+    """A parancs-menü `[(nev, leiras), …]` az adott nyelven.
+
+    ⚠ A LEÍRÁS A KATALÓGUSBÓL JÖN, ugyanabból a kulcsból, amit a `/help` is
+    használ — így a menü és a súgó nem tud kettéválni. És CSAK az engedélyezett
+    parancsok kerülnek bele: ami távolról nem hívható, azt ne is kínáljuk fel."""
+    from core import i18n
+    sorrend = [n for n in MENU_SORREND if n in ENGEDETT]
+    sorrend += [n for n in ENGEDETT if n not in sorrend]
+    def _szoveg(kulcs, **kw):
+        # ⚠ Nyelv megadása nélkül az AKTÍV nyelv (ez az alapértelmezett menü);
+        # megadva pedig CSAK OLVASUNK — a globális nyelvet egy háttérszál nem
+        # billentheti át, mert egy épp rajzolódó felirat más nyelvű lenne.
+        return (i18n.text_in(nyelv, kulcs, **kw) if nyelv
+                else _t(kulcs, **kw))
+
+    ki = []
+    for nev in sorrend:
+        leiras = _szoveg(f"console.help.{nev}")
+        # A paraméteres parancsoknál a menüben is látszódjon, mit vár.
+        if nev in ("play", "stop"):
+            leiras = _szoveg("tg.menu.arg_pair", leiras=leiras)
+        ki.append((nev, leiras))
+    return ki
+
+
+def publish_commands(token: str) -> bool:
+    """A menü kiküldése a Telegramnak — alapértelmezett + nyelvenként.
+
+    ⚠ MINDEN INDULÁSKOR lefut, hogy a menü SOSE avuljon el a kódhoz képest.
+    Egy sikertelen hívás nem baj (a bot enélkül is működik), csak naplózunk."""
+    from core import i18n, telegram
+    ok = telegram.set_commands(token, parancs_lista())        # alapértelmezett
+    for kod in i18n.LANGUAGES:
+        telegram.set_commands(token, parancs_lista(kod), language_code=kod)
+    return ok
+
+
 @dataclass
 class Kimenet:
     """Egy kimenő lépés. ⚠ A hurok ezeket ÁLLÍTJA ELŐ, és külön küldi el — így a
@@ -174,6 +219,12 @@ class Bot:
 
     def _hurok(self) -> None:
         from core import telegram
+        # ⚠ A MENÜ FRISSÍTÉSE A SZÁLON belül, nem az induláskor: egy lassú vagy
+        # elérhetetlen Telegram így nem késlelteti a motor indulását.
+        try:
+            publish_commands(self.token)
+        except Exception:
+            log.debug("telegram: a parancs-menü nem frissült", exc_info=True)
         _hiba = 0
         while not self._leall.is_set():
             try:

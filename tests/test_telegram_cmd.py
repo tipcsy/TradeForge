@@ -221,6 +221,54 @@ check("⚠ hosszú lekérdezést használ (nem percenként hatvanszor kérdez)",
 check("token/címzett nélkül a bot nem indul",
       tgc.setup({}, ctx_epit()[1]) is None)
 
+# ── 6b. A PARANCS-MENÜ nem tud elavulni ──────────────────────────────────
+# ⚠ MIÉRT API-BÓL, ÉS NEM KÉZZEL A @BotFather-BEN. A menüt egyszer beírni
+# könnyű — szinkronban tartani nem. Ha a kódban új parancs születik vagy egy
+# leírás változik, a kézzel beállított menü NÉMÁN elavul: olyat kínálna fel,
+# ami nincs, vagy nem kínálná fel, ami van.
+_menu = tgc.parancs_lista()
+check("⚠ a menü PONTOSAN az engedélyezett parancsokat tartalmazza",
+      {n for n, _d in _menu} == set(tgc.ENGEDETT),
+      str({n for n, _d in _menu} ^ set(tgc.ENGEDETT)))
+check("minden menüpontnak van leírása",
+      all(d and not d.startswith("console.help") for _n, d in _menu),
+      str([n for n, d in _menu if d.startswith("console.help")]))
+# ⚠ A leírás UGYANABBÓL a kulcsból jön, mint a `/help` — a menü és a súgó nem
+# válhat ketté.
+_help = b.feldolgoz(uzenet("/help"))[0].text
+check("⚠ a menü leírásai a `/help`-ből valók",
+      all(d.split("— ")[-1] in _help for _n, d in _menu),
+      str([n for n, d in _menu if d.split("— ")[-1] not in _help]))
+# A Telegram korlátai: a név 1-32 kisbetű/szám/aláhúzás, a leírás max 256.
+import re as _re
+check("⚠ a nevek megfelelnek a Telegram szabályának",
+      all(_re.fullmatch(r"[a-z0-9_]{1,32}", n) for n, _d in _menu))
+check("⚠ ...és a leírások beleférnek a 256 karakterbe",
+      all(len(d) <= 256 for _n, d in _menu))
+# A paraméteres parancsoknál látszik, mit vár.
+check("a `play`/`stop` menüpont mutatja a paramétert",
+      all("<" in d for n, d in _menu if n in ("play", "stop")))
+
+# ⚠ NYELVENKÉNT KÜLÖN, ÉS AZ AKTÍV NYELV ÉRINTÉSE NÉLKÜL. Ha a menü kiadásához
+# egy háttérszál átbillentené a globális nyelvet, egy épp rajzolódó felirat MÁS
+# nyelven jelenne meg — utólag megmagyarázhatatlanul.
+from core import i18n as _i18n
+_elotte = _i18n.language()
+_en_menu = dict(tgc.parancs_lista("en"))
+_hu_menu = dict(tgc.parancs_lista("hu"))
+check("⚠ a menü kiadása NEM billenti át az aktív nyelvet",
+      _i18n.language() == _elotte, f"{_elotte} -> {_i18n.language()}")
+check("az angol menü tényleg angol",
+      "open positions" in _en_menu["pos"] and "<pair>" in _en_menu["play"],
+      _en_menu["play"])
+check("...a magyar meg magyar",
+      "pozíciók" in _hu_menu["pos"] and "<pár>" in _hu_menu["play"])
+
+# A menü a bot INDULÁSAKOR frissül — nem kézzel kell karbantartani.
+import inspect as _insp
+check("⚠ a menü minden induláskor kimegy",
+      "publish_commands" in _insp.getsource(tgc.Bot._hurok))
+
 # ── 7. Katalógus ─────────────────────────────────────────────────────────
 import json
 _hu = json.loads((ROOT / "lang" / "hu.json").read_text(encoding="utf-8"))

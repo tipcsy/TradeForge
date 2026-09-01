@@ -309,6 +309,11 @@ zavartalanul megy tovább.
 | `/heart` | életjel — minden rendben van-e |
 | `/play <pár>` · `/stop <pár>` | stratégia indítása/leállítása |
 
+A **parancs-menüt** a program állítja be minden induláskor (`setMyCommands`),
+a kódban lévő listából és a `/help` leírásaiból — a @BotFather-ben nem kell
+kézzel karbantartani, és így nem is tud elavulni. Magyar és angol Telegram-
+felülethez külön menü megy ki.
+
 ⚠ A bot **kizárólag** a configban felsorolt `chat_ids`-tól fogad parancsot;
 minden más üzenetre **némán** hallgat. A `/stop` nyitott pozíciónál
 **gombbal kérdez rá** (a gomb 10 perc után lejár), és a megerősítésig semmi nem
@@ -937,6 +942,11 @@ thread sends them; if Telegram is unreachable, the engine cycle carries on.
 | `/state` | which strategies run on which pair + engine status |
 | `/heart` | heartbeat — is everything OK |
 | `/play <pair>` · `/stop <pair>` | start/stop a strategy |
+
+The **command menu** is published by the program on every start
+(`setMyCommands`), built from the command list in the code and the `/help`
+descriptions — no manual upkeep in @BotFather, and it cannot go stale. Separate
+menus are published for Hungarian and English Telegram interfaces.
 
 ⚠ The bot accepts commands **only** from the `chat_ids` listed in the config;
 every other message is met with **silence**. With an open position `/stop` asks

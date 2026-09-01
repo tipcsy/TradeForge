@@ -202,6 +202,29 @@ def discover_chats(token: str) -> list:
     return ki
 
 
+def set_commands(token: str, parancsok, language_code: str = "") -> bool:
+    """A bot PARANCS-MENÜJE (`setMyCommands`). `parancsok`: `[(nev, leiras), …]`.
+
+    ⚠ MIÉRT API-BÓL, ÉS NEM KÉZZEL A @BotFather-BEN. A menüt egyszer beírni
+    könnyű — szinkronban tartani nem. Ha a kódban új parancs születik vagy egy
+    leírás változik, a kézzel beállított menü NÉMÁN elavul, és a felhasználó
+    olyat kínál fel, ami nincs (vagy nem kínálja fel, ami van). Innen minden
+    induláskor a KÓDBÓL frissül.
+
+    `language_code`: üres → az alapértelmezett menü; `"hu"`/`"en"` → az adott
+    Telegram-nyelvű felhasználóknak."""
+    body = {"commands": [{"command": str(n)[:32].lower(),
+                          "description": str(d)[:256]} for n, d in parancsok]}
+    if language_code:
+        body["language_code"] = str(language_code)
+    ok, res = _hivas(token, "setMyCommands", body)
+    if ok and isinstance(res, dict) and res.get("ok"):
+        return True
+    log.warning("telegram: a parancs-menü nem állt be (%s): %s",
+                language_code or "alap", res)
+    return False
+
+
 def me(token: str) -> tuple:
     """`(sikerult, bot_neve_vagy_hiba)` — a token ELLENŐRZÉSE.
 

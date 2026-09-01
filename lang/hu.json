@@ -1084,6 +1084,7 @@
   "tg.btn.yes": "Igen",
   "tg.cancelled": "Rendben, nem csinálom.",
   "tg.expired": "Ez az ajánlat lejárt — add ki újra a parancsot.",
+  "tg.menu.arg_pair": "<pár> — {leiras}",
   "tg.unknown": "Ismeretlen parancs: {name}. A /help felsorolja, mit tudok.",
   "theme.contrast": "Magas kontraszt",
   "theme.dark_mocha": "Sötét (Mocha)",

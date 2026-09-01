@@ -1084,6 +1084,7 @@
   "tg.btn.yes": "Yes",
   "tg.cancelled": "OK, not doing it.",
   "tg.expired": "This offer has expired — issue the command again.",
+  "tg.menu.arg_pair": "<pair> — {leiras}",
   "tg.unknown": "Unknown command: {name}. /help lists what I can do.",
   "theme.contrast": "High contrast",
   "theme.dark_mocha": "Dark (Mocha)",
