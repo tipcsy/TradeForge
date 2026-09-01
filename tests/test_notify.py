@@ -244,6 +244,41 @@ check("a rövid üzenet egy darab", telegram._darabol("rövid") == ["rövid"])
 check("⚠ saját User-Agent (nem `Python-urllib`)",
       "TradeForge" in telegram._user_agent())
 
+# ── 9b. A CHAT_ID MEGTALÁLÁSA ────────────────────────────────────────────
+# ⚠ MIÉRT A BOT KERESI MEG. A bot ÚGYSEM tud írni annak, aki nem kezdeményezett
+# vele beszélgetést — ha tehát valaki írt már neki, a `chat_id`-ja a
+# `getUpdates`-ben amúgy is ott van. Egy kézzel átmásolt azonosítónál ez
+# kevesebbet lehet elgépelni, és a @userinfobot-ot is megspórolja.
+_eredeti_upd = telegram.updates
+try:
+    telegram.updates = lambda tok, offset=0, timeout=0: (True, [
+        {"update_id": 1, "message": {"chat": {
+            "id": 12345, "first_name": "Tibor", "last_name": "B"}}},
+        {"update_id": 2, "message": {"chat": {"id": 12345}}},        # ismétlés
+        {"update_id": 3, "channel_post": {"chat": {
+            "id": -100, "title": "Csoport"}}},
+    ])
+    _t2 = telegram.discover_chats("T")
+    check("a `chat_id` a bejövő üzenetekből megtalálható", len(_t2) == 2,
+          str(_t2))
+    check("...névvel együtt", _t2[0]["name"] == "Tibor B", str(_t2[0]))
+    check("⚠ ...és ugyanaz a chat csak EGYSZER szerepel",
+          [x["id"] for x in _t2] == ["12345", "-100"])
+    telegram.updates = lambda tok, offset=0, timeout=0: (False, [])
+    check("⚠ hálózati hibánál ÜRES lista (nem kivétel)",
+          telegram.discover_chats("T") == [])
+finally:
+    telegram.updates = _eredeti_upd
+
+# A beüzemelő parancs be van kötve, és a HIBÁT is jelzi a kilépési kóddal.
+_main = (ROOT / "main.py").read_text(encoding="utf-8")
+check("a `notify-test` parancs regisztrálva van", '"notify-test"' in _main)
+check("⚠ ...és a kilépési kód a hibát is jelzi (szkriptelhető)",
+      "sys.exit(fn() or 0)" in _main)
+# ⚠ A kikapcsolt `enabled`-et NEM állítjuk át magunktól: lehet szándékos.
+check("⚠ a beüzemelő nem kapcsolja be magától az értesítést",
+      'notify.cli.disabled' in _main and '"enabled"] = True' not in _main)
+
 # ── 10. Katalógus + config-példa ─────────────────────────────────────────
 import json
 _hu = json.loads((ROOT / "lang" / "hu.json").read_text(encoding="utf-8"))

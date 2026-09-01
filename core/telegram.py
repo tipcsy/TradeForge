@@ -116,6 +116,48 @@ def send(token: str, chat_ids, szoveg: str) -> bool:
     return ment
 
 
+def updates(token: str, offset: int = 0, timeout: int = 0) -> tuple:
+    """`(sikerult, frissitesek_listaja)` — a bejövő üzenetek (`getUpdates`).
+
+    `offset`: az utoljára feldolgozott `update_id` + 1 (a Telegram csak ezután
+    törli a régieket). `timeout > 0` → LONG POLLING: a szerver eddig vár egy új
+    üzenetre, mielőtt üres listát adna. ⚠ A hosszú várakozás ezért NEM
+    hiba — a hívónak külön szálon kell lennie, hogy a motor körét ne fogja meg."""
+    ok, res = _hivas(token, "getUpdates",
+                     {"offset": int(offset), "timeout": int(timeout)})
+    if ok and isinstance(res, dict) and res.get("ok"):
+        return True, list(res.get("result") or [])
+    return False, []
+
+
+def discover_chats(token: str) -> list:
+    """Kik írtak eddig a botnak — `[{"id", "name"}, …]`.
+
+    ⚠ EZ VÁLTJA KI A @userinfobot-ot. A bot ÚGYSEM tud írni annak, aki nem
+    kezdeményezett vele beszélgetést; ha tehát valaki már írt neki, a
+    `chat_id`-ja itt amúgy is megvan. Egy kézzel átmásolt azonosítónál ez
+    kevesebbet is lehet elgépelni."""
+    ok, upd = updates(token)
+    if not ok:
+        return []
+    ki, latott = [], set()
+    for u in upd:
+        for kulcs in ("message", "edited_message", "channel_post",
+                      "callback_query"):
+            m = u.get(kulcs) or {}
+            chat = (m.get("chat") or (m.get("message") or {}).get("chat") or {})
+            cid = chat.get("id")
+            if cid is None or cid in latott:
+                continue
+            latott.add(cid)
+            nev = " ".join(x for x in (chat.get("first_name"),
+                                       chat.get("last_name")) if x)
+            ki.append({"id": str(cid),
+                       "name": nev or chat.get("title") or
+                               chat.get("username") or "?"})
+    return ki
+
+
 def me(token: str) -> tuple:
     """`(sikerult, bot_neve_vagy_hiba)` — a token ELLENŐRZÉSE.
 

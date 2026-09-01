@@ -7,6 +7,7 @@ Parancsok:
   python main.py live         — élő kereskedés + dashboard
   python main.py console      — élő kereskedés FELÜLET NÉLKÜL (gyenge gép, VM, SSH)
   python main.py console --tui — ugyanaz, élő táblázattal (a `rich` csomag kell hozzá)
+  python main.py notify-test  — a Telegram-értesítés beüzemelése és próbája
   python main.py dashboard    — csak dashboard (demo mód, MT5 nélkül)
   python main.py backtest     — backtest futtatás az alapértelmezett paraméterekkel
 
@@ -317,12 +318,79 @@ def cmd_console():
     return 0
 
 
+def cmd_notify_test():
+    """A Telegram-értesítés BEÜZEMELÉSE és próbája.
+
+    ⚠ MIÉRT KELL EZ A PARANCS. Egy elgépelt tokentől vagy egy hiányzó
+    címzettől a program **némán** nem küld semmit — és a felhasználó a
+    kereskedésben keresné a hibát. Itt mindegyik lépés megmondja, mi a baj,
+    és a `chat_id`-t magától megtalálja."""
+    from core import telegram
+    from strategy.settings import save_main_config
+    from version import APP_VERSION
+
+    cfg = load_cfg()
+    n = (cfg.get("notify") or {})
+    tg = n.get("telegram") or {}
+    token = str(tg.get("token") or "")
+    if not n:
+        print(_t("notify.cli.no_config"))
+        return 1
+    if not token:
+        print(_t("notify.cli.no_token"))
+        return 1
+
+    # 1. A TOKEN — ez az egyetlen olcsó módja megmondani, hogy elgépelted-e.
+    ok, nev = telegram.me(token)
+    if not ok:
+        print(_t("notify.cli.bad_token", hiba=nev))
+        return 1
+    print(_t("notify.cli.ok_token", name=nev))
+    if not n.get("enabled"):
+        # ⚠ NEM állítjuk át magunktól: a kikapcsolt állapot lehet szándékos.
+        print(_t("notify.cli.disabled"))
+
+    # 2. A CÍMZETT — ha nincs, megkeressük, ki írt eddig a botnak.
+    ids = [str(x) for x in (tg.get("chat_ids") or []) if str(x).strip()]
+    if ids:
+        print(_t("notify.cli.have_ids", ids=", ".join(ids)))
+    else:
+        print(_t("notify.cli.searching"))
+        talalt = telegram.discover_chats(token)
+        if not talalt:
+            print(_t("notify.cli.none_found", name=nev))
+            return 1
+        for t in talalt:
+            print("  " + _t("notify.cli.found", name=t["name"], id=t["id"]))
+        ids = [t["id"] for t in talalt]
+        _ir = True
+        if sys.stdin and sys.stdin.isatty():
+            _ir = input(_t("notify.cli.save_q")).strip().lower() in ("i", "y")
+        if _ir:
+            tg["chat_ids"] = ids
+            cfg.setdefault("notify", {})["telegram"] = tg
+            try:
+                save_main_config(cfg, CFG_PATH)
+                print(_t("notify.cli.saved"))
+            except Exception:
+                print(_t("notify.cli.save_failed"))
+
+    # 3. A PRÓBAÜZENET — a teljes út végigjárása, a valódi küldő függvénnyel.
+    print(_t("notify.cli.sending"))
+    if telegram.send(token, ids, _t("notify.cli.test_text", version=APP_VERSION)):
+        print(_t("notify.cli.sent"))
+        return 0
+    print(_t("notify.cli.send_failed"))
+    return 1
+
+
 COMMANDS = {
     "download":  (cmd_download,   []),
     "optimize":  (cmd_optimize,   "symbols"),
     "backtest":  (cmd_backtest,   []),
     "live":      (cmd_live,       []),
     "console":   (cmd_console,    []),
+    "notify-test": (cmd_notify_test, []),
     "dashboard": (cmd_dashboard,  []),
 }
 
@@ -379,4 +447,7 @@ if __name__ == "__main__":
         _syms, _strats = parse_optimize_args(sys.argv[2:])
         sys.exit(fn(_syms, _strats) or 0)
     else:
-        fn()
+        # ⚠ A KILÉPÉSI KÓD SZÁMÍT: a `notify-test` és a `console` hibát is
+        # jelenthet, és egy szkript (vagy egy szolgáltatás-felügyelő) ebből
+        # tudja meg, hogy baj van. Eddig minden futás 0-val tért vissza.
+        sys.exit(fn() or 0)

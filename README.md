@@ -297,6 +297,18 @@ zavartalanul megy tovább.
 ⚠ A `token` birtokosa **olvassa a botodnak küldött üzeneteket** — a
 `config.json` `.gitignore`-olt, oda kerülhet, de máshova ne másold.
 
+**Beüzemelés:** hozz létre egy botot a @BotFather `/newbot` parancsával, a
+tokent írd a `config.json`-ba, majd:
+
+```bash
+python main.py notify-test
+```
+
+Ez ellenőrzi a tokent, **megkeresi a `chat_id`-dat** (abból, aki már írt a
+botnak), felajánlja a mentést, és küld egy próbaüzenetet. ⚠ Előbb nyisd meg a
+botodat Telegramban és nyomj **Startot** — a bot nem tud írni annak, aki nem
+kezdeményezett vele beszélgetést.
+
 **Két nézet, egy parancskészlet.** A `--tui` egy magától frissülő táblázatot ad
 (instrumentumok, futó stratégiák, nyitott pozíciók, a motor életjele) a
 terminál saját képernyő-pufferében; billentyűleütésre a kép megáll, és
@@ -895,6 +907,18 @@ thread sends them; if Telegram is unreachable, the engine cycle carries on.
 
 ⚠ Whoever holds the `token` **can read the messages sent to your bot** —
 `config.json` is git-ignored so it belongs there, but do not copy it elsewhere.
+
+**Setup:** create a bot with @BotFather's `/newbot`, put the token into
+`config.json`, then:
+
+```bash
+python main.py notify-test
+```
+
+This validates the token, **finds your `chat_id`** (from whoever has already
+written to the bot), offers to save it, and sends a test message. ⚠ Open your
+bot in Telegram and press **Start** first — a bot cannot message someone who
+has not started a conversation with it.
 
 **Two views, one command set.** `--tui` gives a self-refreshing table
 (instruments, running strategies, open positions, the engine's heartbeat) in the
