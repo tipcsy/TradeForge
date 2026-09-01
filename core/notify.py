@@ -408,6 +408,47 @@ def sl_moved(symbol: str, strategy: str, ticket: int, sl: float,
                 symbol=symbol, ticket=int(ticket), sl=_szam(sl))))
 
 
+def signal_offer(ajanlat) -> bool:
+    """JÓVÁHAGYÁSRA VÁRÓ belépő — gombokkal.
+
+    ⚠ MIÉRT KÜLÖN ÚT a sima jelzés-értesítéstől: ez nem hír, hanem KÉRDÉS, és
+    a válasza pozíciót nyit. Ezért a `NOTIFY_SIGNAL` kapcsolótól FÜGGETLENÜL
+    kimegy — aki bekapcsolta a válaszos kötést, az épp azért tette, hogy
+    megkérdezzük. (A csendes óra viszont itt is érvényes: egy reggel meglátott
+    ajánlat addigra amúgy is lejárt volna.)"""
+    n = _aktiv
+    if n is None:
+        return False
+    ev = Event(kind=SIGNAL, text="", symbol=getattr(ajanlat, "symbol", ""),
+               strategy=getattr(ajanlat, "strategy", ""))
+    # A csendes órát és a `kesz` állapotot ugyanazzal a szabállyal nézzük — de a
+    # pár-kapcsolót NEM (lásd fent), ezért a szimbólumot kiürítjük hozzá.
+    _proba = Event(kind=SIGNAL, text="")
+    ok, _ok_szoveg = n.kimehet(_proba, _cfg_json)
+    if not ok:
+        log.info("jelzés-ajánlat NEM ment ki (%s): %s", ev.symbol, _ok_szoveg)
+        return False
+    try:
+        from core import telegram
+        _perc = max(1, int((ajanlat.expires - ajanlat.created) // 60))
+        # ⚠ A SZINTEKET AZ AJÁNLAT SZÁMOLJA (`celok`) — ugyanaz a képlet, amivel
+        # a kötés is készül. Külön kiszámolva az üzenet MÁS SL-t mutathatna,
+        # mint ami a pozícióra kerül.
+        _sl, _tp = ajanlat.celok(ajanlat.entry)
+        szoveg = _t("tg.offer.title", symbol=ajanlat.symbol,
+                    strategy=ajanlat.strategy, dir=ajanlat.direction,
+                    lot=f"{ajanlat.lot:.2f}", price=ajanlat.fmt(ajanlat.entry),
+                    sl=ajanlat.fmt(_sl), tp=ajanlat.fmt(_tp), minutes=_perc)
+        gombok = ((_t("tg.btn.yes"), f"a:{ajanlat.id}"),
+                  (_t("tg.btn.no"), f"x:{ajanlat.id}"))
+        for cid in n.cfg.chat_ids:
+            telegram.send_buttons(n.cfg.token, cid, szoveg, gombok)
+        return True
+    except Exception:
+        log.warning("jelzés-ajánlat: a küldés hibára futott", exc_info=True)
+        return False
+
+
 def error(key: str, text: str) -> bool:
     """A NÉGY kritikus esemény egyike. `key` → naponta legfeljebb egyszer.
 

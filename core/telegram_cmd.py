@@ -166,6 +166,11 @@ class Bot:
         cid = str(cq.get("id") or "")
         mid = int(uz.get("message_id") or 0)
         valasz, _, azon = adat.partition(":")
+        # ⚠ A JELZÉS-AJÁNLAT KÜLÖN ÚT: az „a:"/„m:"/„x:" gombok POZÍCIÓT
+        # nyitnak, nem egy függőben lévő parancsot hajtanak végre. A
+        # megerősítés-nyilvántartás (`_fuggo`) itt nem játszik.
+        if valasz in ("a", "m", "x"):
+            return self._ajanlat_gomb(valasz, azon, chat, cid, mid)
         bejegyzes = self._fuggo.pop(azon, None)
         if not bejegyzes or float(self.ora()) > bejegyzes[2]:
             # ⚠ LEJÁRT vagy ismeretlen → NEM csinálunk semmit. Egy fél órája
@@ -181,6 +186,32 @@ class Bot:
         res = cc.dispatch(self.ctx, sor, confirmed=True)
         return [Kimenet(chat_id=chat, callback_id=cid, edit_message_id=mid,
                         text=self._szoveg(res))]
+
+    def _ajanlat_gomb(self, valasz: str, azon: str, chat: str,
+                      cid: str, mid: int) -> list:
+        """A „csak jelzés" ajánlat gombjai: elfogad · mégis · elvet.
+
+        ⚠ A DÖNTÉST NEM ITT HOZZUK MEG. A kapuk (nyitott pozíció, slot, napi
+        limit, ár-elmozdulás) a `live_trader.manual_entry`-ben futnak, ott, ahol
+        a motor saját belépője is átmegy rajtuk. Ez a függvény csak gombot és
+        szöveget kezel."""
+        from core import signal_offer as _so
+        from trading import live_trader as lt
+        if valasz == "x":
+            _so.REGISTRY.lezar(azon, _so.ELUTASITVA)
+            return [Kimenet(chat_id=chat, callback_id=cid,
+                            edit_message_id=mid, text=_t("tg.cancelled"))]
+        # `m` = „mégis, a megcsúszott ár ellenére".
+        statusz, szoveg, ujra = lt.manual_entry(azon, drift_confirmed=(valasz == "m"))
+        if ujra:
+            # ⚠ AZ ELSŐ „Igen" NEM KÖTÖTT: az ár elment a terv óta. Új gombot
+            # adunk, hogy a döntés TUDATOS legyen — és az ajánlat nyitva marad.
+            return [Kimenet(chat_id=chat, callback_id=cid, edit_message_id=mid,
+                            text=szoveg,
+                            buttons=((_t("tg.btn.anyway"), f"m:{azon}"),
+                                     (_t("tg.btn.no"), f"x:{azon}")))]
+        return [Kimenet(chat_id=chat, callback_id=cid, edit_message_id=mid,
+                        text=szoveg)]
 
     @staticmethod
     def _szoveg(res: "cc.Result") -> str:

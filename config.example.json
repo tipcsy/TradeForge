@@ -100,6 +100,8 @@
   "_comment_notify": "Telegram-ertesites. A `token` a @BotFather-tol, a `chat_ids` a @userinfobot-tol. FIGYELEM: a bot CSAK az itt felsorolt chat_id-knak kuld, es a token birtokosa olvassa a botnak kuldott uzeneteket -- ne masold publikus helyre. `quiet_hours`: HELYI ido szerint; a csendben keletkezo JELZESEK elvesznek, a KOTESEK reggel osszesitve jonnek. `heartbeat_times`: ures lista = nincs eletjel. Per par+strategia a `pairs.<sym>.strategy_notify_trade` / `strategy_notify_signal` kapcsol (a jelzes alapbol KI, a kotes alapbol BE).",
   "notify": {
     "enabled": false,
+    "_comment_answer_trading": "VALASZOS KOTES: a `signal` modu par+strategia jelzesehez a bot IGEN/NEM gombot kuld, es az Igen VALODI poziciot nyit. ⚠ ALAPBOL KI. Csak `signal` modu par+strategia kap gombot; az ajanlat a jel-gyertya feleig el (legalabb 1 perc); ha az ar 0,25 R-nel tobbet mozdult, az Igen NEM kot, hanem ujra rakerdez.",
+    "answer_trading": false,
     "telegram": {
       "token": "",
       "chat_ids": []

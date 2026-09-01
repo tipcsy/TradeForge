@@ -1890,6 +1890,69 @@ def _pos_risk_ccy_of(ticket: int, pos=None, pair_cfg: dict | None = None) -> flo
     return 0.0
 
 
+def _execute_entry(symbol: str, strategy_name: str, direction: str, lot: float,
+                   sl_price: float, tp_price: float, sl_points: float,
+                   magic: int, risk_ccy: float, pv1_point: float,
+                   open_price: float, slot_mgr) -> "int | None":
+    """A BELÉPŐ VÉGREHAJTÁSA — fedezet-ellenőrzés, megbízás, nyilvántartás.
+
+    ⚠ MIÉRT KÜLÖN FÜGGVÉNY. Két hívója van: a motor saját belépője
+    (`process_pair`) és a Telegram-gombbal megerősített jelzés
+    (`manual_entry`). Ha a gomb saját utat járna, a fedezet-ellenőrzés, a
+    slot-elszámolás, a belépéskori kockázat rögzítése és a napló-írás
+    KIMARADHATNA belőle — némán, és pont a pénzt mozgató ágon. Egy út, két hívó.
+
+    Visszaad: a ticket, vagy `None` (a kihagyás okát naplózza)."""
+    # ── Fedezet-ellenőrzés ────────────────────────────────────────
+    # A megbízás `10019 No money` / `10018 Market closed`-ig jutna, és a
+    # jel elveszne. Inkább ELŐRE megkérdezzük a szükséges fedezetet, és
+    # beszédesen kihagyjuk — így a naplóból kiderül, hogy nem a
+    # stratégia, hanem a tőkeáttétel/egyenleg a korlát.
+    try:
+        with MT5_LOCK:
+            _need = mt5.order_calc_margin(
+                mt5.ORDER_TYPE_BUY if direction == "BUY" else mt5.ORDER_TYPE_SELL,
+                symbol, lot, open_price)
+            _acct = mt5.account_info()
+        _free = float(getattr(_acct, "margin_free", 0.0) or 0.0) if _acct else 0.0
+        if _need is not None and _free > 0 and float(_need) > _free:
+            log.warning("⏭ %s %s jel — belépő KIHAGYVA: nincs elég szabad "
+                        "fedezet (%.2f kell, %.2f szabad | lot %.2f).",
+                        symbol, direction, float(_need), _free, lot)
+            return None
+    except Exception as _e:
+        log.debug("%s — fedezet-ellenőrzés kihagyva: %s", symbol, _e)
+
+    ticket = open_position(symbol, direction, lot, sl_price, tp_price, magic,
+                           comment=strategy_name, strategy_name=strategy_name)
+    if not ticket:
+        return None
+    if slot_mgr is not None:
+        slot_mgr.add(ticket, risk_ccy)
+    # A BELÉPÉSKORI kockázat (1 R) rögzítése — a BE/trailing hamarosan
+    # felülírja az SL-t, onnantól ez a szám sehonnan nem nyerhető vissza. A
+    # TÉNYLEGES lotból számolunk (a min_lot/max_lot korlát eltérítheti a
+    # szándékolt kockázattól).
+    position_meta.record(
+        ticket, symbol, strategy_name,
+        position_meta.risk_from_points(lot, sl_points, pv1_point),
+        lot=lot, sl_points=sl_points, entry_price=open_price)
+    log_trade({
+        "time":      datetime.now(timezone.utc).isoformat(),
+        "event":     "open",
+        "strategy":  strategy_name,
+        "symbol":    symbol,
+        "direction": direction,
+        "lot":       lot,
+        "price":     open_price,
+        "sl":        sl_price,
+        "tp":        tp_price,
+        "ticket":    ticket,
+        "magic":     magic,
+    })
+    return ticket
+
+
 def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
                  strategy):
     """Egy LIVE pár feldolgozása.
@@ -2950,6 +3013,28 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
                              "| belépő: %.5g | SL: %.5g | TP: %.5g | lot: %.2f",
                              symbol, signal, strategy.name, open_price,
                              sl_price, tp_price, lot)
+                    # ── AJÁNLAT a Telegram „Igen" gombjához ──────────────
+                    # ⚠ CSAK `signal` MÓDBAN (itt vagyunk) ÉS csak ha a válaszos
+                    # kötés be van kapcsolva. A `live` módú pároknál a motor
+                    # amúgy is köt — ott a gomb dupla pozíciót nyitna.
+                    try:
+                        from core import signal_offer as _so
+                        if _so.enabled(cfg):
+                            _ajanlat = _so.REGISTRY.keszit(
+                                jel_gyertya_mp=_sig_sec,
+                                symbol=symbol, strategy=strategy.name,
+                                direction=signal, lot=lot, entry=open_price,
+                                sl_points=sl_points, tp_points=tp_points,
+                                point_size=float(params.get("point_size") or 0.0),
+                                magic=magic, risk_ccy=_risk_ccy,
+                                pv1_point=_sizing_cfg.get("pv1_point", 0.0))
+                            from core import notify as _nf
+                            _nf.signal_offer(_ajanlat)
+                    except Exception:
+                        # ⚠ Az ajánlat elmaradása NEM viheti el a jelzés
+                        # naplózását: a chart és a `trades.csv` attól még
+                        # ugyanazt kell mutassa.
+                        log.debug("jelzés-ajánlat kimaradt", exc_info=True)
                     log_trade({
                         "time":      datetime.now(timezone.utc).isoformat(),
                         "event":     "signal",          # NEM "open" — nincs kötés
@@ -2965,57 +3050,96 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
                     })
                     return
 
-                # ── Fedezet-ellenőrzés ────────────────────────────────────────
-                # A megbízás `10019 No money` / `10018 Market closed`-ig jutna, és a
-                # jel elveszne. Inkább ELŐRE megkérdezzük a szükséges fedezetet, és
-                # beszédesen kihagyjuk — így a naplóból kiderül, hogy nem a
-                # stratégia, hanem a tőkeáttétel/egyenleg a korlát.
-                try:
-                    with MT5_LOCK:
-                        _need = mt5.order_calc_margin(
-                            mt5.ORDER_TYPE_BUY if signal == "BUY" else mt5.ORDER_TYPE_SELL,
-                            symbol, lot, open_price)
-                        _acct = mt5.account_info()
-                    _free = float(getattr(_acct, "margin_free", 0.0) or 0.0) if _acct else 0.0
-                    if _need is not None and _free > 0 and float(_need) > _free:
-                        log.warning("⏭ %s %s jel — belépő KIHAGYVA: nincs elég szabad "
-                                    "fedezet (%.2f kell, %.2f szabad | lot %.2f).",
-                                    symbol, signal, float(_need), _free, lot)
-                        return
-                except Exception as _e:
-                    log.debug("%s — fedezet-ellenőrzés kihagyva: %s", symbol, _e)
-
-                ticket = open_position(symbol, signal, lot, sl_price, tp_price, magic,
-                                       comment=strategy.name, strategy_name=strategy.name)
-                if ticket:
-                    slot_mgr.add(ticket, _risk_ccy)
-                    # A BELÉPÉSKORI kockázat (1 R) rögzítése — a BE/trailing hamarosan
-                    # felülírja az SL-t, onnantól ez a szám sehonnan nem nyerhető
-                    # vissza. A TÉNYLEGES lotból számolunk (a min_lot/max_lot korlát
-                    # eltérítheti a szándékolt kockázattól).
-                    position_meta.record(
-                        ticket, symbol, strategy.name,
-                        position_meta.risk_from_points(
-                            lot, sl_points, _sizing_cfg.get("pv1_point", 0.0)),
-                        lot=lot, sl_points=sl_points, entry_price=open_price)
-                    log_trade({
-                        "time":      datetime.now(timezone.utc).isoformat(),
-                        "event":     "open",
-                        "strategy":  strategy.name,
-                        "symbol":    symbol,
-                        "direction": signal,
-                        "lot":       lot,
-                        "price":     open_price,
-                        "sl":        sl_price,
-                        "tp":        tp_price,
-                        "ticket":    ticket,
-                        "magic":     magic,
-                    })
+                _execute_entry(
+                    symbol, strategy.name, signal, lot, sl_price, tp_price,
+                    sl_points, magic, _risk_ccy,
+                    _sizing_cfg.get("pv1_point", 0.0), open_price, slot_mgr)
 
 
 # ---------------------------------------------------------------------------
 # Fő ciklus
 # ---------------------------------------------------------------------------
+
+# ⚠ EGY SZÁL EGYSZERRE. A Telegram-gombot a bot szála nyomja, a motor pedig a
+# sajátján kereskedik: a „nyitva van-e már" ellenőrzés és a megbízás között
+# beférne egy másik kérés. Egy páron két pozíció pedig pontosan az a hiba, ami
+# a 8 GBPAUD-pozíciót okozta 4 slotra.
+_MANUAL_LOCK = threading.Lock()
+
+
+def manual_entry(offer_id: str, drift_confirmed: bool = False) -> tuple:
+    """Egy JELZÉS-AJÁNLAT elfogadása (a Telegram „Igen" gombja).
+
+    Visszaad: `(statusz, szöveg, ujra_kerdez)`. `ujra_kerdez=True` → a hívónak
+    MÁSODSZOR is rá kell kérdeznie (megcsúszott ár), és az ajánlat nyitva marad.
+
+    ⚠ A KAPUK NEM KERÜLHETŐK MEG. Ugyanaz a `_execute_entry` fut, mint a motor
+    saját belépőjén, és előtte ugyanazok az ellenőrzések: van-e már nyitott
+    pozíció, van-e slot, nem ért-e el a napi veszteséglimit. Ha bármelyik nemet
+    mond, a válasz megmondja, MIÉRT — nem csak annyit, hogy nem sikerült."""
+    from core import signal_offer as _so
+    if not _so.enabled(_run_cfg):
+        return "kikapcsolva", _t("tg.offer.disabled"), False
+    o = _so.REGISTRY.get(offer_id)
+    # ⚠ A NYILVÁNTARTÁS ÓRÁJA, nem a fali óra. Az ajánlat lejáratát a registry
+    # írta be a SAJÁT órájából; ha itt egy másik forrásból néznénk az időt, a
+    # kettő elcsúszhatna — ugyanaz a hibaosztály, ami az értesítés napi
+    # dedupjánál is elsült (a `kimehet` és a `_kuld` külön időt használt).
+    most = float(_so.REGISTRY.ora())
+    if o is None or not o.elerheto(most):
+        return "lejart", _t("tg.expired"), False
+
+    with _MANUAL_LOCK:
+        # ── Aktuális ár és ELMOZDULÁS ─────────────────────────────────
+        try:
+            with MT5_LOCK:
+                _tick = mt5.symbol_info_tick(o.symbol)
+            ar = float(_tick.ask if o.direction == "BUY" else _tick.bid)
+        except Exception:
+            return "hiba", _t("tg.offer.no_price", symbol=o.symbol), False
+        _sod = o.sodrodas_r(ar)
+        if _sod > _so.SODRODAS_R and not drift_confirmed:
+            # ⚠ NEM FOGYASZTJUK EL az ajánlatot: a felhasználó még dönthet.
+            return ("sodrodas",
+                    _t("tg.offer.drift", symbol=o.symbol, r=f"{_sod:.2f}",
+                       planned=o.fmt(o.entry), now=o.fmt(ar)), True)
+
+        # ── A KAPUK ───────────────────────────────────────────────────
+        if strategy_positions(o.symbol, o.strategy):
+            return "mar_nyitva", _t("tg.offer.already_open", symbol=o.symbol), False
+        if _run_slot_mgr is not None and not _run_slot_mgr.can_open_risk(o.risk_ccy):
+            return "nincs_slot", _t("tg.offer.no_slot"), False
+        try:
+            from trading.backtest import daily_limit_usd as _dlim
+            _bal = mt5_connector.account_balance()
+            _pnl = mt5_connector.daily_pnl_cached()
+            if (_bal and _pnl is not None
+                    and _pnl <= -_dlim((_run_cfg or {}).get("trading") or {}, _bal)):
+                return "napi_limit", _t("tg.offer.daily_limit"), False
+        except Exception:
+            log.debug("kézi belépő: a napi limit nem ellenőrizhető", exc_info=True)
+
+        # ⚠ AZ AJÁNLATOT A MEGBÍZÁS ELŐTT fogyasztjuk el. Ha közben egy másik
+        # gombnyomás érkezne, az már `None`-t kap — inkább veszítsünk el egy
+        # belépőt, mint hogy kettő nyíljon.
+        if _so.REGISTRY.lezar(o.id, _so.ELFOGADVA) is None:
+            return "lejart", _t("tg.expired"), False
+
+        # A GEOMETRIA MARAD, A SZINT CSÚSZIK: a stop/célár TÁVOLSÁGA a tervé.
+        sl, tp = o.celok(ar)
+        ticket = _execute_entry(o.symbol, o.strategy, o.direction, o.lot,
+                                sl, tp, o.sl_points, o.magic, o.risk_ccy,
+                                o.pv1_point, ar, _run_slot_mgr)
+    if not ticket:
+        # ⚠ A napló megmondja, MI akadt el (fedezet, bróker-elutasítás); a
+        # felhasználónak itt annyi kell, hogy NEM nyílt pozíció.
+        return "hiba", _t("tg.offer.failed", symbol=o.symbol), False
+    log.info("✅ %s %s KÉZI belépő (Telegram) | #%d | belépő %.5g | lot %.2f",
+             o.symbol, o.direction, ticket, ar, o.lot)
+    return "ok", _t("tg.offer.opened", symbol=o.symbol, dir=o.direction,
+                    lot=f"{o.lot:.2f}", price=o.fmt(ar), ticket=ticket,
+                    sl=o.fmt(sl), tp=o.fmt(tp)), False
+
 
 def _resolve_build_strategy(symbol: str, strategy_name: "str | None") -> "str | None":
     """A ráépítés STRATÉGIÁJA. Ha a hívó megadta, azt használjuk; ha nem, akkor

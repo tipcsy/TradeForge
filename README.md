@@ -309,6 +309,26 @@ zavartalanul megy tovább.
 | `/heart` | életjel — minden rendben van-e |
 | `/play <pár>` · `/stop <pár>` | stratégia indítása/leállítása |
 
+#### Jelzésre kötés gombbal (`answer_trading`)
+
+⚠ **Alapból ki van kapcsolva**, mert ezzel egy chatüzenetből valódi pozíció
+lesz. Bekapcsolva a **`signal` módú** pár+stratégia jelzéséhez a bot IGEN/NEM
+gombot küld, és az IGEN megnyitja a pozíciót.
+
+A biztosítékok:
+
+* **csak `signal` módú** pár+stratégia kap gombot (a `live` módúaknál a motor
+  amúgy is köt);
+* az ajánlat **a jel-gyertya feléig él** (M15 → 7,5 perc, H1 → 30 perc,
+  M1 → 1 perc), utána a gomb megmondja, hogy elkésett;
+* **egyszer használható** — a kétszer megnyomott IGEN egy pozíciót nyit;
+* a **kapuk nem kerülhetők meg**: nyitott pozíció, slot, napi veszteséglimit,
+  fedezet — ugyanaz a végrehajtási út, mint a motor saját belépőjénél, és
+  minden elutasítás megmondja az okát;
+* ha az ár a terv óta **0,25 R-nél többet mozdult**, az IGEN **nem köt**:
+  megmondja, mennyit mozdult, és újra rákérdez. A megerősítés után a
+  **stop/célár távolsága marad**, csak a szint csúszik a mostani árhoz.
+
 A **parancs-menüt** a program állítja be minden induláskor (`setMyCommands`),
 a kódban lévő listából és a `/help` leírásaiból — a @BotFather-ben nem kell
 kézzel karbantartani, és így nem is tud elavulni. Magyar és angol Telegram-
@@ -942,6 +962,26 @@ thread sends them; if Telegram is unreachable, the engine cycle carries on.
 | `/state` | which strategies run on which pair + engine status |
 | `/heart` | heartbeat — is everything OK |
 | `/play <pair>` · `/stop <pair>` | start/stop a strategy |
+
+#### Trading a signal from a button (`answer_trading`)
+
+⚠ **Off by default**, because this turns a chat message into a real position.
+When on, the bot sends a YES/NO button for signals of **`signal`-mode**
+pair+strategy combinations, and YES opens the position.
+
+The safeguards:
+
+* only **`signal`-mode** pair+strategy gets a button (in `live` mode the engine
+  trades anyway);
+* the offer lives for **half a signal bar** (M15 → 7.5 min, H1 → 30 min,
+  M1 → 1 min); after that the button says you are late;
+* **single use** — pressing YES twice opens one position;
+* the **gates cannot be bypassed**: open position, slot, daily loss limit,
+  margin — the same execution path as the engine's own entry, and every refusal
+  states its reason;
+* if the price moved **more than 0.25 R** since the plan, YES does **not**
+  trade: it tells you how far it moved and asks again. After confirming, the
+  **stop/target distance is kept** and only the level slides to the current price.
 
 The **command menu** is published by the program on every start
 (`setMyCommands`), built from the command list in the code and the `/help`
