@@ -6,6 +6,7 @@ Parancsok:
   python main.py optimize     — AI paraméter optimalizálás / tanítás
   python main.py live         — élő kereskedés + dashboard
   python main.py console      — élő kereskedés FELÜLET NÉLKÜL (gyenge gép, VM, SSH)
+  python main.py console --tui — ugyanaz, élő táblázattal (a `rich` csomag kell hozzá)
   python main.py dashboard    — csak dashboard (demo mód, MT5 nélkül)
   python main.py backtest     — backtest futtatás az alapértelmezett paraméterekkel
 
@@ -251,19 +252,44 @@ def cmd_console():
                             daemon=True, name="LiveTrader")
     szal.start()
 
-    ctx = console_cmd.live_context(cfg, CFG_PATH)
-    print(_t("console.banner", version=APP_VERSION))
-
-    def _leallit():
+    def _kilep():
+        """A leállítás EGY helyen: a motor körhatáron áll meg, aztán elengedjük
+        a zárat és a kapcsolatot. ⚠ A zár elengedése nem elhagyható — enélkül a
+        következő indulás egy elárvult zárat találna."""
+        print(_t("console.quit"))
         lt.request_stop()
         szal.join(timeout=15)
         print(_t("console.stopped"))
+        live_lock.release(_szamla)
+        mt5_connector.disconnect()
+
+    ctx = console_cmd.live_context(cfg, CFG_PATH)
+    _interaktiv = bool(sys.stdin) and sys.stdin.isatty()
+
+    # ── TÁBLÁZATOS NÉZET (--tui) ──────────────────────────────────────────
+    # ⚠ Ugyanaz a `ctx`, ugyanazok a parancsok — csak MÁS megjelenítő. A `rich`
+    # hiánya nem hiba: a parancssoros mód enélkül is megy, csak megmondjuk, mit
+    # kell telepíteni. Egy importhiba miatt ne álljon meg a kereskedés.
+    if "--tui" in sys.argv:
+        from core import console_tui
+        if not console_tui.elerheto():
+            print(_t("console.tui.missing"))       # → marad a parancssor
+        elif _interaktiv:                          # élő táblát csak terminálra
+            try:
+                console_tui.fut(ctx, megall=lt.stop_requested)
+            except KeyboardInterrupt:
+                pass
+            finally:
+                _kilep()
+            return 0
+
+    print(_t("console.banner", version=APP_VERSION))
 
     try:
         # ⚠ NEM INTERAKTÍV indulásnál (szolgáltatás, átirányított bemenet) az
         # `input()` azonnal EOF-ot adna, és a program kilépne — pont akkor, ha
         # a legkevésbé akarjuk. Ott a motor prompt nélkül fut.
-        if not sys.stdin or not sys.stdin.isatty():
+        if not _interaktiv:
             print(_t("console.noninteractive"))
             while szal.is_alive():
                 szal.join(timeout=1.0)
@@ -287,10 +313,7 @@ def cmd_console():
     except KeyboardInterrupt:
         pass
     finally:
-        print(_t("console.quit"))
-        _leallit()
-        live_lock.release(_szamla)
-        mt5_connector.disconnect()
+        _kilep()
     return 0
 
 

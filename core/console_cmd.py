@@ -119,6 +119,71 @@ def _has_position(ctx: Context, symbol: str) -> bool:
         return False
 
 
+# ---------------------------------------------------------------------------
+# STRUKTURÁLT SOROK — a szöveges parancs ÉS a TUI ugyanezekből dolgozik
+# ---------------------------------------------------------------------------
+# ⚠ MIÉRT NEM A SZÖVEGET PARSZOLJA A TUI. A parancsok fordított, tördelt sorokat
+# adnak vissza; egy táblázatnak viszont MEZŐK kellenek. Ha a TUI a saját
+# lekérdezését írná meg, két helyen kellene karbantartani ugyanazt a szabályt
+# (mikor „fut" egy stratégia, mi a pár állapota) — és a kettő elcsúszna. Ezért a
+# lekérdezés itt van egyszer, és a megjelenítés (szöveg vagy táblázat) külön.
+
+def pair_rows(ctx: Context) -> list:
+    """Instrumentumonként: `{symbol, state, pnl, strategies: [(név, fut-e)]}`."""
+    prim = _primary(ctx)
+    out = []
+    for sym in sorted(_pairs(ctx)):
+        ds = ctx.dashboard.get(sym)
+        out.append({
+            "symbol": sym,
+            "state": ctx.instrument_state.get(sym, "-"),
+            "pnl": (getattr(ds, "position_pnl", None) if ds is not None else None),
+            "strategies": [
+                (n, _rs.get_state(ctx.cfg, sym, n, prim) == _rs.LIVE)
+                for n in (ctx.strategies_of(sym) or [])
+            ],
+        })
+    return out
+
+
+def position_rows(ctx: Context) -> list:
+    try:
+        return list(ctx.positions() or [])
+    except Exception:
+        # ⚠ A brókeri lekérdezés elbukhat (kapcsolat) — ilyenkor ÜRES lista megy
+        # tovább, de a `state` sor megmondja, hogy nincs MT5-kapcsolat. Egy
+        # kivétel itt az egész kijelzést elvinné.
+        return []
+
+
+def state_rows(ctx: Context) -> list:
+    """`[(címke, érték, rendben-e)]` — a motor életjele mezőnként.
+
+    ⚠ Egy zöld pipa, ami nem néz semmit, rosszabb a semminél. Minden sor MÉRT
+    értéket ad vissza, és a harmadik elem mondja meg, hogy az érték rendben
+    van-e — a megjelenítés ebből színez."""
+    out = []
+    el = bool(ctx.engine_alive())
+    out.append((_t("console.state.thread"),
+                _t("console.yes") if el else _t("console.no"), el))
+    ts = float(ctx.last_cycle_ts() or 0)
+    if ts <= 0:
+        out.append((_t("console.state.cycle"), "-", False))
+    else:
+        kor = max(0.0, time.time() - ts)
+        out.append((_t("console.state.cycle"), f"{kor:.0f} mp",
+                    kor <= 3 * ctx.cycle_sec))
+    _mt5 = bool(ctx.mt5_ok())
+    out.append((_t("console.state.mt5"),
+                _t("console.yes") if _mt5 else _t("console.no"), _mt5))
+    lic = ctx.licence_status() or {}
+    if lic:
+        out.append((_t("console.state.licence"),
+                    f"{lic.get('allapot', '?')} ({lic.get('lejar_nap', '?')})",
+                    str(lic.get("allapot")) == "ok"))
+    return out
+
+
 def _fmt_pos(p: dict) -> str:
     return _t("console.pos.row",
               ticket=p.get("ticket"), symbol=p.get("symbol"),
@@ -139,28 +204,22 @@ def cmd_help(ctx: Context, args: list, confirmed: bool = False) -> Result:
 
 
 def cmd_pairs(ctx: Context, args: list, confirmed: bool = False) -> Result:
-    prim = _primary(ctx)
     sorok = [_t("console.pairs.head")]
-    for sym in sorted(_pairs(ctx)):
-        allapot = ctx.instrument_state.get(sym, "-")
-        strats = ctx.strategies_of(sym) or []
-        # ⚠ Stratégiánként MEGMUTATJUK a szándékot ÉS azt, hogy engedélyezett-e:
+    for r in pair_rows(ctx):
+        # ⚠ Stratégiánként MEGJELÖLJÜK, ami FUT (engedélyezett ÉS szándék=live):
         # a kettő szorzata dönti el, mi fut valójában.
-        cimkek = []
-        for n in strats:
-            el = _rs.get_state(ctx.cfg, sym, n, prim) == _rs.LIVE
-            cimkek.append(f"{n}{'*' if el else ''}")
-        ds = ctx.dashboard.get(sym)
-        pnl = getattr(ds, "position_pnl", None) if ds is not None else None
-        sorok.append(_t("console.pairs.row", symbol=sym, state=allapot,
+        cimkek = [f"{n}{'*' if fut else ''}" for n, fut in r["strategies"]]
+        sorok.append(_t("console.pairs.row", symbol=r["symbol"],
+                        state=r["state"],
                         strategies=", ".join(cimkek) or "-",
-                        pnl=("-" if pnl is None else f"{float(pnl):+.2f}")))
+                        pnl=("-" if r["pnl"] is None
+                             else f"{float(r['pnl']):+.2f}")))
     sorok.append(_t("console.pairs.legend"))
     return Result(sorok)
 
 
 def cmd_pos(ctx: Context, args: list, confirmed: bool = False) -> Result:
-    poz = ctx.positions() or []
+    poz = position_rows(ctx)
     if not poz:
         return Result([_t("console.pos.none")])
     sorok = [_t("console.pos.head", n=len(poz))]
@@ -293,31 +352,11 @@ def cmd_balance(ctx: Context, args: list, confirmed: bool = False) -> Result:
 
 
 def cmd_state(ctx: Context, args: list, confirmed: bool = False) -> Result:
-    """A motor ÉLETJELE — az öt sor, amiből a „minden rendben" áll.
-
-    ⚠ Egy zöld pipa, ami nem néz semmit, rosszabb a semminél: azt sugallná,
-    hogy ellenőriztük. Ezért minden sor MÉRT értéket mutat."""
+    """A motor ÉLETJELE — ugyanabból a `state_rows`-ból, amit a TUI is rajzol."""
     sorok = [_t("console.state.head")]
-    el = bool(ctx.engine_alive())
-    sorok.append(_t("console.state.thread",
-                    value=_t("console.yes") if el else _t("console.no")))
-    ts = float(ctx.last_cycle_ts() or 0)
-    if ts <= 0:
-        sorok.append(_t("console.state.cycle_none"))
-    else:
-        kor = max(0.0, time.time() - ts)
-        # ⚠ A küszöb a ciklusidő HÁROMSZOROSA: egy-egy elnyúló kör (mély
-        # adatablak, lassú bróker) még nem baj, a tartós elmaradás igen.
-        sorok.append(_t("console.state.cycle", sec=f"{kor:.0f}",
-                        flag=("" if kor <= 3 * ctx.cycle_sec
-                              else " " + _t("console.state.late"))))
-    sorok.append(_t("console.state.mt5",
-                    value=_t("console.yes") if ctx.mt5_ok() else _t("console.no")))
-    lic = ctx.licence_status() or {}
-    if lic:
-        sorok.append(_t("console.state.licence",
-                        state=lic.get("allapot", "?"),
-                        days=lic.get("lejar_nap", "?")))
+    for cimke, ertek, rendben in state_rows(ctx):
+        jel = "" if rendben else "  " + _t("console.state.late")
+        sorok.append(f"  {cimke:<18} {ertek}{jel}")
     elo = [s for s in sorted(_pairs(ctx)) if _live_strats(ctx, s)]
     sorok.append(_t("console.state.pairs", n=len(elo),
                     names=", ".join(elo) or "-"))

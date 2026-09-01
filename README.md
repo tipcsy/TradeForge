@@ -251,6 +251,7 @@ Minden parancs a projekt gyökeréből fut (ahol a `main.py` van):
 | `python main.py dashboard` | csak a felület, demo adatokkal — **MT5 nélkül is** |
 | `python main.py live` | élő motor + dashboard |
 | `python main.py console` | élő motor **felület nélkül** + parancssor (gyenge gép, VM, SSH) |
+| `python main.py console --tui` | ugyanaz, **élő táblázattal** (a `rich` csomag kell hozzá) |
 | `python main.py backtest` | backtest az alapértelmezett paraméterekkel |
 | `python main.py optimize` | optimalizálás minden aktív párra, páronként a saját stratégiáival |
 | `python main.py optimize EURUSD GBPJPY` | optimalizálás csak a megadott párokra |
@@ -271,6 +272,14 @@ Két dolgot érdemes tudni:
 * **A licenc-belépés nem itt történik.** A konzolos mód szándékosan nem nyit
   belépő-ablakot (SSH-n nem is látszana): jelentkezz be egyszer a grafikus
   felületen, és másold a `data/licence_token.json`-t a másik gépre.
+
+**Két nézet, egy parancskészlet.** A `--tui` egy magától frissülő táblázatot ad
+(instrumentumok, futó stratégiák, nyitott pozíciók, a motor életjele);
+billentyűleütésre a kép megáll, és ugyanazok a parancsok mennek, mint a
+parancssoros módban. A `rich` **nem kötelező**: nélküle a parancssor
+változatlanul működik, a program pedig megmondja, mit kell telepíteni.
+Mérve: a táblázatos nézet +6,6 MB memória (a tkinter-felület importjainak a
+negyede).
 
 Argumentum nélkül (`python main.py`) kiírja ezt a listát.
 
@@ -817,6 +826,7 @@ Every command runs from the project root (where `main.py` is):
 | `python main.py dashboard` | UI only, with demo data — **works without MT5** |
 | `python main.py live` | live engine + dashboard |
 | `python main.py console` | live engine **without a UI** + a command prompt (weak machine, VM, SSH) |
+| `python main.py console --tui` | the same, with a **live table** (needs the `rich` package) |
 | `python main.py backtest` | backtest with the default parameters |
 | `python main.py optimize` | optimise every active pair, each with its own strategies |
 | `python main.py optimize EURUSD GBPJPY` | optimise the given pairs only |
@@ -837,6 +847,13 @@ Two things worth knowing:
 * **Licence sign-in does not happen here.** Console mode deliberately does not
   open a sign-in window (it would not show over SSH): sign in once in the GUI
   and copy `data/licence_token.json` to the other machine.
+
+**Two views, one command set.** `--tui` gives a self-refreshing table
+(instruments, running strategies, open positions, the engine's heartbeat); any
+key pauses the view and the same commands work as in the plain prompt. `rich`
+is **not required**: without it the prompt works unchanged and the program tells
+you what to install. Measured: the table view costs +6.6 MB of memory (a quarter
+of what the tkinter UI's imports cost).
 
 With no argument (`python main.py`) it prints this list.
 
