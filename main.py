@@ -363,9 +363,17 @@ def cmd_notify_test():
         for t in talalt:
             print("  " + _t("notify.cli.found", name=t["name"], id=t["id"]))
         ids = [t["id"] for t in talalt]
+        # ⚠ AZ `isatty()` NEM ELÉG. Van olyan környezet (átirányított bemenet,
+        # leválasztott konzol), ahol terminált jelez, az `input()` mégis
+        # EOF-ot dob — és akkor a beüzemelő parancs egy stack trace-szel áll
+        # meg, pont a legutolsó lépés előtt. A hiányzó válasz nem hiba: ezt a
+        # parancsot azért futtatod, hogy beállítsa.
         _ir = True
         if sys.stdin and sys.stdin.isatty():
-            _ir = input(_t("notify.cli.save_q")).strip().lower() in ("i", "y")
+            try:
+                _ir = input(_t("notify.cli.save_q")).strip().lower() in ("i", "y")
+            except EOFError:
+                _ir = True
         if _ir:
             tg["chat_ids"] = ids
             cfg.setdefault("notify", {})["telegram"] = tg
