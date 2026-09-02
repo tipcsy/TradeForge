@@ -4012,6 +4012,7 @@ class DashboardWindow:
         _shell = TabShell(popup, (("json", _t("tab.json")),
                                   ("gates", _t("tab.gates")),
                                   ("strategies", _t("tab.strategies")),
+                                  ("telegram", _t("tab.telegram")),
                                   ("appearance", _t("gui.megjelenes")),
                                   ("language", _t("lang.label"))))
         _page = {n: _shell.page(n) for n in _shell.names()}
@@ -4041,6 +4042,27 @@ class DashboardWindow:
             [n for n, on in _av_now.items() if on],
             note=_t("gui2.a_program_a_bekapcsoltakat"))
         _strat_ed.frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+        # ── TELEGRAM lap ─────────────────────────────────────────────────
+        # ⚠ MIÉRT KELLETT IDE KAPCSOLÓ. A válaszos kötés (`notify.answer_trading`)
+        # a v3.12.0 óta MEGVOLT, de sehol nem lehetett bekapcsolni: a kulcs
+        # hiányzott a configból, alapból KI, és a felületen nyoma sem volt. A
+        # felhasználó jelzései kimentek a Telegramra — gomb nélkül —, és nem
+        # volt honnan megtudni, hogy a funkció létezik. Egy kész funkció, amit
+        # nem lehet elérni, pontosan annyit ér, mint a hiányzó.
+        _tg = _page["telegram"]
+        _tg_var = tk.BooleanVar(
+            value=bool((self.cfg.get("notify") or {}).get("answer_trading", False)))
+        tk.Checkbutton(_tg, text=_t("notify.answer_trading"), variable=_tg_var,
+                       bg=BG, fg=FG_WHITE, selectcolor=BG_HEADER,
+                       activebackground=BG, activeforeground=FG_WHITE,
+                       font=self._small_font, anchor="w").pack(
+                       anchor="w", padx=10, pady=(12, 2))
+        # ⚠ EGY sor figyelmeztetés — ez az egyetlen kapcsoló a felületen, ami
+        # egy CHATÜZENETBŐL valódi megbízást csinál.
+        tk.Label(_tg, text=_t("notify.answer_trading.warn"), bg=BG, fg=FG_YELLOW,
+                 font=self._small_font, justify="left", wraplength=620,
+                 anchor="w").pack(anchor="w", padx=32, pady=(0, 10))
 
         # ── JSON lap (a korábbi tartalom) ────────────────────────────────
         # ⚠ A Json lap tartalma ide épül. Régen itt egy `popup = _page["json"]`
@@ -4131,6 +4153,12 @@ class DashboardWindow:
             # ⚠ EZEKET IS a `new`-ba kell írni, nem a `self.cfg`-be: a mentés a
             # JSON-szerkesztő szövegéből építi újra a configot, tehát bármit,
             # amit közben a `self.cfg`-n állítanánk, NÉMÁN felülírna.
+            # ⚠ A KULCSOT MINDIG KIÍRJUK, `false`-ként is. A projekt szokása
+            # az, hogy a config csak az ELTÉRÉST rögzíti — itt viszont épp ez
+            # okozta a bajt: a hiányzó kulcs miatt a funkció létezését sem
+            # lehetett megtudni a fájlból. Egy pénzt érintő kapcsoló legyen
+            # KIMONDVA, akkor is, ha ki van kapcsolva.
+            new.setdefault("notify", {})["answer_trading"] = bool(_tg_var.get())
             _dash = new.setdefault("dashboard", {})
             _dash["language"]    = _lang_code()
             _dash["theme"]       = _theme.theme_code(theme_var.get())
