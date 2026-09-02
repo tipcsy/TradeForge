@@ -31,8 +31,7 @@ A súly TÖRT, nem egészre kerekített: a UsaInd 1,08-as súlya felfelé kerek�
 2 slotot enne el egy 8%-os túllépésért, ami feleslegesen szigorú.
 
 A kockázatmentesre állított pozíció (`set_risk_free`) a TELJES súlyát
-felszabadítja — ez már korábban is így volt, és pontosan illik a keret-modellhez
-(nulla kockázat = nulla keret-fogyasztás).
+felszabadítja — nulla kockázat = nulla keret-fogyasztás.
 
 ⚠ A KÉT KORLÁT EGYÜTT ÉL — a keret SZŰKÍT, nem tágít
 ----------------------------------------------------

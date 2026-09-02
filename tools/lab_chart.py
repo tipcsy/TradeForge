@@ -26,10 +26,19 @@ keletkezzenek belőle másolatok." Egy chart-rajzoló ablak ne ugyanabban a
 processzben legyen, mint az élő kereskedés — épp a 2. pont (gyenge gép) szólt
 arról, hogy a motor önmagában fusson.
 
-── MI VAN BENNE (2. lépcső) ───────────────────────────────────────────────
-Gyertyák, idősík-váltás (M1/M5/M15/H1), a mi indikátoraink és jelölőink,
--tól/-ig kijelölés. A gombok (`Add BUY`, `Add BE`, `Start építés`) és a `Play`
-a 3. lépcső; az időpillanat-nézet és a számlagörbe a 4.
+── MI VAN BENNE ───────────────────────────────────────────────────────────
+2. lépcső: gyertyák, idősík-váltás (M1/M5/M15/H1/H4), a mi indikátoraink és
+jelölőink, -tól/-ig kijelölés.
+
+3. lépcső: **kattintásra belépő** (`Add BUY` / `Add SELL`), `Add BE`,
+`Start építés`, és a `Futtat`, ami a megrajzolt forgatókönyvet a VALÓDI motoron
+futtatja végig. Az időpillanat-nézet és a számlagörbe a 4. lépcső.
+
+⚠ A FUTTATÁS NEM ITT TÖRTÉNIK. A gombok csak egy forgatókönyv-szótárat építenek,
+és azt a MEGLÉVŐ `tools/lab_scenario.futtat()`-nak adják át — ugyanannak, ami a
+JSON-fájlt is futtatja, és ami a `trading.backtest.run_pair`-t hívja. Így a
+chartról indított kísérlet és a fájlból indított BITRE ugyanaz; nincs második
+végrehajtási út, ami elcsúszhatna.
 
 ⚠ AZ X TENGELY GYERTYA-INDEX, NEM IDŐ. Naptári tengelyen a hétvégék és a
 kereskedési szünetek üres sávként jelennének meg, és az ár „ugrálna" — az MT5
@@ -394,8 +403,34 @@ class LabAblak:
         tk.Entry(sav, textvariable=self._ig, width=17).pack(side="left", padx=2)
         tk.Button(sav, text="Betölt", command=self.betolt).pack(side="left", padx=8)
 
+        # ── A FORGATÓKÖNYV-GOMBOK ────────────────────────────────────
+        gs = tk.Frame(self.root)
+        gs.pack(fill="x", padx=8, pady=(0, 4))
+        self._mod = tk.StringVar(value="")
+        tk.Label(gs, text="Kattintás:").pack(side="left")
+        for ertek, cimke in (("BUY", "Add BUY"), ("SELL", "Add SELL"),
+                             ("BE", "Add BE")):
+            tk.Radiobutton(gs, text=cimke, value=ertek, variable=self._mod,
+                           indicatoron=False, padx=8,
+                           width=9).pack(side="left", padx=2)
+        tk.Radiobutton(gs, text="—", value="", variable=self._mod,
+                       indicatoron=False, padx=8, width=4).pack(side="left",
+                                                                padx=(2, 12))
+        self._epites = tk.BooleanVar(value=False)
+        tk.Checkbutton(gs, text="Start építés", variable=self._epites).pack(
+            side="left", padx=(0, 12))
+        tk.Button(gs, text="Futtat", command=self.futtat, width=10).pack(
+            side="left", padx=2)
+        tk.Button(gs, text="Töröl", command=self.torol, width=8).pack(
+            side="left", padx=2)
+        tk.Button(gs, text="JSON mentés", command=self.ment).pack(
+            side="left", padx=(12, 2))
+
         self._allapot = tk.Label(self.root, text="", anchor="w", fg="#666")
         self._allapot.pack(fill="x", padx=10)
+        self._eredmeny_cimke = tk.Label(self.root, text="", anchor="w",
+                                        fg="#046", justify="left")
+        self._eredmeny_cimke.pack(fill="x", padx=10)
 
         import matplotlib
         matplotlib.use("TkAgg")
@@ -409,8 +444,32 @@ class LabAblak:
         NavigationToolbar2Tk(self._vaszon, self.root).update()
         self._vaszon.get_tk_widget().pack(fill="both", expand=True,
                                           padx=8, pady=(0, 8))
+        self._vaszon.mpl_connect("button_press_event", self._kattintas)
+        # ── A 3. LÉPCSŐ ÁLLAPOTA ─────────────────────────────────────
+        # ⚠ IDŐBEN tároljuk, nem bar-indexben: az idősík-váltás átszámozza az
+        # indexeket, az időpont viszont ugyanaz marad. Enélkül egy M15-ön
+        # kattintott belépő M1-re váltva máshova ugrana.
+        self._belepok = []          # [(pd.Timestamp, "BUY"|"SELL"), …]
+        self._be_ido = None         # a kézi breakeven időpontja
+        self._eredmeny = None       # a legutóbbi futtatás kimenete
         self._strat_lista()
         self.betolt()
+
+    def _rajzol(self) -> None:
+        """Újrarajzolás ADAT-BETÖLTÉS nélkül — a terv változásakor.
+
+        ⚠ Nem a `betolt()`-öt hívjuk: az újraszámolná a mély ablakot és a
+        rajz-objektumokat (másodpercek), miközben csak egy vonalat kell kitenni."""
+        if self._chart is None:
+            return
+        self._ax.clear()
+        self._ax_sav.clear()
+        gyertyak(self._ax, self._chart)
+        objektumok_rajza(self._ax, self._objs, self._tengely)
+        allapot_sav(self._ax_sav, self._objs, self._tengely)
+        self._rajzol_terv()
+        self._fig.tight_layout()
+        self._vaszon.draw()
 
     def _strat_lista(self) -> None:
         """A PÁR saját engedélyezett stratégiái — ugyanaz a halmaz, amit a motor
@@ -440,14 +499,18 @@ class LabAblak:
             return
         self._ax.clear()
         self._ax_sav.clear()
+        self._chart = self._tengely = None
         if chart is None:
             self._allapot.config(text=f"HIBA: {uzenet}", fg="#c00")
             self._vaszon.draw()
             return
+        self._chart, self._objs = chart, objs
+        self._tengely = Idotengely(chart.index)
         gyertyak(self._ax, chart)
-        tengely = Idotengely(chart.index)
+        tengely = self._tengely
         db = objektumok_rajza(self._ax, objs, tengely)
         allapot_sav(self._ax_sav, objs, tengely)
+        self._rajzol_terv()
         self._ax.set_title(
             f"{self._sym.get()} / {self._strat.get()}  "
             f"{dict(IDOSIKOK).get(self._tf.get(), self._tf.get())}")
@@ -467,6 +530,161 @@ class LabAblak:
                   f" · {db['idon_kivul']} a kijelölésen kívül"
                   + ("   |   " + "   ".join(kiserok(objs)) if objs else "")),
             fg="#666")
+
+    # ── 3. LÉPCSŐ: forgatókönyv-építés a charton ─────────────────────
+    def _kattintas(self, ev) -> None:
+        """Kattintás a charton: belépő vagy BE az adott gyertyán.
+
+        ⚠ CSAK AKKOR, HA VAN AKTÍV MÓD. A nagyítás/görgetés is kattintás — ha
+        minden kattintás belépőt tenne, a chart használhatatlan lenne."""
+        mod = self._mod.get()
+        if not mod or ev.inaxes is not self._ax or ev.xdata is None:
+            return
+        if self._chart is None or len(self._chart) == 0:
+            return
+        i = int(round(float(ev.xdata)))
+        if not (0 <= i < len(self._chart)):
+            return
+        t = self._chart.index[i]
+        if mod == "BE":
+            self._be_ido = t
+        else:
+            self._belepok.append((t, mod))
+        self._eredmeny = None          # az új terv érvényteleníti a régi futást
+        self._rajzol()
+
+    def torol(self) -> None:
+        self._belepok.clear()
+        self._be_ido = None
+        self._eredmeny = None
+        self._rajzol()
+
+    def _forgatokonyv(self) -> dict:
+        """A megrajzolt terv → forgatókönyv-szótár (ugyanaz az alak, mint a JSON).
+
+        ⚠ EGY ALAK, KÉT BEMENET. A chartról és a fájlból ugyanaz a szótár megy a
+        `lab_scenario.futtat()`-ba — így a „kattintva kipróbálom, aztán elmentem
+        és megismétlem" út végig ugyanazt adja."""
+        _f = self._tol.get() or (str(self._chart.index[0])[:16]
+                                 if self._chart is not None else "")
+        _i = self._ig.get() or (str(self._chart.index[-1])[:16]
+                                if self._chart is not None else "")
+        return {
+            "symbol": self._sym.get(),
+            "strategy": self._strat.get(),
+            "from": _f, "to": _i,
+            "entries": [{"time": str(t)[:16], "direction": d}
+                        for t, d in sorted(self._belepok)],
+            "breakeven_at": (str(self._be_ido)[:16] if self._be_ido else None),
+            "rr_preset": "off",
+            "build": bool(self._epites.get()),
+            "balance": 1000.0,
+            "use_strategy_signals": False,
+            "exec_gates": False,
+        }
+
+    def ment(self) -> None:
+        """A terv kimentése JSON-ba — onnantól a parancssoros úton is fut."""
+        from tkinter import filedialog, messagebox
+        import json as _json
+        ut = filedialog.asksaveasfilename(
+            defaultextension=".json", initialfile="fk.json",
+            filetypes=[("JSON", "*.json")], parent=self.root)
+        if not ut:
+            return
+        try:
+            Path(ut).write_text(_json.dumps(self._forgatokonyv(),
+                                            ensure_ascii=False, indent=2),
+                                encoding="utf-8")
+            self._allapot.config(text=f"mentve: {ut}", fg="#666")
+        except OSError as ex:
+            messagebox.showerror("Mentés", str(ex), parent=self.root)
+
+    def futtat(self) -> None:
+        """A megrajzolt forgatókönyv lefuttatása a VALÓDI motoron."""
+        if not self._belepok:
+            self._eredmeny_cimke.config(
+                text="Előbb tegyél le legalább egy belépőt "
+                     "(Add BUY / Add SELL, majd kattints a chartra).",
+                fg="#a60")
+            return
+        self._eredmeny_cimke.config(text="futtatás…", fg="#666")
+        self.root.update_idletasks()
+        try:
+            from tools.lab_scenario import futtat as _futtat
+            self._eredmeny = _futtat(self._forgatokonyv())
+        except SystemExit as ex:
+            # ⚠ A `lab_scenario._hiba` SystemExit-tel áll meg (parancssori
+            # eszköz). Az ablakot ez megölné — itt üzenetté váltjuk.
+            self._eredmeny = None
+            self._eredmeny_cimke.config(text=f"HIBA: {ex}", fg="#c00")
+            return
+        except Exception as ex:
+            log.exception("a forgatókönyv futtatása elbukott")
+            self._eredmeny = None
+            self._eredmeny_cimke.config(
+                text=f"HIBA: {type(ex).__name__}: {ex}", fg="#c00")
+            return
+        self._rajzol()
+        self._osszegzes()
+
+    def _osszegzes(self) -> None:
+        res = (self._eredmeny or {}).get("res")
+        if res is None:
+            return
+        zart = [t for t in res.closed if t.close_time is not None]
+        if not zart:
+            self._eredmeny_cimke.config(
+                text="Egyetlen kötés sem született ezen a terven.", fg="#a60")
+            return
+        _r = 0.0
+        for t in zart:
+            try:
+                _r += t.pnl_usd / t.risk_usd if t.risk_usd else 0.0
+            except (TypeError, ZeroDivisionError):
+                pass
+        _pnl = sum(t.pnl_usd for t in zart)
+        _veg = " · ".join(f"{str(t.close_time)[11:16]} {t.status}" for t in zart[:6])
+        self._eredmeny_cimke.config(
+            text=(f"{len(zart)} lezárt kötés · összesen {_pnl:+.2f} · {_r:+.2f} R"
+                  + (f"   |   {_veg}" if _veg else "")), fg="#046")
+
+    def _rajzol_terv(self) -> None:
+        """A megrajzolt (még nem futtatott) terv jelölői + a futtatás kötései."""
+        if self._chart is None or self._tengely is None:
+            return
+        for t, d in self._belepok:
+            x = self._tengely.hol(int(t.timestamp()))
+            if x is None:
+                continue
+            self._ax.axvline(x, color=szin("lime" if d == "BUY" else "magenta"),
+                             linewidth=1.6, alpha=0.9, zorder=7)
+            self._ax.annotate(d, (x, self._ax.get_ylim()[1]),
+                              color=szin("lime" if d == "BUY" else "magenta"),
+                              fontsize=8, ha="center", va="top", zorder=8)
+        if self._be_ido is not None:
+            x = self._tengely.hol(int(self._be_ido.timestamp()))
+            if x is not None:
+                self._ax.axvline(x, color=szin("cyan"), linewidth=1.2,
+                                 linestyle=":", zorder=7)
+                self._ax.annotate("BE", (x, self._ax.get_ylim()[1]),
+                                  color=szin("cyan"), fontsize=8, ha="center",
+                                  va="top", zorder=8)
+        # ── A FUTTATÁS eredménye: a valódi kötések a charton ──────────────
+        res = (self._eredmeny or {}).get("res")
+        for t in (getattr(res, "trades", None) or []):
+            x1 = self._tengely.hol(int(t.open_time.timestamp()))
+            x2 = (self._tengely.hol(int(t.close_time.timestamp()))
+                  if t.close_time is not None else None)
+            if x1 is None:
+                continue
+            self._ax.plot([x1], [t.open_price], marker="o", color=szin("white"),
+                          markersize=7, zorder=9)
+            if x2 is not None:
+                _ny = (t.pnl_usd or 0) > 0
+                self._ax.plot([x1, x2], [t.open_price, t.close_price],
+                              color=szin("green" if _ny else "red"),
+                              linewidth=2.0, alpha=0.9, zorder=9)
 
     def fut(self) -> None:
         self.root.mainloop()
