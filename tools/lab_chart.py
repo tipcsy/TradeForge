@@ -32,7 +32,20 @@ jelölőink, -tól/-ig kijelölés.
 
 3. lépcső: **kattintásra belépő** (`Add BUY` / `Add SELL`), `Add BE`,
 `Start építés`, és a `Futtat`, ami a megrajzolt forgatókönyvet a VALÓDI motoron
-futtatja végig. Az időpillanat-nézet és a számlagörbe a 4. lépcső.
+futtatja végig. Plusz a **lejátszás**: `Play` / `Pause`, léptetés, sebesség,
+visszatekerés, BID/ASK vonal, és a „csak eddig látszik" kapcsoló.
+
+⚠ A LEJÁTSZÁS NEM FUTTATJA A MOTORT LÉPÉSENKÉNT. Egy időkurzor halad a
+szakaszon; a jelölőket menet közben rakod le, és a `Futtat` a végén ugyanúgy a
+`lab_scenario.futtat()`-ot hívja. Ha a lejátszás maga „kereskedne", az egy
+MÁSODIK végrehajtási út lenne — pontosan az, amitől a projekt már többször
+megszenvedett. A `Play` a LÁTVÁNYT animálja, a döntés a tiéd, a végrehajtás a
+motoré.
+
+⚠ MIÉRT KELL A „CSAK EDDIG LÁTSZIK". Enélkül a lejátszás alatt végig látod a
+jövőt, és az egész csak animáció. A jövő elrejtése az EGYETLEN dolog, ami a
+`Play`-t valódi döntés-teszteléssé teszi — onnantól nem a menedzsmentet
+próbálod, hanem azt, hogy felismered-e a helyzetet ELŐRE.
 
 ⚠ A FUTTATÁS NEM ITT TÖRTÉNIK. A gombok csak egy forgatókönyv-szótárat építenek,
 és azt a MEGLÉVŐ `tools/lab_scenario.futtat()`-nak adják át — ugyanannak, ami a
@@ -442,6 +455,31 @@ class LabAblak:
         tk.Label(gs, text="  (lerakás után: húzd a jelölőt · jobb gomb: törli)",
                  fg="#888").pack(side="left")
 
+        # ── LEJÁTSZÓ ─────────────────────────────────────────────────
+        ls = tk.Frame(self.root)
+        ls.pack(fill="x", padx=8, pady=(0, 4))
+        self._play_gomb = tk.Button(ls, text="▶ Play", width=9,
+                                    command=self.play_szunet)
+        self._play_gomb.pack(side="left", padx=2)
+        for cimke, lepes in (("⏮", -1000), ("◀◀", -50), ("◀", -1),
+                             ("▶", 1), ("▶▶", 50), ("⏭", 1000)):
+            tk.Button(ls, text=cimke, width=4,
+                      command=lambda n=lepes: self.leptet(n)).pack(side="left")
+        tk.Label(ls, text="  sebesség").pack(side="left")
+        self._sebesseg = tk.DoubleVar(value=4.0)     # gyertya / másodperc
+        tk.Scale(ls, from_=0.5, to=40.0, resolution=0.5, orient="horizontal",
+                 variable=self._sebesseg, length=140,
+                 showvalue=True).pack(side="left")
+        self._csak_eddig = tk.BooleanVar(value=True)
+        tk.Checkbutton(ls, text="csak eddig látszik",
+                       variable=self._csak_eddig,
+                       command=self._rajzol).pack(side="left", padx=(12, 4))
+        self._bidask = tk.BooleanVar(value=True)
+        tk.Checkbutton(ls, text="BID/ASK", variable=self._bidask,
+                       command=self._rajzol).pack(side="left")
+        tk.Button(ls, text="Lejátszás vége", command=self.kurzor_le).pack(
+            side="left", padx=(12, 2))
+
         self._allapot = tk.Label(self.root, text="", anchor="w", fg="#666")
         self._allapot.pack(fill="x", padx=10)
         self._eredmeny_cimke = tk.Label(self.root, text="", anchor="w",
@@ -486,6 +524,10 @@ class LabAblak:
         self._belepok = []          # [(pd.Timestamp, "BUY"|"SELL"), …]
         self._be_ido = None         # a kézi breakeven időpontja
         self._eredmeny = None       # a legutóbbi futtatás kimenete
+        # ── LEJÁTSZÁS ────────────────────────────────────────────────────
+        self._kurzor = None         # a lejátszás helye (bar-index) vagy None
+        self._jatszik = False
+        self._utem_id = None        # a Tk `after` azonosítója
         self._strat_lista()
         self.betolt()
 
@@ -493,6 +535,100 @@ class LabAblak:
         """A kiválasztott stratégia neve — a „nincs" üres sztringre fordul."""
         n = self._strat.get()
         return "" if n == NINCS_STRAT else n
+
+    # ── LEJÁTSZÁS ────────────────────────────────────────────────────
+    def play_szunet(self) -> None:
+        """`Play` / `Pause`. Az első indításnál a kurzor a szakasz elejére áll."""
+        if self._chart is None or len(self._chart) < 2:
+            return
+        self._jatszik = not self._jatszik
+        if self._jatszik and self._kurzor is None:
+            self._kurzor = 0
+        self._play_gomb.config(text="⏸ Pause" if self._jatszik else "▶ Play")
+        if self._jatszik:
+            self._utem()
+        elif self._utem_id is not None:
+            try:
+                self.root.after_cancel(self._utem_id)
+            except Exception:
+                pass
+            self._utem_id = None
+
+    def _utem(self) -> None:
+        """Egy lejátszási lépés. ⚠ A Tk `after`-jével, NEM `sleep`-pel: a
+        `sleep` befagyasztaná az ablakot, és a gombok sem működnének közben."""
+        if not self._jatszik or self._chart is None:
+            return
+        if self._kurzor is None or self._kurzor >= len(self._chart) - 1:
+            self._jatszik = False
+            self._play_gomb.config(text="▶ Play")
+            return
+        self._kurzor += 1
+        self._rajzol()
+        _mp = max(0.02, 1.0 / max(0.5, float(self._sebesseg.get())))
+        self._utem_id = self.root.after(int(_mp * 1000), self._utem)
+
+    def leptet(self, n: int) -> None:
+        """Léptetés/visszatekerés. A lejátszást megállítja — különben a
+        kézi léptetés és az ütem egymás ellen dolgozna."""
+        if self._chart is None or len(self._chart) < 2:
+            return
+        self._jatszik = False
+        self._play_gomb.config(text="▶ Play")
+        alap = self._kurzor if self._kurzor is not None else 0
+        self._kurzor = max(0, min(len(self._chart) - 1, alap + int(n)))
+        self._rajzol()
+
+    def kurzor_le(self) -> None:
+        """A lejátszás vége: nincs kurzor, a teljes chart látszik."""
+        self._jatszik = False
+        self._play_gomb.config(text="▶ Play")
+        self._kurzor = None
+        self._rajzol()
+
+    def _rajzol_kurzor(self) -> None:
+        """Az időkurzor, a BID/ASK vonal, és a jövő elrejtése."""
+        if self._kurzor is None or self._chart is None:
+            return
+        i = int(self._kurzor)
+        x = i - 0.5 + 1.0                       # a gyertya jobb széle: „eddig"
+        self._ax.axvline(x, color=szin("yellow"), linewidth=1.4, alpha=0.9,
+                         zorder=10)
+        sor = self._chart.iloc[i]
+        # ── BID / ASK ────────────────────────────────────────────────────
+        # ⚠ A SPREAD AZ ADATBÓL JÖN (`avg_spread`), nem találjuk ki. Ugyanaz az
+        # oszlop, amivel a backtest is számol — különben a labor mást mutatna,
+        # mint amit a motor fizet.
+        if self._bidask.get():
+            bid = float(sor["close"])
+            _sp = float(sor.get("avg_spread", 0.0) or 0.0)
+            ask = bid + _sp
+            for ar, sz, cim in ((bid, "blue", "BID"), (ask, "orange", "ASK")):
+                self._ax.axhline(ar, color=szin(sz), linewidth=0.9,
+                                 linestyle="--", alpha=0.8, zorder=10)
+                self._ax.annotate(f"{cim} {self._ar_szoveg(ar)}",
+                                  (self._ax.get_xlim()[1], ar),
+                                  color=szin(sz), fontsize=8, ha="right",
+                                  va="bottom", zorder=11)
+        # ── A JÖVŐ ELREJTÉSE ─────────────────────────────────────────────
+        # ⚠ Nem a gyertyákat hagyjuk ki (az újrarajzolást drágítaná), hanem
+        # letakarjuk — így a lejátszás gyors marad.
+        if self._csak_eddig.get():
+            _a, _b = self._ax.get_xlim()
+            if _b > x:
+                self._ax.axvspan(x, _b, color="#101010", alpha=0.93, zorder=9)
+
+    def _ar_szoveg(self, ar: float) -> str:
+        """Ár a pár tizedeseivel. ⚠ `%.5g` NEM: nagy szinten exponenciálisra vált
+        és a szintek egyformává válnak (ez a projektben már háromszor elsült)."""
+        try:
+            import math
+            pc = (self.cfg.get("pairs") or {}).get(self._sym.get()) or {}
+            ps = float(pc.get("point_size") or 0.0)
+            tiz = 0 if ps <= 0 else min(8, max(0, int(round(-math.log10(ps)))))
+            return f"{float(ar):.{tiz}f}"
+        except (TypeError, ValueError, OverflowError):
+            return f"{float(ar):.5f}"
 
     def _rajzol(self) -> None:
         """Újrarajzolás ADAT-BETÖLTÉS nélkül — a terv változásakor.
@@ -507,6 +643,7 @@ class LabAblak:
         objektumok_rajza(self._ax, self._objs, self._tengely)
         allapot_sav(self._ax_sav, self._objs, self._tengely)
         self._rajzol_terv()
+        self._rajzol_kurzor()
         self._fig.tight_layout()
         self._vaszon.draw()
 
@@ -569,8 +706,26 @@ class LabAblak:
         _r = (_h - _l) * 0.06 or 1.0
         self._ax.set_ylim(_l - _r, _h + _r)
 
+    def _kurzor_ido(self):
+        """A kurzor IDŐPONTJA — az idősík-váltáshoz.
+
+        ⚠ Ugyanaz a csapda, mint a nézetnél: bar-indexben őrizve a váltás után
+        máshova ugrana (M15-ön 96 gyertya egy nap, M1-en 1440)."""
+        if self._kurzor is None or self._chart is None:
+            return None
+        i = max(0, min(len(self._chart) - 1, int(self._kurzor)))
+        return self._chart.index[i]
+
+    def _kurzor_vissza(self, t) -> None:
+        if t is None or self._chart is None:
+            self._kurzor = None
+            return
+        poz = self._chart.index.get_indexer([t], method="nearest")
+        self._kurzor = int(poz[0]) if len(poz) and poz[0] >= 0 else None
+
     def betolt(self) -> None:
         _elozo_ido = self._lathato_ido()
+        _kurzor_t = self._kurzor_ido()
         self._allapot.config(text="betöltés…", fg="#666")
         self.root.update_idletasks()
         try:
@@ -606,6 +761,8 @@ class LabAblak:
         self._ax_sav.set_xticklabels(
             [t.strftime("%m-%d %H:%M") for t in chart.index[::_n]],
             rotation=45, fontsize=7, ha="right")
+        self._kurzor_vissza(_kurzor_t)
+        self._rajzol_kurzor()
         self._allitsd_ido(_elozo_ido)
         self._fig.tight_layout()
         self._vaszon.draw()

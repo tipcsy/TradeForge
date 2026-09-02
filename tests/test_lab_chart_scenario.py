@@ -155,7 +155,7 @@ check("a belépő IDŐPONTKÉNT tárolódik (nem bar-indexként)",
       "self.ido_x(" in _katt and "index[i]" not in _katt)
 
 # ── 6. A KATTINTÁS IDŐSÍKTÓL FÜGGETLEN ────────────────────────────────────
-# ⚠ EZ VOLT A „FURASÁG" (2026-09-03, felhasználói jelzés): „ha M1-es idősíkra
+# ⚠ EZ VOLT A „FURASÁG” (2026-09-03, felhasználói jelzés): „ha M1-es idősíkra
 # kattintok, az nem ugyanaz, mint ha M15-re kattintanék". Az ok: a gyertya
 # NYITÓ idejét adtuk vissza, tehát M15-ön a kattintás a gyertya elejére ugrott,
 # M1-en viszont a percre — ugyanaz a vizuális pont akár 15 perccel (H4-en 4
@@ -205,7 +205,7 @@ _b._torol_kozeli(_t0 + pd.Timedelta(hours=3, minutes=2))
 check("a BE-jelölő is törölhető, ha az van közelebb",
       _b._be_ido is None and len(_b._belepok) == 1)
 
-# ── 8. „nincs stratégia" → TISZTA chart ───────────────────────────────────
+# ── 8. „nincs stratégia” → TISZTA chart ───────────────────────────────────
 check("a `— nincs —` üres stratégia-névre fordul",
       _ablak([], chart=_chart).__class__._strat_nev.__doc__ is not None)
 _ns = _ablak([], chart=_chart)
@@ -250,7 +250,7 @@ check("jelölőtől TÁVOL nem fog meg (a chart görgethető marad)",
 # látható szélességgel kell tágulnia.
 # ⚠ A JELÖLŐ a gyertya BAL SZÉLÉN ül (`Idotengely.hol` geometriai leképezése),
 # tehát az 50. gyertyáé x=49,5 — nem 50,0. Az első tesztváltozatomban 50,0-t
-# írtam, és a fogás „nem működött", holott a kód jó volt.
+# írtam, és a fogás „nem működött”, holott a kód jó volt.
 _xm = _d._tengely.hol(int(_idx2[50].timestamp()))
 _d._ax = _Ax(45, 55)                       # erős nagyítás → tűrés 0,5
 check("kinagyítva SZŰKEBB a tűrés (pontosabb fogás)",
@@ -312,6 +312,89 @@ if _TK:
                     _abl.root.destroy()
             except Exception:
                 pass
+
+# ── 11. LEJÁTSZÁS (5-7. pont) ─────────────────────────────────────────────
+# ⚠ A LEJÁTSZÁS NEM FUTTATJA A MOTORT LÉPÉSENKÉNT. Egy időkurzor halad a
+# szakaszon; a `Futtat` a végén ugyanúgy a `lab_scenario.futtat()`-ot hívja.
+# Ha a lejátszás maga „kereskedne”, az egy MÁSODIK végrehajtási út lenne.
+class _Gomb:
+    def __init__(self):
+        self.szoveg = ""
+
+    def config(self, **kw):
+        self.szoveg = kw.get("text", self.szoveg)
+
+
+def _jatszo(n=100, freq="15min"):
+    _i = pd.date_range("2026-08-27 00:00", periods=n, freq=freq, tz="UTC")
+    a = _ablak([], chart=pd.DataFrame(
+        {"open": 1.0, "high": 2.0, "low": 0.5, "close": 1.5,
+         "avg_spread": 0.02}, index=_i))
+    a._kurzor = None
+    a._jatszik = False
+    a._utem_id = None
+    a._play_gomb = _Gomb()
+    a._rajzol = lambda: None
+    a._tengely = lc.Idotengely(_i)
+    return a
+
+
+_j = _jatszo()
+_j.leptet(5)
+check("a léptetés a szakasz elejéről indul", _j._kurzor == 5, str(_j._kurzor))
+_j.leptet(-50)
+check("visszatekerésnél nem megy 0 alá", _j._kurzor == 0, str(_j._kurzor))
+_j.leptet(1000)
+check("előretekerésnél nem megy az utolsó gyertyán túl",
+      _j._kurzor == 99, str(_j._kurzor))
+_j.kurzor_le()
+check("a „Lejátszás vége” leveszi a kurzort (teljes chart)",
+      _j._kurzor is None and _j._jatszik is False)
+
+# ⚠ A KÉZI LÉPTETÉS ÁLLÍTSA MEG a lejátszást — különben az ütem és a kattintás
+# egymás ellen dolgozna, és a kurzor „visszaugrálna”.
+_j._jatszik = True
+_j.leptet(1)
+check("a kézi léptetés megállítja a lejátszást",
+      _j._jatszik is False and _j._play_gomb.szoveg.endswith("Play"))
+
+# ── A LEJÁTSZÁS a Tk `after`-jével megy, NEM `sleep`-pel ──────────────────
+# ⚠ A `sleep` befagyasztaná az ablakot: a gombok sem működnének közben.
+_ply = _src.split("def _utem", 1)[1].split(chr(10) + "    def ", 1)[0]
+# ⚠ A HÍVÁSRA szűkítve: a `_utem` DOCSTRINGJE maga is leírja, hogy „nem
+# `sleep`-pel" — a puszta szó-keresés a saját magyarázatra bukott el.
+check("a lejátszás a Tk `after`-jét használja (nem sleep)",
+      "self.root.after(" in _ply and "sleep(" not in _ply)
+check("a sebesség gyertya/másodpercben számol",
+      "1.0 / max(0.5, float(self._sebesseg.get()))" in _ply)
+
+# ── AZ IDŐSÍK-VÁLTÁS a kurzort IDŐBEN őrzi ───────────────────────────────
+# ⚠ Ugyanaz a csapda, mint a nézetnél: bar-indexben őrizve M15→M1 váltásnál
+# 15-szörös lenne az ugrás.
+_j2 = _jatszo()
+_j2._kurzor = 40
+_t_kurzor = _j2._kurzor_ido()
+check("a kurzor időpontja kiolvasható",
+      str(_t_kurzor)[:16] == "2026-08-27 10:00", str(_t_kurzor))
+_j3 = _jatszo(n=1500, freq="1min")          # ugyanaz a szakasz M1-en
+_j3._kurzor_vissza(_t_kurzor)
+check("idősík-váltás után a kurzor UGYANARRA az időre áll",
+      str(_j3._chart.index[_j3._kurzor])[:16] == "2026-08-27 10:00",
+      str(_j3._chart.index[_j3._kurzor]))
+
+# ── BID/ASK: a spread az ADATBÓL jön ─────────────────────────────────────
+# ⚠ Ha kitalálnánk, a labor mást mutatna, mint amit a motor fizet.
+_kur = _src.split("def _rajzol_kurzor", 1)[1].split(chr(10) + "    def ", 1)[0]
+check("a BID/ASK az `avg_spread` oszlopból számol",
+      'sor.get("avg_spread"' in _kur)
+check("az ár a pár tizedeseivel jelenik meg (nem %.5g)",
+      "self._ar_szoveg(" in _kur)
+check("a „csak eddig látszik” letakarja a jövőt",
+      "self._csak_eddig.get()" in _kur and "axvspan" in _kur)
+
+# ── A LEJÁTSZÁS NEM VÉGREHAJT ────────────────────────────────────────────
+for _tilos in ("open_position", "run_pair(", "def simulate"):
+    check(f"a lejátszás nem kereskedik ({_tilos!r})", _tilos not in _src)
 
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")
