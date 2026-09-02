@@ -80,6 +80,9 @@ def szin(nev: str) -> str:
 # A parquetből M1 és M15 jön; a többi ezekből mintázódik át.
 IDOSIKOK = ((1, "M1"), (5, "M5"), (15, "M15"), (60, "H1"), (240, "H4"))
 
+# A stratégia-választó „nincs" eleme: tiszta chart, jelölők nélkül.
+NINCS_STRAT = "— nincs —"
+
 
 def chart_barok(df_m1, df_m15, perc: int):
     """A CHART gyertyái a kért idősíkon — a meglévő átmintázóval.
@@ -293,6 +296,17 @@ def keszit(symbol: str, strategy_name: str, tf_perc: int,
     pair_cfg = (cfg.get("pairs") or {}).get(symbol)
     if not pair_cfg:
         return None, [], f"a(z) {symbol} nincs a config.json `pairs` blokkjában"
+    if not strategy_name:
+        # ⚠ „nincs stratégia": TISZTA chart, a rajz-objektumok nélkül. A
+        # gyertyák ugyanabból a parquetből jönnek — csak a jelölők maradnak el.
+        df15, df1 = bt.load_data(symbol)
+        if df15 is None or df1 is None:
+            return None, [], (f"nincs letöltött adat a(z) {symbol} párhoz — "
+                              f"`python main.py download`")
+        chart = _vag(chart_barok(df1, df15, tf_perc), tol, ig)
+        if chart is None or len(chart) < 2:
+            return None, [], "a megadott időszakra nincs elég gyertya"
+        return chart, [], ""
     try:
         strategy = get_strategy_by_name(strategy_name)
     except Exception:
@@ -425,6 +439,8 @@ class LabAblak:
             side="left", padx=2)
         tk.Button(gs, text="JSON mentés", command=self.ment).pack(
             side="left", padx=(12, 2))
+        tk.Label(gs, text="  (lerakás után: húzd a jelölőt · jobb gomb: törli)",
+                 fg="#888").pack(side="left")
 
         self._allapot = tk.Label(self.root, text="", anchor="w", fg="#666")
         self._allapot.pack(fill="x", padx=10)
@@ -445,15 +461,38 @@ class LabAblak:
         self._vaszon.get_tk_widget().pack(fill="both", expand=True,
                                           padx=8, pady=(0, 8))
         self._vaszon.mpl_connect("button_press_event", self._kattintas)
+        # ⚠ A BEÉPÍTETT ESZKÖZTÁR NAGYÍTÁSA KÉNYELMETLEN (mód-váltás, keretes
+        # kijelölés). A görgő-nagyítás és a húzás az, amit egy chartnál
+        # megszokott az ember — és nem kell hozzá új függőség.
+        self._vaszon.mpl_connect("scroll_event", self._gorgo)
+        self._vaszon.mpl_connect("button_press_event", self._huzas_kezd)
+        self._vaszon.mpl_connect("motion_notify_event", self._huzas)
+        self._vaszon.mpl_connect("button_release_event", self._huzas_vege)
+        self._huzas_x = None     # a chart görgetése
+        self._fogott = None      # a MEGFOGOTT jelölő ("be"|"belepo", index)
         # ── A 3. LÉPCSŐ ÁLLAPOTA ─────────────────────────────────────
         # ⚠ IDŐBEN tároljuk, nem bar-indexben: az idősík-váltás átszámozza az
         # indexeket, az időpont viszont ugyanaz marad. Enélkül egy M15-ön
         # kattintott belépő M1-re váltva máshova ugrana.
+        # ⚠ A CHART-MEZŐK MÁR ITT LÉTEZZENEK. A `betolt()` legelső dolga a
+        # látott időszak elmentése (`_lathato_ido`), ami a `self._chart`-ot
+        # olvassa — az első hívásnál viszont az még nem jött létre, és az ablak
+        # `AttributeError`-ral el sem indult. A unit-tesztek ezt nem fogták meg:
+        # azok `__new__`-val építik az objektumot és kézzel állítják a mezőket.
+        # UI-változtatás után EL KELL INDÍTANI az ablakot.
+        self._chart = None          # a kirajzolt gyertyák (DataFrame)
+        self._objs = []             # a stratégia rajz-objektumai
+        self._tengely = None        # epoch ↔ bar-index leképezés
         self._belepok = []          # [(pd.Timestamp, "BUY"|"SELL"), …]
         self._be_ido = None         # a kézi breakeven időpontja
         self._eredmeny = None       # a legutóbbi futtatás kimenete
         self._strat_lista()
         self.betolt()
+
+    def _strat_nev(self) -> str:
+        """A kiválasztott stratégia neve — a „nincs" üres sztringre fordul."""
+        n = self._strat.get()
+        return "" if n == NINCS_STRAT else n
 
     def _rajzol(self) -> None:
         """Újrarajzolás ADAT-BETÖLTÉS nélkül — a terv változásakor.
@@ -480,16 +519,63 @@ class LabAblak:
         if not nevek:
             from strategy import available_strategy_names
             nevek = list(available_strategy_names(self.cfg))
+        # ⚠ „nincs": a stratégia jelölői nélküli, TISZTA chart. A felhasználó
+        # kérése — a saját belépőit néha a stratégia rajza nélkül akarja látni.
+        nevek = [NINCS_STRAT] + nevek
         self._strat_box["values"] = nevek
         if self._strat.get() not in nevek:
             self._strat.set(nevek[0] if nevek else "")
 
+    def _lathato_ido(self):
+        """A jelenleg LÁTOTT x-tartomány IDŐBEN — az idősík-váltáshoz.
+
+        ⚠ Idősíkot váltva a bar-index MÁST jelent (M15-ön 96 gyertya egy nap,
+        M1-en 1440). Ha a nézetet indexben őriznénk, a váltás után teljesen más
+        szakaszra ugranánk; időben őrizve ugyanaz a szakasz marad, csak
+        finomabb/durvább felbontásban."""
+        if self._chart is None:
+            return None
+        try:
+            a, b = self._ax.get_xlim()
+        except Exception:
+            return None
+        ta, tb = self.ido_x(a), self.ido_x(b)
+        return (ta, tb) if (ta is not None and tb is not None) else None
+
+    def _allitsd_ido(self, tart) -> None:
+        """A mentett IDŐ-tartomány visszaállítása az ÚJ idősíkon."""
+        if tart is None or self._chart is None or self._tengely is None:
+            return
+        xa = self._tengely.hol(int(tart[0].timestamp()))
+        xb = self._tengely.hol(int(tart[1].timestamp()))
+        # A széleken a `hol()` `None`-t ad (kívül esik) — akkor a szélre húzzuk.
+        xa = 0 - 0.5 if xa is None else xa
+        xb = (len(self._chart) - 0.5) if xb is None else xb
+        if xb > xa:
+            self._ax.set_xlim(xa, xb)
+            self._y_illesztes(xa, xb)
+
+    def _y_illesztes(self, xa: float, xb: float) -> None:
+        """Az ÁR-tengely a LÁTHATÓ szakaszra. Enélkül egy kinagyított részlet
+        lapos vonallá préselődne a teljes szakasz ár-tartományában."""
+        if self._chart is None:
+            return
+        i0 = max(0, int(np.floor(xa + 0.5)))
+        i1 = min(len(self._chart), int(np.ceil(xb + 0.5)) + 1)
+        if i1 - i0 < 2:
+            return
+        _l = float(self._chart["low"].iloc[i0:i1].min())
+        _h = float(self._chart["high"].iloc[i0:i1].max())
+        _r = (_h - _l) * 0.06 or 1.0
+        self._ax.set_ylim(_l - _r, _h + _r)
+
     def betolt(self) -> None:
+        _elozo_ido = self._lathato_ido()
         self._allapot.config(text="betöltés…", fg="#666")
         self.root.update_idletasks()
         try:
             chart, objs, uzenet = keszit(
-                self._sym.get(), self._strat.get(), self._tf.get(),
+                self._sym.get(), self._strat_nev(), self._tf.get(),
                 self._tol.get() or None, self._ig.get() or None, cfg=self.cfg)
         except Exception as ex:
             # ⚠ KIMONDJUK. Egy labor, ami csak üres chartot mutat, használhatatlan.
@@ -520,6 +606,7 @@ class LabAblak:
         self._ax_sav.set_xticklabels(
             [t.strftime("%m-%d %H:%M") for t in chart.index[::_n]],
             rotation=45, fontsize=7, ha="right")
+        self._allitsd_ido(_elozo_ido)
         self._fig.tight_layout()
         self._vaszon.draw()
         # ⚠ AZ IDŐN KÍVÜLI JELÖLŐK SZÁMÁT KIÍRJUK: ha egy jel azért nem látszik,
@@ -542,15 +629,162 @@ class LabAblak:
             return
         if self._chart is None or len(self._chart) == 0:
             return
-        i = int(round(float(ev.xdata)))
-        if not (0 <= i < len(self._chart)):
+        t = self.ido_x(float(ev.xdata))
+        if t is None:
             return
-        t = self._chart.index[i]
+        if ev.button == 3:                       # jobb gomb: TÖRLÉS
+            self._torol_kozeli(t)
+            return
         if mod == "BE":
             self._be_ido = t
         else:
             self._belepok.append((t, mod))
+        # ⚠ LERAKÁS UTÁN AZONNAL FOGD-ÉS-VIDD. A felhasználó kérése
+        # (2026-09-03): „általában leteszem és beigazítom". Ha a mód aktív
+        # maradna, a következő kattintás egy ÚJABB belépőt tenne le ahelyett,
+        # hogy a meglévőt igazítaná — és a chart tele lenne véletlen jelölőkkel.
+        self._mod.set("")
         self._eredmeny = None          # az új terv érvényteleníti a régi futást
+        self._rajzol()
+
+    def _gorgo(self, ev) -> None:
+        """Görgő = nagyítás az EGÉR KÖRÜL (nem a chart közepére)."""
+        if ev.inaxes is not self._ax or ev.xdata is None or self._chart is None:
+            return
+        a, b = self._ax.get_xlim()
+        f = 0.8 if ev.button == "up" else 1.25
+        uj_a = ev.xdata - (ev.xdata - a) * f
+        uj_b = ev.xdata + (b - ev.xdata) * f
+        if uj_b - uj_a < 5:                      # ne lehessen 5 gyertya alá
+            return
+        self._ax.set_xlim(uj_a, uj_b)
+        self._y_illesztes(uj_a, uj_b)
+        self._vaszon.draw_idle()
+
+    # A jelölő megfogásának tűrése CHART-KOORDINÁTÁBAN (gyertya). A nézettel
+    # együtt kell tágulnia: kinagyítva egy gyertya sok képpont, kicsinyítve
+    # kevés — fix gyertya-tűrés mellett kicsinyítve képtelenség lenne eltalálni.
+    FOGAS_TURES_ARANY = 0.012          # a látható szélesség ennyied része
+
+    def _foghato(self, x: float):
+        """Melyik jelölő van a `x` közelében? `("be", None)` | `("belepo", i)`."""
+        if self._chart is None or self._tengely is None:
+            return None
+        a, b = self._ax.get_xlim()
+        tures = max(0.5, abs(b - a) * self.FOGAS_TURES_ARANY)
+        jelolt = []
+        if self._be_ido is not None:
+            _x = self._tengely.hol(int(self._be_ido.timestamp()))
+            if _x is not None:
+                jelolt.append((abs(_x - x), ("be", None)))
+        for i, (t, _d) in enumerate(self._belepok):
+            _x = self._tengely.hol(int(t.timestamp()))
+            if _x is not None:
+                jelolt.append((abs(_x - x), ("belepo", i)))
+        if not jelolt:
+            return None
+        tav, mit = min(jelolt, key=lambda p: p[0])
+        return mit if tav <= tures else None
+
+    def _huzas_kezd(self, ev) -> None:
+        """Bal gomb: MEGFOGJA a közeli jelölőt, különben görgeti a chartot.
+
+        ⚠ Csak akkor, ha NINCS aktív kattintás-mód — különben a belépő-lerakás
+        és a görgetés ütné egymást."""
+        if (ev.inaxes is not self._ax or ev.button != 1
+                or self._mod.get() or ev.xdata is None):
+            return
+        self._fogott = self._foghato(float(ev.xdata))
+        if self._fogott is None:
+            self._huzas_x = float(ev.xdata)
+
+    def _huzas(self, ev) -> None:
+        if ev.inaxes is not self._ax or ev.xdata is None:
+            return
+        # ── A MEGFOGOTT JELÖLŐ mozgatása ─────────────────────────────────
+        if self._fogott is not None:
+            t = self.ido_x(float(ev.xdata))
+            if t is None:
+                return
+            mit, i = self._fogott
+            if mit == "be":
+                if t == self._be_ido:
+                    return                 # ugyanaz a perc — ne rajzoljunk újra
+                self._be_ido = t
+            else:
+                if t == self._belepok[i][0]:
+                    return
+                self._belepok[i] = (t, self._belepok[i][1])
+            # ⚠ CSAK PERC-VÁLTÁSKOR rajzolunk újra. Egérmozgásonként a teljes
+            # chart (gyertyák + rajz-objektumok) újrarajzolása akadozna.
+            self._eredmeny = None
+            self._rajzol()
+            return
+        # ── Görgetés ─────────────────────────────────────────────────────
+        if self._huzas_x is None:
+            return
+        d = self._huzas_x - float(ev.xdata)
+        a, b = self._ax.get_xlim()
+        self._ax.set_xlim(a + d, b + d)
+        self._y_illesztes(a + d, b + d)
+        self._vaszon.draw_idle()
+
+    def _huzas_vege(self, ev) -> None:
+        self._huzas_x = None
+        self._fogott = None
+
+    def ido_x(self, x: float):
+        """Chart-koordináta → IDŐPONT, a gyertyán BELÜL is.
+
+        ⚠ EZ VOLT A „FURASÁG" (2026-09-03). Korábban a gyertya NYITÓ idejét
+        adtuk vissza (`index[round(x)]`), tehát M15-ön bárhova kattintottál a
+        gyertyán belül, a belépő a gyertya elejére ugrott — M1-en viszont a
+        percre. Ugyanaz a vizuális pont így akár 15 perccel (H4-en 4 órával)
+        máshova került, holott a motor M1-en hajt végre.
+
+        Most a TÖRT pozíciót is használjuk: a gyertya [i-0.5, i+0.5) sávot
+        foglal el, a benne mért arány pedig a gyertyán belüli időt adja. Így a
+        kattintás minden idősíkon UGYANOTT van."""
+        if self._chart is None or len(self._chart) < 2:
+            return None
+        n = len(self._chart)
+        i = int(np.floor(x + 0.5))
+        if not (0 <= i < n):
+            return None
+        arany = float(x + 0.5 - i)               # 0..1 a gyertyán belül
+        arany = max(0.0, min(0.999, arany))
+        idx = self._chart.index
+        koz = (idx[1] - idx[0]) if n > 1 else pd.Timedelta(minutes=1)
+        # ⚠ EGÉSZ MÁSODPERCRE ELŐBB, PERCRE UTÁNA. A közvetlen
+        # `(idx[i] + koz*arany).floor("min")` lebegőpontos hibát hoz: M15-ön a
+        # 0,53333 × 15 perc = 7,99999… percből a `floor` 7-et csinál, tehát
+        # ugyanaz a kattintás M1-en 01:08-at, M15-ön 01:07-et adott. A
+        # másodperc-kerekítés ezt elrendezi, a percre vágás pedig azért marad,
+        # mert a motor M1-es gyertyákon dolgozik — finomabb felbontásnak nincs
+        # értelme.
+        _mp = int(round(koz.total_seconds() * arany))
+        return (idx[i] + pd.Timedelta(seconds=_mp)).floor("min")
+
+    def _torol_kozeli(self, t) -> None:
+        """A legközelebbi jelölő törlése (jobb egérgomb).
+
+        ⚠ A `Töröl` gomb MINDENT kiürít; egyetlen elrontott kattintás miatt az
+        egész tervet újra kellene rajzolni."""
+        if self._be_ido is not None and self._belepok:
+            _be_tav = abs((self._be_ido - t).total_seconds())
+            _e_tav = min(abs((x - t).total_seconds()) for x, _ in self._belepok)
+            if _be_tav <= _e_tav:
+                self._be_ido = None
+                self._eredmeny = None
+                self._rajzol()
+                return
+        if self._belepok:
+            _i = min(range(len(self._belepok)),
+                     key=lambda k: abs((self._belepok[k][0] - t).total_seconds()))
+            self._belepok.pop(_i)
+        elif self._be_ido is not None:
+            self._be_ido = None
+        self._eredmeny = None
         self._rajzol()
 
     def torol(self) -> None:
@@ -571,7 +805,7 @@ class LabAblak:
                                 if self._chart is not None else "")
         return {
             "symbol": self._sym.get(),
-            "strategy": self._strat.get(),
+            "strategy": self._strat_nev(),
             "from": _f, "to": _i,
             "entries": [{"time": str(t)[:16], "direction": d}
                         for t, d in sorted(self._belepok)],
