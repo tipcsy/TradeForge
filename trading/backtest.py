@@ -413,6 +413,57 @@ def _rr_spec(rr: "dict | None", risky: bool, symbol: str = "") -> dict:
     return spec
 
 
+def _normalize_manual(manual_events, index) -> "dict | None":
+    """A kézi események időpontjai az M1 index IDŐZÓNÁJÁBAN.
+
+    ⚠ EGYSZER, A HURKON KÍVÜL. Egy időzóna-naiv `Timestamp` és a tz-tudatos
+    bar-idő összehasonlítása `TypeError`-t dob — a hurokban ez az EGÉSZ
+    backtestet vinné el, jóval a hiba forrása után. Itt egy sor, ott egy
+    megmagyarázhatatlan összeomlás."""
+    if not manual_events:
+        return None
+    tz = getattr(index, "tz", None)
+    ki = dict(manual_events)
+    _be = ki.get("breakeven_at")
+    if _be is not None:
+        _be = pd.Timestamp(_be)
+        if tz is not None:
+            _be = _be.tz_localize(tz) if _be.tzinfo is None else _be.tz_convert(tz)
+        elif _be.tzinfo is not None:
+            _be = _be.tz_localize(None)
+        ki["breakeven_at"] = _be
+    return ki
+
+
+def _apply_manual_be(trade: "Trade", m1_time, manual_events, point_size: float) -> bool:
+    """KÉZI kockázatmentesítés egy megadott időponttól (labor).
+
+    ⚠ MIÉRT A MENEDZSMENT-ÁGBAN, ÉS NEM A BAR ELEJÉN. Ha a stopot a bar SL/TP-
+    vizsgálata ELŐTT húznánk a belépőre, egy olyan bar, amelyik közben már
+    lement az eredeti stopig, hirtelen „breakeven-zárásként" jelenne meg —
+    vagyis a labor JOBB kimenetelt találna ki, mint ami történt. Így a
+    beavatkozás a KÖVETKEZŐ bartól hat, ami a konzervatív olvasat.
+
+    ⚠ `manual_events=None` (az alap) → azonnal visszatér: minden meglévő hívó
+    viselkedése bitazonos."""
+    if not manual_events:
+        return False
+    _be = manual_events.get("breakeven_at")
+    if _be is None or m1_time < _be:
+        return False
+    _jo = (trade.sl < trade.open_price if trade.direction == "BUY"
+           else trade.sl > trade.open_price)
+    if not _jo:
+        return False            # a stop már a belépőn vagy azon túl van
+    trade.sl = trade.open_price
+    trade.risk_free = True
+    # ⚠ A technika NEVE is rákerül: a kimutatásban látszódjon, hogy ezt a stopot
+    # NEM a preset húzta, hanem te — különben a labor eredménye
+    # megkülönböztethetetlen lenne egy automatikus BE-től.
+    trade.rr_technique = (trade.rr_technique + "+" if trade.rr_technique else "") + "kezi_be"
+    return True
+
+
 def _manage_position(trade: "Trade", high: float, low: float,
                      point_size: float, min_lot: float, lot_step: float,
                      rr: dict) -> None:
@@ -958,7 +1009,16 @@ def run_pair(
     exec_gates: bool = False,
     tf_eval=_TF_EVAL_AUTO,
     signal_series: "SignalSeries | None" = None,
+    manual_events: "dict | None" = None,
 ) -> BacktestResult:
+    # `manual_events`: KÉZI beavatkozások a laborhoz (`tools/lab_scenario.py`) —
+    # ma egyetlen kulcs, a `breakeven_at`: ettől az időponttól a nyitott pozíció
+    # stopja a belépőn áll. ⚠ `None` (az alap) → a viselkedés BITAZONOS: egyetlen
+    # hívási út sem változik. Azért ITT van, és nem egy második motorban, mert a
+    # labor kérdése („mi lett volna, ha itt kockázatmentesítek") csak akkor
+    # válaszolható meg hitelesen, ha UGYANAZ a végrehajtás fut, mint a
+    # backtestben — egy külön szimulátor a saját hibáit mérné.
+    #
     # A jelzést/indikátorokat a STRATÉGIA adja (seam); a végrehajtás (SL/TP/
     # breakeven/trailing, slot, lot) a motoré. strategy=None → config szerinti.
     # risky=True → a live_trader óvatos módját modellezzük (felezett kockázat,
@@ -980,6 +1040,9 @@ def run_pair(
     # paraméterek ÉS az óra-szűrő is egyeznek — eltérésnél nem csendben építünk
     # újra, hanem hibát dobunk: a csendes újraépítés elrejtené a hívó hibáját
     # (a söprés lassulna, és senki nem tudná meg, miért).
+    # ⚠ A kézi események időzónáját EGYSZER rendezzük el, a hurkon kívül (lásd
+    # `_normalize_manual`) — a beadó oldalon könnyű naiv időt megadni.
+    manual_events = _normalize_manual(manual_events, df_m1.index)
     _cached = signal_series is not None
     if _cached and not signal_series.for_params(params, allowed_hours,
                                                 test_start, test_end):
@@ -1291,6 +1354,7 @@ def run_pair(
                     # A BE/trailing is a KILÉPÉSI (bid) oldalon mér
                     _manage_position(trade, bid_hi, bid_lo,
                                      point_size, min_lot, lot_step, rr_spec)
+                    _apply_manual_be(trade, m1_time, manual_events, point_size)
 
             elif trade.direction == "SELL":
                 # A SELL az ASK-on zár → a TP/SL az ASK-sorozaton triggerel. Ha MINDKETTŐ
@@ -1312,6 +1376,7 @@ def run_pair(
                 else:
                     _manage_position(trade, ask_hi, ask_lo,
                                      point_size, min_lot, lot_step, rr_spec)
+                    _apply_manual_be(trade, m1_time, manual_events, point_size)
 
             # ── Esemény-napló: a menedzsment-fázis (részleges zárás + stop-mozgás)
             # változásai. A TP/SL-záró bar-on a `else` nem futott → nincs változás.

@@ -253,6 +253,7 @@ Minden parancs a projekt gyökeréből fut (ahol a `main.py` van):
 | `python main.py console` | élő motor **felület nélkül** + parancssor (gyenge gép, VM, SSH) |
 | `python main.py console --tui` | ugyanaz, **élő táblázattal** (a `rich` csomag kell hozzá) |
 | `python main.py backtest` | backtest az alapértelmezett paraméterekkel |
+| `python tools/lab_scenario.py <fk.json>` | **kézi laboratórium** — „mi lett volna, ha itt lépek be?" |
 | `python main.py optimize` | optimalizálás minden aktív párra, páronként a saját stratégiáival |
 | `python main.py optimize EURUSD GBPJPY` | optimalizálás csak a megadott párokra |
 | `python main.py optimize Ger40 --strategy ml_ai` | egy pár, egy stratégia (tanítható stratégiánál = tanítás) |
@@ -272,6 +273,31 @@ Két dolgot érdemes tudni:
 * **A licenc-belépés nem itt történik.** A konzolos mód szándékosan nem nyit
   belépő-ablakot (SSH-n nem is látszana): jelentkezz be egyszer a grafikus
   felületen, és másold a `data/licence_token.json`-t a másik gépre.
+
+### Kézi laboratórium (`tools/lab_scenario.py`)
+
+„Mi lett volna, ha **itt** lépek be, és **itt** mentesítem a kockázatot?" Egy
+JSON-forgatókönyvben megadod az időszakot, a belépő(ke)t, opcionálisan a
+kockázatmentesítés pillanatát, és a program lefuttatja:
+
+```bash
+python tools/lab_scenario.py --minta > fk.json   # kiinduló sablon
+python tools/lab_scenario.py fk.json
+```
+
+A válasz egy kötés-lista (belépő, stop, célár, kilépő, P&L, **R**) és az
+**esemény-napló**: mikor mozdult a stop, mikor épített, mi zárta.
+
+⚠ **Nem szimulál semmit.** A kézi belépőket a valódi backtest-motornak
+(`run_pair`) adja be jelölt-listaként — a menedzsment (BE, trailing, részleges
+zárás, ráépítés, kiszállási jel) ugyanaz, mint egy sima backtestben. A paritás
+így nem mérendő, hanem **szerkezeti**: a `"use_strategy_signals": true`
+forgatókönyv eredménye kötésre azonos egy sima backtesttel (teszt őrzi).
+
+⚠ **Kézi belépőnél a stratégia saját szűrői kikapcsolnak** (spread-, volatilitás-
+és együttállás-kapu), mert épp azt a döntést írod felül, hogy „itt belépek".
+A számla-szintű korlátok (méret, slot, napi limit) viszont maradnak. A
+`"exec_gates": true` visszakapcsolja őket.
 
 ### Telegram-értesítés
 
@@ -920,6 +946,7 @@ Every command runs from the project root (where `main.py` is):
 | `python main.py console` | live engine **without a UI** + a command prompt (weak machine, VM, SSH) |
 | `python main.py console --tui` | the same, with a **live table** (needs the `rich` package) |
 | `python main.py backtest` | backtest with the default parameters |
+| `python tools/lab_scenario.py <sc.json>` | **manual laboratory** — "what if I had entered here?" |
 | `python main.py optimize` | optimise every active pair, each with its own strategies |
 | `python main.py optimize EURUSD GBPJPY` | optimise the given pairs only |
 | `python main.py optimize Ger40 --strategy ml_ai` | one pair, one strategy (for a trainable strategy this means training) |
@@ -939,6 +966,31 @@ Two things worth knowing:
 * **Licence sign-in does not happen here.** Console mode deliberately does not
   open a sign-in window (it would not show over SSH): sign in once in the GUI
   and copy `data/licence_token.json` to the other machine.
+
+### Manual laboratory (`tools/lab_scenario.py`)
+
+"What if I had entered **here** and taken the risk off **there**?" You describe
+the period, the entry (or entries) and optionally the moment of de-risking in a
+JSON scenario, and the program runs it:
+
+```bash
+python tools/lab_scenario.py --minta > sc.json   # starter template
+python tools/lab_scenario.py sc.json
+```
+
+The answer is a trade list (entry, stop, target, exit, P&L, **R**) plus the
+**event log**: when the stop moved, when it built up, what closed it.
+
+⚠ **It simulates nothing.** Manual entries are fed to the real backtest engine
+(`run_pair`) as a candidate list — management (BE, trailing, partial close,
+building, exit signal) is identical to a plain backtest. Parity is therefore not
+measured but **structural**: a `"use_strategy_signals": true` scenario matches a
+plain backtest trade for trade (guarded by a test).
+
+⚠ **With manual entries the strategy's own filters are switched off** (spread,
+volatility and alignment gates), because that is exactly the decision you are
+overriding. Account-level limits (sizing, slots, daily loss) still apply.
+`"exec_gates": true` turns the filters back on.
 
 ### Telegram notifications
 
