@@ -185,8 +185,14 @@ try:
     _lt = (ROOT / "trading" / "live_trader.py").read_text(encoding="utf-8")
     check("a pair_visual_lines-nak van `journal` kapcsolója",
           "journal: bool = False" in _lt)
-    check("...és az ALAPÉRTELMEZÉS a nem-írás (export/backtest néma)",
-          _lt.count("journal: bool = False") == 1)
+    # ⚠ A SZÁMOT a SZÁNDÉKRA cseréltük. Eddig azt kötötte ki, hogy a paraméter
+    # PONTOSAN egyszer szerepel — a `pair_visual_objects` kiemelésekor (a Python
+    # chart-labor miatt) viszont két függvénynek lett `journal` kapcsolója, és
+    # a teszt elbukott, holott a viselkedés nem változott. A lényeg nem a
+    # darabszám, hanem hogy SEHOL ne legyen írásra állítva alapból.
+    check("...és az ALAPÉRTELMEZÉS mindenhol a nem-írás (export/backtest néma)",
+          _lt.count("journal: bool = False") >= 1
+          and "journal: bool = True" not in _lt)
     check("...az ÉLŐ út viszont bekapcsolja", "journal=True" in _lt)
     check("a napló írása a `journal` kapuhoz kötött",
           "if journal and m1 is not None" in _lt)

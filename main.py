@@ -10,6 +10,7 @@ Parancsok:
   python main.py notify-test  — a Telegram-értesítés beüzemelése és próbája
   python main.py dashboard    — csak dashboard (demo mód, MT5 nélkül)
   python main.py backtest     — backtest futtatás az alapértelmezett paraméterekkel
+  python main.py lab          — kézi laboratórium: chart-ablak (külön processz)
 
 Az `optimize` pár × STRATÉGIA szinten dolgozik. Stratégia megadása nélkül minden
 páron a SAJÁT engedélyezett stratégiái futnak (pairs.<sym>.strategies) — ugyanaz a
@@ -392,6 +393,17 @@ def cmd_notify_test():
     return 1
 
 
+def cmd_lab(argv=None):
+    """Kezi laboratorium — chart-ablak (2. lepcso).
+
+    KULON PROCESSZ, szandekosan: a 2. pont epp arrol szolt, hogy a motor gyenge
+    gepen onmagaban fusson — egy chart-rajzolo ablak ne ugyanabban a
+    processzben legyen, mint az elo kereskedes. A modulokat viszont HASZNALJA
+    (nem masolja): a gyertyak a parquetbol, a rajz a `pair_visual_objects`-bol."""
+    from tools.lab_chart import main as _lab
+    return _lab(argv or [])
+
+
 COMMANDS = {
     "download":  (cmd_download,   []),
     "optimize":  (cmd_optimize,   "symbols"),
@@ -400,6 +412,7 @@ COMMANDS = {
     "console":   (cmd_console,    []),
     "notify-test": (cmd_notify_test, []),
     "dashboard": (cmd_dashboard,  []),
+    "lab":       (cmd_lab,        "argv"),
 }
 
 
@@ -454,6 +467,9 @@ if __name__ == "__main__":
     if arg_spec == "symbols":
         _syms, _strats = parse_optimize_args(sys.argv[2:])
         sys.exit(fn(_syms, _strats) or 0)
+    elif arg_spec == "argv":
+        # A parancs SAJAT argumentumai (a `lab` argparse-a dolgozza fel).
+        sys.exit(fn(sys.argv[2:]) or 0)
     else:
         # ⚠ A KILÉPÉSI KÓD SZÁMÍT: a `notify-test` és a `console` hibát is
         # jelenthet, és egy szkript (vagy egy szolgáltatás-felügyelő) ebből

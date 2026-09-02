@@ -1210,14 +1210,21 @@ def actual_trade_objects(symbol: str, since_ts: int,
     return objs
 
 
-def pair_visual_lines(symbol: str, params: dict, strategy, point_size: float,
-                      pair_cfg: dict = None, bars: dict = None,
-                      actual_trades: bool = True, cfg: dict = None,
-                      exec_gates: bool = True, journal: bool = False) -> list:
-    """Egy stratégia + keretrendszer rajz-objektumainak TAGELT sorai (a stratégia
-    nevével — `strategy.visual.tag_line`), hogy több stratégia UGYANABBA a
-    szimbólum-fájlba írhasson, az MQL5 indikátor pedig `InpStrategy` szerint szűrjön.
+def pair_visual_objects(symbol: str, params: dict, strategy, point_size: float,
+                        pair_cfg: dict = None, bars: dict = None,
+                        actual_trades: bool = True, cfg: dict = None,
+                        exec_gates: bool = True, journal: bool = False) -> list:
+    """Egy stratégia + keretrendszer rajz-OBJEKTUMAI (`strategy.visual` primitívek).
     MÉLY adatablakot tölt (visual_lookback_bars). Üres lista, ha nincs adat.
+
+    ⚠ MIÉRT KÜLÖN AZ OBJEKTUM ÉS A SOR. Eddig csak a tagelt SZÖVEGES sorok
+    jöttek ki innen (`pair_visual_lines`), mert az egyetlen fogyasztó az
+    MT5-fájl volt. A Python chart-labor (`tools/lab_chart.py`) viszont ugyanezt
+    a rajzot jeleníti meg — ha a sorokat kellene visszaparszolnia, a
+    fájlformátum ismerete MÁSODSZOR is megjelenne a kódban, és a két oldal
+    külön romlana el. (Ettől szenvedett a `BacktestReplayer` v4 és a viz ↔
+    backtest paritás is.) A `pair_visual_lines` ezért innentől CSAK a
+    szövegesítés — egy sor.
 
     `bars`: HA meg van adva (`{"M15": df, "M1": df}`), abból dolgozunk a friss
     MT5-lekérés HELYETT. Ez a seam az MT4-es manuális visszajátszáshoz kell: ott
@@ -1431,8 +1438,24 @@ def pair_visual_lines(symbol: str, params: dict, strategy, point_size: float,
         from strategy.visual import TfOnly as _TfOnly
         objects = [_TfOnly(minutes=_sig_sec // 60)] + objects
 
+    return objects
+
+
+def pair_visual_lines(symbol: str, params: dict, strategy, point_size: float,
+                      pair_cfg: dict = None, bars: dict = None,
+                      actual_trades: bool = True, cfg: dict = None,
+                      exec_gates: bool = True, journal: bool = False) -> list:
+    """Ugyanaz TAGELT SZÖVEGES sorokként — az MT5 viz-fájlhoz.
+
+    A tag (a stratégia neve) azért kell, hogy több stratégia UGYANABBA a
+    szimbólum-fájlba írhasson, és az MQL5 indikátor `InpStrategy` szerint
+    szűrhessen."""
     from strategy.visual import tag_line
-    return [tag_line(o.line(), strategy.name) for o in objects]
+    return [tag_line(o.line(), strategy.name)
+            for o in pair_visual_objects(
+                symbol, params, strategy, point_size, pair_cfg=pair_cfg,
+                bars=bars, actual_trades=actual_trades, cfg=cfg,
+                exec_gates=exec_gates, journal=journal)]
 
 
 def write_pair_visuals(symbol: str, params: dict, strategy, point_size: float,
