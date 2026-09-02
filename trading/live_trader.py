@@ -3019,7 +3019,12 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
                     # amúgy is köt — ott a gomb dupla pozíciót nyitna.
                     try:
                         from core import signal_offer as _so
-                        if _so.enabled(cfg):
+                        # ⚠ `_run_cfg`, NEM `cfg`: a `process_pair`-nek NINCS
+                        # `cfg` parametere, es a modulban sincs ilyen nev. A
+                        # korabbi `cfg` itt NameError-t dobott, amit az alabbi
+                        # `except` log.debug-ra nemitott -- az ajanlat SOSEM
+                        # keszult el, a v3.12.0 ota egyszer sem.
+                        if _so.enabled(_run_cfg):
                             _ajanlat = _so.REGISTRY.keszit(
                                 jel_gyertya_mp=_sig_sec,
                                 symbol=symbol, strategy=strategy.name,

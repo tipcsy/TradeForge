@@ -41,8 +41,12 @@ def _user_agent() -> str:
         return "TradeForge"
 
 
-def _hivas(token: str, metodus: str, body: dict) -> tuple:
-    """`(sikerult, valasz_vagy_hibauzenet)`. Kivételt SOSEM enged ki."""
+def _hivas(token: str, metodus: str, body: dict, timeout=None) -> tuple:
+    """`(sikerult, valasz_vagy_hibauzenet)`. Kivételt SOSEM enged ki.
+
+    ⚠ A `timeout` a SOCKET várakozása. Long pollingnál ennek NAGYOBBNAK kell
+    lennie, mint amennyit a Telegramtól kérünk — különben a saját socketünk
+    vágja el a válaszra váró kapcsolatot, és a hívó hálózati hibának látja."""
     if not token:
         return False, "nincs token"
     req = urllib.request.Request(
@@ -52,7 +56,7 @@ def _hivas(token: str, metodus: str, body: dict) -> tuple:
                  "User-Agent": _user_agent()},
         method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT_SEC) as r:
+        with urllib.request.urlopen(req, timeout=timeout or TIMEOUT_SEC) as r:
             return True, json.loads(r.read().decode("utf-8"))
     except urllib.error.HTTPError as ex:
         # ⚠ A Telegram a HIBÁT IS JSON-ban indokolja (`description`), és az
@@ -167,8 +171,17 @@ def updates(token: str, offset: int = 0, timeout: int = 0) -> tuple:
     törli a régieket). `timeout > 0` → LONG POLLING: a szerver eddig vár egy új
     üzenetre, mielőtt üres listát adna. ⚠ A hosszú várakozás ezért NEM
     hiba — a hívónak külön szálon kell lennie, hogy a motor körét ne fogja meg."""
+    # ⚠ A SOCKET TÚLÉLI A LONG POLLINGOT. A `TIMEOUT_SEC` 15 mp volt, a hívók
+    # viszont 25 mp-es long pollingot kértek: csendes időszakban a socket
+    # ELŐBB szakadt el, mint ahogy a Telegram válaszolt volna. A hurok ezt
+    # hálózati HIBÁNAK vette, és növekvő várakozásba (2, 4, … 60 mp) ment —
+    # így egy parancsra a válasz akár 75 másodpercet is késett, miközben
+    # semmi baj nem volt. Épp ezt panaszolta a felhasználó
+    # (2026-09-02: „a telegram válasz nagyon lassan jelenik meg").
+    _t = int(timeout)
     ok, res = _hivas(token, "getUpdates",
-                     {"offset": int(offset), "timeout": int(timeout)})
+                     {"offset": int(offset), "timeout": _t},
+                     timeout=(_t + TIMEOUT_SEC) if _t > 0 else None)
     if ok and isinstance(res, dict) and res.get("ok"):
         return True, list(res.get("result") or [])
     return False, []

@@ -74,6 +74,21 @@ _sor = next((s for s in _ment.splitlines() if '["answer_trading"]' in s), "")
 check("a kulcs feltétel nélkül íródik (kikapcsolva is)",
       bool(_sor) and "if " not in _sor, _sor.strip())
 
+# ── 2b. AZ AJÁNLAT TÉNYLEG ELKÉSZÜL-E ─────────────────────────────────────
+# ⚠ A KAPCSOLÓ ÖNMAGÁBAN KEVÉS. A `process_pair` az ajánlatot egy `try` blokkban
+# készíti, aminek az `except`-je `log.debug`-ra némít. Ott eredetileg
+# `_so.enabled(cfg)` állt — csakhogy a `process_pair`-nek NINCS `cfg`
+# paramétere, és a modulban sincs ilyen név: a sor `NameError`-t dobott, a
+# némító `except` elnyelte, és a gomb a v3.12.0 óta EGYSZER SEM ment ki.
+_lt = (ROOT / "trading" / "live_trader.py").read_text(encoding="utf-8")
+# A magyarázó megjegyzés miatt az `enabled` hívás lejjebb került —
+# az ablak legyen elég bő, de a FÜGGVÉNY végét ne lépje át.
+_blokk = _lt.split("from core import signal_offer as _so", 1)[1][:900]
+check("az ajánlat a MOTOR élő configjából dönt (`_run_cfg`)",
+      "_so.enabled(_run_cfg)" in _blokk)
+check("...és nem egy nem létező `cfg` névből",
+      "_so.enabled(cfg)" not in _lt)
+
 # ── 3. A feliratok ────────────────────────────────────────────────────────
 for _nyelv in ("hu", "en"):
     _kat = json.loads((ROOT / "lang" / (_nyelv + ".json")).read_text(encoding="utf-8"))

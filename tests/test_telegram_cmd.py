@@ -287,6 +287,41 @@ _i18n.set_language("hu")
 check("⚠ angol nyelven is ANGOL parancsnevek", "play" in _ang and "stop" in _ang)
 check("...de a LEÍRÁS angol", "this list" in _ang or "Commands" in _ang)
 
+from core import telegram
+
+# ── A LONG POLLING SOCKET-IDEJE ───────────────────────────────────────────
+# ⚠ A LELET (2026-09-02): „a telegram válasz nagyon lassan jelenik meg (most az
+# utolsó 1 perc volt)". A `getUpdates` 25 mp-es long pollingot kért, a socket
+# viszont 15 mp-nél elvágta a kapcsolatot. A hurok ezt HÁLÓZATI HIBÁNAK vette,
+# és növekvő várakozásba ment (2, 4, 8 … 60 mp) — csendes időszakban tehát
+# ÁLLANDÓAN backoffban ült, és egy parancsra a válasz akár 75 mp-et késett.
+# Semmi nem volt elromolva: a program a saját türelmetlenségét hitte hibának.
+_latott = {}
+_eredeti_hivas = telegram._hivas
+
+
+def _figyelo(token, metodus, body, timeout=None):
+    _latott.update(metodus=metodus, kert=body.get("timeout"), socket=timeout)
+    return True, {"ok": True, "result": []}
+
+
+telegram._hivas = _figyelo
+try:
+    telegram.updates("T", offset=1, timeout=tgc.POLL_MP)
+    check("a long polling a kért időt küldi a Telegramnak",
+          _latott.get("kert") == tgc.POLL_MP, str(_latott.get("kert")))
+    check("a SOCKET tovább vár, mint a long polling",
+          (_latott.get("socket") or 0) > tgc.POLL_MP,
+          f"socket {_latott.get('socket')} vs poll {tgc.POLL_MP}")
+    # ⚠ Rövid (nem long) pollingnál maradjon az alapértelmezett socket-idő.
+    _latott.clear()
+    telegram.updates("T", offset=1, timeout=0)
+    check("timeout=0-nál nincs megnyújtott socket-idő",
+          _latott.get("socket") is None, str(_latott.get("socket")))
+finally:
+    telegram._hivas = _eredeti_hivas
+
+
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")
 sys.exit(0 if all(results) else 1)
