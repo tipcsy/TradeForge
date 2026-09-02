@@ -68,10 +68,19 @@ class SignalsTab:
     `digits_of(symbol)  -> int`   az ár tizedesjegyei (Bra50: 2, EURUSD: 5)
     `lot_step_of(symbol)-> (min_lot, lot_step, max_lot)`
     `max_age_hours()    -> float` ennél régebbire nem enged kötni
+    `open_of(sym, strat)-> "BUY"|"SELL"|None`  van-e MÁR nyitott pozíció
+
+    ⚠ AZ `open_of` A NYITOTT POZÍCIÓT KÉRDEZI, NEM A GOMBNYOMÁST. A megnyomott
+    gomb megjegyzése hamis biztonságot adna: ugyanez a kötés létrejöhet a
+    Telegram „Igen" gombjáról, egy másik gépen futó felületről, vagy kézzel az
+    MT5-ben — a felület egyikről sem tudna. A megjegyzett gombnyomás ráadásul
+    a program újraindításakor elveszne, a pozíció viszont megmarad. Az egyetlen
+    megbízható forrás tehát a BRÓKER.
     """
 
     def __init__(self, parent, csv_path, on_trade=None, price_of=None,
-                 digits_of=None, lot_step_of=None, max_age_hours=None):
+                 digits_of=None, lot_step_of=None, max_age_hours=None,
+                 open_of=None):
         self.parent = parent
         self._csv = Path(csv_path)
         self._on_trade = on_trade
@@ -79,7 +88,9 @@ class SignalsTab:
         self._digits_of = digits_of or (lambda s: 5)
         self._lot_step_of = lot_step_of or (lambda s: (0.01, 0.01, 100.0))
         self._max_age = max_age_hours or (lambda: ALAP_MAX_ORA)
-        self._sorok: list = []          # (kulcs_ido, lbl_kor, gomb)
+        # ⚠ Alapból NINCS nyitott pozíció: a seam hiánya nem tilthat le gombot.
+        self._open_of = open_of or (lambda sym, strat: None)
+        self._sorok: list = []          # (sor, lbl_kor, gomb)
         self._mtime = None
         self._build_ui()
 
@@ -189,8 +200,8 @@ class SignalsTab:
         # A fájl nem változott → csak a KORT frissítjük (az idő telik), és a
         # gomb elavulhat közben.
         if mt == self._mtime and self._sorok:
-            for ido, lbl, gomb in self._sorok:
-                self._kor_frissit(ido, lbl, gomb)
+            for r, lbl, gomb in self._sorok:
+                self._sor_frissit(r, lbl, gomb)
             return
         self._mtime = mt
 
@@ -207,11 +218,51 @@ class SignalsTab:
             self._lbl_info.config(text=_t("signals.count", n=0))
             return
 
+        self._tulhaladt_jeloles(sorok)
         for i, r in enumerate(sorok):
             self._sor(i, r)
         self._lbl_info.config(text=_t("signals.count", n=len(sorok)))
 
-    def _kor_frissit(self, ido, lbl, gomb):
+    @staticmethod
+    def _tulhaladt_jeloles(sorok: list) -> None:
+        """A pár+stratégia RÉGEBBI jelzéseit lejárttá jelöli.
+
+        ⚠ A KÉRÉS (2026-09-02): „ha látom, hogy két / három kötésünk is van,
+        akkor simán az előzőeket is érvényteleníthetjük" — a képen a Ger40 /
+        wpr_sma háromszor szerepelt (09:12, 08:39, 08:10). Csak a LEGFRISSEBB
+        szetup él: a régebbi másik árra, másik stopra szólt, és a mostani
+        árhoz igazítva már egy harmadik kötés lenne belőle.
+
+        ⚠ AZ IRÁNY NEM RÉSZE A KULCSNAK. Ha a friss jelzés az ELLENKEZŐ irányba
+        szól, a régi attól még — sőt, még inkább — érvénytelen.
+
+        A lista a legfrissebbel kezdődik (`_olvas` megfordítja), tehát egy
+        kulcs ELSŐ előfordulása az élő."""
+        latott = set()
+        for r in sorok:
+            kulcs = (str(r.get("symbol") or ""), str(r.get("strategy") or ""))
+            # ⚠ A jelölés a MEGJELENÍTETT másolatra kerül (`to_dict("records")`),
+            # nem a naplóba: a `trades.csv` auditnyom, azt nem írjuk át.
+            r["_tulhaladt"] = kulcs in latott
+            latott.add(kulcs)
+
+    def _kotve(self, r: dict) -> bool:
+        """Van-e MÁR nyitott pozíció erre a párra + stratégiára?
+
+        ⚠ AZ IRÁNYT ITT SEM NÉZZÜK. Egy nyitott ellenirányú pozíció mellett a
+        gomb ugyanúgy ne legyen aktív: a motor alapból nem nyit ellenirányt
+        (`no_opposite`), és egy hedge biztosan nem egy kattintás szándéka."""
+        try:
+            return bool(self._open_of(str(r.get("symbol") or ""),
+                                      str(r.get("strategy") or "")))
+        except Exception:
+            # ⚠ A LEKÉRDEZÉS HIBÁJA NE ÁLLÍTSON SEMMIT. Ha az MT5-kapcsolat épp
+            # elbukik, a „Kötve" felirat AZT állítaná, hogy van pozíciód —
+            # holott csak nem tudjuk. A kor és a túlhaladás ilyenkor is véd.
+            return False
+
+    def _sor_frissit(self, r, lbl, gomb):
+        ido = r.get("time") if isinstance(r, dict) else r
         perc = _kor_perc(ido)
         if perc == float("inf"):
             szoveg, szin = "—", FG_GRAY_DIM
@@ -225,10 +276,19 @@ class SignalsTab:
         if lbl is not None:
             lbl.config(text=szoveg, fg=szin)
         if gomb is not None:
-            elavult = perc > self._max_age() * 60.0
-            gomb.config(state="disabled" if elavult else "normal",
-                        bg=BTN_DIS_BG if elavult else BG_HEADER,
-                        fg=BTN_DIS_FG if elavult else FG_YELLOW)
+            # ⚠ A SORREND: a „Kötve" TÖBBET mond, mint a „Lejárt" — ha van
+            # pozíció, azt kell látni, akkor is, ha a jelzés közben elévült.
+            _sor = r if isinstance(r, dict) else {}
+            if self._kotve(_sor):
+                felirat, passziv = _t("signals.traded"), True
+            elif _sor.get("_tulhaladt") or perc > self._max_age() * 60.0:
+                felirat, passziv = _t("signals.expired"), True
+            else:
+                felirat, passziv = _t("signals.trade"), False
+            gomb.config(text=felirat,
+                        state="disabled" if passziv else "normal",
+                        bg=BTN_DIS_BG if passziv else BG_HEADER,
+                        fg=BTN_DIS_FG if passziv else FG_YELLOW)
 
     def _sor(self, i: int, r: dict):
         bg = BG_ROW_ODD if i % 2 else BG_ROW_EVEN
@@ -262,8 +322,8 @@ class SignalsTab:
                              bg=BG_HEADER, fg=FG_YELLOW, relief="flat", padx=8,
                              command=lambda rr=r: self._kotes_ablak(rr))
             gomb.pack(side="left", padx=2)
-        self._kor_frissit(ido, lbl_kor, gomb)
-        self._sorok.append((ido, lbl_kor, gomb))
+        self._sor_frissit(r, lbl_kor, gomb)
+        self._sorok.append((r, lbl_kor, gomb))
 
     @staticmethod
     def _ar(v, digits: int) -> str:
@@ -396,9 +456,16 @@ class SignalsTab:
                                      parent=self.parent)
                 return
             if ticket:
-                messagebox.showinfo(_t("manual.title"),
-                                    _t("manual.opened", ticket=ticket),
-                                    parent=self.parent)
+                # ⚠ SIKERNÉL NINCS ABLAK. A felhasználó kérése (2026-09-02):
+                # „nem kell külön megnyitva figyelmeztetés ablak. (A kötve
+                # státuszból látszik, hogy megnyitva!)" — a gomb felirata a
+                # visszajelzés. Ehhez viszont a gombnak AZONNAL át kell
+                # váltania: a `_signal_open_of` a pozíció-cache-ből dolgozik,
+                # amit egy 5 másodperces szál tölt. A hívó ezért a ticket után
+                # frissíti a cache-t, mielőtt visszatér — enélkül a gomb
+                # másodpercekig „Kötés" maradna egy MEGNYITOTT pozíció mellett,
+                # és ez pont a duplakattintás ablaka lenne.
+                pass
             else:
                 messagebox.showerror(_t("manual.title"),
                                      uzenet or _t("manual.not_sent"),

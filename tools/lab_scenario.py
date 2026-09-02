@@ -76,11 +76,31 @@ def _hiba(uzenet: str) -> None:
     raise SystemExit(2)
 
 
+def _szoveg(nyers: bytes) -> str:
+    """A fájl szövege — BÁRMELYIK szokásos Windows-kódolásban.
+
+    ⚠ A SAJÁT DOKUMENTÁLT INDÍTÁSOM TÖRT MEG EZEN. A súgó azt mondja:
+    `python tools/lab_scenario.py --minta > sajat.json` — csakhogy a Windows
+    PowerShell (5.1) `>` operátora UTF-16LE-t ír BOM-mal. Egy UTF-8-ként
+    beolvasott UTF-16 fájl értelmetlen, és a labor azt mondaná rá: „a
+    forgatókönyv nem érvényes JSON" — ami IGAZ, de a felhasználót a saját
+    mintaállománya ellen fordítja. A BOM egyértelműen megmondja, mi ez."""
+    import codecs
+    for bom, kod in ((codecs.BOM_UTF32_LE, 'utf-32'), (codecs.BOM_UTF32_BE, 'utf-32'),
+                     (codecs.BOM_UTF16_LE, 'utf-16'), (codecs.BOM_UTF16_BE, 'utf-16'),
+                     (codecs.BOM_UTF8, 'utf-8-sig')):
+        if nyers.startswith(bom):
+            return nyers.decode(kod)
+    return nyers.decode("utf-8")
+
+
 def betolt(ut: Path) -> dict:
     try:
-        fk = json.loads(ut.read_text(encoding="utf-8"))
+        fk = json.loads(_szoveg(ut.read_bytes()))
     except FileNotFoundError:
         _hiba(f"nincs ilyen fájl: {ut}")
+    except UnicodeDecodeError as ex:
+        _hiba(f"a forgatókönyv kódolása nem olvasható ({ex}) — mentsd UTF-8-ban")
     except json.JSONDecodeError as ex:
         _hiba(f"a forgatókönyv nem érvényes JSON ({ex})")
     for kulcs in ("symbol", "from", "to"):
@@ -212,6 +232,19 @@ def futtat(fk: dict) -> dict:
             "jel_db": len(sorozat.signals)}
 
 
+def _perc(t) -> str:
+    """Időpont PERCRE — a másodperc és az időzóna-toldalék nélkül.
+
+    ⚠ A teljes `2026-08-27 01:30:00+00:00` 25 karakter, a fejléc 20-as oszlopa
+    mellett ELCSÚSZTATJA az egész sort, és épp az árak oszlopai válnak
+    olvashatatlanná. A másodperc M1-es adaton mindig 00, az időzóna pedig a
+    fejlécben egyszer kimondható."""
+    try:
+        return t.strftime("%Y-%m-%d %H:%M")
+    except AttributeError:
+        return str(t)
+
+
 def kiir(ki: dict) -> None:
     res, sym = ki["res"], ki["sym"]
     print(f"{sym} / {ki['strategy']}  —  "
@@ -220,7 +253,7 @@ def kiir(ki: dict) -> None:
              else "  · kapuk és volatilitás-szűrő KI"))
     if ki["sajat"]:
         for t, irany in ki["bejegyzett"]:
-            print(f"   megadva: {t}  {irany}")
+            print(f"   megadva: {_perc(t)}  {irany}")
         if not ki["bejegyzett"]:
             print("   (nem adtál meg belépőt — a futás üres lesz)")
     print()
@@ -252,8 +285,8 @@ def kiir(ki: dict) -> None:
         return f"{float(v):.{_tiz}f}" if v is not None else "—"
 
     _w = max(12, _tiz + 8)
-    print(f"{'belépő':<20} {'ir':<4} {'ár':>{_w}} {'SL (nyitó)':>{_w}} "
-          f"{'TP':>{_w}} {'kilépő':<20} {'P&L':>9} {'R':>7}  vége")
+    print(f"{'belépő':<17} {'ir':<4} {'ár':>{_w}} {'SL (nyitó)':>{_w}} "
+          f"{'TP':>{_w}} {'kilépő':<17} {'P&L':>9} {'R':>7}  vége")
     print("-" * (104 + 3 * _tiz))
     _ossz_r = 0.0
     for t in res.trades:
@@ -268,9 +301,9 @@ def kiir(ki: dict) -> None:
         # eltűnne. Hogy hova mozdult a stop, azt az esemény-napló mondja meg.
         _d = 1 if t.direction == "BUY" else -1
         _sl0 = t.open_price - _d * t.sl_points * t.point_size
-        print(f"{str(t.open_time):<20} {t.direction:<4} {_ar(t.open_price):>{_w}} "
+        print(f"{_perc(t.open_time):<17} {t.direction:<4} {_ar(t.open_price):>{_w}} "
               f"{_ar(_sl0):>{_w}} {_ar(t.tp):>{_w}} "
-              f"{str(t.close_time or '—'):<20} "
+              f"{(_perc(t.close_time) if t.close_time else '—'):<17} "
               f"{t.pnl_usd:>+9.2f} {_r:>+7.2f}  {t.status}"
               + (f"  [{t.rr_technique}]" if t.rr_technique else ""))
     print("-" * (104 + 3 * _tiz))
@@ -288,7 +321,7 @@ def kiir(ki: dict) -> None:
     for t in res.trades:
         if not t.events:
             continue
-        print(f"\n   {t.open_time} {t.direction} eseményei:")
+        print(f"\n   {_perc(t.open_time)} {t.direction} eseményei:")
         for ev in t.events:
             _tipus, _t, _ar, _sl, _tp, _lot, _komment = (list(ev) + [""] * 7)[:7]
             _reszlet = []
@@ -302,7 +335,7 @@ def kiir(ki: dict) -> None:
                 _reszlet.append(f"lot {_lot:g}")
             if _komment:
                 _reszlet.append(str(_komment))
-            print(f"      {str(_t):<20} {_tipus:<14} " + " · ".join(_reszlet))
+            print(f"      {_perc(_t):<17} {_tipus:<14} " + " · ".join(_reszlet))
 
 
 def main(argv=None) -> int:

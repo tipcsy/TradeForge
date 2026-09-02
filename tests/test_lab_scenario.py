@@ -217,6 +217,23 @@ _src = (ROOT / "tools" / "lab_scenario.py").read_text(encoding="utf-8")
 for _tilos in ("def _manage", "def simulate", "close_price =", "def _sl_hit"):
     check(f"⚠ nincs saját végrehajtás a laborban ({_tilos!r})", _tilos not in _src)
 
+# ── A FORGATÓKÖNYV KÓDOLÁSA ────────────────────────────────────────────────
+# ⚠ A dokumentált indítás (`--minta > sajat.json`) a Windows PowerShellben
+# UTF-16LE-t ír BOM-mal. Ha a betöltő csak UTF-8-at ismerne, a felhasználó a
+# SAJÁT mintaállományára kapna „nem érvényes JSON" választ.
+_minta_szoveg = json.dumps(lab.MINTA, ensure_ascii=False)
+for _kod, _nev in (("utf-16", "UTF-16 (PowerShell `>`)"),
+                   ("utf-8-sig", "UTF-8 BOM-mal (Jegyzettömb)"),
+                   ("utf-8", "sima UTF-8")):
+    _f = Path(_tmp) / ("kod_" + _kod + ".json")
+    _f.write_bytes(_minta_szoveg.encode(_kod))
+    try:
+        _be = lab.betolt(_f)
+        _ok = _be.get("symbol") == lab.MINTA["symbol"]
+    except SystemExit:
+        _ok = False
+    check("a forgatókönyv olvasható: " + _nev, _ok)
+
 # A sablon önmagában érvényes forgatókönyv (a `--minta` kimenete).
 check("a `--minta` sablon minden kötelező kulcsot tartalmaz",
       all(k in lab.MINTA for k in ("symbol", "from", "to")))

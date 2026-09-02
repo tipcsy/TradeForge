@@ -53,6 +53,17 @@ from core import i18n as _i18n
 from core.i18n import t as _t, num as _fmtnum
 from version import APP_NAME, APP_VERSION
 
+import logging as _logging_modul
+
+# ⚠ MIÉRT KELL EZ AZ EGY SOR. A fájl négy helyen `log.info/debug/warning`-ot
+# írt, `log` viszont sehol nem volt definiálva — mind a négy hívás
+# `NameError`-t dobott. A legdrágább a „Kézi kötés" volt: a megbízás MÁR
+# KIMENT (a ticket megjött), és csak UTÁNA robbant a naplózás — a felhasználó
+# „Hiba"-ablakot kapott egy SIKERES kötésre, tehát azt hihette, nincs
+# pozíciója, miközben nyitva volt. A másik három `except` ágban ült, ahol a
+# NameError elfedte az EREDETI hibát is.
+log = _logging_modul.getLogger(__name__)
+
 
 # ---------------------------------------------------------------------------
 # Fix (váz-szintű) oszlopok
@@ -2796,7 +2807,8 @@ class DashboardWindow:
             price_of=self._signal_price_of,
             digits_of=self._signal_digits_of,
             lot_step_of=self._signal_lot_step_of,
-            max_age_hours=self._signal_max_age_hours)
+            max_age_hours=self._signal_max_age_hours,
+            open_of=self._signal_open_of)
 
         bt_frame = tk.Frame(self._notebook, bg=BG_BT)
         self._notebook.add(bt_frame, text=_t("gui.portfolio_backtest"))
@@ -5105,6 +5117,53 @@ class DashboardWindow:
         except (TypeError, ValueError):
             return 4.0
 
+    def _signal_open_of(self, symbol: str, strategy: str):
+        """Van-e NYITOTT pozíció ezen a páron ezzel a stratégiával? → irány|None.
+
+        A Jelzések fül „Kötés" gombja ebből lesz „Kötve" és passzív.
+
+        ⚠ MIÉRT NEM A GOMBNYOMÁST JEGYEZZÜK MEG. Ugyanez a kötés létrejöhet a
+        Telegram „Igen" gombjáról, egy másik gépen futó felületről, vagy kézzel
+        az MT5-ben — a gombnyomás egyikről sem tudna, és újraindításkor amúgy is
+        elveszne. A bróker viszont mindegyikről tud.
+
+        A `positions_detail` a felület MEGLÉVŐ cache-e (a `_refresh` tölti),
+        tehát ez a hívás NEM megy az MT5-höz — a Jelzések fül másodpercenként
+        frissül, egy pár-stratégiánkénti MT5-kérdés ott érezhető lenne.
+
+        A stratégia feloldása ugyanaz (`_strategy_by_magic`: örökbefogadás
+        ELŐBB, aztán a magic), mint a Pozíciók és a Lezárt fülön — különben a
+        két nézet mást mondana ugyanarról a pozícióról."""
+        if not symbol or not strategy:
+            return None
+        for p in (getattr(self, "_mt5_cache", {}) or {}).get("positions_detail", []):
+            if str(p.get("symbol") or "") != symbol:
+                continue
+            if self._strategy_by_magic(p.get("magic"), p.get("ticket")) == strategy:
+                return str(p.get("type") or "") or None
+        return None
+
+    def _signal_positions_refresh(self) -> None:
+        """A nyitott pozíciók cache-ének AZONNALI frissítése egy kézi kötés után.
+
+        ⚠ MIÉRT KELL. A siker-ablakot elhagytuk: a visszajelzés az, hogy a gomb
+        „Kötve"-re vált. Csakhogy a `_signal_open_of` a `positions_detail`
+        cache-ből olvas, amit egy 5 másodperces háttérszál tölt — a gomb tehát
+        addig még „Kötés" maradna egy MÁR MEGNYITOTT pozíció mellett. Pontosan
+        ez a duplakattintás ablaka, és most nincs ablak, ami feltartaná a kezet.
+
+        ⚠ A HIBÁJA NEM SZÁMÍT. Ez a hívás a ticket UTÁN fut: a pozíció nyitva
+        van. Ha az MT5-kérdés elbukik, a háttérszál pár másodperc múlva úgyis
+        pótolja — de kivételt itt dobni nem szabad, mert a hívó azt „sikertelen
+        kötésnek" mutatná."""
+        try:
+            from core.mt5_connector import open_positions_detailed
+            if isinstance(getattr(self, "_mt5_cache", None), dict):
+                self._mt5_cache["positions_detail"] = open_positions_detailed()
+        except Exception:
+            log.debug("A pozíció-cache frissítése kézi kötés után elbukott",
+                      exc_info=True)
+
     def _signal_manual_trade(self, row: dict, lot: float | None = None):
         """A Jelzések fül „Kötés" gombja. Visszaad: `(ticket|None, üzenet)`.
 
@@ -5152,9 +5211,19 @@ class DashboardWindow:
         ticket = _lt.open_position(sym, irany, lot, sl, tp, magic,
                                    comment="ErikBot-kezi", strategy_name=strat)
         if ticket:
-            log.info("Kézi kötés a Jelzések fülről: %s %s lot=%.2f SL=%.5g "
-                     "TP=%.5g (a jelzés ideje: %s)", sym, irany, lot, sl, tp,
-                     row.get("time"))
+            # ⚠ A TICKET UTÁN MÁR SEMMI NEM BUKHAT EL. Itt a megbízás KIMENT, a
+            # pozíció NYITVA van. Ha bármi (naplózás, formázás) kivételt dob, a
+            # hívó `except` ága „Hiba"-ablakot mutat — a felhasználó azt hiszi,
+            # nincs kötése, és akár újra megnyomja a gombot. Pontosan ez történt
+            # 2026-09-02-án egy hiányzó `log` név miatt: valódi pozíció nyílt,
+            # a felület mégis hibát jelentett.
+            try:
+                log.info("Kézi kötés a Jelzések fülről: %s %s lot=%.2f SL=%.5g "
+                         "TP=%.5g (a jelzés ideje: %s)", sym, irany, lot, sl, tp,
+                         row.get("time"))
+            except Exception:
+                pass                   # a NAPLÓ hiánya nem tehet kárt a kötésben
+            self._signal_positions_refresh()
             return ticket, ""
         return None, (_t("gui2.a_megbizas_nem_ment"))
 

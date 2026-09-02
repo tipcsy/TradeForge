@@ -16,3 +16,9 @@ config.local.json
 # Ezek SZANDEKOSAN a repoban vannak — lasd core/mt_deploy.py.
 !mt4/compiled/
 !mt5/compiled/
+
+# Kezi laborator forgatokonyvei (tools/lab_scenario.py) — sajat kiserletek,
+# nem a program resze. A `--minta` barmikor ujra eloallitja.
+fk.json
+sajat.json
+lab_*.json
