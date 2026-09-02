@@ -51,7 +51,12 @@ def check(name, ok, detail=""):
 # nem hirdet verziót", és NÉMÁN nem őrzött volna semmit. A záró zárójel viszont
 # mindkét alakban ott van, a szövegbeli „v4"-et pedig továbbra sem fogja meg
 # (nincs benne pont, és nem zárójel követi).
-UZENET_RE = re.compile(r"v(\d+)\.(\d+)\.(\d+)\)")
+# A verzio a targysor VEGEN is allhat zarojel nelkul: „… — v3.22.0".
+# ⚠ EZ MAGA IS LELET (2026-09-03): a sajat commitom epp igy nezett ki, a minta
+# pedig zaro zarojelhez kototte — az or CSENDBEN kihagyta az 1. szabalyt, es
+# 8 helyett 7 ellenorzest futtatott. Csak a darabszam arulta el. Egy or, ami
+# nemán kevesebbet ellenoriz, rosszabb annal, mint amelyik hangosan hibazik.
+UZENET_RE = re.compile(r"v(\d+)\.(\d+)\.(\d+)(?=\)|\s*$)")
 FORRAS_RE = re.compile(r'APP_VERSION\s*=\s*["\'](\d+)\.(\d+)\.(\d+)["\']')
 
 
@@ -83,6 +88,9 @@ check("az üzenet-minta felismeri a `(v3.16.0)` alakot",
 check("...és a projekt másik alakját is: `(..., v3.15.0)`",
       _verzio_szovegbol("Kezi laboratorium (3. pont / 1. lepcso, v3.15.0)",
                         UZENET_RE) == (3, 15, 0))
+check("...és a targysor VEGEN allo alakot is: `— v3.22.0`",
+      _verzio_szovegbol("Kezi labor: lejatszas (BID/ASK) — v3.22.0",
+                        UZENET_RE) == (3, 22, 0))
 check("...és NEM harap rá a szövegbeli „v4\"-re",
       _verzio_szovegbol("a BacktestReplayer v4 azert keszult", UZENET_RE) is None)
 check("a forrás-minta kiolvassa az APP_VERSION-t",
