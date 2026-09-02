@@ -656,6 +656,31 @@ def _build_exit_evaluator(m15: pd.DataFrame, rr_spec: dict):
                 return False
             return (wp >= mp and wc < mc) if direction == "BUY" else (wp <= mp and wc > mc)
         return _at
+    if ind == _exsig.INDICATOR_MA_STACK:
+        # ⚠ EGYSZER szamoljuk ki a teljes M15-re, gyertyankent nem — ugyanaz az
+        # elv, mint a tobbi indikatornal. A `min_periods` miatt az elso barokon
+        # NaN all: ott nincs jel (nem zarunk vakon).
+        _per = tuple(ex.get("ma_periods", (8, 21, 100, 250)))
+        _sb = int(ex.get("ma_slope_bars", 60))
+        _min = int(ex.get("ma_min_agree", 1))
+        _c = m15["close"]
+        _lejtok = []
+        for _n in _per:
+            _ma = _c.rolling(int(_n), min_periods=int(_n)).mean()
+            _lejtok.append((_ma - _ma.shift(_sb)).to_numpy())
+        def _at(i, direction):
+            if i < 1 or i >= len(_c):
+                return False
+            _d = 1 if direction == "BUY" else -1
+            _e = 0
+            for _l in _lejtok:
+                v = _l[i]
+                if v != v:
+                    return False
+                if v != 0 and ((v > 0) == (_d > 0)):
+                    _e += 1
+            return _e < _min
+        return _at
     # default: Supertrend — flip a pozícióval szembe
     _line, _dir = _st(m15["high"], m15["low"], m15["close"],
                       int(ex.get("st_period", 10)), float(ex.get("st_multiplier", 1.7)))

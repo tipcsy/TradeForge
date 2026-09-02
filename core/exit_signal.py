@@ -26,7 +26,15 @@ from core.indicator_engine import (
 INDICATOR_SUPERTREND = "supertrend"
 INDICATOR_WPR = "wpr"
 INDICATOR_DIVERGENCE = "divergence"
-INDICATORS = (INDICATOR_SUPERTREND, INDICATOR_WPR, INDICATOR_DIVERGENCE)
+# ⚠ MOZGOATLAG-SZALAG. A 2026-09-02-i meres szerint a negy SMA (8/21/100/250)
+# LEJTES-EGYETERTESE monoton osszefugg a jovobeli hozammal (Ger40: az egyetertes
+# 0-nal -0,191, 3-nal +0,024 ATR; a leggyorsabb SMA ellentetes lejtese t=-3,89).
+# BELEPONEK nem valt be (a koltseg a brutto el 2-9-szerese), KISZALLASNAK viszont
+# INGYEN van: egy zarasi szabaly nem generál uj kotest, tehat nem fizet uj
+# spreadet. Ezert kerult ide, es nem a belepo-oldalra.
+INDICATOR_MA_STACK = "ma_stack"
+INDICATORS = (INDICATOR_SUPERTREND, INDICATOR_WPR, INDICATOR_DIVERGENCE,
+              INDICATOR_MA_STACK)
 
 OSC_RSI = "rsi"
 OSC_CCI = "cci"
@@ -51,6 +59,11 @@ def default_config() -> dict:
         "osc":           OSC_RSI,     # rsi | cci
         "div_period":    14,
         "div_pivot":     5,           # pivot félszélesség (±gyertya) a csúcsokhoz
+        # Mozgóátlag-szalag: a pozíciót akkor zárjuk, ha az egyetértés (hány SMA
+        # lejt a pozíció irányába) a küszöb ALÁ esik. 4 átlag → 0..4.
+        "ma_periods":   (8, 21, 100, 250),
+        "ma_slope_bars": 60,          # ennyi gyertyán mérjük a lejtést
+        "ma_min_agree":  1,           # ez ALATT zárunk (1 → 0-nál zár)
     }
 
 
@@ -159,6 +172,41 @@ def divergence_exit(bars, direction: str, osc: str, period: int, pivot: int) -> 
     return bool(s[-2]) if len(s) >= 2 else False
 
 
+def ma_stack_exit(bars, direction: str, periods=(8, 21, 100, 250),
+                  slope_bars: int = 60, min_agree: int = 1) -> bool:
+    """A mozgóátlag-szalag SZÉTESETT: kevesebb átlag lejt a pozíció irányába,
+    mint a küszöb.
+
+    ⚠ MIÉRT A LEJTÉS, ÉS NEM A TÁVOLSÁG. Két átlag lehet állandó távolságra úgy
+    is, hogy mindkettő emelkedik, és úgy is, hogy mindkettő esik — a távolság ezt
+    nem különbözteti meg, a lejtés igen. A mérés szerint a lejtés-egyetértés
+    monoton összefügg a jövőbeli hozammal, a távolság-alapú jelek viszont nem
+    hordoztak irányt.
+
+    ⚠ ZÁRT GYERTYÁKON: az utolsó sor a formálódó gyertya, ezért `[-2]`-ig
+    nézünk. Enélkül a jel a saját gyertyája záróárát használná — a projekt már
+    megjárt egy ilyen look-ahead hibát az M15-jelnél."""
+    import pandas as _pd
+    d = _dir_sign(direction)
+    if d == 0 or bars is None:
+        return False
+    _c = bars["close"] if hasattr(bars, "__getitem__") else None
+    if _c is None or len(_c) < max(periods) + slope_bars + 2:
+        return False
+    c = _pd.Series(_c).iloc[:-1]          # a formálódó gyertyát elhagyjuk
+    egyet = 0
+    for n in periods:
+        ma = c.rolling(int(n), min_periods=int(n)).mean()
+        if len(ma) <= slope_bars:
+            return False
+        lejto = ma.iloc[-1] - ma.iloc[-1 - int(slope_bars)]
+        if lejto != lejto:                 # NaN
+            return False
+        if (lejto > 0) == (d > 0) and lejto != 0:
+            egyet += 1
+    return egyet < int(min_agree)
+
+
 def exit_triggered(bars, direction: str, cfg: dict) -> bool:
     """A kiválasztott kiszállási indikátor jele az utolsó ZÁRT gyertyán.
     `cfg` a `default_config()` szerinti (a hívó tölti a per-pár beállításból).
@@ -179,4 +227,9 @@ def exit_triggered(bars, direction: str, cfg: dict) -> bool:
                                cfg.get("osc", OSC_RSI),
                                int(cfg.get("div_period", 14)),
                                int(cfg.get("div_pivot", 5)))
+    if ind == INDICATOR_MA_STACK:
+        return ma_stack_exit(bars, direction,
+                             tuple(cfg.get("ma_periods", (8, 21, 100, 250))),
+                             int(cfg.get("ma_slope_bars", 60)),
+                             int(cfg.get("ma_min_agree", 1)))
     return False

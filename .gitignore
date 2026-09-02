@@ -22,3 +22,6 @@ config.local.json
 fk.json
 sajat.json
 lab_*.json
+
+# IDE-beallitasok (PyCharm/IntelliJ) — gep- es felhasznalo-fuggo, nem a projekte.
+.idea/
