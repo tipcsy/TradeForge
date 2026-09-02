@@ -183,8 +183,11 @@ notify.trade_event({"event": "open", "symbol": "Ger40", "strategy": "wpr_sma",
                     "direction": "BUY", "lot": 0.1, "price": 23456.7,
                     "sl": 23400.0, "tp": 23600.0})
 n._kuld(n._q.get_nowait())
-check("a kötés üzenete tartalmazza a párat, az irányt és az árat",
-      kuldott and all(x in kuldott[-1] for x in ("Ger40", "BUY", "23457")),
+# ⚠ „23457" ÁLLT ITT — a `%.5g` KEREKÍTÉSE. A régi formátum nem csak
+# exponenciálisra váltott nagy szinteknél: Ger40-méretű számon egy valós
+# tizedest is eldobott, és a teszt ezt a veszteséget rögzítette helyesként.
+check("a kötés üzenete tartalmazza a párat, az irányt és a PONTOS árat",
+      kuldott and all(x in kuldott[-1] for x in ("Ger40", "BUY", "23456.7")),
       kuldott[-1] if kuldott else "")
 notify.trade_event({"event": "close", "symbol": "Ger40", "strategy": "wpr_sma",
                     "ticket": 111, "pnl_usd": -12.5})
@@ -400,6 +403,41 @@ check("⚠ ...és alapból KI van kapcsolva (senki ne kapjon váratlan üzenetet
       _pelda["notify"]["enabled"] is False)
 check("⚠ ...token nélkül (a példa-config nyilvános)",
       _pelda["notify"]["telegram"]["token"] == "")
+
+# ── AZ ÁR SOSEM TUDOMÁNYOS ALAKBAN ────────────────────────────────────────
+# ⚠ HARMADSZOR UGYANAZ A HIBA. A `%.5g` nagy szintnél exponenciálisra vált; a
+# felhasználó Telegram-üzenetében ez állt (2026-09-02):
+#     Bra50 BUY JELZÉS @ 1.8087e+05 / SL 1.8044e+05 · TP 1.8173e+05
+# Ebből a stop TÁVOLSÁGA — az egyetlen szám, amiből a kockázat megítélhető —
+# leolvashatatlan. (Ugyanez elsült az `Offer.fmt`-ben és a kézi laborban is.)
+_regi_cfg = notify._cfg_json
+notify._cfg_json = {"pairs": {
+    "Bra50":  {"point_size": 1.0},
+    "USDJPY": {"point_size": 0.001},
+    "EURCHF": {"point_size": 0.00001},
+    "Ger40":  {"point_size": 0.01},
+}}
+try:
+    for _sym, _ertek, _vart in (("Bra50", 180870.0, "180870"),
+                                ("USDJPY", 159.55, "159.550"),
+                                ("EURCHF", 0.94287, "0.94287"),
+                                ("Ger40", 25816.16, "25816.16")):
+        _kapott = notify._szam(_ertek, _sym)
+        check(f"{_sym}: az ar az instrumentum tizedeseivel",
+              _kapott == _vart, f"{_kapott} (vart: {_vart})")
+    for _sym, _ertek in (("Bra50", 180870.0), ("Ger40", 25816.16)):
+        check(f"{_sym}: NINCS exponencialis alak",
+              "e" not in notify._szam(_ertek, _sym).lower())
+    # ⚠ ISMERETLEN PARNAL SEM eshet vissza tudomanyosra: ott a nagysagrend dont.
+    check("ismeretlen parnal sincs exponencialis alak",
+          "e" not in notify._szam(180870.0, "NINCSILYEN").lower(),
+          notify._szam(180870.0, "NINCSILYEN"))
+    check("szimbolum nelkul sincs exponencialis alak",
+          "e" not in notify._szam(180870.0).lower(), notify._szam(180870.0))
+    check("ertelmezhetetlen ertekre '-'", notify._szam(None) == "-")
+finally:
+    notify._cfg_json = _regi_cfg
+
 
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")

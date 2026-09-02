@@ -424,8 +424,10 @@ def trade_event(row: dict) -> bool:
             szoveg = _t("notify.open" if kind == OPEN else "notify.signal",
                         symbol=sym, strategy=strat,
                         dir=str(row.get("direction") or ""),
-                        lot=row.get("lot"), price=_szam(row.get("price")),
-                        sl=_szam(row.get("sl")), tp=_szam(row.get("tp")))
+                        lot=row.get("lot"),
+                        price=_szam(row.get("price"), sym),
+                        sl=_szam(row.get("sl"), sym),
+                        tp=_szam(row.get("tp"), sym))
         return _kuld(Event(kind=kind, text=szoveg, symbol=sym, strategy=strat))
     except Exception:
         # ⚠ Az értesítés SOHA nem viheti el a napló-írást, ami hívja.
@@ -439,7 +441,7 @@ def sl_moved(symbol: str, strategy: str, ticket: int, sl: float,
     return _kuld(Event(
         kind=SL_MOVE, symbol=symbol, strategy=strategy,
         text=_t("notify.be" if breakeven else "notify.sl_move",
-                symbol=symbol, ticket=int(ticket), sl=_szam(sl))))
+                symbol=symbol, ticket=int(ticket), sl=_szam(sl, symbol))))
 
 
 def signal_offer(ajanlat) -> bool:
@@ -491,8 +493,36 @@ def error(key: str, text: str) -> bool:
     return _kuld(Event(kind=ERROR, text=text, key=str(key)))
 
 
-def _szam(v) -> str:
+def _szam(v, symbol: str = "") -> str:
+    """Ár SZÖVEGKÉNT — az INSTRUMENTUM tizedesjegyeivel, sosem tudományos alakban.
+
+    ⚠ HARMADSZOR UGYANAZ A HIBA. A `%.5g` nagy szintnél exponenciálisra vált:
+    a felhasználó Telegram-üzenetében ez állt (2026-09-02):
+
+        Bra50 BUY JELZÉS @ 1.8087e+05
+        SL 1.8044e+05 · TP 1.8173e+05
+
+    Ebből a stop TÁVOLSÁGA — vagyis az egyetlen szám, amiből meg lehetne ítélni
+    a kockázatot — gyakorlatilag leolvashatatlan. Ugyanez a hiba elsült már a
+    jelzés-ajánlat szövegében (`Offer.fmt`) és a kézi laborban is; a megoldás
+    mindháromszor ugyanaz: a tizedesek száma a `point_size`-ból jön.
+
+    A `point_size` a config `pairs` blokkjából; ha nincs (ismeretlen pár, üres
+    config), a NAGYSÁGREND dönt — az is jobb, mint az exponenciális alak."""
     try:
-        return f"{float(v):.5g}"
+        x = float(v)
     except (TypeError, ValueError):
         return "-"
+    tiz = None
+    try:
+        _pc = ((_cfg_json.get("pairs") or {}).get(symbol) or {})
+        _ps = float(_pc.get("point_size") or 0.0)
+        if _ps > 0:
+            import math
+            tiz = min(8, max(0, int(round(-math.log10(_ps)))))
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        tiz = None
+    if tiz is None:
+        _a = abs(x)
+        tiz = 2 if _a >= 100 else (4 if _a >= 1 else 5)
+    return f"{x:.{tiz}f}"
