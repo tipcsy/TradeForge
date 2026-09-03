@@ -391,6 +391,15 @@ def open_position(
     comment: str = "ErikBot",
     strategy_name: str = "",
 ) -> Optional[int]:
+    # ⚠ FEDEZET-SZÜNET: ha a bróker nemrég fedezethiánnyal utasított el, ne
+    # küldjünk újabb megbízást — a fedezet nem lesz több tizenkét másodperc
+    # alatt. A szünet LEJÁR (nem végleges tiltás), és egy sikeres kötés törli.
+    _szunet = _FEDEZET_SZUNET.get(symbol)
+    if _szunet and time.time() < _szunet:
+        log.debug("%s — fedezet-szünet, még %.0f mp", symbol,
+                  _szunet - time.time())
+        return None
+
     order_type = mt5.ORDER_TYPE_BUY if direction == "BUY" else mt5.ORDER_TYPE_SELL
     with MT5_LOCK:
         tick = mt5.symbol_info_tick(symbol)
@@ -428,13 +437,21 @@ def open_position(
         # A retcode is kell, ne csak a szöveg: 10030 = nem támogatott kitöltési mód,
         # 10016 = érvénytelen stop, 10004/10021 = requote/nincs ár. Enélkül nem
         # derül ki, MIÉRT nem ment ki a kötés.
-        log.error("%s — pozíció nyitás hiba: retcode=%s %s | lot=%.2f SL=%g TP=%g "
-                  "deviation=%s filling=%s", symbol,
-                  getattr(result, "retcode", "—"),
-                  result.comment if result else mt5.last_error(),
-                  lot, sl, tp, request["deviation"], request["type_filling"])
+        _rc = getattr(result, "retcode", None)
+        _reszlet = ("retcode=%s %s | lot=%.2f SL=%g TP=%g deviation=%s filling=%s"
+                    % (_rc if _rc is not None else "—",
+                       result.comment if result else mt5.last_error(),
+                       lot, sl, tp, request["deviation"],
+                       request["type_filling"]))
+        _order_hiba_jelent(symbol, _rc, _reszlet)
+        if _rc in FEDEZET_RETCODE:
+            _FEDEZET_SZUNET[symbol] = time.time() + FEDEZET_SZUNET_MP
         return None
 
+    # ⚠ A SIKER TÖRLI a hiba-állapotot és a fedezet-szünetet: ha egyszer
+    # kiment egy megbízás, a következő elutasítás ÚJ hiba, nem a régi
+    # folytatása — különben egy valódi, új probléma ismétlésnek látszana.
+    _order_hiba_rendben(symbol)
     log.info("✅ [%s] %s %s | Lot: %.2f | SL: %.5f | TP: %.5f | Ticket: %d | magic: %d",
              strategy_name or comment, symbol, direction, lot, sl, tp, result.order, magic)
     return result.order
@@ -763,6 +780,73 @@ SL_MOVES_DIR = ROOT / "data" / "sl_moves"
 # tucatnyi azonos sort írna, és a naplóban pont a RITKA leletek vesznének el
 # benne. Az első előfordulás megy ki figyelmeztetésként, a többi `debug`-ra.
 _WARNED: set = set()
+
+
+# ── MEGBÍZÁS-HIBÁK: egyszer mondjuk el, aztán ÖSSZEGEZZÜK ────────────────
+#
+# ⚠ A LELET (2026-09-03). A naplóban 43 hiba állt, MIND ugyanaz: `UsaInd`,
+# `lot=0.05`, `retcode=10019 No money`, 9 perc alatt. A motor körönként újra
+# megpróbálta ugyanazt a megbízást, a bróker pedig minden alkalommal
+# fedezethiánnyal utasította el. A felület „43 hiba a naplóban" feliratot
+# mutatott — ami IGAZ volt, de egyetlen helyzetet írt le negyvenháromszor, és
+# elnyomta volna azt a hibát, ami tényleg új.
+#
+# ⚠ NEM ELNÉMÍTJUK. A projekt szabálya épp az ellenkezője (a néma hiba a
+# legdrágább). Amit teszünk: az ELSŐ előfordulás `ERROR` a teljes részlettel, az
+# ismétlődés `DEBUG`, és negyedóránként egy `WARNING`-összegzés a darabszámmal.
+# Így a hiba nem tűnik el, de nem is fedi el a többit.
+_ORDER_HIBA: dict = {}          # (szimbólum, retcode) → {"eloszor", "db", "jelentve"}
+ORDER_HIBA_JELENTES_MP = 900    # ennyinél ritkábban nem ismételjük a jelentést
+
+# Fedezet-hiány: ezekre VÁRUNK, nem próbálkozunk körönként újra.
+# ⚠ MIÉRT SZÜNET, ÉS NEM VÉGLEGES TILTÁS: az egyenleg változhat (zár egy
+# pozíció, vagy töltesz rá), tehát a párat nem szabad örökre kizárni — de
+# másodpercenként újrapróbálni értelmetlen, mert a fedezet nem lesz több
+# tizenkét másodperc alatt.
+FEDEZET_RETCODE = (10019,)      # „No money"
+FEDEZET_SZUNET_MP = 900
+_FEDEZET_SZUNET: dict = {}      # szimbólum → eddig szünetel (epoch)
+
+# Emberi magyarázat a gyakori bróker-válaszokra. A puszta kód nem mondja meg,
+# hogy MIT LEHET KEZDENI vele.
+RETCODE_MAGYARAZAT = {
+    10019: ("nincs elég szabad fedezet — a legkisebb köthető lot ekkora "
+            "egyenlegnél nem nyitható. Vagy kisebb kockázat/nagyobb egyenleg "
+            "kell, vagy ezt a párat ki kell venni a listából."),
+    10016: "érvénytelen stop (túl közel a jelenlegi árhoz vagy rossz oldalon)",
+    10030: "a bróker nem támogatja ezt a kitöltési módot",
+    10004: "requote — az ár elmozdult a megbízás elküldése közben",
+    10021: "nincs ár erre az instrumentumra (piac zárva vagy nincs jegyzés)",
+    10018: "a piac zárva van",
+}
+
+
+def _order_hiba_jelent(symbol: str, retcode, reszlet: str) -> None:
+    """Megbízás-hiba naplózása ISMÉTLÉS-SZŰRÉSSEL."""
+    kulcs = (symbol, retcode)
+    most = time.time()
+    _a = _ORDER_HIBA.get(kulcs)
+    _mi = RETCODE_MAGYARAZAT.get(retcode)
+    if _a is None:
+        _ORDER_HIBA[kulcs] = {"eloszor": most, "db": 1, "jelentve": most}
+        log.error("%s — pozíció nyitás hiba: %s%s", symbol, reszlet,
+                  f"  ⇒ {_mi}" if _mi else "")
+        return
+    _a["db"] += 1
+    log.debug("(ismételt) %s — pozíció nyitás hiba: %s", symbol, reszlet)
+    if most - _a["jelentve"] >= ORDER_HIBA_JELENTES_MP:
+        _a["jelentve"] = most
+        log.warning("%s — a megbízás MÉG MINDIG nem megy ki (%d alkalom "
+                    "%.0f perce): %s%s", symbol, _a["db"],
+                    (most - _a["eloszor"]) / 60.0, reszlet,
+                    f"  ⇒ {_mi}" if _mi else "")
+
+
+def _order_hiba_rendben(symbol: str) -> None:
+    """Sikeres megbízás → a pár hiba-állapota törlődik."""
+    for k in [k for k in _ORDER_HIBA if k[0] == symbol]:
+        _ORDER_HIBA.pop(k, None)
+    _FEDEZET_SZUNET.pop(symbol, None)
 
 
 def _warn_once(key, msg: str, *args) -> None:
