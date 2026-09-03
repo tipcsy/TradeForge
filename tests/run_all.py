@@ -1,9 +1,21 @@
 """
 Az összes teszt lefuttatása egy paranccsal:
 
-    python tests/run_all.py                  # mind
-    python tests/run_all.py package          # csak a névben illeszkedők
-    python tests/run_all.py --no-live-data   # az éles adatot igénylők nélkül
+    python tests/run_all.py                    # mind
+    python tests/run_all.py package            # csak a névben illeszkedők
+    python tests/run_all.py --no-live-data     # az éles adatot igénylők nélkül
+
+RÉSZLEGES FUTÁS (2026-09-03) — a teljes csomag lassú, és 46 teszt ablakot nyit.
+Fejlesztés közben elég az a terület, amihez hozzányúltál:
+
+    python tests/run_all.py --csoportok        # mi van, és melyikben hány teszt
+    python tests/run_all.py --csoport motor    # egy (vagy több) csoport
+    python tests/run_all.py --kihagy felulet   # minden, csak a villogók nélkül
+    python tests/run_all.py --erinti core/gates.py   # ami EZT a fájlt érintheti
+
+⚠ A RÉSZLEGES FUTÁS MINDIG VISZI AZ ŐRÖKET és a be nem sorolható teszteket
+(lásd `csoportok.py`). Pusholás előtt viszont teljes futás kell — a részleges
+azt mondja meg, hogy amihez NYÚLTÁL, az rendben van, nem azt, hogy minden.
 
 Nincs pytest-függés: minden teszt önálló szkript, ami a végén `0`/`1` kilépési
 kóddal tér vissza, és kiírja a saját `n/m teszt PASS` sorát. Ez a futtató csak
@@ -109,16 +121,89 @@ def _skiplist() -> dict:
     return out
 
 
+def _ertek(args: list, kapcsolo: str) -> list:
+    """A `--kapcsolo ertek` (és `--kapcsolo a,b`) alakok kiszedése az argokból."""
+    ki: list = []
+    while kapcsolo in args:
+        i = args.index(kapcsolo)
+        if i + 1 >= len(args):
+            raise SystemExit(f"A(z) {kapcsolo} utan kell egy ertek.")
+        ki += [x for x in args[i + 1].split(",") if x]
+        del args[i:i + 2]
+    return ki
+
+
+def _csoport_lista() -> int:
+    from csoportok import csoportok_szerint, teszt_terkep
+    terkep = teszt_terkep()
+    g = csoportok_szerint(terkep)
+    print(f"{len(terkep)} tesztfajl, csoportonkent "
+          f"(egy teszt tobb csoportban is lehet):")
+    for nev in sorted(g, key=lambda n: (-len(g[n]), n)):
+        # ⚠ Az ÜRES csoport is információ: azt a területet nem fedi teszt.
+        jel = "   <- nincs ra teszt" if not g[nev] else ""
+        print(f"   {nev:<14} {len(g[nev]):>4}{jel}")
+    print()
+    print("A reszleges futas mindig viszi az 'orok' es az 'egyeb' csoportot.")
+    return 0
+
+
 def main() -> int:
     args = [a for a in sys.argv[1:]]
+    sys.path.insert(0, str(HERE))
+    if "--csoportok" in args:
+        return _csoport_lista()
     no_live = "--no-live-data" in args
     if no_live:
         args.remove("--no-live-data")
+    kert = _ertek(args, "--csoport")
+    kihagy = _ertek(args, "--kihagy")
+    erinti = _ertek(args, "--erinti")
     pattern = args[0] if args else ""
     files = sorted(p for p in HERE.glob("test_*.py") if pattern in p.name)
     if not files:
         print(f"Nincs illeszkedő teszt: {pattern!r}")
         return 1
+
+    if kert or kihagy or erinti:
+        import csoportok as _cs
+        terkep = _cs.teszt_terkep()
+        valaszt: set = set()
+        try:
+            if kert:
+                valaszt |= set(_cs.valogatas(kert, terkep))
+            for cel in erinti:
+                # ⚠ TRANZITÍV, tehát konzervatív: ide az is beleszámít, ami csak
+                # három áttéten át ér el a fájlhoz. Inkább fusson feleslegesen
+                # egy teszt, mint hogy egy törés csendben átcsússzon.
+                valaszt |= set(_cs.erintett_tesztek(cel, terkep))
+                valaszt |= set(_cs.valogatas([], terkep))   # őrök + besorolatlan
+                kozv = _cs.kozvetlen_importalok(cel, terkep)
+                print(f"--erinti {cel}: {len(_cs.erintett_tesztek(cel, terkep))} "
+                      f"teszt ({len(kozv)} kozvetlenul importalja)")
+            if not (kert or erinti):
+                valaszt = {f.name for f in files}
+            if kihagy:
+                g = _cs.csoportok_szerint(terkep)
+                for nev in kihagy:
+                    if nev not in g:
+                        raise KeyError("Nincs ilyen csoport: " + nev
+                                       + "  |  van: " + ", ".join(sorted(g)))
+                    # Az őröket és a besorolatlanokat a --kihagy sem viheti el.
+                    tilos = set(g[nev]) - set(g["orok"]) - set(g["egyeb"])
+                    valaszt -= tilos
+        except KeyError as e:
+            print(str(e).strip(chr(39) + chr(34)))
+            return 1
+        files = [f for f in files if f.name in valaszt]
+        cimke = (("csoport: " + ", ".join(kert)) if kert else "")
+        cimke += ("  kihagyva: " + ", ".join(kihagy)) if kihagy else ""
+        print(f"RESZLEGES FUTAS  {cimke}  ->  {len(files)} fajl "
+              f"(orokkel egyutt)")
+        print("-" * 52)
+        if not files:
+            print("Nincs futtatando teszt.")
+            return 1
 
     skipped: list = []
     if no_live:

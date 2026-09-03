@@ -588,6 +588,32 @@ python tests/run_all.py
 Egy teszt önmagában is futtatható (`python tests/test_gates.py`), és részhalmaz is
 szűrhető névtöredékkel (`python tests/run_all.py package`).
 
+### Részleges futás — csak az érintett terület
+
+A teljes csomag lassú, és 46 teszt ablakot nyit. Fejlesztés közben elég az a
+terület, amihez hozzányúltál:
+
+```bash
+python tests/run_all.py --csoportok              # mi van, és melyikben hány teszt
+python tests/run_all.py --csoport motor          # egy (vagy több) csoport
+python tests/run_all.py --kihagy felulet         # minden, csak a villogók nélkül
+python tests/run_all.py --erinti core/gates.py   # ami EZT a fájlt érintheti
+```
+
+A besorolás **nem kézzel karbantartott lista**, hanem a tesztek TÉNYLEGES
+importjaiból számítódik (a függvényeken belüliekkel együtt) — így nem tud
+csendben elavulni. A `--csoport` a közvetlen importokat nézi („miről szól a
+teszt"), az `--erinti` a tranzitív lezárást („mit törhet el egy változtatás"),
+ezért az utóbbi szándékosan bőkezű.
+
+Minden részleges futás viszi az **őröket** (verzió, definiálatlan nevek, néma
+hibák, konfig-koherencia, higiénia) és a be nem sorolható teszteket: egy
+besorolhatatlan tesztet kihagyni annyi lenne, mint a nem-tudást biztonságnak
+nevezni. Részletek: [`tests/csoportok.py`](tests/csoportok.py).
+
+> **Pusholás előtt teljes futás kell.** A részleges azt mondja meg, hogy amihez
+> nyúltál, az rendben van — nem azt, hogy minden.
+
 ### Miért nem 116/116 a CI-ben?
 
 13 teszt a saját `config.json`-odból, a `data/` mappádból vagy egy valódi képernyőből
@@ -1280,6 +1306,32 @@ python tests/run_all.py
 
 A single test can be run on its own (`python tests/test_gates.py`), and a subset
 can be filtered by a name fragment (`python tests/run_all.py package`).
+
+### Partial runs — only the area you touched
+
+The full suite is slow, and 46 tests open a window. While developing, the area
+you actually touched is enough:
+
+```bash
+python tests/run_all.py --csoportok              # groups and their test counts
+python tests/run_all.py --csoport motor          # one (or more) groups
+python tests/run_all.py --kihagy felulet         # everything except the UI ones
+python tests/run_all.py --erinti core/gates.py   # whatever THIS file can break
+```
+
+Membership is **not a hand-maintained table**: it is derived from each test's
+ACTUAL imports, including the ones inside functions — so it cannot go stale
+silently. `--csoport` uses direct imports ("what the test is about"),
+`--erinti` uses the transitive closure ("what a change can break"), which is
+deliberately generous.
+
+Every partial run also carries the **guards** (version, undefined names,
+silently swallowed errors, config coherence, hygiene) and any test that could
+not be classified: skipping an unclassifiable test would be calling ignorance
+safety. Details: [`tests/csoportok.py`](tests/csoportok.py).
+
+> **A full run is still required before pushing.** A partial run tells you that
+> what you touched is fine — not that everything is.
 
 ### Why is CI not 116/116?
 
