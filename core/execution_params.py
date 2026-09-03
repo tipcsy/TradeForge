@@ -11,7 +11,7 @@ csináltak), tehát a kimenet-menedzsment paraméterei — nem a végrehajtásé
 végképp nem a stratégiáé. A `MIGRATED_KEYS` csak az egyszeri átköltöztetéshez
 kell (`tools/migrate_be_trail.py`), új írás már nem történik rájuk.
 
-Korábban ez az 5-6 kulcs stratégiánként DUPLIKÁLVA élt a `strategy/config/<name>.json`
+Korábban ez az 5-6 kulcs stratégiánként DUPLIKÁLVA élt a `strategies/config/<name>.json`
 indicators/sltp/position_mgmt szekcióiban, és a `wpr_sma` az egyetlen, amelyik
 ténylegesen hangolta is instrumentumonként (Optuna-tartomány). Mivel egy adott
 szimbólumon TÖBB stratégia is futhat, és a BE%/trailing/spread-tűrés a piac/broker

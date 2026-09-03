@@ -10,7 +10,7 @@ A sávok összeszűkülését (squeeze) és az azt követő kitörést fogja meg
                  alapból KI — az irány-vétó a kapuké)
   4. KITÖRÉS     záróár a sávon kívül ÉS a %B megerősíti
 
-A leírás: `strategy/docs/bollinger_squeeze_breakout.md`.
+A leírás: `strategies/docs/bollinger_squeeze_breakout.md`.
 
 ───────────────────────────────────────────────────────────────────────────
 AMI NEM EZÉ A MODULÉ
@@ -118,7 +118,7 @@ def _to_signal_tf(df: pd.DataFrame, params: dict = None) -> pd.DataFrame:
     tf = int((params or {}).get("signal_tf_min") or signal_tf_min())
     if tf <= 15 or df is None or len(df) < 2:
         return df
-    from strategy.ml_ai import resample_ohlc
+    from core.indicator_engine import resample_ohlc
     return resample_ohlc(df, tf)
 
 
@@ -602,7 +602,8 @@ class BollingerSqueezeStrategy(Strategy):
         if self._constraints_cache is None:
             import json
             from pathlib import Path
-            p = Path(__file__).resolve().parent / "config" / f"{self.name}.json"
+            from strategy import paths as _paths
+            p = _paths.config_file(self.name)
             try:
                 data = json.loads(p.read_text(encoding="utf-8"))
                 self._constraints_cache = ((data.get("optimizer") or {})

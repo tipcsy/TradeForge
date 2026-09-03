@@ -110,7 +110,7 @@ a páron futó ÖSSZES stratégiára.
 
 ## Paraméterek
 
-`strategy/config/trend_pullback.json`:
+`strategies/config/trend_pullback.json`:
 
 | kulcs | alap | mit állít |
 |---|---|---|

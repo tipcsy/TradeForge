@@ -1,7 +1,7 @@
 """
 Deklaratív paraméter-kényszerek BIZTONSÁGOS kiértékelése.
 
-A kényszerek a stratégia optimizer-configjában élnek (strategy/config/<name>.json
+A kényszerek a stratégia optimizer-configjában élnek (strategies/config/<name>.json
 → optimizer.constraints), kifejezés-STRINGEKként, pl.:
     "wpr_m15_buy_extreme < wpr_m15_buy_trigger"
     "wpr_m15_buy_trigger < wpr_m15_sell_extreme"

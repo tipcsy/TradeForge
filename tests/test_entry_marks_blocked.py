@@ -159,7 +159,7 @@ check("a kötő rekordban nincs fölösleges mező", _n2 is not None and "skip" 
 # ⚠ Nem elég a `trend_pullback`-et javítani: ugyanez a félreolvasás a `wpr_sma`
 # és a `bollinger_squeeze` chartján is megvolt.
 for _f in ("trend_pullback.py", "wpr_sma.py", "bollinger_squeeze.py"):
-    _src = (ROOT / "strategy" / _f).read_text(encoding="utf-8")
+    _src = (ROOT / "strategies" / _f).read_text(encoding="utf-8")
     if "viz.entry_marks(rec)" not in _src:
         continue
     check(f"{_f}: a kötne/kimarad jelölést KÉRI", "viz.mark_blocked(" in _src)

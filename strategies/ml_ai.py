@@ -4,7 +4,7 @@ Strategy seam mögé csomagolva.
 
 Működés: páronként és irányonként (long/short) egy tanított osztályozó
 (LightGBM/RandomForest) + StandardScaler + kalibrált valószínűség-küszöb.
-Minden JEL-gyertya zárásakor a ~50 feature-ből (strategy.ml_features) predikció
+Minden JEL-gyertya zárásakor a ~50 feature-ből (strategies.ml_features) predikció
 készül; ha P(irány) >= küszöb ÉS a session-óra engedi, a KÖVETKEZŐ M1 záráskor
 belépő jel születik. Az SL/TP ATR-alapú (vagy fix pip) — a pozíciómenedzsment
 (BE/trailing/kockázatcsökkentés) a keretrendszer meglévő presetjeié.
@@ -48,7 +48,8 @@ from strategy.base import (
     Strategy, Column, StrategyColumn, MarkerColumn,
     MarketData, Cell, Timeframe,
 )
-from strategy import ml_features as mlf
+from core.indicator_engine import resample_ohlc
+from strategies import ml_features as mlf
 
 
 # ---------------------------------------------------------------------------
@@ -67,7 +68,7 @@ def model_path(symbol: str) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# Jel-idősík — STRATÉGIA-szintű beállítás (strategy/config/ml_ai.json)
+# Jel-idősík — STRATÉGIA-szintű beállítás (strategies/config/ml_ai.json)
 # ---------------------------------------------------------------------------
 #
 # MIÉRT NEM per instrumentum: a `Strategy.timeframes()` az egész keretrendszer
@@ -130,21 +131,6 @@ def _infer_tf_min(df) -> "int | None":
         return int(deltas.mode().iloc[0].total_seconds() // 60) or None
     except Exception:
         return None
-
-
-def resample_ohlc(df, minutes: int):
-    """OHLC(V) frame átmintázása `minutes` perces gyertyákra.
-
-    Csak FELFELÉ (durvább idősík) értelmes; a hívó dolga ezt biztosítani. A
-    `label`/`closed` alapértelmezés (bal-zárt, bal-címkés) EGYEZIK az MT5-ével és
-    a `core.tf_align` resample-jével: a gyertya a NYITÓ idejével azonosított."""
-    agg = {"open": "first", "high": "max", "low": "min", "close": "last"}
-    if "volume" in df.columns:
-        agg["volume"] = "sum"
-    if "avg_spread" in df.columns:
-        agg["avg_spread"] = "mean"
-    out = df.resample(f"{int(minutes)}min").agg(agg).dropna(subset=["close"])
-    return out
 
 
 def frame_for_signal(df_hi, df_lo, minutes: int):
@@ -213,7 +199,7 @@ def load_bundle(symbol: str) -> Optional[dict]:
         _tf_model = int(_meta.get("signal_tf_min", DEFAULT_TF_MIN))
         if _tf_model != tf_now:
             log.warning("%s — az ML modell M%d idősíkon tanult, a beállítás viszont "
-                        "M%d (strategy/config/ml_ai.json: signal_tf_min) → a "
+                        "M%d (strategies/config/ml_ai.json: signal_tf_min) → a "
                         "predikció más gyertyákra vonatkozna. A modell KIHAGYVA; "
                         "tanítsd újra (Opt gomb / `python main.py optimize %s "
                         "--strategy ml_ai`).", symbol, _tf_model, tf_now, symbol)
@@ -573,7 +559,7 @@ class MlAiStrategy(Strategy):
         ml_ai-nál TANÍT). A test_start UTÁNI adat nem kerül tanításba; az
         out-of-sample mérést az optimizer közös run_pair-teszt végzi a frissen
         mentett modellel."""
-        from strategy.ml_train import train_symbol
+        from strategies.ml_train import train_symbol
         return train_symbol(symbol, df_m15, cfg, pair_cfg, test_start,
                             progress_callback)
 

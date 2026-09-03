@@ -4,7 +4,7 @@ Stratégia-config betöltés és szétválasztás.
 A `config.json` a VÁZ (főprogram) beállításait tartja (broker, mt5, trading,
 data, pairs, dashboard, optimizer-MOTOR). A stratégiához tartozó beállítások
 (quality, indicators, sltp, position_mgmt és az optimizer PARAMÉTERTÉR) a
-stratégia SAJÁT fájljában élnek: `strategy/config/<name>.json`.
+stratégia SAJÁT fájljában élnek: `strategies/config/<name>.json`.
 
 Betöltéskor a kettő EGY futásidejű cfg-vé olvad (a downstream kód változatlanul
 `cfg["indicators"]` stb. formában olvassa). Mentéskor a `main_config_view()` a
@@ -99,8 +99,13 @@ def strategy_name(cfg: dict) -> str:
 
 
 def strategy_config_path(name: str) -> Path:
-    """A stratégia saját config-fájlja (a strategy csomag mellett)."""
-    return Path(__file__).resolve().parent / "config" / f"{name}.json"
+    """A stratégia saját config-fájlja: `strategies/config/<név>.json`.
+
+    ⚠ AZ ÚTVONAL A `strategy.paths`-BÓL JÖN, nem `__file__`-relatívan: a
+    stratégiák v3.29.0 óta külön csomagban élnek, és egy második másolat ebből a
+    feltevésből némán elavulna."""
+    from strategy import paths as _paths
+    return _paths.config_file(name)
 
 
 def load_strategy_config(name: str) -> dict:

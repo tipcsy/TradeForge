@@ -36,7 +36,8 @@ ROOT = Path(__file__).resolve().parent.parent
 TESZT_DIR = ROOT / "tests"
 
 # A projekt saját csomagjai — csak ezeket követjük (a numpy/pandas nem érdekes).
-CSOMAGOK = ("core", "trading", "strategy", "dashboard", "ml", "tools", "tests")
+CSOMAGOK = ("core", "trading", "strategy", "strategies", "dashboard",
+            "ml", "tools", "tests")
 
 # ── A NÉVVEL ELLÁTOTT CSOPORTOK ───────────────────────────────────────────
 # Egy csoport = modul-előtagok halmaza. Egy teszt ANNYI csoportba tartozik,
@@ -57,7 +58,10 @@ CSOPORTOK = {
               "core.vol_baseline", "core.live_lock", "core.position_meta",
               "core.adopted", "core.pnl_split", "core.correlation",
               "core.trade_mode", "core.gate_params"),
-    "strategia": ("strategy.",),
+    # ⚠ KÉT csomag (v3.29.0): a KERET (`strategy/`) és a TARTALOM
+    # (`strategies/`). Egy csoportba tartoznak: aki az egyikhez nyúl, a
+    # másikat is elronthatja.
+    "strategia": ("strategy.", "strategies."),
     "felulet": ("dashboard.", "core.gate_layout", "core.overview",
                 "tools.ui_preview"),
     "optimalizalo": ("ml.", "core.opt_activity", "core.opt_lock", "core.opt_plan",

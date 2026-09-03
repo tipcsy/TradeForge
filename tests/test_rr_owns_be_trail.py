@@ -191,7 +191,7 @@ check("ismeretlen parnal az alapertek (nem szall el)",
 # ══ 7. A strategia-configokban NINCS nyoma ═══════════════════════════════
 import json
 for name in ("wpr_sma", "ml_ai"):
-    raw = json.loads((ROOT / "strategy" / "config" / f"{name}.json")
+    raw = json.loads((ROOT / "strategies" / "config" / f"{name}.json")
                      .read_text(encoding="utf-8"))
     flat = set()
     for sec in ("indicators", "sltp", "position_mgmt"):

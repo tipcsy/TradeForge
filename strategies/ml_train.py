@@ -25,8 +25,8 @@ import pandas as pd
 
 log = logging.getLogger(__name__)
 
-from strategy import ml_features as mlf
-from strategy import ml_ai
+from strategies import ml_features as mlf
+from strategies import ml_ai
 
 
 # ---------------------------------------------------------------------------

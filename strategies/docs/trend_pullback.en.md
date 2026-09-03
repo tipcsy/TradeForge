@@ -116,7 +116,7 @@ it on EVERY strategy running on the pair.
 
 ## Parameters
 
-`strategy/config/trend_pullback.json`:
+`strategies/config/trend_pullback.json`:
 
 | key | default | what it sets |
 |---|---|---|

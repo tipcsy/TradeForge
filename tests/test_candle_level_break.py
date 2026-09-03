@@ -103,7 +103,7 @@ check("a param_space fut (a helper a MEGFELELŐ modulból)",
 
 
 # ── 3. A SZINT-SZÁMÍTÁS — és a JÖVŐ-SZIVÁRGÁS ELLENI védelem ───────────
-from strategy.candle_level_break import _levels
+from strategies.candle_level_break import _levels
 
 # Szintetikus H4: egy egyértelmű swing-alj a 10. gyertyán.
 _n = 30
@@ -139,7 +139,7 @@ check("a szint elévül a TTL után", pd.isna(_lv2["long_level"].iloc[25]),
 # ⚠ [DÖNTÉS] A videó „momentum gyertyát" említ, de a képen bekarikázott formáció
 # 2-3 APRÓ gyertya, és a belépő az utánuk jövő KITÖRÉS. Így a „mekkora a momentum
 # gyertya?" kérdés elkerülhető: a kitörés a SÁV CSÚCSÁN mérhető, küszöb nélkül.
-_src = (ROOT / "strategy" / "candle_level_break.py").read_text(encoding="utf-8")
+_src = (ROOT / "strategies" / "candle_level_break.py").read_text(encoding="utf-8")
 check("a döntéseink jelölve vannak a kódban", _src.count("[DÖNTÉS]") >= 2)
 check("a trendvonalat SZÁNDÉKOSAN nem implementáljuk (indokkal)",
       "trendvonalat sem implementáljuk" in _src)
@@ -210,7 +210,7 @@ if _plan3:
 # ⚠ A `bollinger_squeeze.param_space` a NEM LÉTEZŐ `ml.param_space`-t importálta.
 # Az optuna nem hívja, ezért a hiba a `grid`/`random` úton hetekig lappangott.
 for _n in registered_strategy_names():
-    _s = (ROOT / "strategy" / f"{_n}.py")
+    _s = (ROOT / "strategies" / f"{_n}.py")
     if _s.exists():
         check(f"{_n}: nem importál nem létező param_space modult",
               "from ml.param_space import" not in _s.read_text(encoding="utf-8"))

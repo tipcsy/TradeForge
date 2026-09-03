@@ -567,7 +567,8 @@ git stash pop
 ├── config.example.json      ← config-minta (a valódi config.json gitignore-olt)
 ├── core/                    ← MT5-kapcsolat, indikátorok, kockázat, kapuk, végrehajtás
 ├── trading/                 ← élő motor és backtest
-├── strategy/                ← stratégiák (wpr_sma, ml_ai) + saját configjaik és doksijuk
+├── strategy/                ← a stratégia-KERET (base, visual, settings, registry)
+├── strategies/              ← a STRATÉGIÁK maguk + saját configjaik (`config/`) és doksijuk (`docs/`)
 ├── ml/                      ← Optuna-optimalizáló
 ├── dashboard/               ← tkinter felület
 ├── mt5/                     ← MQL5 indikátorok (vizualizáció)
@@ -678,8 +679,8 @@ Ha lehet, ennyit írj meg a levélben:
 
 ## További dokumentáció
 
-- [`strategy/docs/wpr_sma.md`](strategy/docs/wpr_sma.md) — a WPR + SMA trendkövető stratégia
-- [`strategy/docs/ml_ai.md`](strategy/docs/ml_ai.md) — a gépi tanulásos stratégia (jelenleg **nem** javasolt élesben)
+- [`strategies/docs/wpr_sma.md`](strategies/docs/wpr_sma.md) — a WPR + SMA trendkövető stratégia
+- [`strategies/docs/ml_ai.md`](strategies/docs/ml_ai.md) — a gépi tanulásos stratégia (jelenleg **nem** javasolt élesben)
 - [`tools/MT5_BACKTEST_README.md`](tools/MT5_BACKTEST_README.md) — backtest visszajátszása MT5-ben
 - [`build/README.md`](build/README.md) — EXE-build (PyInstaller)
 - [`.claude/skills/new-strategy/SKILL.md`](.claude/skills/new-strategy/SKILL.md) — új stratégia bevezetésének checklistje
@@ -1286,7 +1287,8 @@ git stash pop
 ├── config.example.json      ← config sample (the real config.json is gitignored)
 ├── core/                    ← MT5 connection, indicators, risk, gates, execution
 ├── trading/                 ← live engine and backtest
-├── strategy/                ← strategies (wpr_sma, ml_ai) + their own configs and docs
+├── strategy/                ← the strategy FRAMEWORK (base, visual, settings, registry)
+├── strategies/              ← the STRATEGIES themselves + their configs (`config/`) and docs (`docs/`)
 ├── ml/                      ← Optuna optimiser
 ├── dashboard/               ← tkinter UI
 ├── mt5/                     ← MQL5 indicators (visualisation)
@@ -1398,8 +1400,8 @@ If you can, put this much in the mail:
 
 ## Further documentation
 
-- [`strategy/docs/wpr_sma.md`](strategy/docs/wpr_sma.md) — the WPR + SMA trend-following strategy (Hungarian)
-- [`strategy/docs/ml_ai.md`](strategy/docs/ml_ai.md) — the machine-learning strategy (currently **not** recommended live) (Hungarian)
+- [`strategies/docs/wpr_sma.md`](strategies/docs/wpr_sma.md) — the WPR + SMA trend-following strategy (Hungarian)
+- [`strategies/docs/ml_ai.md`](strategies/docs/ml_ai.md) — the machine-learning strategy (currently **not** recommended live) (Hungarian)
 - [`tools/MT5_BACKTEST_README.md`](tools/MT5_BACKTEST_README.md) — replaying a backtest in MT5 (Hungarian)
 - [`build/README.md`](build/README.md) — EXE build (PyInstaller) (Hungarian)
 - [`.claude/skills/new-strategy/SKILL.md`](.claude/skills/new-strategy/SKILL.md) — checklist for introducing a new strategy (Hungarian)

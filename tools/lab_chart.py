@@ -16,7 +16,7 @@ ettől szenvedett többször: két forrás, ami külön romlik el.
   * a rajzot a MEGLÉVŐ `live_trader.pair_visual_objects()`-ból kapja — ugyanaz
     a hívás, amiből az MT5-fájl is készül, ugyanazokkal a kapukkal,
   * a színeket a `strategy.visual.COLORS`-ból, a durvább idősíkot a
-    `strategy.ml_ai.resample_ohlc`-ból.
+    `core.indicator_engine.resample_ohlc`-ból.
 
 Ha itt bármit „egyszerűbb lenne újraírni", az a másolat, amit el kell kerülni.
 
@@ -107,7 +107,7 @@ def chart_barok(df_m1, df_m15, perc: int):
 
     ⚠ Csak FELFELÉ mintázunk: M5 az M1-ből, H1/H4 az M15-ből. Lefelé (finomabb
     idősík durvábból) nem létező adatot találna ki."""
-    from strategy.ml_ai import resample_ohlc
+    from core.indicator_engine import resample_ohlc
     perc = int(perc)
     if perc == 1:
         return df_m1

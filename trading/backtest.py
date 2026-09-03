@@ -832,7 +832,7 @@ def _build_tf_align_evaluator(cfg, symbol, strategy_name, df_m1,
 #     indikátorok + M15/M1 állapotgépek : 7,5 mp   ← ez itt épül, EGYSZER
 #     a teljes run_pair                 : 11,1 mp
 # Egy végrehajtási söprés (sl_atr_mult × tp_rr_ratio …) tehát a munka ~2/3-át
-# újrahasználhatja. A besorolást a `strategy/config/<név>.json` `param_meta`
+# újrahasználhatja. A besorolást a `strategies/config/<név>.json` `param_meta`
 # adja (lásd `strategy.settings.param_class`).
 #
 # ⚠ A GYORSÍTÓTÁR ÁLLÍTÁSA erősebb, mint a jelölt-listáé: itt az INDIKÁTOR-TÁBLÁK

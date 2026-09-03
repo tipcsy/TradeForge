@@ -163,7 +163,7 @@ KEYS = tuple(g["key"] for g in REGISTRY)
 def doc_path(key: str):
     """A kapu leírásának útvonala: `core/docs/<kulcs>.md`.
 
-    Ugyanaz a minta, mint a stratégiáknál (`strategy/docs/<név>.md`): a leírás
+    Ugyanaz a minta, mint a stratégiáknál (`strategies/docs/<név>.md`): a leírás
     FÁJLBAN él, nem a kódban — szerkeszthető anélkül, hogy hozzányúlnál a
     logikához, és a beállító ablak „Leírás" lapja mindig a lemezről olvassa.
 

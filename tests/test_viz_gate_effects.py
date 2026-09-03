@@ -66,7 +66,7 @@ check("...és átadja a stratégiának", "md.gate_effects" in _lt)
 check("⚠ a TF-kapu csak `block`-nál épül fel",
       "_tf_eff != _gt.EFFECT_BLOCK" in _lt)
 
-_ws = (ROOT / "strategy" / "wpr_sma.py").read_text(encoding="utf-8")
+_ws = (ROOT / "strategies" / "wpr_sma.py").read_text(encoding="utf-8")
 # v3.28.0: a kérdés SÁV-TUDATOS lett — nem „blokkol-e ez a kapu",
 # hanem „blokkol-e EZEN a mérésen" (`gate_blocks_at`).
 check("a spread-kapu is hatás-tudatos",

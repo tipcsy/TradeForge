@@ -166,7 +166,7 @@ check("a volatilitas a PARAM_DRIVEN halmazban van", g.VOLATILITY in g.PARAM_DRIV
 _src = {
     "el (live_trader)": ROOT / "trading" / "live_trader.py",
     "backtest": ROOT / "trading" / "backtest.py",
-    "viz (wpr_sma)": ROOT / "strategy" / "wpr_sma.py",
+    "viz (wpr_sma)": ROOT / "strategies" / "wpr_sma.py",
 }
 for _nev, _p in _src.items():
     check(f"{_nev}: a kozos `failed`-et hivja",

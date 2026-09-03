@@ -41,7 +41,7 @@ def check(name, ok, detail=""):
 import logging
 logging.disable(logging.INFO)
 
-import strategy.bollinger_squeeze as B
+import strategies.bollinger_squeeze as B
 from strategy import get_strategy_by_name
 from strategy.base import MarketData
 from strategy.settings import config_for_strategy, load_config
@@ -60,7 +60,7 @@ def _params(sym):
 
 
 # ── 1. A KIJELZES VISSZAJATSSZA az allapotot ─────────────────────────────
-_src = (ROOT / "strategy" / "bollinger_squeeze.py").read_text(encoding="utf-8")
+_src = (ROOT / "strategies" / "bollinger_squeeze.py").read_text(encoding="utf-8")
 def _code(txt):
     """A forras KOMMENTEK nelkul. ⚠ A javitast MAGYARAZO komment emliti a regi
     megoldast (`last_signal`, `.iloc[i]`) — egy nyers szoveg-keresés emiatt

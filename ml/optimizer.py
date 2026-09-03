@@ -476,7 +476,7 @@ def _dep_order(specs: dict) -> list:
 def _param_split(strategy, opt_cfg: dict) -> tuple[list, list]:
     """A HANGOLT kulcsok kettéosztva: (jel, végrehajtás).
 
-    A besorolás a `strategy/config/<név>.json` `param_meta`-jából jön. Ismeretlen
+    A besorolás a `strategies/config/<név>.json` `param_meta`-jából jön. Ismeretlen
     kulcs → jel (a drága, biztonságos ág): egy be nem sorolt paraméter inkább
     lassítson, mint hogy a jelölt-lista gyorsítótára tévesen újrahasznosuljon.
     """

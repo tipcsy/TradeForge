@@ -45,7 +45,7 @@ def check(name, ok, detail=""):
 
 # ---------------------------------------------------------------------------
 print("== A cimke szerkezete (szintetikus, pontosan ellenorizheto) ==")
-from strategy import ml_train as mt                      # noqa: E402
+from strategies import ml_train as mt                      # noqa: E402
 
 n = 60
 idx = pd.date_range("2026-01-01", periods=n, freq="15min", tz="UTC")
@@ -93,7 +93,8 @@ _ok_data = ((ROOT / "data" / "m1" / f"{SYM}.parquet").exists()
 if not _ok_data:
     print("  (kihagyva: nincs adat)")
 else:
-    from strategy import get_strategy_by_name, ml_features as mlf   # noqa: E402
+    from strategy import get_strategy_by_name
+    from strategies import ml_features as mlf   # noqa: E402
     from strategy.settings import config_for_strategy               # noqa: E402
     from core.execution_params import load_execution_params         # noqa: E402
     from trading.backtest import run_pair                           # noqa: E402

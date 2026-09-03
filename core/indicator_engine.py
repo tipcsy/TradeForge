@@ -120,3 +120,27 @@ def compute_indicators(
     m1["wpr"] = wpr(m1["high"], m1["low"], m1["close"], params["wpr_m1_period"])
 
     return m15, m1
+
+
+# ---------------------------------------------------------------------------
+# Idősík-átmintázás — KERET, nem stratégia
+# ---------------------------------------------------------------------------
+# ⚠ v3.29.0-ig ez a függvény az `ml_ai` stratégiában lakott, miközben a
+# `bollinger_squeeze`, a `candle_level_break` ÉS a `tools/lab_chart` is onnan
+# importálta. Vagyis három független hívó függött EGY konkrét stratégia belső
+# függvényétől — pontosan az a szivárgás, ami miatt a keret és a tartalom
+# szétvált. Ha az ml_ai egyszer kikerülne a programból, három másik dolog törne
+# el, látszólag ok nélkül.
+def resample_ohlc(df, minutes: int):
+    """OHLC(V) frame átmintázása `minutes` perces gyertyákra.
+
+    Csak FELFELÉ (durvább idősík) értelmes; a hívó dolga ezt biztosítani. A
+    `label`/`closed` alapértelmezés (bal-zárt, bal-címkés) EGYEZIK az MT5-ével és
+    a `core.tf_align` resample-jével: a gyertya a NYITÓ idejével azonosított."""
+    agg = {"open": "first", "high": "max", "low": "min", "close": "last"}
+    if "volume" in df.columns:
+        agg["volume"] = "sum"
+    if "avg_spread" in df.columns:
+        agg["avg_spread"] = "mean"
+    out = df.resample(f"{int(minutes)}min").agg(agg).dropna(subset=["close"])
+    return out

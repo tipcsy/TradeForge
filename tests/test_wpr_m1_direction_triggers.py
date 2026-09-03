@@ -36,7 +36,7 @@ def check(name, ok, detail=""):
     print(f"{'PASS' if ok else 'FAIL'}  {name}" + (f"  [{detail}]" if detail else ""))
 
 
-CFG = json.loads((ROOT / "strategy" / "config" / "wpr_sma.json").read_text(encoding="utf-8"))
+CFG = json.loads((ROOT / "strategies" / "config" / "wpr_sma.json").read_text(encoding="utf-8"))
 OLD = "wpr_m1_trigger"
 
 # ── 1. A KONFIG: az M1 pontosan azt a szerkezetet kapja, mint az M15 ──────
@@ -184,7 +184,7 @@ print(f"      (irányonként ELTÉRŐ trigger: {len(_diff)} pár — {_diff})")
 # ⚠ A sorrend SZERZŐDÉS az MQL-lel: [felső extrém, SELL trigger, BUY trigger,
 # alsó extrém]. A TradeForgeWPR a 4-es esetet MÁR ismeri (SELL trigger piros,
 # BUY trigger zöld) — ezért NEM kell újrafordítani.
-_src = (ROOT / "strategy" / "wpr_sma.py").read_text(encoding="utf-8")
+_src = (ROOT / "strategies" / "wpr_sma.py").read_text(encoding="utf-8")
 _i = _src.find("m1_levels  = (")      # ⚠ a fallback-sor is `p.get("wpr_m1…`
 _blk = _src[_i:_src.find(")", _src.find("wpr_m1_buy_extreme", _i)) + 1]
 check("a viz M1 szintjei: 4 elem", _blk.count('p.get("wpr_m1') == 4,

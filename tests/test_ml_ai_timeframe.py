@@ -31,7 +31,7 @@ def check(name, ok, detail=""):
     print(f"{'PASS' if ok else 'FAIL'}  {name}" + (f"  [{detail}]" if detail else ""))
 
 
-from strategy import ml_ai
+from strategies import ml_ai
 from strategy import get_strategy_by_name
 
 strat = get_strategy_by_name("ml_ai")
@@ -160,7 +160,7 @@ _old30 = _with_fake_bundle({"feature_unit": "point"}, 30,
 check("...de M30-ra atallitva mar nem", _old30 is None)
 
 # ══ 6. A tanitas a JEL idosikjan tanit, es bejegyzi ══════════════════════
-tr_src = (ROOT / "strategy" / "ml_train.py").read_text(encoding="utf-8")
+tr_src = (ROOT / "strategies" / "ml_train.py").read_text(encoding="utf-8")
 check("a tanitas a jel-idosikra mintaz at", "ml_ai.resample_ohlc(df_m15, tf_min)" in tr_src)
 check("...es az idosik a modell fejlecebe kerul", '"signal_tf_min": tf_min,' in tr_src)
 check("a feature-frame a JEL-frame-bol epul (nem a nyers M15-bol)",
@@ -168,7 +168,7 @@ check("a feature-frame a JEL-frame-bol epul (nem a nyers M15-bol)",
 
 # ══ 7. A config-minta es a param_meta megmondja a felhasznalonak ═════════
 import json
-cfg_ml = json.loads((ROOT / "strategy" / "config" / "ml_ai.json").read_text(encoding="utf-8"))
+cfg_ml = json.loads((ROOT / "strategies" / "config" / "ml_ai.json").read_text(encoding="utf-8"))
 check("a stratégia-config tartalmazza a kulcsot",
       cfg_ml["indicators"].get("signal_tf_min") == 15)
 check("...es a Parameterek ablak is megmagyarazza",

@@ -72,7 +72,7 @@ def _to_level_tf(df: pd.DataFrame) -> pd.DataFrame:
     `core.tf_align` is használ, hogy a gyertya-határok sehol ne csússzanak el."""
     if df is None or len(df) < 2:
         return df
-    from strategy.ml_ai import resample_ohlc
+    from core.indicator_engine import resample_ohlc
     return resample_ohlc(df, LEVEL_TF_MIN)
 
 

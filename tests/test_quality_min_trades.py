@@ -92,7 +92,7 @@ check("...és a mérés ott van indoklásként",
 # RÖGZÍTI, tehát a modul alapértelmezése wpr_sma/ml_ai alatt HALOTT KÓD. Az
 # első javításom (csak a modulban) semmit nem változtatott a minősítéseken.
 _pinned = {}
-for _f in sorted((ROOT / "strategy" / "config").glob("*.json")):
+for _f in sorted((ROOT / "strategies" / "config").glob("*.json")):
     _q = (json.loads(_f.read_text(encoding="utf-8")).get("quality") or {})
     if "min_trades" in _q:
         _pinned[_f.stem] = _q["min_trades"]

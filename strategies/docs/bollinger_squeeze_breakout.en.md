@@ -126,7 +126,7 @@ shared setting.
 
 ## Parameters
 
-`strategy/config/bollinger_squeeze_breakout.json`, grouped into categories in the
+`strategies/config/bollinger_squeeze_breakout.json`, grouped into categories in the
 parameter window.
 
 | group | keys |

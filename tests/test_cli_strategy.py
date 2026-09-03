@@ -203,7 +203,7 @@ check("run_optimizer: fogadja a strategies argumentumot",
 
 # ══ 5. Az ml_ai uzenete a HELYES parancsra mutat ══════════════════════════
 
-msrc = (ROOT / "strategy" / "ml_ai.py").read_text(encoding="utf-8")
+msrc = (ROOT / "strategies" / "ml_ai.py").read_text(encoding="utf-8")
 check("az ml_ai elavult-modell uzenete --strategy ml_ai-t ajanl",
       "python main.py optimize %s --strategy ml_ai" in msrc)
 check("nincs tobbe strategia NELKULI 'main.py optimize' ajanlas az ml_ai-ban",

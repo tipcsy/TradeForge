@@ -4092,7 +4092,7 @@ class DashboardWindow:
         text.tag_configure("json_num",  foreground=FG_ORANGE)
         text.tag_configure("json_bool", foreground=FG_CYAN)
         # Csak a VÁZ-config látszik/szerkeszthető; a stratégia beállításai a
-        # stratégia saját fájljában élnek (strategy/config/<name>.json).
+        # stratégia saját fájljában élnek (strategies/config/<name>.json).
         text.insert("1.0", json.dumps(main_config_view(self.cfg), indent=2, ensure_ascii=False))
         self._highlight_json(text)
 

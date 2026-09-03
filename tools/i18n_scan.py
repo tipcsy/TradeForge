@@ -179,7 +179,7 @@ def main(argv):
     from core import gates as _gates
     for label, folder, only in (
             ("kapuk", ROOT / "core" / "docs", set(_gates.KEYS)),
-            ("stratégiák", ROOT / "strategy" / "docs", None)):
+            ("stratégiák", ROOT / "strategies" / "docs", None)):
         base = sorted(p for p in folder.glob("*.md")
                       if p.name.count(".") == 1
                       and (only is None or p.stem in only))

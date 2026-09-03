@@ -1,7 +1,7 @@
 """
 Markdown-megjelenítő a stratégia-leírásokhoz.
 
-A stratégia leírása `.md` fájlban él (`strategy/docs/<név>.md`), és a
+A stratégia leírása `.md` fájlban él (`strategies/docs/<név>.md`), és a
 paraméter-ablakból nyitható meg **formázva**. Nem teljes Markdown-motor: pontosan
 annyit tud, amennyi egy stratégia-doksit olvashatóvá tesz — címsorok, félkövér,
 listák, kódblokk, táblázat-sorok, idézet, vízszintes vonal.

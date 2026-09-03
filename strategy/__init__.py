@@ -7,9 +7,14 @@ csomagon keresztül csatlakozik: deklarálja a saját oszlopait, kiszámítja a
 megjelenítendő értékeket, kezeli a jelzéslogikát és megadja az optimalizálandó
 paramétertartományt.
 
-Új stratégia = EGY új modul a `strategy/` csomagban, ami a `Strategy` interfészt
-implementálja. A regisztráció AUTOMATIKUS (a modul felderítése) — ezt a fájlt (a
-vázat) NEM kell szerkeszteni. A `get_strategy()` adja vissza az aktívat (config-vezérelt).
+Új stratégia = EGY új modul a `strategies/` csomagban, ami a `Strategy`
+interfészt implementálja. A regisztráció AUTOMATIKUS (a modul felderítése) — ezt
+a fájlt (a vázat) NEM kell szerkeszteni. A `get_strategy()` adja vissza az
+aktívat (config-vezérelt).
+
+⚠ KÉT CSOMAG, KÉT SZEREP (v3.29.0): ez a modul a KERET (`strategy/`), a konkrét
+stratégiák a TARTALOM csomagban élnek (`strategies/`). A keret sosem importálhat
+a tartalomból — kivéve ITT, a felderítésben, ami épp arra való.
 """
 
 import importlib
@@ -23,33 +28,38 @@ from strategy.base import (
 
 log = logging.getLogger(__name__)
 
-# A strategy/ csomag NEM-stratégia segédmoduljai — a felderítés kihagyja őket. (Nem
-# kötelező: a felderítés amúgy is csak a Strategy-alosztályokat regisztrálja; ez a
-# lista pusztán az importjukat spórolja meg.)
-_SKIP_MODULES = {"base", "settings", "visual", "ml_features", "ml_train"}
+# A `strategies/` csomag NEM-stratégia segédmoduljai — a felderítés kihagyja
+# őket. (Nem kötelező: a felderítés amúgy is csak a Strategy-alosztályokat
+# regisztrálja; ez a lista pusztán az importjukat spórolja meg.)
+#
+# ⚠ A KERET MODULJAI (base, settings, visual, signal_journal) v3.29.0 óta NINCSENEK
+# ITT: átkerültek a `strategy/` csomagba, tehát a felderítés eleve nem látja őket.
+_SKIP_MODULES = {"ml_features", "ml_train"}
 
 _REGISTRY: "dict[str, type] | None" = None   # név → Strategy-osztály (lazán felderítve)
 
 
 def _registry() -> "dict[str, type]":
-    """A `strategy/` csomag AUTOMATIKUS felderítése: végignézi a moduljait, és a
+    """A `strategies/` csomag AUTOMATIKUS felderítése: végignézi a moduljait, és a
     talált `Strategy`-alosztályokat a `.name`-jük alapján regisztrálja. Egyszer fut
-    (cache-elve). ÍGY egy új stratégia = EGY új modul a strategy/-ben — a registry-t
-    (ezt a fájlt) nem kell módosítani. Determinisztikus (ábécé) sorrend; a be nem
-    tölthető modult átugorja (figyelmeztetéssel)."""
+    (cache-elve). ÍGY egy új stratégia = EGY új modul a strategies/-ben — a
+    registry-t (ezt a fájlt) nem kell módosítani. Determinisztikus (ábécé)
+    sorrend; a be nem tölthető modult átugorja (figyelmeztetéssel)."""
     global _REGISTRY
     if _REGISTRY is not None:
         return _REGISTRY
-    import strategy as _pkg
+    from strategy import paths as _paths
+    _pkg = importlib.import_module(_paths.PACKAGE)
     reg: dict = {}
     for _mi in pkgutil.iter_modules(_pkg.__path__):
         nm = _mi.name
         if nm.startswith("_") or nm in _SKIP_MODULES:
             continue
         try:
-            mod = importlib.import_module(f"strategy.{nm}")
+            mod = importlib.import_module(f"{_paths.PACKAGE}.{nm}")
         except Exception as e:
-            log.warning("Stratégia-modul nem tölthető be: strategy.%s (%s)", nm, e)
+            log.warning("Stratégia-modul nem tölthető be: %s.%s (%s)",
+                        _paths.PACKAGE, nm, e)
             continue
         for obj in vars(mod).values():
             if (isinstance(obj, type) and issubclass(obj, Strategy)
@@ -75,7 +85,7 @@ _INSTANCES: dict[str, Strategy] = {}
 
 def get_strategy_by_name(name: str) -> Strategy:
     """Stratégia-példány NÉV alapján (a felderített registry-ből, cache-elve).
-    Új stratégia = egy új modul a strategy/-ben (Strategy-alosztály) — itt nincs mit írni."""
+    Új stratégia = egy új modul a strategies/-ben (Strategy-alosztály) — itt nincs mit írni."""
     if name not in _INSTANCES:
         cls = _registry().get(name)
         if cls is None:

@@ -40,7 +40,7 @@ def check(name, ok, detail=""):
     print(f"{'PASS' if ok else 'FAIL'}  {name}" + (f"  [{detail}]" if detail else ""))
 
 
-import strategy.trend_pullback as T
+import strategies.trend_pullback as T
 from strategy import get_strategy_by_name
 from strategy.base import MarketData
 from strategy.settings import config_for_strategy, load_config

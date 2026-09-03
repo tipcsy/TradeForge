@@ -45,7 +45,7 @@ check("ervenyes 'execution' atmegy",
 
 # ── 2. MINDEN OPTIMALIZALHATO PARAMETER OSZTALYOZVA VAN ──────────────────────
 for strat in ("wpr_sma", "bollinger_squeeze_breakout", "ml_ai"):
-    cfg = json.loads((ROOT / "strategy" / "config" / f"{strat}.json").read_text(encoding="utf-8"))
+    cfg = json.loads((ROOT / "strategies" / "config" / f"{strat}.json").read_text(encoding="utf-8"))
     keys = list(((cfg.get("param_meta") or {}).get("params") or {}).keys())
     check(f"{strat}: van param_meta ({len(keys)} kulcs)", len(keys) > 0)
     miss = unclassified_params(cfg, keys)
@@ -59,14 +59,14 @@ for strat in ("wpr_sma", "bollinger_squeeze_breakout", "ml_ai"):
 # ── 3. A KONKRET BESOROLASOK — a kod tenyleges hasznalata alapjan ────────────
 # Ezek nem izles kerdesei: a jel-parametereket az indicator_engine/signal_detector
 # olvassa (allapotgep), a vegrehajtasiakat a risk_manager/vol_baseline (szuro+meret).
-W = json.loads((ROOT / "strategy" / "config" / "wpr_sma.json").read_text(encoding="utf-8"))
+W = json.loads((ROOT / "strategies" / "config" / "wpr_sma.json").read_text(encoding="utf-8"))
 for k in ("sma_period", "wpr_m15_period", "wpr_m1_buy_trigger", "wpr_m15_buy_extreme",
           "no_trade_resets_signal"):
     check(f"wpr_sma/{k} = signal", param_class(W, k) == SIGNAL_PARAM, param_class(W, k))
 for k in ("sl_atr_mult", "tp_rr_ratio", "atr_min_pct", "atr_max_pct"):
     check(f"wpr_sma/{k} = execution", param_class(W, k) == EXEC_PARAM, param_class(W, k))
 
-B = json.loads((ROOT / "strategy" / "config" / "bollinger_squeeze_breakout.json").read_text(encoding="utf-8"))
+B = json.loads((ROOT / "strategies" / "config" / "bollinger_squeeze_breakout.json").read_text(encoding="utf-8"))
 for k in ("signal_tf_min", "bb_period", "bw_lookback", "max_bars_after_squeeze"):
     check(f"bollinger/{k} = signal", param_class(B, k) == SIGNAL_PARAM, param_class(B, k))
 for k in ("sl_atr_mult", "tp_rr"):

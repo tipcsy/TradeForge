@@ -28,7 +28,7 @@ import numpy as np                                    # noqa: E402
 import pandas as pd                                   # noqa: E402
 from sklearn.metrics import roc_auc_score             # noqa: E402
 
-from strategy import ml_train as mt                   # noqa: E402
+from strategies import ml_train as mt                   # noqa: E402
 
 _results = []
 _fail = []

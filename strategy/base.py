@@ -447,7 +447,7 @@ class Strategy(ABC):
 
     # ── Leírás (a paraméter-ablakból megnyitható) ─────────────────────────
     def doc_path(self):
-        """A stratégia leírásának útvonala: `strategy/docs/<név>.md`.
+        """A stratégia leírásának útvonala: `strategies/docs/<név>.md`.
 
         Konvenció, nem kötelező: ha a fájl nem létezik, a felület KIÍRJA az
         elvárt útvonalat. Így a hiányzó doksi nem „elromlott gomb", hanem
@@ -458,9 +458,9 @@ class Strategy(ABC):
         ⚠ NYELVFÜGGŐ: angol felületen `<név>.en.md`, ha létezik — különben a
         magyar eredeti (a `doc_text` ilyenkor kiírja, hogy fordítatlant olvasol).
         """
-        from pathlib import Path
         from core.i18n import doc_path as _doc_path
-        return _doc_path(Path(__file__).resolve().parent / "docs", self.name)
+        from strategy import paths as _paths
+        return _doc_path(_paths.docs_dir(), self.name)
 
     def doc_text(self) -> str:
         """A leírás tartalma, vagy egy beszédes helyettesítő szöveg."""

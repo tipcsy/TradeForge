@@ -30,7 +30,7 @@ import numpy as np
 import pandas as pd
 
 from tools.research import lab
-import strategy.trend_pullback as T
+import strategies.trend_pullback as T
 from strategy import get_strategy_by_name
 from strategy.settings import config_for_strategy, load_config
 from trading.live_trader import default_params, strategy_params

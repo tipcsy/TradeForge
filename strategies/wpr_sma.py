@@ -709,7 +709,7 @@ class WprSmaStrategy(Strategy):
 
     def constraints_ok(self, params: dict) -> bool:
         """Érvényes-e a paraméter-kombináció? A kényszereket a stratégia SAJÁT
-        optimizer-configjából olvassa (`strategy/config/wpr_sma.json` →
+        optimizer-configjából olvassa (`strategies/config/wpr_sma.json` →
         `optimizer.constraints`, pl. WPR szint-sorrend) — EGYETLEN forrás, amit az
         optimizer szűrése és ez az ellenőrzés is használ. Üres lista → True."""
         from core import param_constraints

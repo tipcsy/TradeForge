@@ -127,7 +127,7 @@ _viz = (ROOT / "strategy" / "visual.py").read_text(encoding="utf-8")
 check("a kozos rajzolo teszi ki a cimket a belepo-vonalra",
       "m1lbl_" in _viz and "def entry_marks(" in _viz)
 
-for _mod in ("strategy/wpr_sma.py", "strategy/bollinger_squeeze.py"):
+for _mod in ("strategies/wpr_sma.py", "strategies/bollinger_squeeze.py"):
     _src = (ROOT / _mod).read_text(encoding="utf-8")
     check(f"{_mod}: a kozos rajzolot hasznalja", "viz.entry_marks(rec)" in _src)
     check(f"{_mod}: a ROVID nevet irja ki", "self.short_name" in _src)
@@ -163,8 +163,8 @@ check("a `green` es a `lime` TENYLEG mas", _color_rgb("green") != _color_rgb("li
       f"green={_color_rgb('green')} lime={_color_rgb('lime')}")
 
 _VIZ_SRC = {n: (ROOT / f).read_text(encoding="utf-8") for n, f in (
-    ("wpr_sma", "strategy/wpr_sma.py"),
-    ("bollinger", "strategy/bollinger_squeeze.py"))}
+    ("wpr_sma", "strategies/wpr_sma.py"),
+    ("bollinger", "strategies/bollinger_squeeze.py"))}
 for _n, _src2 in _VIZ_SRC.items():
     check(f"{_n}: NEM hasznal `lime`-ot a jelolokon", '"lime"' not in _src2,
           "lime maradt a forrasban")

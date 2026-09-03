@@ -51,7 +51,7 @@ check("NINCS absztrakt metodus hianyban", not getattr(type(s), "__abstractmethod
       str(sorted(getattr(type(s), "__abstractmethods__", set()))))
 
 # A regi vazlat maradvanyai NE legyenek benne
-_src = (ROOT / "strategy" / "bollinger_squeeze.py").read_text(encoding="utf-8")
+_src = (ROOT / "strategies" / "bollinger_squeeze.py").read_text(encoding="utf-8")
 check("nem hivatkozik a nem letezo EntryPlan-re", "EntryPlan" not in _src)
 check("nem hasznalja a nem letezo sl_tp_pips-et", "sl_tp_pips" not in _src)
 
@@ -61,7 +61,7 @@ raw = json.loads((ROOT / "config.json").read_text(encoding="utf-8"))
 from strategy.settings import config_for_strategy                        # noqa: E402
 cfg = config_for_strategy(raw, NAME)
 
-cfg_file = ROOT / "strategy" / "config" / f"{NAME}.json"
+cfg_file = ROOT / "strategies" / "config" / f"{NAME}.json"
 check("van strategia-config fajl", cfg_file.exists(), str(cfg_file.name))
 base = s.base_params(cfg)
 for k in ("bb_period", "bw_percentile", "ema_fast", "sl_atr_mult", "tp_rr"):
@@ -97,7 +97,7 @@ check("...de a parameter MEGMARAD (kutatasra allithato)",
 # hangolatlan parameterekkel): M15 mindharomban VESZTESEG (-133/-691/-487$,
 # 23-29% talalat), M60 mindharomban NYERESEG (+1709/+1438/+1737$, 52-58%).
 # Ezert az alap 60 perc — ha valaki 15-re allitja, ez a teszt szol.
-from strategy import bollinger_squeeze as _bsq                          # noqa: E402
+from strategies import bollinger_squeeze as _bsq                          # noqa: E402
 check("a jel idosikja PARAMETER (nem beegetve)", "signal_tf_min" in base)
 check("az alapertelmezes 60 perc (a meres szerint)",
       int(base["signal_tf_min"]) == 60, str(base.get("signal_tf_min")))

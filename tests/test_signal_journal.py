@@ -218,14 +218,14 @@ try:
     # csendben CSAK az egyikre működne. A `bollinger_squeeze` eredetileg saját
     # nevekkel (`bsq*`) és saját vonalvastagsággal rajzolt; így a jelölői nem is
     # kerültek volna be az előzménybe.
-    for _f, _old in (("strategy/wpr_sma.py", 'name=f"m1sig_'),
-                     ("strategy/bollinger_squeeze.py", 'name=f"bsq')):
+    for _f, _old in (("strategies/wpr_sma.py", 'name=f"m1sig_'),
+                     ("strategies/bollinger_squeeze.py", 'name=f"bsq')):
         _ss = (ROOT / _f).read_text(encoding="utf-8")
         check(f"{_f}: a KÖZÖS rajzolót hívja", "viz.entry_marks(rec)" in _ss)
         check(f"{_f}: ⚠ nincs MÁSODIK rajzoló-út", _old not in _ss)
         check(f"{_f}: a rekord a naplóba is kimegy", "_sink(rec)" in _ss)
 
-    _ws = (ROOT / "strategy" / "wpr_sma.py").read_text(encoding="utf-8")
+    _ws = (ROOT / "strategies" / "wpr_sma.py").read_text(encoding="utf-8")
     # A rekord-gyűjtés a `show_signals` ELLENŐRZÉSÉN KÍVÜL van: a sorrend a
     # forrásban is látszik — előbb a gyűjtő, utána a rajz-kapu.
     _i_sink = _ws.find("_sink(rec)")

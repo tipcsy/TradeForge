@@ -1,17 +1,33 @@
 ---
 name: new-strategy
-description: Checklist és buktatók egy ÚJ kereskedési stratégia bevezetéséhez a TradeForge kódbázisba (strategy/ csomag). Használd, amikor új stratégiát adnál a motorhoz / dashboardhoz — "új stratégia", "add strategy", "introduce a strategy", "stratégia bevezetése", stratégia-modul, param_space, bt_entry.
+description: Checklist és buktatók egy ÚJ kereskedési stratégia bevezetéséhez a TradeForge kódbázisba (strategies/ csomag). Használd, amikor új stratégiát adnál a motorhoz / dashboardhoz — "új stratégia", "add strategy", "introduce a strategy", "stratégia bevezetése", stratégia-modul, param_space, bt_entry.
 ---
 
 # Új stratégia bevezetése (TradeForge)
 
 A dashboard "váza" (megjelenítés, optimalizálás, futtatás, MT5, portfólió-backtest)
-**stratégia-független**. Egy stratégia a `strategy/` csomagon át csatlakozik, a
+**stratégia-független**. Egy stratégia a `strategies/` csomagban él, és a `strategy/` KERETEN át csatlakozik, a
 `Strategy` interfészen ([strategy/base.py](../../strategy/base.py)) keresztül. Ez a
 skill a bevezetés lépéseit ÉS a nehezen tanult buktatókat foglalja össze — kövesd
 végig, mielőtt "kész"-nek jelölsz egy új stratégiát.
 
-## 1. A stratégia-modul (`strategy/<name>.py`)
+> [!warning] KERET vs. TARTALOM (v3.29.0)
+> Két csomag van, és a különbség kötelező:
+>
+> * **`strategy/`** — a KERET: `base` (az interfész), `visual` (rajz-primitívek),
+>   `settings` (config-betöltés), `signal_journal`, `paths`, és a registry.
+> * **`strategies/`** — a TARTALOM: a konkrét stratégiák + `config/` + `docs/`.
+>
+> Az irány EGYIRÁNYÚ: a stratégiád támaszkodhat a keretre, a keret viszont soha
+> nem importálhat a `strategies/`-ből. Ezt teszt őrzi
+> (`tests/test_strategy_layout.py`) — ha egy segédfüggvényed több stratégiának
+> is kellene, az NEM a másik stratégiából importálandó, hanem a `core/`-ba való.
+> (Pontosan ez történt a `resample_ohlc`-kal: az `ml_ai`-ban lakott, miközben
+> három másik hívó importálta onnan.)
+>
+> Az útvonalakat a `strategy.paths` adja — ne számolj `__file__`-relatívan.
+
+## 1. A stratégia-modul (`strategies/<name>.py`)
 
 Implementáld a `Strategy` interfészt. A **kötelező** (abstract) metódusok:
 
@@ -81,7 +97,7 @@ visual_objects(md)               -> list   # `strategy.visual` OBJEKTUMOK, nem d
 
 > ⚠ **`md.bars` egy SZÓTÁR**, nem DataFrame: `{"M15": df, "M1": df}` — a
 > `timeframes()` címkéivel kulcsolva. `md.params` a **dict**, amiből dolgozol
-> (nincs `self.cfg` dataclass: a paraméterek a `strategy/config/<name>.json`-ból
+> (nincs `self.cfg` dataclass: a paraméterek a `strategies/config/<name>.json`-ból
 > jönnek, és a hívó adja át).
 
 **A `bt_*` hookok EGY SORT kapnak** (pandas Series), nem DataFrame-et és nem indexet —
@@ -93,14 +109,14 @@ a motor előre kiszámolt oszlopokon fut, szoros ciklusban. Ami több sort igén
 Opcionális, de gyakran kell: `signal_warmup_bars`, `live_cells`, `visual_lookback_bars`
 + `visual_objects` (MT5-viz), `grade`, `magic`, `constraints_ok`.
 
-Minta a bevált stratégiákból: [strategy/wpr_sma.py](../../strategy/wpr_sma.py) (klasszikus),
-[strategy/ml_ai.py](../../strategy/ml_ai.py) (tanítható — `fit`).
+Minta a bevált stratégiákból: [strategies/wpr_sma.py](../../strategies/wpr_sma.py) (klasszikus),
+[strategies/ml_ai.py](../../strategies/ml_ai.py) (tanítható — `fit`).
 
 ## 2. Regisztráció — AUTOMATIKUS (nincs teendő)
 
-A `strategy/__init__.py` **auto-felderíti** a `strategy/` csomag moduljait, és a `Strategy`
+A `strategy/__init__.py` **auto-felderíti** a `strategies/` csomag moduljait, és a `Strategy`
 interfészt implementáló osztályt a `.name` attribútuma alapján magától regisztrálja.
-**Új stratégia = csak egy új modul a `strategy/`-ben** — a vázat (`__init__.py`) NEM kell
+**Új stratégia = csak egy új modul a `strategies/`-ben** — a vázat (`__init__.py`) NEM kell
 szerkeszteni. A `name` osztály-attribútum legyen EGYEDI (ez a registry-kulcs). A be nem
 tölthető modult a felderítés kihagyja (warning a logban).
 
@@ -136,7 +152,7 @@ soha nem fut (v1.98.0-ban javítva; őrzi: `tests/test_strategy_availability.py`
 stratégia bevezetésekor a `row_source.row_data` `enabled_of` seamje adja a különbséget
 a sornak: a nem engedélyezett blokk **marad** (oszlop-egyvonal), csak a Play tétlenedik
 — az OPT viszont használható, hisz épp optimalizálni akarod, mielőtt bekapcsolod.
-- **Stratégia-config fájl**: `strategy/config/<name>.json` — `indicators`, `sltp`,
+- **Stratégia-config fájl**: `strategies/config/<name>.json` — `indicators`, `sltp`,
   `position_mgmt`, `quality`, és az optimalizáló-tér + `constraints`. A váz-config ezt
   betöltéskor beolvasztja (`apply_strategy_config`), mentéskor kiszűri
   (`main_config_view`) — a config.json nem szennyeződik stratégia-szekciókkal.
@@ -201,7 +217,7 @@ ami sokáig egy **elpazarolt optimalizálási tengely** volt. Lásd `strategy/ba
 
 ## 6. Ellenőrzés (mielőtt "kész")
 
-1. `python -m py_compile strategy/<name>.py` és a modul importja hibátlan.
+1. `python -m py_compile strategies/<name>.py` és a modul importja hibátlan.
 2. `available_strategy_names(cfg)` / a per-pár választó felkínálja; oszlop megjelenik
    (újraindítás után).
 3. Optimalizálás lefut (Opt gomb; tanítható stratégiánál = tanítás), 0 érvénytelen trial

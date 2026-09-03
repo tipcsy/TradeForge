@@ -118,7 +118,7 @@ kaphat saját idősíkokat és `sma_period`-ot, a pár közös beállítása fö
 
 ## Paraméterek
 
-`strategy/config/bollinger_squeeze_breakout.json`, a paraméter-ablakban
+`strategies/config/bollinger_squeeze_breakout.json`, a paraméter-ablakban
 kategóriákra bontva.
 
 | csoport | kulcsok |

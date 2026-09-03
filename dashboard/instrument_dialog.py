@@ -985,7 +985,7 @@ class InstrumentParamsDialog:
             pass
 
     def _on_tab(self, name):
-        """Lapváltás — a lapok LUSTA feltöltése (pl. `strategy/docs/<név>.md`).
+        """Lapváltás — a lapok LUSTA feltöltése (pl. `strategies/docs/<név>.md`).
 
         Ha a leírás-fájl nincs, a nézet KIÍRJA az elvárt útvonalat — így a
         hiányzó doksi nem üres lap, hanem felszólítás. Mindig a lemezről olvas,

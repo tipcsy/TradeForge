@@ -89,7 +89,7 @@ for nev in nevek:
     # `optimizer` alól olvas. Egy beágyazott alkulcs (`ranges`, `params`…)
     # NÉMÁN üres teret ad — a config érvényes marad, a keresés viszont nem
     # csinál semmit.
-    _cf = ROOT / "strategy" / "config" / f"{nev}.json"
+    _cf = ROOT / "strategies" / "config" / f"{nev}.json"
     if _cf.exists():
         _o = (json.load(open(_cf, encoding="utf-8")).get("optimizer") or {})
         _felul = [k for k, v in _o.items() if isinstance(v, dict) and "min" in v]
@@ -107,7 +107,7 @@ for nev in nevek:
 # FORDÍTOTTSÁGÁT méri — nem azt, hogy minden stratégiának VAN-e leírása. Egy
 # leírás nélküli stratégiánál a felület „Leírás" fülje üresen marad, és a
 # scanner ettől még 100%-ot jelent.
-_docs = ROOT / "strategy" / "docs"
+_docs = ROOT / "strategies" / "docs"
 for nev in nevek:
     check(f"'{nev}': van magyar leírása",
           (_docs / f"{nev}.md").exists(), f"{nev}.md")

@@ -19,7 +19,7 @@ applog.harden_console()
 
 import numpy as np
 
-from strategy.ml_train import _calibrate_threshold, MIN_CALIB_SIGNALS
+from strategies.ml_train import _calibrate_threshold, MIN_CALIB_SIGNALS
 
 results = []
 
@@ -89,7 +89,7 @@ check("a statisztika KIIRJA a hasznalt minimumot (visszakovetheto legyen)",
 # spreaddel KOZELEBB, a TP egy spreaddel TAVOLABB. Ugyanez a LONG-nal is igaz.
 # Meres (2026-08-07): EURCHF-en az SL 47 pont, a spread 15 — a stop HARMADA.
 import pandas as pd
-from strategy.ml_train import label_outcomes
+from strategies.ml_train import label_outcomes
 
 n = 60
 idx = pd.date_range("2026-01-01", periods=n, freq="15min", tz="UTC")
