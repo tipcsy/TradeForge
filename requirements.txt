@@ -28,3 +28,12 @@ rich>=13.0               # a konzolos táblázatos nézet (`main.py console --tu
 #   változatlanul megy, és a program megmondja, mit kell telepíteni. Mérve
 #   (2026-08-31): +6,6 MB RSS, 15 MB lemezen — a tkinter-felület importjainak
 #   negyede, ezért fér bele egy 2 GB-os VM-be is.
+
+# A kezi laboratorium (python main.py lab) Qt-s chart-felulete.
+# ⚠ CSAK A LABORHOZ kell: a motor, a dashboard es a backtest ezek nelkul is fut.
+# A matplotlib-rol valo valtas oka merve van (a lab_qt.py fejleceben): a
+# rajzolas 5-15x gyorsabb, es a huzhato vonal / talalat-teszt / tengely-felirat
+# keszen van benne — ezeket a matplotlib alatt kezzel irtuk, es sorra hibasak
+# voltak. A PySide6 LGPL (nem GPL), tehat a licencelest nem szukiti.
+pyqtgraph>=0.13
+PySide6>=6.6

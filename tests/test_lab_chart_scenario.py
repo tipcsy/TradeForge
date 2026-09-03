@@ -54,8 +54,12 @@ def _ablak(belepok, be_ido=None, epites=False, chart=None):
     a = lc.LabAblak.__new__(lc.LabAblak)
     # ⚠ A belépő 3 elemű lett (idő, irány, SL-ár) — a 2 eleműt kiegészítjük,
     # hogy a régi tesztesetek változatlanul olvashatók maradjanak.
-    a._belepok = [(e + (None,)) if len(e) == 2 else e for e in belepok]
+    # ⚠ A belépő 4 elemű lett (idő, irány, SL-ár, TP-szorzó) — a rövidebb
+    # alakokat kiegészítjük, hogy a régi tesztesetek olvashatók maradjanak.
+    a._belepok = [tuple(e) + (None, 2.0)[len(e) - 2:] for e in belepok]
     a._tp_rr = _Var(2.0)
+    a._eredmeny = None
+    a._rr_mezok = {}
     a._be_ido = be_ido
     a._epites = _Var(epites)
     a._sym = _Var("UsaTec")
@@ -404,6 +408,25 @@ check("a „csak eddig látszik” letakarja a jövőt",
 # ── A LEJÁTSZÁS NEM VÉGREHAJT ────────────────────────────────────────────
 for _tilos in ("open_position", "run_pair(", "def simulate"):
     check(f"a lejátszás nem kereskedik ({_tilos!r})", _tilos not in _src)
+
+# ── 12. A PLAY FUTTAT (nincs külön `Futtat` gomb) ─────────────────────────
+# ⚠ A KÉRÉS (2026-09-03): „nekem az lenne a jó, ha nem lenne futtat parancs,
+# hanem a play az, ami megnyitja a pozíciót, és a megfelelő helyen lezárja".
+# A korábbi külön gomb mellett előfordulhatott, hogy egy áthelyezett TP után a
+# RÉGI eredményt nézted.
+check("a `Play` gondoskodik a futtatásról",
+      "self._biztos_eredmeny()" in _src.split("def play_szunet", 1)[1]
+      .split(chr(10) + "    def ", 1)[0])
+check("a léptetés is",
+      "self._biztos_eredmeny()" in _src.split("def leptet", 1)[1]
+      .split(chr(10) + "    def ", 1)[0])
+check("nincs külön `Futtat` gomb", 'text="Futtat"' not in _src)
+
+# ⚠ CSAK HA PISZKOS: egy szerkesztés után PONTOSAN EGYSZER futunk — a
+# tekergetés nem indíthat újra és újra egy backtestet.
+_biz = _src.split("def _biztos_eredmeny", 1)[1].split(chr(10) + "    def ", 1)[0]
+check("csak akkor futtat, ha a terv változott",
+      "if self._eredmeny is None and self._belepok:" in _biz)
 
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")

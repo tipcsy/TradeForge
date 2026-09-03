@@ -461,17 +461,31 @@ class LabAblak:
                    textvariable=self._tp_rr,
                    command=self._rajzol).pack(side="left", padx=(2, 2))
         tk.Label(gs, text="R  ").pack(side="left")
+        # ── BE / TRAILING ────────────────────────────────────────────
+        # ⚠ Ezek a kimenet-kezelés paraméterei; a mérés szerint épp a
+        # kimenet-kezelés hozta az egyetlen mérhető javulást a projektben, ezért
+        # a laborban állíthatónak kell lenniük. Üresen hagyva a pár MENTETT
+        # beállítása marad — nem találunk ki alapértéket.
+        from core import risk_reduction as _rrm0
+        _alap = _rrm0.default_config()
+        self._rr_mezok = {}
+        for _k, _cim, _sz in (("breakeven_pct", "BE", 5),
+                              ("trail_activation_atr", "trail@", 5),
+                              ("trail_distance_atr", "táv", 5)):
+            tk.Label(gs, text=f" {_cim}:").pack(side="left")
+            _v = tk.StringVar(value=str(_alap.get(_k, "")))
+            tk.Entry(gs, textvariable=_v, width=_sz).pack(side="left")
+            self._rr_mezok[_k] = _v
+
         self._epites = tk.BooleanVar(value=False)
         tk.Checkbutton(gs, text="Start építés", variable=self._epites).pack(
             side="left", padx=(0, 12))
-        tk.Button(gs, text="Futtat", command=self.futtat, width=10).pack(
-            side="left", padx=2)
         tk.Button(gs, text="Töröl", command=self.torol, width=8).pack(
             side="left", padx=2)
         tk.Button(gs, text="JSON mentés", command=self.ment).pack(
             side="left", padx=(12, 2))
-        tk.Label(gs, text="  (lerakás után: húzd a jelölőt · jobb gomb: törli)",
-                 fg="#888").pack(side="left")
+        tk.Label(gs, text="  (húzd a jelölőt / SL / TP · jobb gomb: törli"
+                          " · a Play futtat)", fg="#888").pack(side="left")
 
         # ── LEJÁTSZÓ ─────────────────────────────────────────────────
         ls = tk.Frame(self.root)
@@ -528,21 +542,24 @@ class LabAblak:
         # ⚠ A „NYITOTT" ITT AZT JELENTI: a vizsgált szakasz VÉGÉN még élt.
         # A labor egy lezárt időszakot játszik le, tehát nincs „most futó"
         # pozíció — ezt ki kell mondani, különben a szó mást ígér, mint amit ad.
-        listak = tk.Frame(self.root)
-        listak.pack(fill="x", padx=8, pady=(0, 6))
+        # ⚠ FÜLEKRE, nem egymás mellé. A felhasználó jelzése (2026-09-03): a
+        # két táblázat csak nagy ablakban fért ki, és „ezt nem akarom egyszerre
+        # látni". Így a chart kapja a helyet, a lista pedig ott van, ha kell.
+        fulek = ttk.Notebook(self.root, height=140)
+        fulek.pack(fill="x", padx=8, pady=(0, 6))
         self._fak = {}
         for kulcs, cim, oszlopok in (
-            ("nyitott", "Nyitott a szakasz végén",
-             ("idő", "ir", "belépő", "SL", "TP", "lot")),
+            ("nyitott", "Nyitott",
+             ("idő", "ir", "belépő", "most", "P&L", "R", "SL", "TP", "perc")),
             ("lezart", "Lezárt",
              ("idő", "ir", "belépő", "kilépő", "P&L", "R", "vége")),
         ):
-            _k = tk.LabelFrame(listak, text=cim)
-            _k.pack(side="left", fill="both", expand=True, padx=(0, 6))
+            _k = tk.Frame(fulek)
+            fulek.add(_k, text=cim)
             _f = ttk.Treeview(_k, columns=oszlopok, show="headings", height=5)
             for _o in oszlopok:
                 _f.heading(_o, text=_o)
-                _f.column(_o, width=78, anchor="center", stretch=True)
+                _f.column(_o, width=72, anchor="center", stretch=True)
             _f.pack(fill="both", expand=True)
             self._fak[kulcs] = _f
         self._vaszon.mpl_connect("button_press_event", self._kattintas)
@@ -568,8 +585,11 @@ class LabAblak:
         self._chart = None          # a kirajzolt gyertyák (DataFrame)
         self._objs = []             # a stratégia rajz-objektumai
         self._tengely = None        # epoch ↔ bar-index leképezés
-        # [(idő, irány, sl_ár|None), …] — az SL a charton húzható, a TP az
-        # R-szorzóból adódik (`self._tp_rr`).
+        # [(idő, irány, sl_ár|None, tp_rr), …]
+        # ⚠ A TP-SZORZÓ PER BELÉPŐ. A felhasználó kérése (2026-09-03): „ne csak
+        # az SL-t, a TP-t is lehessen külön állítani". A TP-vonalat húzva ennek
+        # az EGY belépőnek az R-je változik — a többi érintetlen. A fenti
+        # `TP: [x] R` mező csak az ÚJ belépők kiinduló értéke.
         self._belepok = []
         self._be_ido = None         # a kézi breakeven időpontja
         self._eredmeny = None       # a legutóbbi futtatás kimenete
@@ -586,10 +606,26 @@ class LabAblak:
         return "" if n == NINCS_STRAT else n
 
     # ── LEJÁTSZÁS ────────────────────────────────────────────────────
+    def _biztos_eredmeny(self) -> None:
+        """A terv legyen LEFUTTATVA, mielőtt a lejátszás mutatná.
+
+        ⚠ A felhasználó kérése (2026-09-03): „nekem az lenne a jó, ha nem lenne
+        futtat parancs, hanem a play az, ami megnyitja a pozíciót, és a
+        megfelelő helyen lezárja". Külön gomb nélkül a lejátszás magától
+        aktuális — és nem fordulhat elő, hogy egy áthelyezett TP után a régi
+        eredményt nézed.
+
+        ⚠ CSAK HA PISZKOS. Minden terv-változtatás nullázza az eredményt
+        (`self._eredmeny = None`), tehát egy szerkesztés után PONTOSAN EGYSZER
+        futunk — a tekergetés nem indít újra és újra egy backtestet."""
+        if self._eredmeny is None and self._belepok:
+            self.futtat()
+
     def play_szunet(self) -> None:
         """`Play` / `Pause`. Az első indításnál a kurzor a szakasz elejére áll."""
         if self._chart is None or len(self._chart) < 2:
             return
+        self._biztos_eredmeny()
         self._jatszik = not self._jatszik
         if self._jatszik and self._kurzor is None:
             self._kurzor = 0
@@ -630,6 +666,7 @@ class LabAblak:
             return
         self._jatszik = False
         self._play_gomb.config(text="▶ Play")
+        self._biztos_eredmeny()
         alap = self._kurzor if self._kurzor is not None else 0
         self._kurzor = max(0, min(len(self._chart) - 1, alap + int(n)))
         self._rajzol()
@@ -640,6 +677,37 @@ class LabAblak:
         self._play_gomb.config(text="▶ Play")
         self._kurzor = None
         self._rajzol()
+
+    def _ido_cimkek(self) -> None:
+        """Az x-tengely IDŐ-címkéi (hó-nap óó:pp).
+
+        ⚠ A tengely bar-INDEXEN áll (a hétvégék miatt), a felirat viszont IDŐ
+        kell legyen. Formázóval oldjuk meg, nem fix címkékkel: a `clear()` a fix
+        címkéket eldobná, és nagyítás után amúgy is rossz helyen állnának."""
+        if self._chart is None:
+            return
+        from matplotlib.ticker import FuncFormatter
+        _idx = self._chart.index
+
+        def _fmt(x, _pos):
+            i = int(round(float(x)))
+            if not (0 <= i < len(_idx)):
+                return ""
+            return _idx[i].strftime("%m-%d %H:%M")
+
+        # ⚠ MINDKÉT TENGELYRE. A sáv-tengelyt az `allapot_sav` ELREJTI, ha
+        # nincs sáv-állapot (pl. `— nincs —` stratégiánál) — és vele tűntek el a
+        # dátum-címkék is. A felhasználó jelzése: „a vízszintes sávon továbbra
+        # sincs dátumunk". Ha a sáv rejtve van, a FŐ tengely mutatja az időt.
+        _sav_lathato = self._ax_sav.get_visible()
+        for _a in (self._ax_sav, self._ax):
+            _a.xaxis.set_major_formatter(FuncFormatter(_fmt))
+        self._ax.tick_params(axis="x", labelbottom=not _sav_lathato)
+        for _a in (self._ax_sav, self._ax):
+            for _c in _a.get_xticklabels():
+                _c.set_rotation(30)
+                _c.set_fontsize(7)
+                _c.set_ha("right")
 
     def _rajzol_kurzor(self) -> None:
         """Az időkurzor, a BID/ASK vonal, és a jövő elrejtése."""
@@ -672,6 +740,16 @@ class LabAblak:
             _a, _b = self._ax.get_xlim()
             if _b > x:
                 self._ax.axvspan(x, _b, color="#101010", alpha=0.93, zorder=9)
+        # ── AKTUÁLIS IDŐ a jobb alsó sarokban ────────────────────────────
+        # ⚠ A felhasználó kérése: „a chart jobb alsó sarkában lehetne egy
+        # aktuális idő: a sárga csúszka vonalnak az idejét jelölni". Ez mondja
+        # meg, HOL tartunk — a bar-index tengelyről ez nem olvasható le.
+        self._ax.annotate(self._chart.index[i].strftime("%Y-%m-%d %H:%M"),
+                          xy=(0.995, 0.02), xycoords="axes fraction",
+                          color=szin("yellow"), fontsize=11, ha="right",
+                          va="bottom", zorder=12,
+                          bbox=dict(boxstyle="round,pad=0.25", fc="#202020",
+                                    ec=szin("yellow"), lw=0.8, alpha=0.9))
 
     def _ar_szoveg(self, ar: float) -> str:
         """Ár a pár tizedeseivel. ⚠ `%.5g` NEM: nagy szinten exponenciálisra vált
@@ -704,8 +782,13 @@ class LabAblak:
         allapot_sav(self._ax_sav, self._objs, self._tengely)
         self._rajzol_terv()
         self._rajzol_kurzor()
+        self._ido_cimkek()
         self._fig.tight_layout()
         self._vaszon.draw()
+        # ⚠ A LISTA IS KÖVESSE A KURZORT — különben a lejátszás alatt a
+        # táblázat a szakasz végét mutatná, miközben a chart máshol jár.
+        if self._eredmeny is not None or self._belepok:
+            self._listak_frissit()
 
     def _strat_lista(self) -> None:
         """A PÁR saját engedélyezett stratégiái — ugyanaz a halmaz, amit a motor
@@ -753,8 +836,14 @@ class LabAblak:
             self._y_illesztes(xa, xb)
 
     def _y_illesztes(self, xa: float, xb: float) -> None:
-        """Az ÁR-tengely a LÁTHATÓ szakaszra. Enélkül egy kinagyított részlet
-        lapos vonallá préselődne a teljes szakasz ár-tartományában."""
+        """Az ÁR-tengely a LÁTHATÓ szakaszra ÉS a rajta lévő jelölőkre.
+
+        ⚠ A JELÖLŐK NÉLKÜL ELVESZNEK. A felhasználó jelzése (2026-09-03):
+        idősíkot váltva „sikerült akkorára húzni az SL–TP vonalat, hogy nem
+        tudom újra megfogni… bárhová is kicsinyítem, sem SL-em, sem TP-m
+        nincs". Az ok: a tengely CSAK a gyertyákra illeszkedett, tehát egy
+        távoli stop kívül esett a képen, és ott már nem volt mit megfogni.
+        Most a terv szintjei is beleszámítanak — a jelölő mindig elérhető."""
         if self._chart is None:
             return
         i0 = max(0, int(np.floor(xa + 0.5)))
@@ -763,8 +852,23 @@ class LabAblak:
             return
         _l = float(self._chart["low"].iloc[i0:i1].min())
         _h = float(self._chart["high"].iloc[i0:i1].max())
+        for _sz in self._terv_szintek():
+            _l, _h = min(_l, _sz), max(_h, _sz)
         _r = (_h - _l) * 0.06 or 1.0
         self._ax.set_ylim(_l - _r, _h + _r)
+
+    def _terv_szintek(self) -> list:
+        """A megrajzolt terv ÖSSZES ár-szintje (SL és TP)."""
+        ki = []
+        for t, d, sl, rr in (self._belepok or []):
+            if sl is None:
+                continue
+            _be = self._be_ar(t)
+            if _be is None:
+                continue
+            ki.append(float(sl))
+            ki.append(float(self._tp_ar(_be, sl, d, rr)))
+        return ki
 
     def _kurzor_ido(self):
         """A kurzor IDŐPONTJA — az idősík-váltáshoz.
@@ -816,13 +920,11 @@ class LabAblak:
             f"{self._sym.get()} / {self._strat.get()}  "
             f"{dict(IDOSIKOK).get(self._tf.get(), self._tf.get())}")
         # Az időcímkék a gyertya-indexhez.
-        _n = max(1, len(chart) // 12)
-        self._ax_sav.set_xticks(list(range(0, len(chart), _n)))
-        self._ax_sav.set_xticklabels(
-            [t.strftime("%m-%d %H:%M") for t in chart.index[::_n]],
-            rotation=45, fontsize=7, ha="right")
+        # (Az idő-címkéket az `_ido_cimkek` formázója adja — a fix címkék
+        # nagyítás után rossz helyen álltak volna.)
         self._kurzor_vissza(_kurzor_t)
         self._rajzol_kurzor()
+        self._ido_cimkek()
         self._allitsd_ido(_elozo_ido)
         self._fig.tight_layout()
         self._vaszon.draw()
@@ -858,7 +960,8 @@ class LabAblak:
             # ⚠ AZ SL AUTOMATIKUSAN a gyertya ellenkező oldalára kerül, egy
             # ATR-nyire — így van mit HÚZNI. Üres SL-lel a felhasználónak előbb
             # meg kellene találnia egy láthatatlan fogantyút.
-            self._belepok.append((t, mod, self._alap_sl(t, mod)))
+            self._belepok.append((t, mod, self._alap_sl(t, mod),
+                                  float(self._tp_rr.get())))
         # ⚠ LERAKÁS UTÁN AZONNAL FOGD-ÉS-VIDD. A felhasználó kérése
         # (2026-09-03): „általában leteszem és beigazítom". Ha a mód aktív
         # maradna, a következő kattintás egy ÚJABB belépőt tenne le ahelyett,
@@ -897,7 +1000,10 @@ class LabAblak:
             _x = self._tengely.hol(int(self._be_ido.timestamp()))
             if _x is not None:
                 jelolt.append((abs(_x - x), ("be", None)))
-        for i, (t, _d, _sl) in enumerate(self._belepok):
+        # ⚠ INDEXELVE: a belépő 4 elemű (idő, irány, SL, TP-szorzó), és a
+        # rögzített hosszú kicsomagolás minden bővítésnél eltörik.
+        for i, _e in enumerate(self._belepok):
+            t = _e[0]
             _x = self._tengely.hol(int(t.timestamp()))
             if _x is not None:
                 jelolt.append((abs(_x - x), ("belepo", i)))
@@ -905,6 +1011,21 @@ class LabAblak:
             return None
         tav, mit = min(jelolt, key=lambda p: p[0])
         return mit if tav <= tures else None
+
+    def _foghato_kurzor(self, x: float):
+        """A sárga lejátszás-vonalra kattintottunk? → `("kurzor", None)`.
+
+        ⚠ A felhasználó kérése (2026-09-03): „a sárga mezőt tudjam visszahúzni,
+        visszatekerni". A gombos léptetés megvan, de a vonal MEGFOGÁSA a
+        természetes mozdulat — és a `⏮ ◀◀ ◀` gombokkal nem lehet egy adott
+        pillanatra állni."""
+        if self._kurzor is None or self._chart is None:
+            return None
+        a, b = self._ax.get_xlim()
+        tures = max(0.5, abs(b - a) * 0.02)
+        if abs((int(self._kurzor) + 0.5) - x) <= tures:
+            return ("kurzor", None)
+        return None
 
     def _foghato_sl(self, x: float, y):
         """Az SL-VONALRA kattintottunk? → `("sl", i)`.
@@ -918,14 +1039,24 @@ class LabAblak:
         _c, _d = self._ax.get_ylim()
         tx = max(0.5, abs(_b - _a) * 0.05)          # vízszintesen bőven
         ty = abs(_d - _c) * 0.02                    # függőlegesen szűken
-        for i, (t, _ir, sl) in enumerate(self._belepok):
+        for i, (t, _ir, sl, rr) in enumerate(self._belepok):
             if sl is None:
                 continue
             _x = self._tengely.hol(int(t.timestamp()))
-            if _x is None or float(y) is None:
+            if _x is None:
                 continue
-            if _x <= x <= _x + tx * 12 and abs(float(y) - sl) <= ty:
+            if not (_x <= x <= _x + tx * 12):
+                continue
+            _be = self._be_ar(t)
+            if _be is None:
+                continue
+            if abs(float(y) - sl) <= ty:
                 return ("sl", i)
+            # ⚠ A TP-VONAL IS FOGHATÓ. Húzásakor ennek a belépőnek az R-je
+            # számolódik újra — a kapcsolat megmarad, csak fordítva:
+            # a szintből lesz az arány, nem az arányból a szint.
+            if abs(float(y) - self._tp_ar(_be, sl, _ir, rr)) <= ty:
+                return ("tp", i)
         return None
 
     def _huzas_kezd(self, ev) -> None:
@@ -936,7 +1067,9 @@ class LabAblak:
         if (ev.inaxes is not self._ax or ev.button != 1
                 or self._mod.get() or ev.xdata is None):
             return
-        self._fogott = self._foghato_sl(float(ev.xdata), ev.ydata)
+        self._fogott = self._foghato_kurzor(float(ev.xdata))
+        if self._fogott is None:
+            self._fogott = self._foghato_sl(float(ev.xdata), ev.ydata)
         if self._fogott is None:
             self._fogott = self._foghato(float(ev.xdata))
         if self._fogott is None:
@@ -947,21 +1080,58 @@ class LabAblak:
             return
         # ── A MEGFOGOTT JELÖLŐ mozgatása ─────────────────────────────────
         if self._fogott is not None:
+            # ⚠ A SZINT KIHÚZHATÓ A LÁTHATÓ SÁVON KÍVÜLRE. A felhasználó jelzése
+            # (2026-09-03): „az SL-t ki kell húzni a látható távolságon kívülre,
+            # de a program nem engedi". Az ár-tengely a látható gyertyákra
+            # illeszkedik, tehát a kurzor sosem ér a sáv alá. Ha a szél
+            # közelében húzol, a tengely UTÁNAD TÁGUL.
+            if self._fogott[0] in ("sl", "tp") and ev.ydata is not None:
+                self._y_tagit(float(ev.ydata))
             t = self.ido_x(float(ev.xdata))
             if t is None:
                 return
             mit, i = self._fogott
-            if mit == "sl":
+            if mit == "kurzor":
+                # ⚠ A HÚZÁS MEGÁLLÍTJA A LEJÁTSZÁST — különben az ütem
+                # visszaugratná a kurzort a kezed alól.
+                self._jatszik = False
+                self._play_gomb.config(text="▶ Play")
+                self._biztos_eredmeny()
+                _uj = int(np.floor(float(ev.xdata) + 0.5))
+                _uj = max(0, min(len(self._chart) - 1, _uj))
+                if _uj == self._kurzor:
+                    return
+                self._kurzor = _uj
+                self._rajzol()
+                return
+            if mit == "tp":
+                if ev.ydata is None:
+                    return
+                _t, _d, _sl, _regi_rr = self._belepok[i]
+                _be = self._be_ar(_t)
+                if _be is None or _sl is None:
+                    return
+                _tav = abs(_be - _sl)
+                if _tav <= 0:
+                    return
+                # A húzott szintből az R-szorzó. Az ELLENIRÁNYBA húzott TP
+                # (a stop oldalára) 0 R lenne — ott megállunk.
+                _d1 = 1 if _d == "BUY" else -1
+                _uj_rr = max(0.0, _d1 * (float(ev.ydata) - _be) / _tav)
+                if abs(_uj_rr - _regi_rr) < 1e-9:
+                    return
+                self._belepok[i] = (_t, _d, _sl, _uj_rr)
+            elif mit == "sl":
                 # ⚠ FÜGGŐLEGES HÚZÁS: az SL az ÁR tengelyen mozog, az idő
                 # marad. A TP nem külön objektum — a stop távolságából adódik,
                 # tehát MAGÁTÓL követi (ez a felhasználó kérése).
                 if ev.ydata is None:
                     return
-                _t, _d, _regi = self._belepok[i]
+                _t, _d, _regi, _rr = self._belepok[i]
                 _uj = float(ev.ydata)
                 if _regi is not None and abs(_uj - _regi) < 1e-12:
                     return
-                self._belepok[i] = (_t, _d, _uj)
+                self._belepok[i] = (_t, _d, _uj, _rr)
             elif mit == "be":
                 if t == self._be_ido:
                     return                 # ugyanaz a perc — ne rajzoljunk újra
@@ -970,7 +1140,7 @@ class LabAblak:
                 if t == self._belepok[i][0]:
                     return
                 self._belepok[i] = (t, self._belepok[i][1],
-                                    self._belepok[i][2])
+                                    self._belepok[i][2], self._belepok[i][3])
             # ⚠ CSAK PERC-VÁLTÁSKOR rajzolunk újra. Egérmozgásonként a teljes
             # chart (gyertyák + rajz-objektumok) újrarajzolása akadozna.
             self._eredmeny = None
@@ -984,6 +1154,18 @@ class LabAblak:
         self._ax.set_xlim(a + d, b + d)
         self._y_illesztes(a + d, b + d)
         self._vaszon.draw_idle()
+
+    def _y_tagit(self, y: float) -> None:
+        """Az ár-tengely tágítása, ha a húzott szint a szélhez ér."""
+        a, b = self._ax.get_ylim()
+        _sav = (b - a)
+        if _sav <= 0:
+            return
+        _perem = _sav * 0.08
+        if y < a + _perem:
+            self._ax.set_ylim(y - _perem, b)
+        elif y > b - _perem:
+            self._ax.set_ylim(a, y + _perem)
 
     def _huzas_vege(self, ev) -> None:
         self._huzas_x = None
@@ -1070,16 +1252,33 @@ class LabAblak:
             "from": _f, "to": _i,
             "entries": [
                 {"time": str(t)[:16], "direction": d,
-                 **({"sl": float(sl), "tp_rr": float(self._tp_rr.get())}
+                 **({"sl": float(sl), "tp_rr": float(rr)}
                     if sl is not None else {})}
-                for t, d, sl in sorted(self._belepok, key=lambda e: e[0])],
+                for t, d, sl, rr in sorted(self._belepok, key=lambda e: e[0])],
             "breakeven_at": (str(self._be_ido)[:16] if self._be_ido else None),
             "rr_preset": "off",
+            "rr": self._rr_ertekek(),
             "build": bool(self._epites.get()),
             "balance": 1000.0,
             "use_strategy_signals": False,
             "exec_gates": False,
         }
+
+    def _rr_ertekek(self) -> dict:
+        """A BE / trailing mezők értéke — az ÜRESET kihagyjuk.
+
+        ⚠ Az üres mező nem 0, hanem „maradjon, ami a párnál be van állítva".
+        Egy 0-ra értelmezett üres mező NÉMÁN kikapcsolná a breakeven-t."""
+        ki = {}
+        for k, v in self._rr_mezok.items():
+            _sz = (v.get() or "").strip().replace(",", ".")
+            if not _sz:
+                continue
+            try:
+                ki[k] = float(_sz)
+            except ValueError:
+                continue          # elgépelt érték → a mentett marad
+        return ki
 
     def ment(self) -> None:
         """A terv kimentése JSON-ba — onnantól a parancssoros úton is fut."""
@@ -1127,22 +1326,67 @@ class LabAblak:
         self._osszegzes()
 
     def _listak_frissit(self) -> None:
-        """A futtatás kötései a két listába."""
+        """A futtatás kötései a két listába — A KURZOR IDEJÉHEZ igazítva.
+
+        ⚠ MIÉRT A KURZORHOZ. A felhasználó jelzése (2026-09-03): „itt vagyok egy
+        nyitott pozícióban, de nem látható lent, hogy ez nyitva lenne". A
+        lejátszás alatt azt akarja látni, ami AKKOR volt nyitva — nem a szakasz
+        végét. Ezért egy kötés akkor „nyitott", ha a kurzor ideje a nyitása és a
+        zárása KÖZÖTT van.
+
+        ⚠ ÉS MIÉRT NEM SZÁMOLUNK MAGUNK. A sorok a MOTOR kötéseiből jönnek
+        (`lab_scenario.futtat` → `run_pair`); itt csak SZŰRÜNK és a kurzor
+        áránál értékelünk. Ha a labor maga döntené el, hogy egy terv „megütötte
+        volna-e a stopot", az egy MÁSODIK végrehajtási út lenne — pontosan az,
+        amitől a projekt már többször megszenvedett."""
         for _f in self._fak.values():
             _f.delete(*_f.get_children())
         res = (self._eredmeny or {}).get("res")
         if res is None:
+            # ⚠ KIMONDJUK, hogy miért üres. Egy üres táblázat magától nem
+            # árulja el, hogy még nem futtattál — és a felhasználó jogosan
+            # hitte, hogy a lerakott jelölő már pozíció.
+            if self._belepok:
+                self._fak["nyitott"].insert(
+                    "", "end", values=("— nyomj `Futtat`-ot —", "", "", "", "",
+                                       "", "", "", ""))
             return
+        _kt = self._kurzor_ido()
         for t in (getattr(res, "trades", None) or []):
+            # A KURZOR ELŐTTI kötések nem léteznek még; a kurzor UTÁN zártakat
+            # nyitottnak mutatjuk.
+            if _kt is not None:
+                if t.open_time > _kt:
+                    continue
+                _nyitva = (t.close_time is None) or (t.close_time > _kt)
+            else:
+                _nyitva = t.close_time is None
             _d = 1 if t.direction == "BUY" else -1
             _sl0 = t.open_price - _d * t.sl_points * t.point_size
-            if t.close_time is None:
+            if _nyitva:
+                # ⚠ NEM REALIZÁLT eredmény: a KURZOR (vagy a szakasz vége) áránál. A
+                # felhasználó kérése: „a nyitottnak pont az lenne a lényege,
+                # hogy lássuk … P&L, R, hány perce van nyitva". A `Trade`-en
+                # ezek csak záráskor töltődnek, ezért itt SZÁMOLJUK.
+                _most, _perc = self._ar_ido_kurzornal(t.open_time)
+                _pnl = _r = float("nan")
+                if _most is not None:
+                    _tav = (_most - t.open_price) * _d
+                    _kock = t.sl_points * t.point_size
+                    _r = (_tav / _kock) if _kock else float("nan")
+                    try:
+                        _pnl = _r * float(t.risk_usd or 0.0)
+                    except (TypeError, ValueError):
+                        _pnl = float("nan")
                 self._fak["nyitott"].insert(
-                    "", "end", values=(str(t.open_time)[5:16], t.direction,
-                                       self._ar_szoveg(t.open_price),
-                                       self._ar_szoveg(_sl0),
-                                       self._ar_szoveg(t.tp),
-                                       f"{t.lot:g}"))
+                    "", "end", values=(
+                        str(t.open_time)[5:16], t.direction,
+                        self._ar_szoveg(t.open_price),
+                        self._ar_szoveg(_most) if _most is not None else "—",
+                        ("—" if _pnl != _pnl else f"{_pnl:+.2f}"),
+                        ("—" if _r != _r else f"{_r:+.2f}"),
+                        self._ar_szoveg(_sl0), self._ar_szoveg(t.tp),
+                        ("—" if _perc is None else f"{_perc:.0f}")))
             else:
                 try:
                     _r = (t.pnl_usd / t.risk_usd) if t.risk_usd else 0.0
@@ -1154,6 +1398,23 @@ class LabAblak:
                                        str(t.close_time)[5:16],
                                        f"{t.pnl_usd:+.2f}", f"{_r:+.2f}",
                                        t.status))
+
+    def _ar_ido_kurzornal(self, nyitas):
+        """A KURZORNÁL érvényes ár és a nyitás óta eltelt PERCEK.
+
+        Kurzor nélkül a szakasz vége. ⚠ A labor lezárt időszakot játszik le: a
+        „most" a lejátszás helye, nem a valódi jelen."""
+        if self._chart is None or len(self._chart) == 0:
+            return None, None
+        i = (int(self._kurzor) if self._kurzor is not None
+             else len(self._chart) - 1)
+        i = max(0, min(len(self._chart) - 1, i))
+        _ar = float(self._chart["close"].iloc[i])
+        try:
+            _perc = (self._chart.index[i] - nyitas).total_seconds() / 60.0
+        except (TypeError, ValueError):
+            _perc = None
+        return _ar, _perc
 
     def _osszegzes(self) -> None:
         self._listak_frissit()
@@ -1204,7 +1465,8 @@ class LabAblak:
         except (IndexError, ValueError, KeyError):
             return None
 
-    def _tp_ar(self, be_ar: float, sl_ar: float, irany: str) -> float:
+    def _tp_ar(self, be_ar: float, sl_ar: float, irany: str,
+               rr: float = None) -> float:
         """A TP a stop TÁVOLSÁGÁBÓL és az R-szorzóból.
 
         ⚠ EZ A LÉNYEG (a felhasználó kérése, TradingView-mintára): „ha a pirosat
@@ -1212,7 +1474,8 @@ class LabAblak:
         rajzolható objektum, hanem a stop FÜGGVÉNYE — így nem lehet véletlenül
         olyan pár, ami nem a szándékolt kockázat/hozamot adja."""
         d = 1 if irany == "BUY" else -1
-        return be_ar + d * abs(be_ar - sl_ar) * max(0.0, float(self._tp_rr.get()))
+        _rr = self._tp_rr.get() if rr is None else rr
+        return be_ar + d * abs(be_ar - sl_ar) * max(0.0, float(_rr))
 
     def _rajzol_terv(self) -> None:
         """A megrajzolt (még nem futtatott) terv jelölői + a futtatás kötései."""
@@ -1220,7 +1483,7 @@ class LabAblak:
             return
         from matplotlib.patches import Rectangle
         _jobb = self._ax.get_xlim()[1]
-        for t, d, sl in self._belepok:
+        for t, d, sl, rr in self._belepok:
             x = self._tengely.hol(int(t.timestamp()))
             if x is None:
                 continue
@@ -1235,14 +1498,15 @@ class LabAblak:
             be_ar = self._be_ar(t)
             if be_ar is None:
                 continue
-            tp = self._tp_ar(be_ar, sl, d)
+            tp = self._tp_ar(be_ar, sl, d, rr)
             _sz = max(1.0, (_jobb - x) * 0.6)
             for _a, _b, _c in ((be_ar, sl, "red"), (be_ar, tp, "green")):
                 self._ax.add_patch(Rectangle(
                     (x, min(_a, _b)), _sz, abs(_b - _a),
                     facecolor=szin(_c), edgecolor=szin(_c), alpha=0.13,
                     linewidth=0.8, zorder=4))
-            for _ar, _c, _cim in ((sl, "red", "SL"), (tp, "green", "TP")):
+            for _ar, _c, _cim in ((sl, "red", "SL"),
+                                  (tp, "green", f"TP {rr:.2f}R")):
                 self._ax.plot([x, x + _sz], [_ar, _ar], color=szin(_c),
                               linewidth=1.4, zorder=6)
                 self._ax.annotate(f"{_cim} {self._ar_szoveg(_ar)}",
@@ -1259,6 +1523,8 @@ class LabAblak:
         # ── A FUTTATÁS eredménye: a valódi kötések a charton ──────────────
         res = (self._eredmeny or {}).get("res")
         for t in (getattr(res, "trades", None) or []):
+            self._rajzol_stop_ut(t)
+        for t in (getattr(res, "trades", None) or []):
             x1 = self._tengely.hol(int(t.open_time.timestamp()))
             x2 = (self._tengely.hol(int(t.close_time.timestamp()))
                   if t.close_time is not None else None)
@@ -1271,6 +1537,49 @@ class LabAblak:
                 self._ax.plot([x1, x2], [t.open_price, t.close_price],
                               color=szin("green" if _ny else "red"),
                               linewidth=2.0, alpha=0.9, zorder=9)
+
+    def _rajzol_stop_ut(self, t) -> None:
+        """A STOP ÚTJA lépcsős vonalként — BE és trailing.
+
+        ⚠ EZ HIÁNYZOTT (felhasználói jelzés, 2026-09-03): „az a hiba, hogy ezt
+        nem láttam, hogy a trailing elindult, az SL mozgott". A kötés `sl`
+        státusszal, mégis PLUSZBAN zárt — ami ellentmondásnak látszik, amíg nem
+        látod, hogy a stop közben felhúzódott. A motor eseménynaplója ezt
+        rögzíti (`record_events`), csak eddig nem rajzoltuk ki."""
+        _ev = getattr(t, "events", None) or []
+        if not _ev or self._tengely is None:
+            return
+        _x, _y = [], []
+        for e in _ev:
+            _tip, _ido, _ar, _sl = (list(e) + [None] * 4)[:4]
+            if not _sl:
+                continue
+            _px = self._tengely.hol(int(pd.Timestamp(_ido).timestamp()))
+            if _px is None:
+                continue
+            _x.append(_px)
+            _y.append(float(_sl))
+        if len(_x) < 1:
+            return
+        # A záróig húzzuk az utolsó szintet, hogy látszódjon, hol fogta meg.
+        if t.close_time is not None:
+            _vx = self._tengely.hol(int(t.close_time.timestamp()))
+            if _vx is not None:
+                _x.append(_vx)
+                _y.append(_y[-1])
+        # ⚠ VASTAG, KÜLÖN SZÍN. A felhasználó kérése (2026-09-03): „szeretném
+        # vizuálisan is látni, ahogy az SL–TP-t, csak mondjuk más színnel".
+        # A cián sem a piros (SL), sem a zöld (TP), sem a narancs (ASK) —
+        # a stop ÚTJA külön dolog, és ez magyarázza meg, miért zárt `sl`
+        # státusszal egy nyereséges kötés.
+        self._ax.step(_x, _y, where="post", color=szin("cyan"),
+                      linewidth=2.2, alpha=0.95, zorder=12)
+        self._ax.plot(_x, _y, "o", color=szin("cyan"), markersize=3.5,
+                      zorder=12)
+        self._ax.annotate("SL útja (BE / trailing)", (_x[-1], _y[-1]),
+                          color=szin("cyan"), fontsize=8, ha="left",
+                          va="center", zorder=12,
+                          xytext=(4, 0), textcoords="offset points")
 
     def fut(self) -> None:
         self.root.mainloop()

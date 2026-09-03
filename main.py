@@ -10,7 +10,8 @@ Parancsok:
   python main.py notify-test  — a Telegram-értesítés beüzemelése és próbája
   python main.py dashboard    — csak dashboard (demo mód, MT5 nélkül)
   python main.py backtest     — backtest futtatás az alapértelmezett paraméterekkel
-  python main.py lab          — kézi laboratórium: chart-ablak (külön processz)
+  python main.py lab          — kézi laboratórium: chart-ablak (Qt, külön processz)
+  python main.py lab-mpl      — ugyanaz a régi, matplotlib-es felülettel
 
 Az `optimize` pár × STRATÉGIA szinten dolgozik. Stratégia megadása nélkül minden
 páron a SAJÁT engedélyezett stratégiái futnak (pairs.<sym>.strategies) — ugyanaz a
@@ -400,6 +401,16 @@ def cmd_lab(argv=None):
     gepen onmagaban fusson — egy chart-rajzolo ablak ne ugyanabban a
     processzben legyen, mint az elo kereskedes. A modulokat viszont HASZNALJA
     (nem masolja): a gyertyak a parquetbol, a rajz a `pair_visual_objects`-bol."""
+    from tools.lab_qt import main as _lab
+    return _lab(argv or [])
+
+
+def cmd_lab_mpl(argv=None):
+    """A kezi labor REGI, matplotlib-es valtozata.
+
+    ⚠ SZANDEKOSAN MEGMARADT. A Qt-s valtozat (v3.24.0) mindent tud, amit ez —
+    de amig nem futott eleg valos helyzeten, a regi legyen elerheto. Ha a
+    Qt-s bevalt, ez torolheto."""
     from tools.lab_chart import main as _lab
     return _lab(argv or [])
 
@@ -413,6 +424,7 @@ COMMANDS = {
     "notify-test": (cmd_notify_test, []),
     "dashboard": (cmd_dashboard,  []),
     "lab":       (cmd_lab,        "argv"),
+    "lab-mpl":   (cmd_lab_mpl,    "argv"),
 }
 
 

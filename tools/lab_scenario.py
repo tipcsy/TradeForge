@@ -31,6 +31,9 @@ sima backtest ugyanarra az időszakra — a teszt ezt ellenőrzi is.
                 "sl": 29516.4, "tp_rr": 2.0} ],   // sl/tp_rr elhagyhato
   "breakeven_at": "2026-08-27 02:10",      // elhagyható
   "rr_preset": "off",                      // off | halving | shield | …
+  "rr": {"breakeven_pct": 0.5,             // ennyi R-nel a stop a nyitora
+         "trail_activation_atr": 1.0,      // ennyi ATR utan indul a trailing
+         "trail_distance_atr": 1.5},       // ilyen tavolsagra huz
   "build": false,                          // pozícióépítés be/ki
   "balance": 1000.0
 }
@@ -217,6 +220,14 @@ def futtat(fk: dict) -> dict:
         if _p not in _rrm.PRESETS:
             _hiba(f"ismeretlen rr-preset: {_p!r} — {', '.join(_rrm.PRESETS)}")
         _rr = {**_rrm.default_config(), "preset": _p}
+        # ⚠ A BE / TRAILING BEÁLLÍTHATÓ. A felhasználó jelzése (2026-09-03):
+        # „nem is tudom állítani, hogy mikor induljon a trailing, és mikor húzza
+        # be az SL-t BE-be". Ezek a kockázatcsökkentés paraméterei
+        # (`core.risk_reduction`), és eddig a mentett alapértéket kapták — a
+        # laborban viszont épp ezeket akarod variálni.
+        for _k, _v in (fk.get("rr") or {}).items():
+            if _k != "preset":
+                _rr[_k] = _v
 
     _manual = None
     if fk.get("breakeven_at"):
