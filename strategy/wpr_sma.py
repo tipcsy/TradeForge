@@ -503,8 +503,8 @@ class WprSmaStrategy(Strategy):
         # A VÉGREHAJTÁSI szűrők (mint a backtest/él): a jel-replay CSAK azokat a
         # belépőket rajzolja ki, amiket a motor TÉNYLEGESEN megkötne — így a chart a
         # valós kötéseket mutatja (a kikapcsolt kapuknál több lesz, ez is látszik).
-        #  • volatilitás-szűrő: a bt_entry HOOK (atr_min_pct/atr_max_pct); baseline az
-        #    ablak ATR-átlaga (mint a bt_indicators atr_avg oszlopa).
+        #  • volatilitás-kapu: `core.vol_baseline.failed` (atr_min_pct/atr_max_pct);
+        #    baseline az ablak ATR-átlaga (mint a bt_indicators atr_avg oszlopa).
         #  • spread-kapu: ha a bárokon van spread-adat (close_spread/avg_spread/spread).
         #  • TF-együttállás: már a md.entry_gate intézi (lentebb).
         _atr_avg = float(np.nanmean(atr15)) if np.isfinite(atr15).any() else 0.0
@@ -571,14 +571,17 @@ class WprSmaStrategy(Strategy):
                 if math.isnan(atr_v):
                     continue
                 # ── VÉGREHAJTÁSI szűrők (UGYANAZ, mint a backtest/él) ──────────
-                # Volatilitás-szűrő: a bt_entry hook (None → a motor SEM lépne be,
-                # tehát a jelölő se jelenjen meg). Ugyanaz az atr_min/max_pct logika.
-                # A mérce a p. M15 báré (gördülő mércénél bar-onként változik) —
-                # a `bt_indicators`-szal AZONOS képlet, közös modulból.
-                if getattr(md, "exec_gates", True):
+                # Volatilitás-KAPU (v3.27.0): ugyanaz az `atr_min/max_pct` ítélet,
+                # amit a motor is hoz — közös modulból (`vol_baseline.failed`).
+                # A mérce a p. M15 báré (gördülő mércénél bar-onként változik).
+                #
+                # ⚠ CSAK `block` hatásnál szűr, mint a spread-kapunál. `none`/
+                # `reduce` mellett a motor BELÉP (utóbbinál kisebb mérettel),
+                # tehát a jelölőnek meg kell jelennie — különben a chart kevesebbet
+                # mutatna, mint a valóság (megtörtént: 12 riasztás, 5 jelölő).
+                if getattr(md, "exec_gates", True) and md.gate_blocks("volatility"):
                     _base = _volb.value_at(atr15, p, md.params, _atr_avg)
-                    if self.bt_entry({"atr": float(atr_v), "atr_avg": _base},
-                                     md.params, pip) is None:
+                    if _volb.failed(float(atr_v), md.params, _base):
                         continue
                 # Spread-kapu (ha van spread-adat a bárokon): a közös core.spread_gate.
                 # ⚠ CSAK `block` hatásnál szűr. `none`/`reduce` mellett a motor
@@ -762,26 +765,10 @@ class WprSmaStrategy(Strategy):
         sl_points, tp_points = calc_sl_tp_points(float(atr_v), {**params, "point_size": point_size})
         return sl_points, tp_points
 
-    def bt_entry(self, hi_row, params, point_size):
-        """Backtest: volatilitás-szűrő + ATR-méretezés. None → kihagyás."""
-        atr_v = hi_row.get("atr", 0)
-        if not atr_v or pd.isna(atr_v) or atr_v <= 0:
-            return None
-        # Volatilitás-szűrő: a túl csendes/kaotikus gyertyák kizárása.
-        # A MÉRCE (baseline) elsősorban a MENTETT, fix `atr_avg_ref` (optimalizáláskor
-        # számolt, ablak-FÜGGETLEN) → a backtest, a viz ÉS az él UGYANAZT az egy számot
-        # használja, így a három egyezik és a backtest reprodukálható. Fallback az
-        # ablak ATR-átlaga (atr_avg oszlop, a bt_indicators teszi rá), ha nincs mentve
-        # (régi params). 0 = a szűrő kikapcsolva. A backtest ÉS a live belépés-kapuja is
-        # (v1.31.0 óta a live_trader is ezt a hookot hívja).
-        # ⚠ Ha `atr_baseline_bars > 0`, a GÖRDÜLŐ mérce (a sor `atr_avg`-ja) nyer a
-        # befagyasztott `atr_avg_ref` fölött — különben a kettő versengene, és a
-        # beállítás némán hatástalan maradna. A precedenciát egy helyen döntjük el.
-        atr_avg = _volb.effective(params, hi_row.get("atr_avg", 0))
-        if atr_avg and atr_avg > 0:
-            lo, hi = _volb.band(params, atr_avg)
-            if lo > 0 and atr_v < lo:
-                return None
-            if hi > 0 and atr_v > hi:
-                return None
-        return self.sl_tp_points(hi_row, params, point_size)
+    # ⚠ NINCS SAJÁT `bt_entry`. v3.27.0 előtt itt állt a volatilitás-szűrő
+    # (`atr_min_pct`/`atr_max_pct`); mostantól a VOLATILITÁS-KAPU dönt
+    # (`core.gates` + `core.vol_baseline.failed`), a küszöbök viszont továbbra is
+    # ennek a stratégiának az optimalizált paraméterei. Így a `none` hatás
+    # tényleg azt jelenti, hogy nincs szűrés — és a stratégia egy hookkal
+    # egyszerűbb. Az `atr_avg` oszlopot a `bt_indicators` továbbra is előállítja:
+    # a kapu MÉRÉSE abból dolgozik.

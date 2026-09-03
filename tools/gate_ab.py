@@ -96,18 +96,10 @@ def main() -> int:
     print("  fuggetlen: az ABSZOLUT szamok felfele torzitanak. A KULONBSEG")
     print("  viszont ervenyes — minden valtozat ugyanazt a torzitast hordozza.\n")
 
-    # ⚠ A CSAK KIJELZES kapukat (pl. Volatilitas) kihagyjuk a kihagyasos
-    # merésbol: a `decide` atugorja oket, tehat a soruk BETURE azonos volna a
-    # "mind" sorral — es a felhasznalo joggal hinne, hogy meresi hiba. A valodi
-    # volatilitas-szures a strategia sajat `bt_entry`-jeben van (atr_min/max_pct),
-    # az nem kapu-kerdes.
-    _display_only = [k for k in on_keys if g.is_display_only(k)]
-    _deciding = [k for k in on_keys if k not in _display_only]
-    if _display_only:
-        print("  (csak kijelzes, a dontesbe nem szol bele: "
-              + ", ".join(g.label_of(k) for k in _display_only) + ")\n")
+    # v3.27.0 ota MINDEN engedelyezett kapu dont — a Volatilitas is —, tehat
+    # mindegyikre van ertelme kihagyasos sort merni.
     variants = [("mind (mai beallitas)", on_keys), ("egy kapu sem", [])]
-    for k in _deciding:
+    for k in on_keys:
         variants.append((f"– {g.label_of(k)} nelkul",
                          [x for x in on_keys if x != k]))
 
@@ -162,7 +154,7 @@ def main() -> int:
         print("\n" + "=" * 72)
         print("OSSZEGZES — a 'mind' valtozathoz kepest (pozitiv = a kapu HASZNAL)")
         print("=" * 72)
-        for k in _deciding:
+        for k in on_keys:
             lbl = f"– {g.label_of(k)} nelkul"
             d_pnl, d_pf, n = 0.0, 0.0, 0
             for sym, rows in all_rows.items():

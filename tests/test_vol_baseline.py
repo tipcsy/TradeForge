@@ -110,17 +110,23 @@ check("a kikapcsolt padlo nem szur",
       vb.status(1.0, {"atr_min_pct": 0, "atr_max_pct": 0}, 272.75)["ok"])
 
 # ---------------------------------------------------------------------------
-print("== A strategia HASZNALJA is (bt_indicators + bt_entry) ==")
+print("== A KAPU hasznalja (v3.27.0: mar nem a bt_entry) ==")
+# ⚠ v3.27.0 elott ez a szures a strategia `bt_entry`-jeben volt. Most a
+# VOLATILITAS-KAPU dont (`vol_baseline.failed`), a kuszobok viszont tovabbra is
+# a strategia optimalizalt parameterei. A `bt_entry` ezert mar NEM szur —
+# csak meretez —, es ezt itt ki is mondjuk, hogy a valtas ne legyen nema.
 strat = get_strategy_by_name("wpr_sma")
 row_quiet = {"atr": 140.19, "atr_avg": 140.19}
 p_fix = {"atr_avg_ref": 272.75, "atr_min_pct": 0.9, "atr_max_pct": 3.2,
          "sl_atr_mult": 1.5, "tp_rr_ratio": 2.0, "sl_method": "atr"}
-check("fix mercevel a BTCUSD-eset BLOKKOL",
-      strat.bt_entry(row_quiet, p_fix, 0.01) is None)
+check("fix mercevel a BTCUSD-eset BUKIK a kapun",
+      vb.failed(row_quiet["atr"], p_fix, row_quiet["atr_avg"]))
 check("gordulo mercevel ATMEGY",
-      strat.bt_entry(row_quiet, {**p_fix, "atr_baseline_bars": 96 * 90}, 0.01)
-      is not None,
+      not vb.failed(row_quiet["atr"],
+                    {**p_fix, "atr_baseline_bars": 96 * 90}, row_quiet["atr_avg"]),
       "a sor atr_avg-ja a merce, tehat az arany 1,00")
+check("a bt_entry mar NEM szur (csak meretez)",
+      strat.bt_entry(row_quiet, p_fix, 0.01) is not None)
 
 # A bt_indicators oszlopa a KOZOS modulbol jojjon
 df_hi = pd.DataFrame({"open": 1.0, "high": 1.1, "low": 0.9, "close": 1.0},

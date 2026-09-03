@@ -83,7 +83,10 @@ def _volatility_cell(ctx: dict, on_click=None, symbol: str = None) -> dict:
     blokkoló ok, ami eddig sehol nem látszott: a BTCUSD hetekig némán nem
     kereskedett 0,51×-es aránnyal (lásd `core/vol_baseline.py`).
 
-    ⚠ Ez az oszlop MUTAT, nem dönt: a szűrés a stratégia `bt_entry`-jében van."""
+    ⚠ Ez a CELLA az instrumentum szintjén áll, tehát a MÉRÉST mutatja: a
+    küszöbön kívüli ATR-t akkor is jelzi, ha a kapu hatása `none` (nem szűr). A
+    stratégiánkénti hatást a jelzés-cella KERETE mondja meg (`frame_state`) —
+    ugyanaz a szétválasztás, mint a többi kapunál."""
     import math
     from core import vol_baseline as _vb
     atr = ctx.get("atr_price")

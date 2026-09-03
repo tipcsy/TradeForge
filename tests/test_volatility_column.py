@@ -52,33 +52,53 @@ PRM = {"atr_min_pct": 0.9, "atr_max_pct": 3.2, "atr_avg_ref": 272.75}
 PC = {"point_size": 0.01}
 
 # ---------------------------------------------------------------------------
-print("== CSAK KIJELZES: nincs allithato hatasa ==")
+print("== VALODI KAPU (v3.27.0): a hatasa DONT ==")
+# ⚠ v3.27.0 elott ez a kapu CSAK KIJELZES volt: a `decide` atugorta, a szures
+# pedig a strategia `bt_entry`-jeben futott. A felhasznalo kifogasa ez volt:
+# "van egy kapunk, ami nem szur, csak mutat — annak meg mi ertelme van?"
+# Mostantol a kapu dont, es a `none` TENYLEG azt jelenti, hogy nincs szures.
 check("a volatilitas kapu regisztralva van", g.VOLATILITY in g.KEYS)
-check("...es CSAK KIJELZES", g.is_display_only(g.VOLATILITY))
-check("a tobbi kapu NEM az",
-      not any(g.is_display_only(k) for k in g.KEYS if k != g.VOLATILITY),
-      str([k for k in g.KEYS if g.is_display_only(k)]))
+check("...es `block`-kal indul (a v3.27.0 ELOTTI viselkedes megorzese)",
+      g.default_effect_of(g.VOLATILITY) == g.EFFECT_BLOCK,
+      g.default_effect_of(g.VOLATILITY))
 
-# A `decide` akkor sem dont, ha valaki `block`-ot ir a configba ES bukik a meres
 dec = g.decide({g.VOLATILITY: True, g.SPREAD: True},
                {g.VOLATILITY: g.EFFECT_BLOCK, g.SPREAD: g.EFFECT_BLOCK})
-check("a decide FIGYELMEN KIVUL hagyja (nem blokkol)",
-      g.VOLATILITY not in dec["blocked"], str(dec["blocked"]))
-check("...de a tobbi kapu valtozatlanul dont", g.SPREAD in dec["blocked"])
-check("kockazatcsokkentesre sem hat",
+check("a decide BLOKKOL, ha a meres bukik", g.VOLATILITY in dec["blocked"],
+      str(dec["blocked"]))
+check("kockazatcsokkentesre is hat",
       g.decide({g.VOLATILITY: True},
-               {g.VOLATILITY: g.EFFECT_REDUCE})["risk_factor"] == 1.0)
+               {g.VOLATILITY: g.EFFECT_REDUCE})["risk_factor"] < 1.0)
+check("`none` hatasnal NEM szol bele",
+      not g.decide({g.VOLATILITY: True},
+                   {g.VOLATILITY: g.EFFECT_NONE})["blocked"])
 
-# ...es a config-ellenorzes SZOL, ha valaki megis beallitja
-cfg_bad = {"pairs": {"X": {"point_size": 0.01, "pv1_point": 1.0,
+# PARAMETER-VEZERELT: az `exec_gates=False` NEM kapcsolja ki (a kuszobeit a
+# strategia soport parameterei adjak — kulonben a sopres hatastalan parametert
+# merne).
+_eff_off = g.effects_for({}, "X", "wpr_sma", exec_gates=False)
+check("exec_gates=False mellett is el", _eff_off[g.VOLATILITY] == g.EFFECT_BLOCK,
+      str(_eff_off))
+check("...de a tobbi kapu kimarad",
+      all(_eff_off[k] == g.EFFECT_NONE for k in g.KEYS if k != g.VOLATILITY),
+      str(_eff_off))
+
+# ...es a config-ellenorzes SZOL, ha a kaput a Beallitasokban kikapcsoltak,
+# holott van mit szurni: a v3.27.0 elotti configokban a `gate_order`-bol
+# kivenni MEGJELENITESI dontes volt, most viszont a szurest is leveszi.
+cfg_off = {"dashboard": {"gate_order": ["spread"]},
+           "pairs": {"X": {"point_size": 0.01, "pv1_point": 1.0,
                            "commission_per_lot": 0, "swap_long_per_lot": 0,
-                           "swap_short_per_lot": 0,
-                           "gates": {"volatility": {"wpr_sma": "block"}}}}}
-fs = [f for f in cc.check(cfg_bad) if f["code"] == "display_only_gate_effect"]
-check("a config-ellenorzes jelzi a nema beallitast", len(fs) == 1, f"{len(fs)} lelet")
+                           "swap_short_per_lot": 0}}}
+fs = [f for f in cc.check(cfg_off) if f["code"] == "volatility_gate_off"]
+check("a config-ellenorzes jelzi a nema kikapcsolast", len(fs) == 1, f"{len(fs)} lelet")
 if fs:
-    check("...es megmondja, HOL van a valodi szuro",
-          "atr_min_pct" in fs[0]["message"], fs[0]["message"][-60:])
+    check("...es megnevezi a kuszoboket",
+          "atr_min_pct" in fs[0]["message"], fs[0]["message"][:60])
+cfg_on = {"dashboard": {"gate_order": ["spread", "volatility"]},
+          "pairs": cfg_off["pairs"]}
+check("bekapcsolt kapunal nincs lelet",
+      not [f for f in cc.check(cfg_on) if f["code"] == "volatility_gate_off"])
 
 # ---------------------------------------------------------------------------
 print("== A cella: arany + blokkolo allapot ==")
@@ -134,7 +154,8 @@ check("ki-be kapcsolhato, mint a tobbi",
       "volatility" not in gl.enabled_columns(
           {"dashboard": {"gate_order": ["spread"]}}))
 check("van leirasa", (g.doc_text(g.VOLATILITY) or "").strip() != "" and
-      "MUTAT, nem dönt" in g.doc_text(g.VOLATILITY))
+      "Valódi kapu" in g.doc_text(g.VOLATILITY),
+      g.doc_text(g.VOLATILITY)[:60])
 check("a leiras a valodi meressel indokol", "0,51" in g.doc_text(g.VOLATILITY))
 
 from dashboard import live_row as lr             # noqa: E402

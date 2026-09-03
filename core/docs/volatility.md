@@ -8,16 +8,31 @@ Az oszlop egyetlen számot mutat: a **mostani ATR a kalibrált mércéhez képes
 1.37×   →  élénkebb a szokásosnál
 ```
 
-## ⚠ Ez az oszlop MUTAT, nem dönt
+## Valódi kapu — a hatása állítható (v3.27.0)
 
-Minden más kapu (Spread, Együtt, Piac, Lendület, Költség) itt, a kapu-ablakban
-kap hatást. **Ez nem.** A volatilitás-szűrés a stratégia belépő-hookjában
-(`bt_entry`) történik — ott, ahol a backtest, a viz és az él **közös** kapuja
-van. Ha itt is lehetne hatást állítani, az vagy duplán szűrne, vagy `none`-ra
-állítva azt ígérné, hogy kikapcsoltad a szűrést, holott a stratégia tovább szűr.
+Ez a kapu sokáig **csak mutatott**: a szűrés a stratégia belépő-hookjában
+(`bt_entry`) futott, feltétel nélkül, és a kapu-ablakban nem lehetett hozzányúlni.
+Ez félrevezető volt — egy kapu, ami nem dönt, nem kapu.
 
-A szűrő számai a **stratégia paraméterei** (`atr_min_pct`, `atr_max_pct`), a
-Piac-szűrő kategóriában.
+Mostantól itt, a kapu-ablakban kap hatást, mint a többi:
+
+| hatás | mit tesz |
+|---|---|
+| **Akadályozza a beszállást** (alap) | a sávon kívüli ATR-nél nincs belépő — ez a v3.27.0 előtti viselkedés |
+| **Kockázatcsökkentés** | belép, de fele mérettel |
+| **Ki** | a kapu **tényleg** nem szűr — a stratégia sem |
+
+> **A küszöbök továbbra is a stratégia paraméterei** (`atr_min_pct`,
+> `atr_max_pct`), nem a kapu configjában laknak. Ezért ez az egyetlen
+> **paraméter-vezérelt** kapu: az optimalizáló és a söprés ugyanezeket a
+> számokat söpri, és emiatt az `exec_gates=False` („ne modellezd a végrehajtási
+> kapukat") ezt a kaput **nem** kapcsolja ki — különben a söprés olyan
+> paramétert mérne, aminek nincs hatása.
+
+> **⚠ A Beállításokban kikapcsolt oszlop most már a szűrést is leveszi.**
+> v3.27.0 előtt a `gate_order`-ből kivenni pusztán megjelenítési döntés volt. Ha
+> korábban azért vetted ki, mert „úgyis csak mutat", kapcsold vissza — a
+> program a naplóban is szól róla (`volatility_gate_off`).
 
 ## Miért lett külön oszlopa
 

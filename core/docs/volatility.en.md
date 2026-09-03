@@ -9,17 +9,31 @@ baseline**.
 1.37×   →  livelier than usual
 ```
 
-## ⚠ This column SHOWS, it does not decide
+## A real gate — its effect is adjustable (v3.27.0)
 
-Every other gate (Spread, Align, Market, Momentum, Cost) gets its effect here, in
-the gate window. **This one does not.** Volatility filtering happens in the
-strategy's entry hook (`bt_entry`) — where the backtest, the visualisation and
-live trading share the **same** gate. If an effect could be set here too, it
-would either filter twice or, set to `none`, promise that you switched the filter
-off while the strategy keeps filtering.
+For a long time this gate only **showed**: the filtering ran unconditionally in
+the strategy's entry hook (`bt_entry`), and the gate window offered nothing to
+change. That was misleading — a gate that does not decide is not a gate.
 
-The filter's numbers are **strategy parameters** (`atr_min_pct`, `atr_max_pct`),
-under the Market filter category.
+From now on it gets an effect here, like every other gate:
+
+| effect | what it does |
+|---|---|
+| **Block the entry** (default) | no entry while the ATR is outside the band — the pre-v3.27.0 behaviour |
+| **Reduce risk** | enters, but at half size |
+| **Off** | the gate **really** does not filter — and neither does the strategy |
+
+> **The thresholds are still strategy parameters** (`atr_min_pct`,
+> `atr_max_pct`), not gate config. That makes this the only
+> **parameter-driven** gate: the optimiser and the sweep sweep those very
+> numbers, which is why `exec_gates=False` ("do not model the execution gates")
+> does **not** switch this gate off — otherwise the sweep would be measuring a
+> parameter that has no effect.
+
+> **⚠ Disabling the column in Settings now removes the filtering too.**
+> Before v3.27.0, taking it out of `gate_order` was purely a display decision. If
+> you removed it because "it only shows anyway", switch it back on — the program
+> also says so in the log (`volatility_gate_off`).
 
 ## Why it got its own column
 

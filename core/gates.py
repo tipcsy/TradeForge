@@ -1,9 +1,10 @@
 """
 Belépő-kapuk EGYSÉGES nyilvántartása — per (instrumentum × stratégia).
 
-A dashboard három előszűrőt mutat: Spread · Idősík-együttállás · Piac-állapot.
-Ez a modul egy helyre hozza a kiértékelésüket, és — a 2.0 terv 6. pontja szerint —
-minden kapu **hatása stratégiánként állítható**:
+A dashboard előszűrőket mutat: Spread · Idősík-együttállás · Piac-állapot ·
+Lendület · Költség · Volatilitás. Ez a modul egy helyre hozza a kiértékelésüket,
+és — a 2.0 terv 6. pontja szerint — minden kapu **hatása stratégiánként
+állítható** (v3.27.0 óta KIVÉTEL NÉLKÜL: a volatilitás is):
 
     wpr_sma → Együtt → akadályozza a beszállást
     wpr_sma → Piac   → kockázatcsökkentés
@@ -21,6 +22,10 @@ HATÓKÖRÖK (2026-07-31 állapot, v1.80.0 után):
   • **Idősík-együttállás** — a mért állapot instrumentum-tulajdonság (az
     SMA-irányok), a KAPUZÁS viszont per stratégia (`tf_align.gate`).
   • **Piac-állapot** — instrumentum-szintű (`pairs.<sym>.market_strategy`).
+  • **Volatilitás** — a küszöbök a STRATÉGIA optimalizált paraméterei
+    (`atr_min_pct`/`atr_max_pct`), tehát páronként ÉS stratégiánként mások. Ez az
+    egyetlen `PARAM_DRIVEN` kapu; v3.27.0 előtt nem is volt kapu, hanem a
+    stratégia `bt_entry` hookjában futó, kikapcsolhatatlan szűrő.
 
 Ebből következik a 2.0 elrendezése: a kapu-oszlopok az instrumentum szintjén
 mondják meg, hogy „mi a helyzet", és a stratégia jelzés-cellájának KERETE mondja
@@ -117,31 +122,42 @@ REGISTRY = (
     # Költség/kockázat: a spread mennyire torzítja a TERVEZETT RR-t. Alapból
     # `none` — a meglévő párok viselkedése nem változhat egy frissítéstől.
     {"key": COST,     "default_effect": EFFECT_NONE},
-    # ⚠ CSAK KIJELZÉS. A volatilitás-szűrés NEM itt történik, hanem a stratégia
-    # `bt_entry` hookjában (atr_min_pct/atr_max_pct) — ott van a backtest, a viz
-    # és az él KÖZÖS belépő-kapuja. Ha ez a kapu is kapna állítható hatást, az
-    # vagy DUPLÁN szűrne, vagy — `none`-ra állítva — azt ígérné, hogy kikapcsolta
-    # a szűrést, holott a stratégia tovább szűrne. Az oszlop tehát MUTAT, nem dönt.
+    # ⚠ A VOLATILITÁS AZ EGYETLEN KAPU, AMI `block`-KAL INDUL — és ez nem
+    # következetlenség, hanem a viselkedés MEGŐRZÉSE. v3.27.0 előtt a szűrés a
+    # stratégia `bt_entry` hookjában volt, és FELTÉTEL NÉLKÜL futott: nem volt
+    # kapcsoló, amivel ki lehetett volna kapcsolni. Ha ez a kapu `none`-nal
+    # indulna, egy frissítés NÉMÁN levenné a szűrőt minden párról — pontosan az
+    # a hibaosztály, ami miatt a többi kapu `none`-nal indul.
     #
-    # Miért kell mégis oszlop: 2026-08-08-ig ez volt az EGYETLEN blokkoló ok, ami
+    # A „kikapcsolt" állapotot eddig is a NULLA KÜSZÖB jelentette
+    # (`atr_min_pct`/`atr_max_pct`), és ez így is marad: a `bollinger_squeeze`,
+    # az `ml_ai` és a `trend_pullback` mentett készleteiben nincs küszöb, tehát
+    # ott a kapu `block` hatással sem szűr semmit. Mérve a bevezetéskor: küszöbe
+    # CSAK a `wpr_sma`-nak van, mind a 13 páron — vagyis pontosan az a halmaz,
+    # amelyik eddig is szűrt.
+    #
+    # Miért kell az oszlop is: 2026-08-08-ig ez volt az EGYETLEN blokkoló ok, ami
     # nem látszott sehol. A BTCUSD hetekig némán nem kereskedett, mert az ATR a
     # kalibrált sáv alá csúszott (0,51×) — a chart üres maradt, és semmi nem
     # árulta el, miért. Minden más ok (spread, együttállás, piac, lendület,
     # költség) látható kapu volt; ez az aszimmetria került a felhasználónak hetekbe.
-    {"key": VOLATILITY, "default_effect": EFFECT_NONE,
-     "display_only": True},
+    {"key": VOLATILITY, "default_effect": EFFECT_BLOCK},
 )
 
+# ── PARAMÉTER-VEZÉRELT kapuk: a küszöbük a STRATÉGIA mentett készletében van ──
+# A többi kapu küszöbét a kapu configja adja (spread-szorzó, lendület-küszöb,
+# költség-plafon). A volatilitásé viszont a stratégia OPTIMALIZÁLT paramétere
+# (`atr_min_pct`/`atr_max_pct`) — ugyanaz, amit a söprés és az optimalizáló söpör.
+#
+# ⚠ EBBŐL EGY DOLOG KÖVETKEZIK, és azt itt mondjuk ki: az `exec_gates=False`
+# („ne modellezd a végrehajtási kapukat") EZT a kaput NEM kapcsolja ki. Ha
+# kikapcsolná, a `core/sweep.py` olyan paramétert söpörne, aminek nincs hatása —
+# a némán hatástalan beállítás pedig ebben a projektben a legdrágább hibafajta.
+# A volatilitás kikapcsolása a HATÁSÁVAL történik (`none`), ahogy a felhasználó
+# kérte: „a none onnantól TÉNYLEG azt jelenti, hogy nincs volatilitás-szűrés".
+PARAM_DRIVEN = (VOLATILITY,)
+
 KEYS = tuple(g["key"] for g in REGISTRY)
-
-
-def is_display_only(key: str) -> bool:
-    """CSAK KIJELZÉS kapu-e? Ilyennek NINCS állítható hatása: a szűrés
-    máshol (a stratégiában) történik, az oszlop csak láthatóvá teszi."""
-    for g in REGISTRY:
-        if g["key"] == key:
-            return bool(g.get("display_only"))
-    return False
 
 
 def doc_path(key: str):
@@ -374,15 +390,9 @@ def backtest_enabled(cfg: dict, symbol: str, strategy: str, key: str) -> bool:
     Amit a felület KIMOND, ha a kettő eltér: hogy a mérés MÁST modellez, mint
     ami élesben történik. Az eltérés így látható marad, nem néma.
 
-    ⚠ A CSAK KIJELZÉS kapu az EGYETLEN kivétel, és az nem házirend, hanem TÉNY:
-    a `decide` átugorja, tehát a bepipálás semmit nem tenne. A valódi szűrés a
-    stratégia saját `bt_entry`-jében van.
-
     Alapértelmezés: modellezze, ha élesben dönt; ne, ha nem. Így a mérés
     alapból az élet tükrözi, és csak akkor tér el, ha te kéred.
     """
-    if is_display_only(key):
-        return False
     sec = (((cfg or {}).get("pairs", {}).get(symbol) or {})
            .get(_BT_SECTION) or {}).get(strategy) or {}
     v = sec.get(key)
@@ -423,13 +433,18 @@ def set_backtest(cfg: dict, symbol: str, strategy: str, key: str,
 
 
 def effects_for(cfg: dict, symbol: str, strategy: str,
-                for_backtest: bool = False) -> dict:
+                for_backtest: bool = False, exec_gates: bool = True) -> dict:
     """`{kapu_kulcs: hatás}` egy (pár, stratégia) párosra — az `evaluate` bemenete.
 
     `for_backtest=True` → a kapu-táblában KIPIPÁLATLAN kapuk `EFFECT_NONE`-t
     kapnak. Így ugyanaz a hívás szolgálja az élt és a backtestet, és a kettő
     nem tud szétcsúszni: a backtest MINDIG az éles hatásból indul, és legfeljebb
     kivesz belőle — soha nem tesz hozzá.
+
+    `exec_gates=False` → a VÉGREHAJTÁSI kapuk kimaradnak a modellezésből (a
+    söprés és a feltáró futások használják). A `PARAM_DRIVEN` kapuk (ma: a
+    volatilitás) NEM maradnak ki: a küszöbük a stratégia saját, söpört
+    paramétere — lásd a `PARAM_DRIVEN` megjegyzését.
     """
     out = {k: effect_for(cfg, symbol, strategy, k) for k in KEYS}
     if for_backtest:
@@ -444,6 +459,13 @@ def effects_for(cfg: dict, symbol: str, strategy: str,
                 # kapu bekapcsolásán azt szokás érteni, hogy akadályoz.
                 d = default_effect_of(k)
                 out[k] = d if d != EFFECT_NONE else EFFECT_BLOCK
+    if not exec_gates:
+        # ⚠ A SORREND SZÁMÍT: előbb a backtest-pipa, utána a maszk. Így egy
+        # KIVETT kapu a söprésben is kivett marad — a maszk csak elvehet, soha
+        # nem adhat vissza olyat, amit a felhasználó kikapcsolt.
+        for k in KEYS:
+            if k not in PARAM_DRIVEN:
+                out[k] = EFFECT_NONE
     return out
 
 
@@ -555,10 +577,9 @@ def _eval_momentum(ctx: dict):
 def _eval_volatility(ctx: dict):
     """Az ATR a stratégia kalibrált sávjában van-e (`core.vol_baseline`).
 
-    ⚠ CSAK KIJELZÉS: a `decide` ezt a kaput átugorja, tehát a MÉRÉS nem dönt.
-    Mégis fontos, hogy BLOCKING-ot adjon, ha a sávon kívül vagyunk: a `K.Össz.`
-    számláló ebből tudja, hogy a motor MOST nem lépne be — pontosan ez hiányzott,
-    amikor a BTCUSD hetekig némán nem kereskedett (0,51× a mércének)."""
+    v3.27.0 óta VALÓDI kapu: a hatása (blokkol / kockázatcsökkentés / ki) dönt,
+    mint bárhol máshol. Ami NEM változott: a küszöbök a stratégia optimalizált
+    paraméterei (`atr_min_pct`/`atr_max_pct`) — lásd `PARAM_DRIVEN`."""
     from core import vol_baseline as _vb
     atr, base = ctx.get("atr_price"), ctx.get("atr_baseline")
     if not atr or not base:
@@ -657,10 +678,6 @@ def decide(failed: dict, effects: dict) -> dict:
     blocked, reduced = [], []
     for key in KEYS:
         if not (failed or {}).get(key):
-            continue
-        # A CSAK KIJELZÉS kapuk sosem döntenek — a hatásuk máshol lakik. Enélkül
-        # egy configba tévedt `block` némán duplán szűrne.
-        if is_display_only(key):
             continue
         eff = (effects or {}).get(key) or default_effect_of(key)
         if eff == EFFECT_BLOCK:

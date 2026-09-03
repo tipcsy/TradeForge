@@ -1181,6 +1181,7 @@ def run_pair(
     # ÉRVÉNYES érték: „nincs kapu ezen a páron/stratégián").
     from core import spread_gate as _spread_gate
     from core import gates as _gt
+    from core import vol_baseline as _volb
     _exec_gates = bool(exec_gates)
     if tf_eval is not _TF_EVAL_AUTO:
         _tf_eval = tf_eval if _exec_gates else None
@@ -1193,9 +1194,13 @@ def run_pair(
     # ⚠ `for_backtest=True`: a kapu-tablaban KIPIPALATLAN kapuk kimaradnak a
     # modellezesbol. Az eles hatasbol indulunk, es legfeljebb KIVESZUNK —
     # a backtest sosem alkalmazhat olyan kaput, ami elesben nem szol bele.
-    _gate_eff = (_gt.effects_for(cfg or {}, symbol, strategy.name,
-                                 for_backtest=True)
-                 if _exec_gates else {k: _gt.EFFECT_NONE for k in _gt.KEYS})
+    # ⚠ `exec_gates=False` MELLETT IS a közös feloldó dönt — nem egy külön
+    # „mind none" szótár. A volatilitás ugyanis PARAMÉTER-VEZÉRELT kapu: a
+    # küszöbeit a stratégia söpört paraméterei adják, ezért a söprésben is élnie
+    # kell (lásd `gates.PARAM_DRIVEN`). Ha itt kézzel nulláznánk, a söprés olyan
+    # paramétert mérne, aminek nincs hatása.
+    _gate_eff = _gt.effects_for(cfg or {}, symbol, strategy.name,
+                                for_backtest=True, exec_gates=_exec_gates)
     # A piac-kapu per-gyertya besorolása — EGYSZER, mint a TF-kiértékelő
     # (paraméter-független). None, ha a kapu ki van kapcsolva vagy nincs osztályozó.
     _mkt_series, _mkt_adverse = None, set()
@@ -1579,8 +1584,15 @@ def run_pair(
                 # HATÁSSAL (blokkol / kockázatcsökkentés / ki), a közös
                 # `core.gates.decide`-on keresztül. A MÉRÉS itt is irány-tudatos.
                 _gate_risk = 1.0
+                _failed = {}
+                # ⚠ A VOLATILITÁS A BLOKKON KÍVÜL van: `exec_gates=False` mellett
+                # is mérjük, mert a küszöbei a stratégia saját paraméterei
+                # (`gates.PARAM_DRIVEN`). v3.27.0 előtt ugyanez a `bt_entry`-ben
+                # futott, szintén feltétel nélkül — a viselkedés tehát változatlan.
+                if _gt.active(_gate_eff, _gt.VOLATILITY):
+                    _failed[_gt.VOLATILITY] = _volb.failed(
+                        m15_row.get("atr"), params, m15_row.get("atr_avg", 0))
                 if _exec_gates:
-                    _failed = {}
                     if _gt.active(_gate_eff, _gt.SPREAD):
                         _atr_e = m15_row.get("atr", float("nan"))
                         if _atr_e and not pd.isna(_atr_e):
@@ -1604,11 +1616,11 @@ def run_pair(
                         _failed[_gt.MOMENTUM] = _momx.failed(
                             _mom_series.get(m15_times[m15_ptr], float("nan")),
                             signal, _mom_mode, _mom_cfg)
-                    _dec = _gt.decide(_failed, _gate_eff)
-                    if _dec["blocked"]:
-                        prev_m1_row = m1_row
-                        continue
-                    _gate_risk = _dec["risk_factor"]
+                _dec = _gt.decide(_failed, _gate_eff)
+                if _dec["blocked"]:
+                    prev_m1_row = m1_row
+                    continue
+                _gate_risk = _dec["risk_factor"]
 
                 # A stratégia adja a pozíciótervet (SL/TP + saját szűrők); None → kihagyás
                 plan = strategy.bt_entry(m15_row, params, point_size)
@@ -2180,9 +2192,12 @@ def run_portfolio_backtest(
             "tf_eval":   (_build_tf_align_evaluator(cfg, sym, strategy.name, df_m1)
                           if _exec_gates else None),
             # A kapuk HATÁSA per (pár × stratégia) — a `core.gates.decide` bemenete.
-            "gate_eff":  (_gt.effects_for(cfg, sym, strategy.name,
-                                          for_backtest=True) if _exec_gates
-                          else {k: _gt.EFFECT_NONE for k in _gt.KEYS}),
+            # ⚠ `exec_gates=False` mellett is a közös feloldó dönt: a
+            # volatilitás PARAMÉTER-VEZÉRELT kapu, a küszöbeit a stratégia
+            # söpört paraméterei adják (lásd `gates.PARAM_DRIVEN`).
+            "gate_eff":  _gt.effects_for(cfg, sym, strategy.name,
+                                         for_backtest=True,
+                                         exec_gates=_exec_gates),
             # Piac-kapu: per-gyertya besorolás (EGYSZER, mint a tf_eval — nem
             # paraméter-függő). None, ha a kapu ki van kapcsolva/nincs osztályozó.
             "mkt_series": _pair_market_series(cfg, sym, strategy.name, m15,
@@ -2432,9 +2447,17 @@ def run_portfolio_backtest(
                         # A HATÁS is: blokkol / kockázatcsökkentés / ki, a közös
                         # `core.gates.decide`-on keresztül (per pár × stratégia).
                         _gate_ok, _gate_risk = True, 1.0
+                        _eff = info["gate_eff"]
+                        _failed = {}
+                        # ⚠ A VOLATILITÁS A BLOKKON KÍVÜL — ugyanaz az indok,
+                        # mint a `run_pair`-ben: a küszöbei a stratégia saját
+                        # paraméterei, tehát `exec_gates=False` mellett is élnek.
+                        if _gt.active(_eff, _gt.VOLATILITY):
+                            from core import vol_baseline as _volbx
+                            _failed[_gt.VOLATILITY] = _volbx.failed(
+                                m15_row.get("atr"), params,
+                                m15_row.get("atr_avg", 0))
                         if _exec_gates:
-                            _eff = info["gate_eff"]
-                            _failed = {}
                             if _gt.active(_eff, _gt.SPREAD):
                                 _atr_e = m15_row.get("atr", float("nan"))
                                 if _atr_e and not pd.isna(_atr_e):
@@ -2461,9 +2484,9 @@ def run_portfolio_backtest(
                                     info["mom_series"].get(m15_df.index[ptr],
                                                            float("nan")),
                                     signal, info["mom_mode"], info["mom_cfg"])
-                            _dec = _gt.decide(_failed, _eff)
-                            _gate_ok = not _dec["blocked"]
-                            _gate_risk = _dec["risk_factor"]
+                        _dec = _gt.decide(_failed, _eff)
+                        _gate_ok = not _dec["blocked"]
+                        _gate_risk = _dec["risk_factor"]
 
                         # A stratégia adja a pozíciótervet (SL/TP + saját szűrők)
                         plan = (strategy.bt_entry(m15_row, params, point_size)

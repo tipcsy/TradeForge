@@ -382,20 +382,9 @@ class CandleLevelBreakStrategy(Strategy):
                 tp = cand
         return sl, tp
 
-    def bt_entry(self, hi_row, params, point_size):
-        """Belépés-kapu + méretezés — a backtest ÉS az él UGYANEZT hívja."""
-        from core import vol_baseline as _vb
-        atr = hi_row.get("atr")
-        if atr is None or (isinstance(atr, float) and math.isnan(atr)) or atr <= 0:
-            return None
-        base = _vb.effective(params, hi_row.get("atr_avg", 0))
-        if base and base > 0:
-            lo, hi = _vb.band(params, base)
-            if lo > 0 and atr < lo:
-                return None
-            if hi > 0 and atr > hi:
-                return None
-        return self.sl_tp_points(hi_row, params, point_size)
+    # ⚠ NINCS SAJÁT `bt_entry`: a volatilitás-szűrés v3.27.0 óta a
+    # VOLATILITÁS-KAPU dolga (`core.gates`), a küszöbök (`atr_min_pct` /
+    # `atr_max_pct`) továbbra is ennek a stratégiának a paraméterei.
 
     # ── Megjelenítés ─────────────────────────────────────────────────────
     def compute_display(self, md: MarketData) -> dict:

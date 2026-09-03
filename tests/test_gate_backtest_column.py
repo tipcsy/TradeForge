@@ -53,10 +53,11 @@ check("alapbol MINDEN dontő kaput modellez a backtest",
 check("az eles es a backtest hatas kezdetben AZONOS",
       g.effects_for(c, SYM, STRAT) == g.effects_for(c, SYM, STRAT, for_backtest=True))
 
-# ⚠ A CSAK KIJELZES kapu SOHA nem modellezheto: a `decide` atugorja, a valodi
-# szures a strategia bt_entry-jeben van. Egy bejelolheto pipa azt igerne, hogy hat.
-check("a CSAK KIJELZES kapu sosem modellezheto",
-      not g.backtest_enabled(c, SYM, STRAT, g.VOLATILITY))
+# ⚠ v3.27.0: a Volatilitas is DONTO kapu lett (eddig CSAK KIJELZES volt), tehat
+# alapbol modellezi a backtest — ahogy eddig is tette, csak akkor a strategia
+# `bt_entry`-jen keresztul, lathatatlanul.
+check("a Volatilitast alapbol modellezi a backtest",
+      g.backtest_enabled(c, SYM, STRAT, g.VOLATILITY))
 
 
 # ── 2. A PIPA KIVESZI a merésbol — de az ELES hatast NEM erinti ───────────
@@ -113,10 +114,13 @@ check("...mindket iranyban", set(g.backtest_differs(
       SYM, STRAT)) == {g.SPREAD, g.MOMENTUM})
 check("egyezéskor URES a lista", g.backtest_differs(_cfg(), SYM, STRAT) == [])
 
-# A CSAK KIJELZES kapu marad az egyetlen kivetel — meg kezi `true` mellett is.
-c4 = {"pairs": {SYM: {"gates_backtest": {STRAT: {g.VOLATILITY: True}}}}}
-check("a CSAK KIJELZES kaput semmi nem elesitheti",
+# A Volatilitas KIVEHETO a meresbol (a pipaval) — ez az A/B lenyege: mennyit
+# visz el a volatilitas-szuro? Elesben viszont valtozatlanul blokkol.
+c4 = {"pairs": {SYM: {"gates_backtest": {STRAT: {g.VOLATILITY: False}}}}}
+check("a Volatilitas kivehető a merésbol",
       g.effects_for(c4, SYM, STRAT, for_backtest=True)[g.VOLATILITY] == g.EFFECT_NONE)
+check("...de az ELES hatasa valtozatlan",
+      g.effects_for(c4, SYM, STRAT)[g.VOLATILITY] == g.EFFECT_BLOCK)
 
 
 # ── 5. A BACKTEST TENYLEG ezt hasznalja ──────────────────────────────────
@@ -155,17 +159,12 @@ if TK:
     check("minden kapunak van backtest-pipaja",
           set(d._gate_bt_vars) == set(g.KEYS), str(sorted(d._gate_bt_vars)))
 
-    # ⚠ A pipa MINDEN dontokepes kapun allithato — akkor is, ha elesben ki van
-    # kapcsolva. Egyedul a CSAK KIJELZES kapun letiltva (ott tenyleg nem tenne
-    # semmit).
-    _bad = []
-    for k in g.KEYS:
-        state = str(d._gate_bt_cb[k].cget("state"))
-        want = "disabled" if g.is_display_only(k) else "normal"
-        if state != want:
-            _bad.append(f"{k}: {state} (varhato: {want})")
-    check("a pipa MINDEN kapun allithato, csak a kijelzo kivetel", not _bad,
-          "; ".join(_bad))
+    # ⚠ A pipa MINDEN kapun allithato — akkor is, ha elesben ki van kapcsolva.
+    # v3.27.0 elott a Volatilitas kivetel volt (CSAK KIJELZES, a `decide`
+    # atugorta); mostantol valodi kapu, tehat neki is elo pipaja van.
+    _bad = [f"{k}: {str(d._gate_bt_cb[k].cget('state'))}"
+            for k in g.KEYS if str(d._gate_bt_cb[k].cget("state")) != "normal"]
+    check("a pipa MINDEN kapun allithato", not _bad, "; ".join(_bad))
 
     # A megszunt harmadik oszlop: csak akkor szol, ha van MIT mondania.
     _texts = {k: d._gate_src_lbl[k].cget("text") for k in g.KEYS}
@@ -175,7 +174,6 @@ if TK:
     # „ki"-t mutat — mintha a felhasznalo allitotta volna ugy.
     from core import gate_layout as gl
     _off = [k for k in g.KEYS if not gl.is_enabled(live, k)
-            and not g.is_display_only(k)
             and not g.backtest_enabled(live, sym, "wpr_sma", k)]
     check("a globalisan kikapcsoltnal KIIRJA az okot",
           all("Beállításokban" in _texts[k] for k in _off) if _off else True,
@@ -183,8 +181,8 @@ if TK:
 
     # ⚠ AZ ELTERES NEM LEHET NEMA: ha egy elesben kikapcsolt kaput bepipalsz, a
     # sor vegen ki kell irnia — kulonben a meres hetekig mast modellezne.
-    _k = next((k for k in g.KEYS if not g.is_display_only(k)
-               and g.effect_for(live, sym, "wpr_sma", k) == g.EFFECT_NONE), None)
+    _k = next((k for k in g.KEYS
+               if g.effect_for(live, sym, "wpr_sma", k) == g.EFFECT_NONE), None)
     if _k:
         d._gate_bt_vars[_k].set(True)
         d._on_gate_bt_change(_k)

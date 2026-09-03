@@ -109,3 +109,31 @@ def status(atr: float, params: dict, base: float) -> dict:
                 "why": _t("vol.too_wild", ratio=f"{ratio:.2f}",
                           cap=params.get("atr_max_pct"))}
     return {"ok": True, "ratio": ratio, "lo": lo, "hi": hi, "why": ""}
+
+
+def failed(atr, params: dict, row_atr_avg=0.0) -> bool:
+    """Kívül van-e az ATR az engedett sávon? — A VOLATILITÁS-KAPU EGYETLEN
+    ÍTÉLETE, minden úton (él, backtest, portfólió, viz).
+
+    ⚠ MIÉRT EGY FÜGGVÉNY. v3.27.0 előtt ugyanez a néhány sor HÁROM stratégia
+    `bt_entry`-jében állt külön-külön (`wpr_sma`, `bollinger_squeeze`,
+    `candle_level_break`), a `trend_pullback`-ben és az `ml_ai`-ban viszont NEM
+    — vagyis a szűrés attól függött, melyik stratégia másolta be. Most a kapu
+    dönt, a küszöböket pedig továbbra is a stratégia optimalizált paraméterei
+    adják (`atr_min_pct`/`atr_max_pct`), ezért az `effective` precedenciája
+    (gördülő mérce a befagyasztott fölött) itt is érvényes.
+
+    Nincs mérce (0 küszöb, hiányzó `atr_avg_ref`) → `False`: a kapu nem szól
+    bele. Ez pontosan a régi viselkedés — a szűrő „kikapcsolt" állapota mindig
+    is a nulla küszöb volt, nem egy külön kapcsoló."""
+    try:
+        a = float(atr)
+    except (TypeError, ValueError):
+        return False
+    if not (a > 0) or a != a:
+        return False
+    base = effective(params or {}, row_atr_avg)
+    if not base or base <= 0:
+        return False
+    lo, hi = band(params or {}, base)
+    return bool((lo > 0 and a < lo) or (hi > 0 and a > hi))

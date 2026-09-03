@@ -3314,8 +3314,7 @@ class InstrumentParamsDialog:
           1. ELTÉR-e a mérés az élestől — ez a legfontosabb, mert egy feltáró
              beállítás különben hetekig ott maradna, és a backtest csendben mást
              mérne, mint ami történik;
-          2. hogy a kapu CSAK KIJELZÉS (a szűrés a paraméterekben van);
-          3. hogy a Beállításokban GLOBÁLISAN ki van kapcsolva — mert a legördülő
+          2. hogy a Beállításokban GLOBÁLISAN ki van kapcsolva — mert a legördülő
              olyankor „Ki"-t mutat, mintha te állítottad volna úgy.
         """
         lbl = self._gate_src_lbl.get(key)
@@ -3323,10 +3322,6 @@ class InstrumentParamsDialog:
             return
         eff, src = self._g.effect_with_source(self.root_cfg, self.symbol,
                                               self.strategy.name, key)
-        if self._g.is_display_only(key):
-            lbl.config(text=_t("idlg.csak_kijelzes_a_szures"),
-                       fg=FG_GRAY_DIM)
-            return
         bt = self._g.effects_for(self.root_cfg, self.symbol, self.strategy.name,
                                  for_backtest=True)[key]
         if bt != eff:
@@ -3348,17 +3343,16 @@ class InstrumentParamsDialog:
         legfontosabb kérdést — megéri-e egyáltalán bekapcsolni. Az ELTÉRÉST a
         sor végi megjegyzés mondja ki, hogy ne maradjon néma.
 
-        Az EGYETLEN kivétel a CSAK KIJELZÉS kapu, és az nem házirend, hanem
-        tény: a `decide` átugorja, tehát a bepipálás semmit nem tenne."""
+        ⚠ v3.27.0 óta NINCS kivétel: a Volatilitás is valódi kapu lett, tehát a
+        pipája is használható (eddig kiszürkítve állt, mert a `decide` átugorta)."""
         cb = (getattr(self, "_gate_bt_cb", None) or {}).get(key)
         var = (getattr(self, "_gate_bt_vars", None) or {}).get(key)
         if cb is None or var is None:
             return
-        usable = not self._g.is_display_only(key)
-        var.set(usable and self._g.backtest_enabled(
+        var.set(self._g.backtest_enabled(
             self.root_cfg, self.symbol, self.strategy.name, key))
         try:
-            cb.config(state=("normal" if usable else "disabled"))
+            cb.config(state="normal")
         except tk.TclError:
             pass
 

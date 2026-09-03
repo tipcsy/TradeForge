@@ -271,8 +271,12 @@ def build(cfg: dict, symbol: str, strategy, opt_cfg: dict, df_m15=None,
     # be van kapcsolva. Ha ki van, akkor a kapu-beállítás LÁTSZÓLAG él, de az
     # optimalizálás nem tud róla — és a mentett paraméterek olyan világból
     # jönnek, ami élesben nem létezik. Ezt ki KELL írni.
-    effects = (_gt.effects_for(cfg or {}, symbol, strategy.name)
-               if exec_gates else {k: _gt.EFFECT_NONE for k in _gt.KEYS})
+    # ⚠ A volatilitás `exec_gates=False` mellett is él (PARAM_DRIVEN: a küszöbei
+    # a stratégia söpört paraméterei) — ezért a közös feloldó dönt, nem egy
+    # kézzel nullázott szótár. Enélkül a terv-panel MÁST mutatna, mint amivel a
+    # futás indul, és pont ezt a fajta eltérést hivatott kimondani.
+    effects = _gt.effects_for(cfg or {}, symbol, strategy.name,
+                              exec_gates=exec_gates)
 
     data_from = data_to = None
     if df_m15 is not None and len(df_m15):

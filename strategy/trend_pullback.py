@@ -455,5 +455,7 @@ class TrendPullbackStrategy(Strategy):
                 objs += viz.entry_marks(rec)
         return objs
 
-    def bt_entry(self, hi_row, params, point_size):
-        return self.sl_tp_points(hi_row, params, point_size)
+    # ⚠ NINCS SAJÁT `bt_entry`: az ősé (`Strategy.bt_entry`) pontosan ezt tette
+    # (`sl_tp_points`), tehát a felülírás semmit nem adott hozzá. A volatilitás
+    # v3.27.0 óta KAPU — ez a stratégia is megkapta vele a szűrés lehetőségét,
+    # amivel eddig nem rendelkezett (küszöb nélkül nem szól bele).

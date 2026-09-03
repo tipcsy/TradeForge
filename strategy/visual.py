@@ -217,8 +217,8 @@ class BarState:
     BTCUSD-nél hetekbe került — lásd `core.gates` VOLATILITY megjegyzését.
 
     ⚠ Csak az ÉRVÉNYES kapuk kaphatnak kódot: a `none` hatású kapu SOSEM zár, tehát
-    nem is villoghat (`gates.evaluate` konvenciója). A `display_only` (Volatilitás)
-    viszont MINDIG érvényes, mert a szűrés a stratégia `bt_entry`-jében történik.
+    nem is villoghat (`gates.evaluate` konvenciója). v3.27.0 óta a Volatilitás sem
+    kivétel: valódi kapu lett, tehát a saját hatása dönt.
 
     `market_state`: GENERIKUS piac-állapot kód. **-1 = NINCS piac-sáv** (a piac-viz
     kikapcsolva vagy nincs kiválasztott piac-stratégia) → a TradeForgeBands NEM

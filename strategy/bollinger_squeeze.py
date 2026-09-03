@@ -572,25 +572,10 @@ class BollingerSqueezeStrategy(Strategy):
             return None
         return sl, sl * float(params.get("tp_rr", 2.0))
 
-    def bt_entry(self, hi_row, params, point_size):
-        """Belépés-kapu + méretezés — a backtest ÉS az él UGYANEZT hívja.
-
-        A közös volatilitás-mércét használja (`core.vol_baseline`), mint a
-        `wpr_sma`: `atr_min_pct`/`atr_max_pct` a kalibrált mércéhez képest. Nulla
-        küszöb → a szűrő kikapcsolva (ez az alapértelmezés ennél a stratégiánál:
-        a squeeze MAGA a volatilitás-szűrő, kétszer szűrni értelmetlen)."""
-        from core import vol_baseline as _vb
-        atr = hi_row.get("atr")
-        if atr is None or (isinstance(atr, float) and math.isnan(atr)) or atr <= 0:
-            return None
-        base = _vb.effective(params, hi_row.get("atr_avg", 0))
-        if base and base > 0:
-            lo, hi = _vb.band(params, base)
-            if lo > 0 and atr < lo:
-                return None
-            if hi > 0 and atr > hi:
-                return None
-        return self.sl_tp_points(hi_row, params, point_size)
+    # ⚠ NINCS SAJÁT `bt_entry`: a volatilitás-szűrés v3.27.0 óta a
+    # VOLATILITÁS-KAPU dolga (`core.gates`). Ennél a stratégiánál ez amúgy sem
+    # szűrt: a squeeze MAGA a volatilitás-feltétel, ezért a mentett készletekben
+    # nincs `atr_min_pct`/`atr_max_pct` — a kapu nulla küszöbbel nem szól bele.
 
     # ── Optimalizálás ─────────────────────────────────────────────────────
 

@@ -362,17 +362,6 @@ class GateDialog:
     def _build_effects(self):
         if not self.strategies:
             return
-        # ⚠ CSAK KIJELZÉS kapu: NINCS állítható hatás. A szűrés máshol (a
-        # stratégia `bt_entry`-jében) történik. Egy hatás-választó itt vagy
-        # duplán szűrne, vagy `none`-ra állítva azt ígérné, hogy kikapcsoltad a
-        # szűrést — a némán hatástalan beállítás pont az, amit ez a projekt a
-        # legrosszabbnak tart. Ezért a választó helyett MEGMONDJUK, hol lakik.
-        if _g.is_display_only(self.key):
-            box = _section(self._page, _t("gate.section.effect"))
-            tk.Label(box, text=_t("gate.display_only"),
-                bg=BG, fg=FG_GRAY, font=self._f["small"], anchor="w",
-                justify="left", wraplength=560).pack(anchor="w", pady=(4, 0))
-            return
         box = _section(self._page, _t("gate.section.when_blocking"))
         grid = tk.Frame(box, bg=BG)
         grid.pack(fill="x", pady=(4, 0))

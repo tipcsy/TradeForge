@@ -133,8 +133,15 @@ check("bekapcsolt exec_gates mellett latszik az aktiv kapu",
       _on["gate_effects"][gt.SPREAD] == gt.EFFECT_BLOCK)
 _cg["optimizer"]["exec_gates"] = False
 _off = op.build(_cg, SYM, ST, OCFG, df_m15=M15)
-check("KIKAPCSOLT exec_gates -> a panel EGYETLEN kaput sem mutat aktivnak",
-      all(e == gt.EFFECT_NONE for e in _off["gate_effects"].values()))
+# ⚠ EGY KIVETELLEL: a volatilitas PARAMETER-VEZERELT kapu (a kuszobeit a
+# strategia soport parameterei adjak), ezert az `exec_gates=False` nem kapcsolja
+# ki — kulonben az optimalizalo olyan parametert hangolna, aminek nincs hatasa.
+check("KIKAPCSOLT exec_gates -> a VEGREHAJTASI kapuk egyike sem aktiv",
+      all(e == gt.EFFECT_NONE for k, e in _off["gate_effects"].items()
+          if k not in gt.PARAM_DRIVEN),
+      str(_off["gate_effects"]))
+check("...de a parameter-vezerelt kapu megmarad",
+      _off["gate_effects"][gt.VOLATILITY] == gt.EFFECT_BLOCK)
 check("...es a terv jelzi is, hogy a kapuk nincsenek modellezve",
       _off["exec_gates"] is False)
 

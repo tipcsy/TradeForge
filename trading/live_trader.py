@@ -46,6 +46,7 @@ from core import adopted
 from core import order_exec
 from core import spread_gate
 from core import gates as _gates
+from core import vol_baseline as _vol_baseline
 from core import symbol_policy as _sym_policy
 from core import opt_activity as _opt_activity
 from core.indicator_engine import atr as atr_indicator
@@ -1003,11 +1004,11 @@ def apply_gate_state(objects: list, bars: dict, symbol: str, strategy_name: str,
     0,67–0,89× volt a kalibrált mércének. A charton semmi nem árulta el. Ugyanaz
     az aszimmetria, ami a BTCUSD-nél hetekbe került (lásd `core.gates` VOLATILITY).
 
-    ⚠ CSAK az ÉRVÉNYES kapuk kaphatnak kódot:
-      • `EFFECT_NONE` hatású kapu SOSEM zár → nem is villoghat (`gates.evaluate`
-        konvenciója: az ilyen kapu állapota mindig OFF),
-      • a `display_only` (Volatilitás) viszont MINDIG érvényes, mert a szűrés nem
-        a kapu-keretben, hanem a stratégia `bt_entry`-jében történik.
+    ⚠ CSAK az ÉRVÉNYES kapuk kaphatnak kódot: az `EFFECT_NONE` hatású kapu SOSEM
+    zár, tehát nem is villoghat (`gates.evaluate` konvenciója: az ilyen kapu
+    állapota mindig OFF). v3.27.0 óta a Volatilitás sem kivétel: valódi kapu lett,
+    tehát a saját hatása dönt — ha `none`-ra állítod, a sávban sem villog többé,
+    mert tényleg nem szűr.
     Így a „nincs kód" egyértelmű: nem azért, mert nem mértük, hanem mert nyitva van.
 
     Több egyidejű zárásnál a REGISTRY-sorrendben ELSŐ kód kerül ki (determinisztikus).
@@ -1023,8 +1024,7 @@ def apply_gate_state(objects: list, bars: dict, symbol: str, strategy_name: str,
         # üres, és akkor a kapu-hatások az ALAPÉRTELMEZÉSRE esnének vissza (a
         # tf_align pl. `none`-ra), tehát a kapu-sáv MÁST mutatna, mint a valóság.
         eff = _g.effects_for(cfg if cfg is not None else _run_cfg, symbol, strategy_name)
-        active = {k for k in _g.KEYS
-                  if _g.is_display_only(k) or eff.get(k) != _g.EFFECT_NONE}
+        active = {k for k in _g.KEYS if eff.get(k) != _g.EFFECT_NONE}
         if not active:
             return objects
 
@@ -1046,13 +1046,16 @@ def apply_gate_state(objects: list, bars: dict, symbol: str, strategy_name: str,
                                                     bars.get("M1"))
             else:
                 gate_fn = tf_align_gate_fn(symbol, strategy_name, params)
-        base = _vb.effective(params, 0.0)
-        lo, hi = _vb.band(params, base)
 
         # Bar-adatok epoch szerint — a BarState-ek a MÁSIK irányból jönnek.
         idx = [int(t.timestamp()) for t in df15.index]
         a_by = {idx[i]: float(atr.iloc[i] or 0.0) for i in range(len(idx))}
         c_by = {idx[i]: float(df15["close"].iloc[i]) for i in range(len(idx))}
+        # A volatilitás-kapu MÉRCÉJE bar-onként (gördülő mércénél változik). Ha a
+        # stratégia nem tett `atr_avg` oszlopot a sorokra, 0 marad → a `failed` a
+        # befagyasztott `atr_avg_ref`-re esik vissza.
+        aa_by = ({idx[i]: float(df15["atr_avg"].iloc[i] or 0.0)
+                  for i in range(len(idx))} if "atr_avg" in df15.columns else {})
         s_by = ({idx[i]: float(spread.iloc[i] or 0.0) for i in range(len(idx))}
                 if spread is not None else {})
         step = int((df15.index[1] - df15.index[0]).total_seconds()) if len(idx) > 1 else 0
@@ -1087,10 +1090,14 @@ def apply_gate_state(objects: list, bars: dict, symbol: str, strategy_name: str,
                     _warn_once(("tf_align_gate", symbol),
                                "%s: a TF-együttállás kapu-függvénye hibázik (%s) "
                                "— a kapu NEM blokkol (fail open).", symbol, ex)
-            # 6) Volatilitás — display_only, tehát MINDIG érvényes
-            if code == 0 and "volatility" in active and a > 0 and base > 0:
-                if (lo > 0 and a < lo) or (hi > 0 and a > hi):
-                    code = _g_code("volatility")
+            # 6) Volatilitás — v3.27.0 óta valódi kapu, a hatása dönt (az
+            # `active` halmaz már kiszűrte, ha `none`). A MÉRCE a bár saját
+            # `atr_avg`-ja, ha van (gördülő mérce), különben a befagyasztott
+            # `atr_avg_ref` — a `vol_baseline.failed` ugyanezt a precedenciát
+            # használja a motorban is, tehát a sáv és a kötés nem csúszhat szét.
+            if code == 0 and "volatility" in active and _vb.failed(
+                    a, params, aa_by.get(t, 0.0)):
+                code = _g_code("volatility")
             o.gate = code
     except Exception as e:
         log.debug("kapu-overlay hiba: %s", e)
@@ -2882,6 +2889,16 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
             _mom_ok = True
     _gate_failed[_gates.MOMENTUM] = not _mom_ok
 
+    # Volatilitás: az ATR a stratégia kalibrált sávjában van-e. v3.27.0 előtt ez a
+    # stratégia `bt_entry`-jében volt, feltétel nélkül; most KAPU, tehát a hatása
+    # (blokkol / kockázatcsökkentés / ki) is állítható. A MÉRÉST ugyanabból a
+    # sorból végezzük, amiből a `bt_entry` is dolgozott (`hi_row`, a stratégia
+    # `bt_indicators`-ából) — így a döntés bemenete bitre ugyanaz.
+    _gate_failed[_gates.VOLATILITY] = bool(
+        hi_row is not None and _gates.active(_gate_eff, _gates.VOLATILITY)
+        and _vol_baseline.failed(hi_row.get("atr"), params,
+                                 hi_row.get("atr_avg", 0)))
+
     _gate_dec = _gates.decide(_gate_failed, _gate_eff)
     _gates_ok = not _gate_dec["blocked"]
     # Diagnosztika: ha a stratégia JELET adott (a viz ezt rajzolja — a NYERS
@@ -2944,23 +2961,14 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
             if _gate_dec["risk_factor"] < 1.0:
                 ctf = {**ctf, "account_risk_pct":
                        ctf["account_risk_pct"] * _gate_dec["risk_factor"]}
-            # A belépés-kaput ÉS a méretezést a STRATÉGIA adja (bt_entry:
-            # volatilitás-szűrő + SL/TP pip) — UGYANAZ a hook, amit a backtest
-            # modellez, így az élő viselkedés egyezik az optimalizált/minősített
-            # eredménnyel (atr_min_pct/atr_max_pct per instrumentum). None →
-            # kihagyás. Diagnosztika: ha a TISZTA méretező (sl_tp_points) adott
-            # volna tervet, akkor a volatilitás-kapu blokkolt — írjuk ki külön.
+            # A méretezést a STRATÉGIA adja (`bt_entry` → `sl_tp_points`) —
+            # UGYANAZ a hook, amit a backtest modellez. A volatilitás-szűrés
+            # v3.27.0 óta NEM itt van, hanem a kapu-blokkban (fentebb), ezért a
+            # `None` már csak egyet jelenthet: nincs érvényes SL/TP méret.
             plan = strategy.bt_entry(hi_row, params, point_size) if hi_row is not None else None
             if plan is None:
-                _sizing = (strategy.sl_tp_points(hi_row, params, point_size)
-                           if hi_row is not None else None)
-                if _sizing is not None:
-                    log.info("⏭ %s %s jel — belépő KIHAGYVA: volatilitás-kapu "
-                             "(ATR a megengedett sávon kívül — atr_min_pct/atr_max_pct).",
-                             symbol, signal)
-                else:
-                    log.info("⏭ %s %s jel — belépő KIHAGYVA: a stratégia nem adott "
-                             "érvényes SL/TP méretet (hi_row/indikátor hiány).", symbol, signal)
+                log.info("⏭ %s %s jel — belépő KIHAGYVA: a stratégia nem adott "
+                         "érvényes SL/TP méretet (hi_row/indikátor hiány).", symbol, signal)
                 return
             sl_points, tp_points = plan
             # SL-módszer: `swing20` → az utolsó N M1 gyertya swingjéből (ATR helyett):
