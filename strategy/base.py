@@ -192,10 +192,32 @@ class MarketData:
     # riasztást látná jelölő nélkül. (Megtörtént 2026-08-25: a Ger40 minden
     # kapuja `none`-on állt, 12 riasztás mellett 5 jelölő.)
     gate_effects: dict = field(default_factory=dict)
+    # A KAPUK SÁVJAI (`core.gate_bands`): `{kapu_kulcs: [(határ, hatás), …]}`.
+    # ÜRES = nincs sáv, tehát a kapu egyetlen küszöbe dönt (a régi viselkedés).
+    #
+    # ⚠ MIÉRT KELL A RAJZNAK IS. A sáv azt mondja meg, hogy egy MÉRÉSNÉL mi
+    # történik — és a jelölő pontosan akkor maradhat el, ha a motor sem lépne be.
+    # Ha a rajz csak a `gate_effects`-et nézné, egy 85%-os szinten előírt
+    # kockázatcsökkentést BLOKKOLÁSNAK értene, és eltüntetne egy jelölőt, ami
+    # mögött valódi kötés van. (Ugyanez a hiba fordítva már megtörtént
+    # 2026-08-25-én: 12 riasztás mellett 5 jelölő.)
+    gate_bands: dict = field(default_factory=dict)
 
     def gate_blocks(self, key: str) -> bool:
-        """Blokkol-e ez a kapu a rajzoláskor? Csak a `block` hatás szűr."""
-        return str(self.gate_effects.get(key, "block")) == "block"
+        """Blokkol-e ez a kapu, ha a SAJÁT küszöbén bukik? Csak a `block` szűr."""
+        return self.gate_blocks_at(key, True)
+
+    def gate_blocks_at(self, key: str, failed: bool, level=None) -> bool:
+        """Blokkol-e ez a kapu EZEN a mérésen? (sáv-tudatos)
+
+        `failed`: a kapu saját, bináris ítélete; `level`: a mért szint (sávhoz).
+        Csak a `block` hatás szűr — `reduce`/`none` mellett a motor BELÉP, tehát
+        a jelölőnek látszania kell."""
+        from core import gate_bands as _gb
+        eff = _gb.effect_at(key, (self.gate_bands or {}).get(key),
+                            str(self.gate_effects.get(key, "block")),
+                            level, failed)
+        return eff == "block"
 
     def closed(self, label: str) -> Optional[pd.Series]:
         df = self.bars.get(label)

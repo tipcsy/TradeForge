@@ -67,7 +67,10 @@ check("⚠ a TF-kapu csak `block`-nál épül fel",
       "_tf_eff != _gt.EFFECT_BLOCK" in _lt)
 
 _ws = (ROOT / "strategy" / "wpr_sma.py").read_text(encoding="utf-8")
-check("a spread-kapu is hatás-tudatos", 'md.gate_blocks("spread")' in _ws)
+# v3.28.0: a kérdés SÁV-TUDATOS lett — nem „blokkol-e ez a kapu",
+# hanem „blokkol-e EZEN a mérésen" (`gate_blocks_at`).
+check("a spread-kapu is hatás-tudatos",
+      "gate_blocks_at(" in _ws and "spread" in _ws)
 
 # ── 3. VALÓDI adaton: a `none` hatás TÖBB jelölőt ad, mint a `block` ───
 # ⚠ Ez a mérés a lelet lényege. Ha a két szám egyenlő, a hatás nem érvényesül,

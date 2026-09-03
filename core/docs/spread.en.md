@@ -43,3 +43,22 @@ spread.
 > larger than the pair's normal spread, so a pair never trips over it at its OWN
 > usual spread. This gate catches the *widening* spread, not the *chronically
 > expensive* instrument — that is what the **Cost/risk** gate is for.
+
+## Banded effect (v3.28.0)
+
+A gate's effect need not be a single yes/no. On the **Effect** tab you can build
+a ladder: `+ Band` adds a threshold, `Remove` takes it out.
+
+| level | what happens |
+|---|---|
+| 80% | reduce risk (half size) |
+| 100% | block the entry |
+
+**The level is a percentage of the gate's OWN threshold**: 100% is exactly where
+this gate would fail anyway. That is what makes it portable, and what makes it
+inheritable — global → instrument → instrument+strategy; wherever it is not set,
+it is inherited.
+
+> **Without bands nothing changes.** The absence of a ladder is itself a ladder:
+> a single implicit band at the gate's own threshold, with the effect set above.
+> Until you add a band, the gate behaves exactly as before.

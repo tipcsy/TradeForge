@@ -64,3 +64,22 @@ about a 20% relative DD reduction for about 4% of the profit.
 On `ml_ai` it is the other way round: there the idle filter only hurts, while the
 direction filter is a genuine quality filter — but it throws away half the trades
 and halves the profit as well.
+
+## Banded effect (v3.28.0)
+
+A gate's effect need not be a single yes/no. On the **Effect** tab you can build
+a ladder: `+ Band` adds a threshold, `Remove` takes it out.
+
+| level | what happens |
+|---|---|
+| 80% | reduce risk (half size) |
+| 100% | block the entry |
+
+**The level is a percentage of the gate's OWN threshold**: 100% is exactly where
+this gate would fail anyway. That is what makes it portable, and what makes it
+inheritable — global → instrument → instrument+strategy; wherever it is not set,
+it is inherited.
+
+> **Without bands nothing changes.** The absence of a ladder is itself a ladder:
+> a single implicit band at the gate's own threshold, with the effect set above.
+> Until you add a band, the gate behaves exactly as before.

@@ -29,3 +29,20 @@ a jel iránya is ismert.
 
 > A kapu a `tf_align.gate` LISTÁBÓL is örökölhet (régi config-alak). Ha a hatás
 > „örökölt", és nem ezen a páron állítottad be, az ablak kiírja, honnan jön.
+
+## Sávos hatás (v3.28.0)
+
+A **Hatás** fülön létrát állíthatsz: `+ Sáv` felvesz egy határt, a `Törlés`
+kiveszi. Ennél a kapunál a határ **darabszám** — hány idősík áll a jel irányába —,
+és a KEVESEBB a rosszabb:
+
+| legfeljebb ennyi áll együtt | mi történik |
+|---|---|
+| 2 | kockázatcsökkentés (fele méret) |
+| 1 | akadályozza a beszállást |
+
+A létra öröklődik: globális → instrumentum → instrumentum+stratégia; ahol nincs
+beállítva, ott örököl.
+
+> **Sáv nélkül semmi nem változik**: a kapu a régi, mindent-vagy-semmit szabály
+> szerint dönt (csak a TELJES együttállás enged).

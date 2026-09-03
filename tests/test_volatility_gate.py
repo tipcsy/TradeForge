@@ -176,7 +176,7 @@ check("a backtest MINDKET aga meri (run_pair + portfolio)",
       _btsrc.count("_gt.VOLATILITY") >= 2, str(_btsrc.count("_gt.VOLATILITY")))
 _vizsrc = _src["viz (wpr_sma)"].read_text(encoding="utf-8")
 check("a viz CSAK `block` hatasnal szur (a `reduce`-nal is rajzol)",
-      'gate_blocks("volatility")' in _vizsrc)
+      "gate_blocks_at(" in _vizsrc and '"volatility"' in _vizsrc)
 
 
 # ══ 6. A KIJELZES ugyanezt mondja ════════════════════════════════════════

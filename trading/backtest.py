@@ -765,7 +765,8 @@ def _pair_momentum(cfg, symbol, strategy_name, m15, df_m1, exec_gates: bool) -> 
     return out
 
 
-def _build_tf_align_evaluator(cfg, symbol, strategy_name, df_m1):
+def _build_tf_align_evaluator(cfg, symbol, strategy_name, df_m1,
+                              want: str = "gate"):
     """A TF-együttállás VÉGREHAJTÁSI kapu historikus kiértékelője a backtesthez —
     UGYANAZ a logika, mint az él (`core.tf_align`) és a viz jel-replay-e
     (`live_trader.tf_align_gate_fn`), csak az adat a backtest saját M1-jéből jön.
@@ -785,7 +786,11 @@ def _build_tf_align_evaluator(cfg, symbol, strategy_name, df_m1):
     más belépőket engedett át, mint az él.
 
     Visszaad: `fn(entry_unix, price, direction) -> bool`, vagy None, ha a kapu erre a
-    stratégiára/instrumentumra nincs bekapcsolva."""
+    stratégiára/instrumentumra nincs bekapcsolva.
+
+    `want="count"` esetén `fn(...) -> int`: HÁNY idősík áll a jel irányába. Ez a
+    sávos hatás bemenete (v3.28.0) — ugyanabból az előjel-magból, mint a bináris
+    döntés, tehát a kettő nem csúszhat szét."""
     try:
         import numpy as _np
         from core import tf_align as _tfa
@@ -813,7 +818,9 @@ def _build_tf_align_evaluator(cfg, symbol, strategy_name, df_m1):
                             "gyertya van (SMA %d kell) → a kapu MINDENT blokkol, "
                             "ahogy élesben is. Tölts le hosszabb előzményt.",
                             symbol, strategy_name, tf, len(closes), sma)
-        return _tfa.build_historical_gate(bars_by_tf, sma)
+        return (_tfa.build_historical_count(bars_by_tf, sma)
+                if want == "count"
+                else _tfa.build_historical_gate(bars_by_tf, sma))
     except Exception:
         return None
 
@@ -1182,6 +1189,7 @@ def run_pair(
     from core import spread_gate as _spread_gate
     from core import gates as _gt
     from core import vol_baseline as _volb
+    from core import gate_bands as _gb
     _exec_gates = bool(exec_gates)
     if tf_eval is not _TF_EVAL_AUTO:
         _tf_eval = tf_eval if _exec_gates else None
@@ -1201,6 +1209,14 @@ def run_pair(
     # paramétert mérne, aminek nincs hatása.
     _gate_eff = _gt.effects_for(cfg or {}, symbol, strategy.name,
                                 for_backtest=True, exec_gates=_exec_gates)
+    # SÁVOS hatás (v3.28.0): a létrák EGYSZER oldódnak fel — a bároktól nem
+    # függenek, egy per-bár config-bejárás viszont ötszámjegyű szorzó lenne.
+    _bands = _gb.ladders_for(cfg or {}, symbol, strategy.name)
+    # A TF-kapu DARABSZÁM-kiértékelője csak akkor kell, ha tényleg van rá sáv.
+    _tf_count = (_build_tf_align_evaluator(cfg, symbol, strategy.name, df_m1,
+                                           want="count")
+                 if (_bands.get(_gt.TF_ALIGN) and _tf_eval is not None
+                     and cfg is not None) else None)
     # A piac-kapu per-gyertya besorolása — EGYSZER, mint a TF-kiértékelő
     # (paraméter-független). None, ha a kapu ki van kapcsolva vagy nincs osztályozó.
     _mkt_series, _mkt_adverse = None, set()
@@ -1584,7 +1600,7 @@ def run_pair(
                 # HATÁSSAL (blokkol / kockázatcsökkentés / ki), a közös
                 # `core.gates.decide`-on keresztül. A MÉRÉS itt is irány-tudatos.
                 _gate_risk = 1.0
-                _failed = {}
+                _failed, _lvl = {}, {}
                 # ⚠ A VOLATILITÁS A BLOKKON KÍVÜL van: `exec_gates=False` mellett
                 # is mérjük, mert a küszöbei a stratégia saját paraméterei
                 # (`gates.PARAM_DRIVEN`). v3.27.0 előtt ugyanez a `bt_entry`-ben
@@ -1592,6 +1608,9 @@ def run_pair(
                 if _gt.active(_gate_eff, _gt.VOLATILITY):
                     _failed[_gt.VOLATILITY] = _volb.failed(
                         m15_row.get("atr"), params, m15_row.get("atr_avg", 0))
+                    if _bands.get(_gt.VOLATILITY):
+                        _lvl[_gt.VOLATILITY] = _gb.level_volatility(
+                            m15_row.get("atr"), params, m15_row.get("atr_avg", 0))
                 if _exec_gates:
                     if _gt.active(_gate_eff, _gt.SPREAD):
                         _atr_e = m15_row.get("atr", float("nan"))
@@ -1599,24 +1618,38 @@ def run_pair(
                             _sp_e = _cspread_arr[i] if _cspread_arr is not None else float("nan")
                             if not (_sp_e > 0):
                                 _sp_e = _spread_arr[i] if _spread_arr is not None else _spread_fallback
-                            _failed[_gt.SPREAD] = not _spread_gate.spread_ok(
+                            _ok_s, _cap_s = _spread_gate.spread_ok(
                                 _sp_e / point_size, float(_atr_e), point_size, params,
-                                pair_cfg.get("backtest_spread_points"))[0]
+                                pair_cfg.get("backtest_spread_points"))
+                            _failed[_gt.SPREAD] = not _ok_s
+                            if _bands.get(_gt.SPREAD):
+                                _lvl[_gt.SPREAD] = _gb.scalar_level(
+                                    _sp_e / point_size, _cap_s)
                     if _tf_eval is not None:
                         # A belépő M1-gyertya nyitó-idejére, a DÖNTÉSKOR ISMERT árral
                         # (ennek az M1-gyertyának a záróára) — a formálódó TF-gyertya
                         # záróára ez, nem a (még ismeretlen) végleges close.
                         _failed[_gt.TF_ALIGN] = not _tf_eval(
                             int(m1_time.timestamp()), float(_bar_c), signal)
+                        if _tf_count is not None:
+                            _lvl[_gt.TF_ALIGN] = _tf_count(
+                                int(m1_time.timestamp()), float(_bar_c), signal)
                     if _mkt_series is not None:
                         _cat = _mkt_series.get(m15_times[m15_ptr])
                         _failed[_gt.MARKET] = bool(_cat) and _cat in _mkt_adverse
+                        _lvl[_gt.MARKET] = _cat
                     if _mom_series is not None:
                         from core import momentum as _momx
+                        _mv = _mom_series.get(m15_times[m15_ptr], float("nan"))
                         _failed[_gt.MOMENTUM] = _momx.failed(
-                            _mom_series.get(m15_times[m15_ptr], float("nan")),
-                            signal, _mom_mode, _mom_cfg)
-                _dec = _gt.decide(_failed, _gate_eff)
+                            _mv, signal, _mom_mode, _mom_cfg)
+                        if _bands.get(_gt.MOMENTUM):
+                            _lvl[_gt.MOMENTUM] = _gb.momentum_level(
+                                _mv, signal, _mom_mode, _mom_cfg)
+                # A SÁVOK feloldása: a létra a mért szintből hatást csinál; ahol
+                # nincs létra, ott a kapu saját ítélete (`_failed`) dönt, mint eddig.
+                _eff_now = _gb.effects_at(_gate_eff, _bands, _failed, _lvl)
+                _dec = _gt.decide(_gb.failed_at(_eff_now, _failed), _eff_now)
                 if _dec["blocked"]:
                     prev_m1_row = m1_row
                     continue
@@ -1677,10 +1710,17 @@ def run_pair(
                         _csp = _cspread_arr[i] if _cspread_arr is not None else float("nan")
                         if not (_csp > 0):
                             _csp = _sp
-                        _cdec = _gt.decide(
-                            {_gt.COST: _cgx.failed(sl_points, tp_points,
-                                                   _csp / point_size, _cost_cap)},
-                            _gate_eff)
+                        _cf = {_gt.COST: _cgx.failed(sl_points, tp_points,
+                                                     _csp / point_size, _cost_cap)}
+                        # SÁV: a szint a TORZÍTÁS és a plafon aránya (100% = a
+                        # kapu saját határa) — a `distortion` ugyanaz a képlet,
+                        # amiből a bináris ítélet is születik.
+                        _cl = ({_gt.COST: _gb.scalar_level(
+                            _cgx.distortion(sl_points, tp_points,
+                                            _csp / point_size), _cost_cap)}
+                            if _bands.get(_gt.COST) else {})
+                        _ceff = _gb.effects_at(_gate_eff, _bands, _cf, _cl)
+                        _cdec = _gt.decide(_gb.failed_at(_ceff, _cf), _ceff)
                         if _cdec["blocked"]:
                             prev_m1_row = m1_row
                             continue
@@ -2046,6 +2086,7 @@ def run_portfolio_backtest(
     # ── Végrehajtási kapuk (él-paritás, opcionális) — UGYANAZ, mint a run_pair-ben ──
     from core import spread_gate as _spread_gate
     from core import gates as _gt
+    from core import gate_bands as _gb
     _exec_gates = bool(exec_gates)
 
     # Risky mód forrásai: (1) kézi kapcsoló (data/risky_mode.json) + (2) auto:
@@ -2198,6 +2239,13 @@ def run_portfolio_backtest(
             "gate_eff":  _gt.effects_for(cfg, sym, strategy.name,
                                          for_backtest=True,
                                          exec_gates=_exec_gates),
+            # SÁVOS hatás (v3.28.0) — a létrák EGYSZER, pár × stratégia szinten.
+            "bands":     _gb.ladders_for(cfg, sym, strategy.name),
+            "tf_count":  (_build_tf_align_evaluator(cfg, sym, strategy.name,
+                                                    df_m1, want="count")
+                          if (_exec_gates
+                              and _gb.ladders_for(cfg, sym, strategy.name)
+                                  .get(_gt.TF_ALIGN)) else None),
             # Piac-kapu: per-gyertya besorolás (EGYSZER, mint a tf_eval — nem
             # paraméter-függő). None, ha a kapu ki van kapcsolva/nincs osztályozó.
             "mkt_series": _pair_market_series(cfg, sym, strategy.name, m15,
@@ -2448,7 +2496,8 @@ def run_portfolio_backtest(
                         # `core.gates.decide`-on keresztül (per pár × stratégia).
                         _gate_ok, _gate_risk = True, 1.0
                         _eff = info["gate_eff"]
-                        _failed = {}
+                        _bnd = info.get("bands") or {}
+                        _failed, _lvl = {}, {}
                         # ⚠ A VOLATILITÁS A BLOKKON KÍVÜL — ugyanaz az indok,
                         # mint a `run_pair`-ben: a küszöbei a stratégia saját
                         # paraméterei, tehát `exec_gates=False` mellett is élnek.
@@ -2457,6 +2506,10 @@ def run_portfolio_backtest(
                             _failed[_gt.VOLATILITY] = _volbx.failed(
                                 m15_row.get("atr"), params,
                                 m15_row.get("atr_avg", 0))
+                            if _bnd.get(_gt.VOLATILITY):
+                                _lvl[_gt.VOLATILITY] = _gb.level_volatility(
+                                    m15_row.get("atr"), params,
+                                    m15_row.get("atr_avg", 0))
                         if _exec_gates:
                             if _gt.active(_eff, _gt.SPREAD):
                                 _atr_e = m15_row.get("atr", float("nan"))
@@ -2466,25 +2519,39 @@ def run_portfolio_backtest(
                                         _sp_e = row.get("avg_spread", float("nan"))
                                     if not (_sp_e > 0):
                                         _sp_e = points_to_price(sp, point_size)
-                                    _failed[_gt.SPREAD] = not _spread_gate.spread_ok(
+                                    _ok_s, _cap_s = _spread_gate.spread_ok(
                                         _sp_e / point_size, float(_atr_e), point_size, params,
-                                        pair_cfg.get("backtest_spread_points"))[0]
+                                        pair_cfg.get("backtest_spread_points"))
+                                    _failed[_gt.SPREAD] = not _ok_s
+                                    if _bnd.get(_gt.SPREAD):
+                                        _lvl[_gt.SPREAD] = _gb.scalar_level(
+                                            _sp_e / point_size, _cap_s)
                             if info.get("tf_eval") is not None:
                                 # A döntéskor ISMERT árral (az M1-gyertya záróára) —
                                 # a formálódó TF-gyertya close-a ez, nem a végleges.
                                 _failed[_gt.TF_ALIGN] = not info["tf_eval"](
                                     int(m1_time.timestamp()), float(row["close"]), signal)
+                                if info.get("tf_count") is not None:
+                                    _lvl[_gt.TF_ALIGN] = info["tf_count"](
+                                        int(m1_time.timestamp()),
+                                        float(row["close"]), signal)
                             if info.get("mkt_series") is not None:
                                 _cat = info["mkt_series"].get(m15_df.index[ptr])
                                 _failed[_gt.MARKET] = (bool(_cat)
                                                        and _cat in info["mkt_adverse"])
+                                _lvl[_gt.MARKET] = _cat
                             if info.get("mom_series") is not None:
                                 from core import momentum as _momx
+                                _mv = info["mom_series"].get(m15_df.index[ptr],
+                                                             float("nan"))
                                 _failed[_gt.MOMENTUM] = _momx.failed(
-                                    info["mom_series"].get(m15_df.index[ptr],
-                                                           float("nan")),
-                                    signal, info["mom_mode"], info["mom_cfg"])
-                        _dec = _gt.decide(_failed, _eff)
+                                    _mv, signal, info["mom_mode"], info["mom_cfg"])
+                                if _bnd.get(_gt.MOMENTUM):
+                                    _lvl[_gt.MOMENTUM] = _gb.momentum_level(
+                                        _mv, signal, info["mom_mode"],
+                                        info["mom_cfg"])
+                        _eff_now = _gb.effects_at(_eff, _bnd, _failed, _lvl)
+                        _dec = _gt.decide(_gb.failed_at(_eff_now, _failed), _eff_now)
                         _gate_ok = not _dec["blocked"]
                         _gate_risk = _dec["risk_factor"]
 
@@ -2498,13 +2565,18 @@ def run_portfolio_backtest(
                             # és a TERVEZETT stop viszonya, tehát a terv UTÁN dől el.)
                             if _exec_gates and _gt.active(info["gate_eff"], _gt.COST):
                                 from core import cost_gate as _cgx
-                                if _cgx.failed(sl_points, tp_points, sp,
-                                               _gt.cost_max_distortion(pair_cfg, cfg)):
-                                    _cd = _gt.decide({_gt.COST: True}, info["gate_eff"])
-                                    if _cd["blocked"]:
-                                        plan = None
-                                    else:
-                                        _gate_risk = min(_gate_risk, _cd["risk_factor"])
+                                _ccap = _gt.cost_max_distortion(pair_cfg, cfg)
+                                _cf = {_gt.COST: _cgx.failed(sl_points, tp_points,
+                                                             sp, _ccap)}
+                                _cl = ({_gt.COST: _gb.scalar_level(
+                                    _cgx.distortion(sl_points, tp_points, sp), _ccap)}
+                                    if _bnd.get(_gt.COST) else {})
+                                _ceff = _gb.effects_at(info["gate_eff"], _bnd, _cf, _cl)
+                                _cd = _gt.decide(_gb.failed_at(_ceff, _cf), _ceff)
+                                if _cd["blocked"]:
+                                    plan = None
+                                else:
+                                    _gate_risk = min(_gate_risk, _cd["risk_factor"])
                         if plan is not None:
                             sl_points, tp_points = plan
                             # Óvatos (felezett) méret? A kockázatcsökkentő preset dönti

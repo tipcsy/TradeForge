@@ -29,6 +29,7 @@ from strategy import visual as viz
 from core.indicator_engine import compute_indicators
 from core.signal_detector import PairState, check_m15_signal, check_m1_entry
 from core import vol_baseline as _volb
+from core import gate_bands as _gbands
 from core.risk_manager import calc_sl_tp_points, calc_swing_sl_tp_points
 from core import spread_gate
 
@@ -579,25 +580,33 @@ class WprSmaStrategy(Strategy):
                 # `reduce` mellett a motor BELÉP (utóbbinál kisebb mérettel),
                 # tehát a jelölőnek meg kell jelennie — különben a chart kevesebbet
                 # mutatna, mint a valóság (megtörtént: 12 riasztás, 5 jelölő).
-                if getattr(md, "exec_gates", True) and md.gate_blocks("volatility"):
+                if getattr(md, "exec_gates", True):
                     _base = _volb.value_at(atr15, p, md.params, _atr_avg)
-                    if _volb.failed(float(atr_v), md.params, _base):
+                    if md.gate_blocks_at(
+                            "volatility",
+                            _volb.failed(float(atr_v), md.params, _base),
+                            _gbands.level_volatility(float(atr_v), md.params,
+                                                     _base)):
                         continue
                 # Spread-kapu (ha van spread-adat a bárokon): a közös core.spread_gate.
                 # ⚠ CSAK `block` hatásnál szűr. `none`/`reduce` mellett a motor
                 # BELÉP (utóbbinál kisebb mérettel), tehát a jelölőnek meg kell
                 # jelennie — különben a chart kevesebbet mutat, mint a valóság.
-                if _sp_arr is not None and getattr(md, "exec_gates", True)                         and md.gate_blocks("spread"):
+                if _sp_arr is not None and getattr(md, "exec_gates", True):
                     _spv = _sp_arr[j]
                     # ⚠ A `backtest_spread_points` ÁTADÁSA kötelező: abból jön a kapu
                     # RELATÍV padlója (normál spread × min_spread_mult). Nélküle a
                     # viz a régi fix alapértékre esett vissza, tehát MÁS küszöbbel
                     # szűrt, mint a backtest — a chart jelölői és a motor kötései
                     # ezért csúsztak szét.
-                    if _spv > 0 and not spread_gate.spread_ok(
+                    if _spv > 0:
+                        _ok_s, _cap_s = spread_gate.spread_ok(
                             float(_spv) / pip, float(atr_v), pip, md.params,
-                            md.params.get("backtest_spread_points"))[0]:
-                        continue
+                            md.params.get("backtest_spread_points"))
+                        if md.gate_blocks_at(
+                                "spread", not _ok_s,
+                                _gbands.scalar_level(float(_spv) / pip, _cap_s)):
+                            continue
                 entry = float(m1_close[j])
                 # SL-módszer: `swing20` → az utolsó N M1 gyertya swingjéből (a live/
                 # backtest belépővel EGYEZŐEN), különben a régi ATR-méret.

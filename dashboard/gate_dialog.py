@@ -8,11 +8,18 @@ az instrumentum-ablakból volt állítható. Ez a modul EGY felületet ad
 mindegyiknek:
 
     ┌ <SYM> — <Kapu neve> ────────────────────────────┐
+    │ [Beállítás] [Hatás] [Leírás]                    │
     │ MOST                (mért, csak olvasható)      │
     │ BEÁLLÍTÁSOK         (a kapu saját számai)       │
-    │ HATÁS STRATÉGIÁNKÉNT (Ki / Akadályoz / Kockázat)│
+    │ ── Hatás fül ──                                 │
+    │ stratégiánként: alap-hatás + SÁVOK (+ / Törlés) │
     │ [ ] Az összes instrumentumra                    │
     └─────────────────────────────────────────────────┘
+
+A HATÁS KÜLÖN FÜL (v3.28.0, a felhasználó kérésére): „Ez legyen minden kapun és
+egy külön fülön: Hatás." A sávok szerkesztése felületvezérelt — `+ Sáv` felvesz
+egy határt, a `Törlés` kiveszi —, mert a küszöbök helyes értékét MÉRNI kell, nem
+kitalálni, és egy rossz sávnak egy kattintással kell eltűnnie.
 
 A rajzoláson kívül semmi nem itt lakik: a paraméterek LEÍRÁSA és ellenőrzése a
 tiszta `core/gate_params.py`-ban, a hatás-feloldás a `core/gates.py`-ban, a
@@ -27,6 +34,7 @@ import tkinter as tk
 
 from core import gate_params as _gp
 from core import gates as _g
+from core import gate_bands as _gb
 from core.i18n import t as _t
 from dashboard import theme as _theme
 from dashboard.scroll_area import scrollable as _scrollable
@@ -235,6 +243,7 @@ class GateDialog:
         from dashboard.tab_shell import TabShell
         self._shell = TabShell(self.top,
                                (("settings", _t("tab.settings")),
+                                ("effect", _t("gb.tab.effect")),
                                 ("docs", _t("tab.docs"))),
                                on_show=self._on_tab)
 
@@ -245,6 +254,10 @@ class GateDialog:
         # Text-widgetje magától görget, két sáv egymás mellett zavaró lenne.
         _holder, self._page, _ = _scrollable(self._shell.page("settings"))
         _holder.pack(fill="both", expand=True)
+        # A Hatás lap is görgethető: hat sáv × több stratégia hamar kifut a
+        # képernyőből, és a levágott alsó sor NÉMÁN tűnne el.
+        _eh, self._epage, _ = _scrollable(self._shell.page("effect"))
+        _eh.pack(fill="both", expand=True)
 
         self._build_measured()
         self._build_params()
@@ -360,47 +373,167 @@ class GateDialog:
         return (pg.get(self.key) or {}).get(name) in _g.EFFECTS
 
     def _build_effects(self):
+        """A HATÁS lap: stratégiánként egy alap-hatás és egy SÁV-LÉTRA.
+
+        ⚠ MIÉRT KÉT DOLOG. Az alap-hatás azt mondja meg, MI történjen, ha a kapu
+        a saját küszöbén bukik — ez a mai, sáv nélküli viselkedés. A létra azt,
+        hogy MIKOR mi történjen. Ha nincs sáv, a létra üres, és minden pontosan
+        úgy megy, mint eddig; a kettő nem versenyzik egymással."""
         if not self.strategies:
             return
-        box = _section(self._page, _t("gate.section.when_blocking"))
+        kind = _gb.kind_of(self.key)
+        hint = {_gb.SCALAR: "gb.hint.scalar", _gb.COUNT: "gb.hint.count",
+                _gb.CATEGORY: "gb.hint.category"}.get(kind)
+        if hint:
+            tk.Label(self._epage, text=_t(hint), bg=BG, fg=FG_GRAY,
+                     font=self._f["small"], anchor="w", justify="left",
+                     wraplength=620).pack(anchor="w", padx=12, pady=(10, 0))
+        self._band_rows = {}          # stratégia → [(határ Entry|str, hatás StringVar, sor Frame)]
+        self._band_host = {}          # stratégia → a sorok kerete
+        for name in self.strategies:
+            box = _section(self._epage, name)
+            self._build_effect_row(box, name)
+            self._build_ladder(box, name, kind)
+
+    def _build_effect_row(self, box, name: str):
+        """Az ALAP-hatás választója (ez volt eddig a Beállítás lap alján)."""
         grid = tk.Frame(box, bg=BG)
         grid.pack(fill="x", pady=(4, 0))
-        for i, name in enumerate(self.strategies):
-            tk.Label(grid, text=name, bg=BG, fg=FG_WHITE, font=self._f["small"],
-                     anchor="w", width=16).grid(row=i, column=0, sticky="w", pady=1)
-            eff, src = _g.effect_with_source(self.cfg, self.symbol, name, self.key)
-            # ALAPBÓL az „Örökölt (…)" tétel áll, ha nincs pár-szintű felülírás —
-            # így a Mentés nem RÖGZÍTI némán az örökölt értéket. Ez nem
-            # kozmetika: az `Együtt` hatása a régi `tf_align.gate` listából is
-            # öröklődhet, és egy néma `none` KIKAPCSOLTA volna a kaput.
-            choices = self._effect_choices(name)
-            sv = tk.StringVar(value=(_g.EFFECT_LABEL[eff]
-                                     if self._has_override(name) else choices[0]))
-            self._eff_vars[name] = sv
-            om = tk.OptionMenu(grid, sv, *choices)
-            _style_om(om, self._f["small"])
-            om.config(width=max(len(t) for t in choices), anchor="w")
-            om.grid(row=i, column=1, sticky="w", padx=6)
-            col = 2
-            # A Lendület KÉTFÉLEKÉPPEN bukhat (alapjárat / irány), és a kettő más
-            # kereskedési döntés — ezért itt a hatás mellé egy „mit figyeljen"
-            # választó is kell, szintén stratégiánként.
-            if self.key == _g.MOMENTUM:
-                mode, _msrc = _g.mode_with_source(self.cfg, self.symbol, name)
-                mv = tk.StringVar(value=_g.MOM_MODE_LABEL[mode])
-                self._mode_vars[name] = mv
-                mom = tk.OptionMenu(grid, mv,
-                                    *[_g.MOM_MODE_LABEL[m] for m in _g.MOM_MODES])
-                _style_om(mom, self._f["small"])
-                mom.config(width=max(len(t) for t in _g.MOM_MODE_LABEL.values()),
-                           anchor="w")
-                mom.grid(row=i, column=col, sticky="w", padx=6)
-                col += 1
-            tk.Label(grid, text=f"→ {_g.EFFECT_LABEL[eff]}  "
-                                f"({_g.SOURCE_LABEL.get(src, src)})", bg=BG,
-                     fg=(FG_WHITE if src == _g.SRC_PAIR else FG_GRAY_DIM),
-                     font=self._f["small"], anchor="w").grid(
-                     row=i, column=col, sticky="w", padx=(6, 0))
+        tk.Label(grid, text=_t("gate.section.when_blocking"), bg=BG, fg=FG_GRAY,
+                 font=self._f["small"], anchor="w", width=22).grid(
+                 row=0, column=0, sticky="w")
+        eff, src = _g.effect_with_source(self.cfg, self.symbol, name, self.key)
+        # ALAPBÓL az „Örökölt (…)" tétel áll, ha nincs pár-szintű felülírás — így
+        # a Mentés nem RÖGZÍTI némán az örökölt értéket.
+        choices = self._effect_choices(name)
+        sv = tk.StringVar(value=(_g.EFFECT_LABEL[eff]
+                                 if self._has_override(name) else choices[0]))
+        self._eff_vars[name] = sv
+        om = tk.OptionMenu(grid, sv, *choices)
+        _style_om(om, self._f["small"])
+        om.config(width=max(len(t) for t in choices), anchor="w")
+        om.grid(row=0, column=1, sticky="w", padx=6)
+        col = 2
+        # A Lendület KÉTFÉLEKÉPPEN bukhat (alapjárat / irány), és a kettő más
+        # kereskedési döntés — ezért a hatás mellé egy „mit figyeljen" választó is.
+        if self.key == _g.MOMENTUM:
+            mode, _msrc = _g.mode_with_source(self.cfg, self.symbol, name)
+            mv = tk.StringVar(value=_g.MOM_MODE_LABEL[mode])
+            self._mode_vars[name] = mv
+            mom = tk.OptionMenu(grid, mv,
+                                *[_g.MOM_MODE_LABEL[m] for m in _g.MOM_MODES])
+            _style_om(mom, self._f["small"])
+            mom.config(width=max(len(t) for t in _g.MOM_MODE_LABEL.values()),
+                       anchor="w")
+            mom.grid(row=0, column=col, sticky="w", padx=6)
+            col += 1
+        tk.Label(grid, text=f"→ {_g.EFFECT_LABEL[eff]}  "
+                            f"({_g.SOURCE_LABEL.get(src, src)})", bg=BG,
+                 fg=(FG_WHITE if src == _g.SRC_PAIR else FG_GRAY_DIM),
+                 font=self._f["small"], anchor="w").grid(
+                 row=0, column=col, sticky="w", padx=(6, 0))
+
+    def _build_ladder(self, box, name: str, kind: str):
+        """A SÁVOK szerkesztője egy stratégiára."""
+        bands, src = _gb.ladder_with_source(self.cfg, self.symbol, name, self.key)
+        host = tk.Frame(box, bg=BG)
+        host.pack(fill="x", pady=(2, 0))
+        self._band_host[name] = host
+        self._band_rows[name] = []
+        if kind == _gb.CATEGORY:
+            for cat, eff in sorted((bands or {}).items()):
+                self._add_band_row(name, kind, cat, eff)
+        else:
+            for lim, eff in _gb.normalize(self.key, bands):
+                self._add_band_row(name, kind, lim, eff)
+        bar = tk.Frame(box, bg=BG)
+        bar.pack(fill="x", pady=(4, 0))
+        tk.Button(bar, text=_t("gb.band.add"),
+                  command=lambda n=name, k=kind: self._add_band_row(n, k),
+                  bg=BG_HEADER, fg=FG_WHITE, font=self._f["small"], bd=0,
+                  padx=10, pady=2).pack(side="left")
+        # ⚠ HONNAN JÖN a létra, ha nem itt állítottad be. Enélkül egy örökölt sáv
+        # láthatatlanul hatna — pont az, ami ellen az öröklés-kiírás készült.
+        if bands and src != _g.SRC_PAIR:
+            tk.Label(bar, text=_t("gb.inherited",
+                                  source=_g.SOURCE_LABEL.get(src, src)),
+                     bg=BG, fg=FG_GRAY_DIM, font=self._f["small"]).pack(
+                     side="left", padx=(10, 0))
+        elif not bands:
+            tk.Label(bar, text=_t("gb.no_bands"), bg=BG, fg=FG_GRAY_DIM,
+                     font=self._f["small"]).pack(side="left", padx=(10, 0))
+
+    def _add_band_row(self, name: str, kind: str, value=None, effect=None):
+        """Egy sáv-sor: [határ] [hatás ▾] [Törlés]."""
+        host = self._band_host[name]
+        row = tk.Frame(host, bg=BG)
+        row.pack(fill="x", pady=1)
+        lbl = {_gb.SCALAR: "gb.band.from_scalar", _gb.COUNT: "gb.band.from_count",
+               _gb.CATEGORY: "gb.band.category"}[kind]
+        tk.Label(row, text=_t(lbl), bg=BG, fg=FG_GRAY, font=self._f["small"],
+                 anchor="w", width=22).pack(side="left")
+        if kind == _gb.CATEGORY:
+            cats = [c for c, _l in _gp.choices_of(
+                next(sp for sp in _gp.specs_for(_g.MARKET) if sp.key == "adverse"))]
+            cv = tk.StringVar(value=str(value) if value is not None
+                              else (cats[0] if cats else ""))
+            w = tk.OptionMenu(row, cv, *(cats or [""]))
+            _style_om(w, self._f["small"])
+            w.config(width=16, anchor="w")
+            w.pack(side="left")
+            holder = cv
+        else:
+            e = tk.Entry(row, width=8, bg=BG_HEADER, fg=FG_WHITE,
+                         insertbackground=FG_WHITE, font=self._f["small"],
+                         relief="flat")
+            e.insert(0, "" if value is None else f"{float(value):g}")
+            e.pack(side="left")
+            tk.Label(row, text=("%" if kind == _gb.SCALAR else ""), bg=BG,
+                     fg=FG_GRAY, font=self._f["small"]).pack(side="left")
+            holder = e
+        ev = tk.StringVar(value=_g.EFFECT_LABEL[effect or _g.EFFECT_BLOCK])
+        om = tk.OptionMenu(row, ev, *[_g.EFFECT_LABEL[x] for x in _g.EFFECTS])
+        _style_om(om, self._f["small"])
+        om.config(width=max(len(t) for t in _g.EFFECT_LABEL.values()), anchor="w")
+        om.pack(side="left", padx=6)
+        rec = (holder, ev, row)
+        self._band_rows[name].append(rec)
+        tk.Button(row, text=_t("gb.band.remove"),
+                  command=lambda n=name, r=rec: self._drop_band_row(n, r),
+                  bg=BG_HEADER, fg=FG_GRAY, font=self._f["small"], bd=0,
+                  padx=8).pack(side="left")
+
+    def _drop_band_row(self, name: str, rec):
+        """⚠ A SORT AZONNAL ELTÁVOLÍTJUK a nyilvántartásból is, nem csak a
+        képernyőről. Egy csak-elrejtett sor a mentésnél visszajönne — a
+        felhasználó pedig azt látná, hogy a törlés „nem működik"."""
+        try:
+            self._band_rows[name].remove(rec)
+        except ValueError:
+            pass
+        rec[2].destroy()
+
+    def raw_bands(self) -> dict:
+        """`{stratégia: létra}` az űrlapról. Üres határ = a sor kimarad."""
+        out = {}
+        kind = _gb.kind_of(self.key)
+        for name, rows in (getattr(self, "_band_rows", None) or {}).items():
+            by_label = {lb: e for e, lb in _g.EFFECT_LABEL.items()}
+            if kind == _gb.CATEGORY:
+                out[name] = {cv.get(): by_label.get(ev.get())
+                             for cv, ev, _r in rows if cv.get()}
+                continue
+            bands = []
+            for ent, ev, _r in rows:
+                txt = str(ent.get()).strip().replace(",", ".")
+                if not txt:
+                    continue
+                try:
+                    bands.append([float(txt), by_label.get(ev.get())])
+                except ValueError:
+                    bands.append([txt, by_label.get(ev.get())])   # a validate szól
+            out[name] = bands
+        return out
 
     # ── Lábléc: „összes instrumentumra” + gombok ─────────────────────────
     def _build_footer(self):
@@ -446,6 +579,9 @@ class GateDialog:
     def _save(self):
         values, errors = _gp.parse_all(self.key, self.raw_values())
         errors += _gp.extra_errors(self.key, values)
+        _bands = self.raw_bands()
+        for _n, _b in _bands.items():
+            errors += _gb.validate(self.key, _b)
         if errors:
             # RÉSZLEGES mentés SOHA: a fele beállítás elmenne, a másik fele nem,
             # és utána semmi nem mondaná meg, melyik melyik.
@@ -458,6 +594,7 @@ class GateDialog:
             if save:
                 save(self.cfg, self.symbol, values, targets)
             self._save_effects(targets)
+            self._save_bands(targets, _bands)
         except Exception as ex:
             self.lbl_err.config(text=_t("save.error", error=ex))
             return
@@ -501,6 +638,24 @@ class GateDialog:
                     gates.pop(self.key, None)
                 if not gates:
                     pc.pop("gates", None)
+
+
+    def _save_bands(self, targets: list, bands_by_strategy: dict):
+        """A létrák mentése — a config CSAK AZ ELTÉRÉST rögzíti.
+
+        ⚠ ÜRES LÉTRA KÉTFÉLE LEHET, és a különbség számít:
+          * a felhasználó KIVETTE az összes sávot, holott feljebb van örökölt
+            létra → ezt EL KELL menteni (`bands: []`), különben az öröklés
+            visszahozná, amit épp töröltek;
+          * nincs is örökölt létra → nincs mit rögzíteni, a bejegyzés törlődik.
+        A kettőt az `inherited_ladder` különbözteti meg."""
+        for sym in targets:
+            for name, bands in (bands_by_strategy or {}).items():
+                inh, _src = _gb.inherited_ladder(self.cfg, sym, name, self.key)
+                if not bands and not inh:
+                    _gb.set_ladder(self.cfg, sym, name, self.key, None)
+                else:
+                    _gb.set_ladder(self.cfg, sym, name, self.key, bands)
 
 
 def open_gate_dialog(parent, cfg, symbol, gate_key, strategies, ctx=None,

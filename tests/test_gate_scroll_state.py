@@ -107,10 +107,19 @@ try:
     check("a tartalom tenyleg tullog (kulonben a teszt semmit nem bizonyit)",
           tall, f"{bb[3] if bb else '?'} > {cvs[0].winfo_height() if cvs else '?'}")
 
-    # Az also blokk (hatas strategiankent) a gorgetheto teruleten belul van-e
-    labels = [c for c in walk(page) if isinstance(c, tk.Label)]
-    check("a strategia-nevek a gorgetheto lapon vannak",
-          any("wpr_sma" in (c.cget("text") or "") for c in labels))
+    # ⚠ v3.28.0: a hatas-blokk KULON FULRE kerult („Hatas"), a felhasznalo
+    # kerésére. A kovetelmeny valtozatlan: a strategiankenti resz gorgetheto
+    # teruleten legyen, kulonben tobb strategianal + tobb savnal NEMAN levagodik.
+    d._shell.show("effect")
+    root.update_idletasks(); root.update()
+    epage = d._shell.page("effect")
+    elabels = [c for c in walk(epage) if isinstance(c, tk.Label)]
+    check("a strategia-nevek a HATAS lapon vannak",
+          any("wpr_sma" in (c.cget("text") or "") for c in elabels))
+    check("...es az is gorgetheto",
+          len([c for c in walk(epage) if isinstance(c, tk.Scrollbar)]) == 1)
+    d._shell.show(SET)
+    root.update_idletasks(); root.update()
 
     # Lapvaltas: a leiras sajat Text-je gorget, a beallitas vaszna nem hallgatozik
     d._shell.show(DOC)

@@ -80,3 +80,21 @@ van definiálva, nem a letöltött előzmény hosszában).
    (`atr_baseline_bars`), vagy a `atr_min_pct` újragondolása.
 3. **Újraoptimalizálás önmagában nem elég**: az `atr_avg_ref` a teljes
    előzményből számol, tehát ugyanaz a szám jönne ki újra.
+
+## Sávos hatás (v3.28.0)
+
+A kapu hatása nem csak egyetlen igen/nem lehet. A **Hatás** fülön létrát
+állíthatsz: `+ Sáv` felvesz egy határt, a `Törlés` kiveszi.
+
+| szint | mi történik |
+|---|---|
+| 80% | kockázatcsökkentés (fele méret) |
+| 100% | akadályozza a beszállást |
+
+**A szint a kapu SAJÁT küszöbének százaléka**: 100% pontosan az a pont, ahol ez a
+kapu enélkül is bukna. Ezért hordozható, és ezért öröklődik — globális →
+instrumentum → instrumentum+stratégia, ahol nincs beállítva, ott örököl.
+
+> **Sáv nélkül semmi nem változik.** A létra hiánya is létra: egyetlen implicit
+> sáv a kapu saját küszöbén, a fent beállított hatással. Amíg nem veszel fel
+> sávot, a kapu bitre úgy viselkedik, ahogy eddig.

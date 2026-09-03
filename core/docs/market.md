@@ -23,3 +23,20 @@ Bizonyt.  Átmenet      nem eldönthető
 > ⚠ **Két dolog kell hozzá.** A hatás beállítása önmagában kevés: a páron KI IS
 > KELL VÁLASZTANI egy osztályozót, különben a kapunak nincs mit mérnie, és sosem
 > tüzel. A config-ellenőrző szól, ha ez az állapot előáll.
+
+## Sávos hatás (v3.28.0)
+
+A **Hatás** fülön besorolásonként külön hatást adhatsz: `+ Sáv` felvesz egy
+kategóriát, a `Törlés` kiveszi. Itt nincs mit sorba rendezni — a piac-állapot
+nem skála, hanem kategória:
+
+| besorolás | mi történik |
+|---|---|
+| Érdektelen | akadályozza a beszállást |
+| Oldalazó | kockázatcsökkentés (fele méret) |
+
+Ami nincs felsorolva, azt a kapu átengedi. A lista öröklődik: globális →
+instrumentum → instrumentum+stratégia.
+
+> **Sáv nélkül semmi nem változik**: a „kedvezőtlen" halmaz (`adverse`) dönt,
+> ahogy eddig.

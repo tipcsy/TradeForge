@@ -31,3 +31,19 @@ engine, where the signal's direction is also known.
 > The gate can also inherit from the `tf_align.gate` LIST (the old config form).
 > If the effect is „inherited" and you did not set it on this pair, the window
 > writes out where it comes from.
+
+## Banded effect (v3.28.0)
+
+On the **Effect** tab you can build a ladder: `+ Band` adds a threshold, `Remove`
+takes it out. For this gate the threshold is a **count** — how many timeframes
+line up with the signal — and FEWER is worse:
+
+| at most this many aligned | what happens |
+|---|---|
+| 2 | reduce risk (half size) |
+| 1 | block the entry |
+
+The ladder is inherited: global → instrument → instrument+strategy.
+
+> **Without bands nothing changes**: the gate keeps its old all-or-nothing rule
+> (only FULL alignment passes).

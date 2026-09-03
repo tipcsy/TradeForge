@@ -134,6 +134,36 @@ def gate_ok(alignment_dir: "str | None", signal: str) -> bool:
     return alignment_dir is not None and alignment_dir == signal
 
 
+def aligned_count(signs, signal: str) -> int:
+    """Hány figyelt idősík áll a JEL irányába? (`signs` az `alignment`-ből.)
+
+    ⚠ MIÉRT KELL, ha a kapu bináris. A sávos hatás (v3.28.0) darabszámra épül: „4
+    idősíkból 2 → kockázatcsökkentés, 1 → blokkol". A `gate_ok` ehhez kevés — az
+    csak azt mondja meg, hogy MIND együtt áll-e. A számot ugyanabból az
+    előjel-listából olvassuk, amiből a bináris döntés is születik, tehát a kettő
+    nem csúszhat szét."""
+    want = 1 if signal == "BUY" else -1 if signal == "SELL" else 0
+    if not want:
+        return 0
+    return sum(1 for s in (signs or []) if s == want)
+
+
+def build_historical_count(bars_by_tf: dict, sma_period: int):
+    """A `build_historical_gate` darabszámos párja: `fn(t_unix, price, direction)
+    -> int`, az adott irányba álló idősíkok száma.
+
+    ⚠ UGYANABBÓL a `build_historical_signs` magból dolgozik, mint a bináris kapu
+    — egy forrás, hogy a sávos és a bináris út ugyanazt a piacot lássa."""
+    if not bars_by_tf:
+        return lambda t_unix, price, direction: 0
+    signs_at = build_historical_signs(bars_by_tf, sma_period)
+
+    def _at(t_unix, price, direction):
+        return aligned_count(signs_at(t_unix, price), direction)
+
+    return _at
+
+
 def labels(timeframes: list) -> list:
     """Az idősíkok rövid címkéi (a cella/tooltip sorrendjéhez)."""
     return [TF_LABEL.get(t, f"{t}m") for t in timeframes]

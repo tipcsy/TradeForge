@@ -47,6 +47,7 @@ from core import order_exec
 from core import spread_gate
 from core import gates as _gates
 from core import vol_baseline as _vol_baseline
+from core import gate_bands as _gate_bands_mod
 from core import symbol_policy as _sym_policy
 from core import opt_activity as _opt_activity
 from core.indicator_engine import atr as atr_indicator
@@ -1023,7 +1024,9 @@ def apply_gate_state(objects: list, bars: dict, symbol: str, strategy_name: str,
         # ⚠ `cfg` kell: a `_run_cfg` csak az élő motorban van feltöltve — export-úton
         # üres, és akkor a kapu-hatások az ALAPÉRTELMEZÉSRE esnének vissza (a
         # tf_align pl. `none`-ra), tehát a kapu-sáv MÁST mutatna, mint a valóság.
-        eff = _g.effects_for(cfg if cfg is not None else _run_cfg, symbol, strategy_name)
+        _c0 = cfg if cfg is not None else _run_cfg
+        eff = _g.effects_for(_c0, symbol, strategy_name)
+        bands = _gate_bands_mod.ladders_for(_c0, symbol, strategy_name)
         active = {k for k in _g.KEYS if eff.get(k) != _g.EFFECT_NONE}
         if not active:
             return objects
@@ -1073,7 +1076,13 @@ def apply_gate_state(objects: list, bars: dict, symbol: str, strategy_name: str,
             if "spread" in active and t in s_by and a > 0 and point_size > 0:
                 ok, _cap = _sg.spread_ok(s_by[t] / point_size, a, point_size,
                                          params, normal_sp)
-                if not ok:
+                # ⚠ CSAK a `block` hatás zár. A sáv is itt dől el: egy 85%-os
+                # szinten előírt kockázatcsökkentés NEM zárás, tehát a sávban
+                # sem villoghat — különben a chart szigorúbbat mutatna a motornál.
+                if _gate_bands_mod.effect_at(
+                        "spread", bands.get("spread"), eff.get("spread"),
+                        _gate_bands_mod.scalar_level(s_by[t] / point_size, _cap),
+                        not ok) == _g.EFFECT_BLOCK:
                     code = _g_code("spread")
             # 2) Idősík-együttállás — a sáv IRÁNYÁBA állt-e minden figyelt idősík?
             if code == 0 and gate_fn is not None and o.dir:
@@ -1095,8 +1104,13 @@ def apply_gate_state(objects: list, bars: dict, symbol: str, strategy_name: str,
             # `atr_avg`-ja, ha van (gördülő mérce), különben a befagyasztott
             # `atr_avg_ref` — a `vol_baseline.failed` ugyanezt a precedenciát
             # használja a motorban is, tehát a sáv és a kötés nem csúszhat szét.
-            if code == 0 and "volatility" in active and _vb.failed(
-                    a, params, aa_by.get(t, 0.0)):
+            if code == 0 and "volatility" in active and \
+                    _gate_bands_mod.effect_at(
+                        "volatility", bands.get("volatility"),
+                        eff.get("volatility"),
+                        _gate_bands_mod.level_volatility(a, params,
+                                                         aa_by.get(t, 0.0)),
+                        _vb.failed(a, params, aa_by.get(t, 0.0))) == _g.EFFECT_BLOCK:
                 code = _g_code("volatility")
             o.gate = code
     except Exception as e:
@@ -1398,6 +1412,7 @@ def pair_visual_objects(symbol: str, params: dict, strategy, point_size: float,
     from core import gates as _gt
     if _cfg:
         md.gate_effects = _gt.effects_for(_cfg, symbol, strategy.name)
+        md.gate_bands = _gate_bands_mod.ladders_for(_cfg, symbol, strategy.name)
     _tf_eff = md.gate_effects.get(_gt.TF_ALIGN, _gt.EFFECT_BLOCK)
     if not exec_gates or _tf_eff != _gt.EFFECT_BLOCK:
         md.entry_gate = None            # NYERS jelzesek / nem blokkoló kapu
@@ -2297,6 +2312,9 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
         atr_val = None
 
     spread_ok = True
+    # A MÉRT spread és a plafon — a sávos hatás szintjéhez is (v3.28.0). None,
+    # amíg nincs jegyzés: olyankor a kapu fail-open, mint eddig.
+    current_spread_points = _cap_pips = None
     with MT5_LOCK:
         sym_info = mt5.symbol_info(symbol)
     if ds is not None and atr_val is not None:
@@ -2828,12 +2846,20 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
     # A MÉRÉS itt marad (irány-tudatosan!), a HATÁS feloldása a közös modulé —
     # lásd `gates.decide` docstringjét, hogy miért nem az `evaluate`-re épül.
     _gate_eff = _gates.effects_for(_run_cfg or {}, symbol, strategy.name)
+    # SÁVOS hatás (v3.28.0): a létrák „mikor mi történjen"-t mondanak, nem csak
+    # „mi történjen"-t. Ahol nincs sáv, ott a kapu saját ítélete dönt — a
+    # viselkedés tehát változatlan, amíg te nem veszel fel sávot.
+    _gate_bands = _gate_bands_mod.ladders_for(_run_cfg or {}, symbol, strategy.name)
     _gate_failed = {}
+    _gate_level = {}
 
     # Spread — a mérés fentebb megtörtént (`spread_ok`); ha a kapu ki van
     # kapcsolva erre a stratégiára, a bukás nem számít.
     _gate_failed[_gates.SPREAD] = (not spread_ok) if _gates.active(
         _gate_eff, _gates.SPREAD) else False
+    if _gate_bands.get(_gates.SPREAD):
+        _gate_level[_gates.SPREAD] = _gate_bands_mod.scalar_level(
+            current_spread_points, _cap_pips)
 
     # TF-együttállás: csak a trenddel EGYEZŐ jel léphet (irány-tudatos).
     tf_gate_ok = True
@@ -2846,8 +2872,13 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
             # gates modulban) — itt már csak a figyelés be/ki számít.
             if _tf_en:
                 _tf_cl = mt5_connector.tf_closes(symbol, _tf_tfs, _tf_sma + 5)
-                _tf_dir, _ = _tfa.alignment(_tf_cl, _tf_tfs, _tf_sma)
+                _tf_dir, _tf_signs = _tfa.alignment(_tf_cl, _tf_tfs, _tf_sma)
                 tf_gate_ok = _tfa.gate_ok(_tf_dir, signal)
+                # SÁV: hány idősík áll a jel irányába — UGYANABBÓL az
+                # előjel-listából, amiből a bináris döntés is született.
+                if _gate_bands.get(_gates.TF_ALIGN):
+                    _gate_level[_gates.TF_ALIGN] = _tfa.aligned_count(
+                        _tf_signs, signal)
         except Exception:
             tf_gate_ok = True
     _gate_failed[_gates.TF_ALIGN] = not tf_gate_ok
@@ -2859,6 +2890,7 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
         _cat = getattr(ds, "market_state", "") or ""
         if _cat and _cat in _gates.market_adverse(_run_cfg or {}, symbol):
             _market_ok = False
+        _gate_level[_gates.MARKET] = _cat
     _gate_failed[_gates.MARKET] = not _market_ok
 
     # Lendület („fordulatszám") — KÉTFÉLEKÉPPEN bukhat, és hogy melyik számít, az
@@ -2885,6 +2917,9 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
                 # ahogy a spread-kapu is teszi.
                 if _mdir and _mdir != signal:
                     _mom_ok = False
+            if _gate_bands.get(_gates.MOMENTUM):
+                _gate_level[_gates.MOMENTUM] = _gate_bands_mod.momentum_level(
+                    _mval, signal, _mmode, _mcfg)
         except Exception:
             _mom_ok = True
     _gate_failed[_gates.MOMENTUM] = not _mom_ok
@@ -2898,8 +2933,16 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
         hi_row is not None and _gates.active(_gate_eff, _gates.VOLATILITY)
         and _vol_baseline.failed(hi_row.get("atr"), params,
                                  hi_row.get("atr_avg", 0)))
+    if hi_row is not None and _gate_bands.get(_gates.VOLATILITY):
+        _gate_level[_gates.VOLATILITY] = _gate_bands_mod.level_volatility(
+            hi_row.get("atr"), params, hi_row.get("atr_avg", 0))
 
-    _gate_dec = _gates.decide(_gate_failed, _gate_eff)
+    # A SÁVOK feloldása: a mért szintből hatás lesz. Sáv nélkül a kapu saját
+    # ítélete dönt (`_gate_failed`) — bitre a v3.28.0 előtti viselkedés.
+    _gate_eff = _gate_bands_mod.effects_at(_gate_eff, _gate_bands,
+                                           _gate_failed, _gate_level)
+    _gate_dec = _gates.decide(
+        _gate_bands_mod.failed_at(_gate_eff, _gate_failed), _gate_eff)
     _gates_ok = not _gate_dec["blocked"]
     # Diagnosztika: ha a stratégia JELET adott (a viz ezt rajzolja — a NYERS
     # jelet, végrehajtási szűrők nélkül), de egy VÉGREHAJTÁSI kapu blokkol, írjuk
@@ -3008,9 +3051,16 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
             if _gates.active(_gate_eff, _gates.COST):
                 from core import cost_gate as _cgx
                 _spr_pts = float(getattr(sym_info, "spread", 0) or 0)
-                if _cgx.failed(sl_points, tp_points, _spr_pts,
-                               _gates.cost_max_distortion(pair_cfg, _run_cfg)):
-                    _cd = _gates.decide({_gates.COST: True}, _gate_eff)
+                _ccap = _gates.cost_max_distortion(pair_cfg, _run_cfg)
+                _cf = {_gates.COST: _cgx.failed(sl_points, tp_points,
+                                                _spr_pts, _ccap)}
+                # SÁV: a szint a torzítás és a plafon aránya (100% = a határ).
+                _cl = ({_gates.COST: _gate_bands_mod.scalar_level(
+                    _cgx.distortion(sl_points, tp_points, _spr_pts), _ccap)}
+                    if _gate_bands.get(_gates.COST) else {})
+                _ceff = _gate_bands_mod.effects_at(_gate_eff, _gate_bands, _cf, _cl)
+                if _cf[_gates.COST] or _ceff[_gates.COST] != _gates.EFFECT_NONE:
+                    _cd = _gates.decide(_gate_bands_mod.failed_at(_ceff, _cf), _ceff)
                     if _cd["blocked"]:
                         log.info("⛔ %s %s — a spread a tervezett kockázat/hozamot "
                                  "%.0f%%-kal rontja (tényleges %.1f:1) → kimarad. "
