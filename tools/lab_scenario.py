@@ -27,7 +27,8 @@ sima backtest ugyanarra az időszakra — a teszt ezt ellenőrzi is.
   "strategy": "wpr_sma",
   "from": "2026-08-27 00:00",
   "to":   "2026-08-27 23:59",
-  "entries": [ {"time": "2026-08-27 01:30", "direction": "BUY"} ],
+  "entries": [ {"time": "2026-08-27 01:30", "direction": "BUY",
+                "sl": 29516.4, "tp_rr": 2.0} ],   // sl/tp_rr elhagyhato
   "breakeven_at": "2026-08-27 02:10",      // elhagyható
   "rr_preset": "off",                      // off | halving | shield | …
   "build": false,                          // pozícióépítés be/ki
@@ -178,6 +179,7 @@ def futtat(fk: dict) -> dict:
 
     _sajat = _sajat_belepo
     _bejegyzett = []
+    _szintek = []                    # [(idő, sl_ár, tp_rr), …] — kézi szintek
     if _sajat:
         # ⚠ A KÉZI BELÉPŐK CSERÉLIK a stratégia jelzéseit. A `signals` kulcsa az
         # M1 tábla POZÍCIÓ-INDEXE, ezért az időpontot arra kell fordítani.
@@ -200,6 +202,12 @@ def futtat(fk: dict) -> dict:
                       f"időpontot, ahol van adat.")
             uj[int(poz[0])] = irany
             _bejegyzett.append((_tenyleges, irany))
+            # ── KÉZI SL / TP ─────────────────────────────────────────────
+            # A charton húzott stop ára + az R-szorzó. Elhagyható: enélkül a
+            # stratégia ATR-alapú terve marad.
+            if be.get("sl") is not None:
+                _szintek.append((_tenyleges, float(be["sl"]),
+                                 float(be.get("tp_rr", 2.0))))
         sorozat.signals = uj
 
     _rr = None
@@ -214,6 +222,8 @@ def futtat(fk: dict) -> dict:
     if fk.get("breakeven_at"):
         _manual = {"breakeven_at": _ido(fk["breakeven_at"], "breakeven_at",
                                         sorozat.m1.index.tz)}
+    if _szintek:
+        _manual = {**(_manual or {}), "levels": _szintek}
 
     _build = None
     if fk.get("build"):

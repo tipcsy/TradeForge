@@ -432,6 +432,26 @@ def _normalize_manual(manual_events, index) -> "dict | None":
         elif _be.tzinfo is not None:
             _be = _be.tz_localize(None)
         ki["breakeven_at"] = _be
+    # ── KÉZI SL/TP SZINTEK ────────────────────────────────────────────────
+    # `levels`: `[(idő, sl_ár, tp_rr), …]` → `{Timestamp: (sl_ár, tp_rr)}`.
+    # ⚠ A KÉZI LABOR miatt (2026-09-03): a felhasználó a charton HÚZZA az SL-t,
+    # és a TP az R-szorzóból adódik. Enélkül a kézi belépő MINDIG a stratégia
+    # ATR-alapú stopjával futna — vagyis a saját elképzelését nem tudná
+    # végigmérni. Az időzóna ITT dől el, a hurkon kívül (lásd fent).
+    _lv = ki.get("levels")
+    if _lv:
+        _uj = {}
+        # ⚠ NEM `_t` A CIKLUSVÁLTOZÓ: az a FORDÍTÓ függvény neve a modulban
+        # (`core.i18n.t as _t`). Elárnyékolva minden `_t("kulcs")` hívás ebben a
+        # hatókörben elszállna — a `test_i18n` őre ezt ki is mondta.
+        for _lt, _sl, _rr in _lv:
+            _lt = pd.Timestamp(_lt)
+            if tz is not None:
+                _lt = _lt.tz_localize(tz) if _lt.tzinfo is None else _lt.tz_convert(tz)
+            elif _lt.tzinfo is not None:
+                _lt = _lt.tz_localize(None)
+            _uj[_lt] = (float(_sl), float(_rr))
+        ki["levels"] = _uj
     return ki
 
 
@@ -1609,6 +1629,32 @@ def run_pair(
                             prev_m1_row = m1_row
                             continue
                         sl_points, tp_points = _sw
+
+                    # ── KÉZI SL/TP (a labor charton húzott szintjei) ──────────
+                    # ⚠ A STRATÉGIA TERVÉT ÍRJA FELÜL, de csak arra az EGY
+                    # belépőre, amelyikhez a felhasználó szintet rajzolt. A TP a
+                    # megadott R-szorzóból adódik — ahogy a charton is: húzod az
+                    # SL-t, a TP arányosan mozog. Minden más (méretezés, BE,
+                    # trailing, kapuk) változatlanul a motoré.
+                    _kezi_lv = ((manual_events or {}).get("levels") or {})
+                    if _kezi_lv:
+                        _lv = _kezi_lv.get(m1_time)
+                        if _lv is not None:
+                            _sl_ar, _tp_rr = _lv
+                            # ⚠ A BELÉPŐ ÁRÁTÓL mérünk, nem a gyertya záróárától.
+                            # A chart BID gyertyákat mutat, a BUY viszont ASK-on
+                            # nyit — a bid-től mérve a stop a SPREADDEL arrébb
+                            # landolt, mint ahova a felhasználó húzta (mérve:
+                            # 1,91 UsaTec-en). Így oda kerül, ahova rajzolta.
+                            _be_ar = float(_bar_c) + (spread_points * point_size
+                                                      if signal == "BUY" else 0.0)
+                            _tav = abs(_be_ar - float(_sl_ar)) / point_size
+                            # ⚠ A NULLA TÁVOLSÁG ÉRTELMETLEN: a stopot a belépőre
+                            # húzva a kockázat nulla lenne, és az „1 R" elveszítené
+                            # a jelentését. Ilyenkor a stratégia terve marad.
+                            if _tav > 0:
+                                sl_points = _tav
+                                tp_points = _tav * max(0.0, float(_tp_rr))
 
                     # ── KÖLTSÉG/KOCKÁZAT kapu — a TERV ISMERETÉBEN ────────────
                     # Ez az EGYETLEN kapu, ami a belépő-terv UTÁN dől el: a

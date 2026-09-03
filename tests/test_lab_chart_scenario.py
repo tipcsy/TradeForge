@@ -52,7 +52,10 @@ class _Var:
 def _ablak(belepok, be_ido=None, epites=False, chart=None):
     """`LabAblak` UI-építés NÉLKÜL — csak a forgatókönyv-építéshez kell."""
     a = lc.LabAblak.__new__(lc.LabAblak)
-    a._belepok = list(belepok)
+    # ⚠ A belépő 3 elemű lett (idő, irány, SL-ár) — a 2 eleműt kiegészítjük,
+    # hogy a régi tesztesetek változatlanul olvashatók maradjanak.
+    a._belepok = [(e + (None,)) if len(e) == 2 else e for e in belepok]
+    a._tp_rr = _Var(2.0)
     a._be_ido = be_ido
     a._epites = _Var(epites)
     a._sym = _Var("UsaTec")
@@ -196,7 +199,7 @@ _a._eredmeny = None
 _a._rajzol = lambda: None                 # a rajzoláshoz Tk kellene
 _a._torol_kozeli(_t0 + pd.Timedelta(minutes=5))
 check("a jobb gomb a LEGKÖZELEBBI belépőt törli",
-      [d for _, d in _a._belepok] == ["SELL"], str(_a._belepok))
+      [e[1] for e in _a._belepok] == ["SELL"], str(_a._belepok))
 
 _b = _ablak([(_t0, "BUY")], be_ido=_t0 + pd.Timedelta(hours=3), chart=_chart)
 _b._eredmeny = None
@@ -365,8 +368,14 @@ _ply = _src.split("def _utem", 1)[1].split(chr(10) + "    def ", 1)[0]
 # `sleep`-pel" — a puszta szó-keresés a saját magyarázatra bukott el.
 check("a lejátszás a Tk `after`-jét használja (nem sleep)",
       "self.root.after(" in _ply and "sleep(" not in _ply)
+# ⚠ A GYORSÍTÁS KORLÁTJA AZ ÚJRARAJZOLÁS, nem az ütemezés (a felhasználó
+# jelzése: „egy kicsit lassú a leggyorsabb is"). Ezért a nagy sebesség NEM
+# sűríti tovább az ütemet, hanem ÜTEMENKÉNT TÖBB GYERTYÁT lép.
 check("a sebesség gyertya/másodpercben számol",
-      "1.0 / max(0.5, float(self._sebesseg.get()))" in _ply)
+      "float(self._sebesseg.get())" in _ply)
+check("nagy sebességnél ÜTEMENKÉNT TÖBB gyertyát lép",
+      "_lepes = max(1, int(round(_seb / MAX_KEP_MP)))" in _ply
+      and "self._kurzor + _lepes" in _ply)
 
 # ── AZ IDŐSÍK-VÁLTÁS a kurzort IDŐBEN őrzi ───────────────────────────────
 # ⚠ Ugyanaz a csapda, mint a nézetnél: bar-indexben őrizve M15→M1 váltásnál
