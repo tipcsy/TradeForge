@@ -28,10 +28,10 @@ from strategy.base import (
 from strategy import visual as viz
 from core.indicator_engine import compute_indicators
 from core.signal_detector import PairState, check_m15_signal, check_m1_entry
-from core import vol_baseline as _volb
+from gates import vol_baseline as _volb
 from core import gate_bands as _gbands
 from core.risk_manager import calc_sl_tp_points, calc_swing_sl_tp_points
-from core import spread_gate
+from gates import spread_gate
 
 
 # ---------------------------------------------------------------------------
@@ -504,7 +504,7 @@ class WprSmaStrategy(Strategy):
         # A VÉGREHAJTÁSI szűrők (mint a backtest/él): a jel-replay CSAK azokat a
         # belépőket rajzolja ki, amiket a motor TÉNYLEGESEN megkötne — így a chart a
         # valós kötéseket mutatja (a kikapcsolt kapuknál több lesz, ez is látszik).
-        #  • volatilitás-kapu: `core.vol_baseline.failed` (atr_min_pct/atr_max_pct);
+        #  • volatilitás-kapu: `gates.vol_baseline.failed` (atr_min_pct/atr_max_pct);
         #    baseline az ablak ATR-átlaga (mint a bt_indicators atr_avg oszlopa).
         #  • spread-kapu: ha a bárokon van spread-adat (close_spread/avg_spread/spread).
         #  • TF-együttállás: már a md.entry_gate intézi (lentebb).
@@ -553,7 +553,7 @@ class WprSmaStrategy(Strategy):
                 # végrehajtódott volna).
                 # A kapunak a DÖNTÉST hozó M1-gyertya ZÁRÓÁRA kell — ez az „akkor
                 # ismert ár" (a formálódó TF-gyertya close-a), különben look-ahead
-                # lenne benne (lásd core.tf_align.build_historical_gate). A backtest
+                # lenne benne (lásd gates.tf_align.build_historical_gate). A backtest
                 # ugyanezt adja át (`_bar_c`), tehát a kettő így egyezik.
                 #
                 # ⚠ ITT VOLT EGY VALÓDI HIBA (2026-08-24): a `cw` NEM az ár, hanem a
@@ -588,7 +588,7 @@ class WprSmaStrategy(Strategy):
                             _gbands.level_volatility(float(atr_v), md.params,
                                                      _base)):
                         continue
-                # Spread-kapu (ha van spread-adat a bárokon): a közös core.spread_gate.
+                # Spread-kapu (ha van spread-adat a bárokon): a közös gates.spread_gate.
                 # ⚠ CSAK `block` hatásnál szűr. `none`/`reduce` mellett a motor
                 # BELÉP (utóbbinál kisebb mérettel), tehát a jelölőnek meg kell
                 # jelennie — különben a chart kevesebbet mutat, mint a valóság.
@@ -735,7 +735,7 @@ class WprSmaStrategy(Strategy):
         # (a motor NEM ismeri az 'atr'-t). Mindkét backtest-motor ugyanezt látja.
         if "atr" in m15.columns and len(m15) > 0:
             m15 = m15.copy()
-            # A mércét a KÖZÖS `core.vol_baseline` adja (fix `atr_avg_ref` vagy
+            # A mércét a KÖZÖS `gates.vol_baseline` adja (fix `atr_avg_ref` vagy
             # gördülő ablak) — így a backtest, a viz és az él ugyanazt számolja.
             m15["atr_avg"] = _volb.series(m15["atr"], params)
         return m15, m1
@@ -776,7 +776,7 @@ class WprSmaStrategy(Strategy):
 
     # ⚠ NINCS SAJÁT `bt_entry`. v3.27.0 előtt itt állt a volatilitás-szűrő
     # (`atr_min_pct`/`atr_max_pct`); mostantól a VOLATILITÁS-KAPU dönt
-    # (`core.gates` + `core.vol_baseline.failed`), a küszöbök viszont továbbra is
+    # (`core.gates` + `gates.vol_baseline.failed`), a küszöbök viszont továbbra is
     # ennek a stratégiának az optimalizált paraméterei. Így a `none` hatás
     # tényleg azt jelenti, hogy nincs szűrés — és a stratégia egy hookkal
     # egyszerűbb. Az `atr_avg` oszlopot a `bt_indicators` továbbra is előállítja:

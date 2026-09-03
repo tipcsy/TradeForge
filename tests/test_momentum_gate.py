@@ -22,7 +22,7 @@ import numpy as np
 import pandas as pd
 
 from core import gates as g
-from core import momentum as m
+from gates import momentum as m
 
 results = []
 

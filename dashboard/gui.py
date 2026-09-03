@@ -6115,7 +6115,7 @@ class DashboardWindow:
         # TF-együttállás (M1/M5/M15 SMA-irány) → az „Együtt" oszlop. Idősíkonként
         # NATIVE copy_rates (nincs resample-torzítás); sign(close − SMA(n)).
         try:
-            from core import tf_align as _tfa
+            from gates import tf_align as _tfa
             from core import mt5_connector as _mc
             _tfa_en, _tfa_tfs, _tfa_sma, _ = _tfa.config_for(self.cfg, symbol)
             if _tfa_en:
@@ -6338,7 +6338,7 @@ class DashboardWindow:
         # (egy idősík 3 SMA-val / három idősík) EGY kódúton fut, és az M5-höz
         # sem kell új adatút.
         try:
-            from core import momentum as _mom
+            from gates import momentum as _mom
             from core import gates as _gts
             from core import mt5_connector as _mc
             _mcfg = _gts.momentum_config(_pcfg, self.cfg)
@@ -6379,7 +6379,7 @@ class DashboardWindow:
                     # A `vol_baseline` dönti el, hogy a befagyasztott
                     # `atr_avg_ref` vagy a gördülő ablak a mérce — UGYANAZ a
                     # képlet, mint a backtestben és a vizben (`core/vol_baseline`).
-                    from core import vol_baseline as _vb
+                    from gates import vol_baseline as _vb
                     ds.atr_price = float(_a)
                     ds.atr_baseline = _vb.effective(
                         params,

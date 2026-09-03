@@ -89,7 +89,7 @@ check("`none` alap-hatás → a létra sem szól bele",
 
 
 # ══ 4. A SZINT 100%-a PONTOSAN a kapu saját határa ══════════════════════
-from core import vol_baseline as vb                          # noqa: E402
+from gates import vol_baseline as vb                          # noqa: E402
 _lo, _hi = vb.band(PRM, 272.75)
 check("volatilitás: a padlón a szint 100%",
       abs(gb.level_volatility(_lo, PRM, 0.0) - 100.0) < 1e-6,

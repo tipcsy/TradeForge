@@ -36,8 +36,8 @@ ROOT = Path(__file__).resolve().parent.parent
 TESZT_DIR = ROOT / "tests"
 
 # A projekt saját csomagjai — csak ezeket követjük (a numpy/pandas nem érdekes).
-CSOMAGOK = ("core", "trading", "strategy", "strategies", "dashboard",
-            "ml", "tools", "tests")
+CSOMAGOK = ("core", "trading", "strategy", "strategies", "gates",
+            "dashboard", "ml", "tools", "tests")
 
 # ── A NÉVVEL ELLÁTOTT CSOPORTOK ───────────────────────────────────────────
 # Egy csoport = modul-előtagok halmaza. Egy teszt ANNYI csoportba tartozik,
@@ -48,16 +48,18 @@ CSOMAGOK = ("core", "trading", "strategy", "strategies", "dashboard",
 # Egy modul hovatartozása stabil (a `core/spread_gate.py` jövőre is kapu), egy
 # teszté nem. A teszt besorolása ebből SZÁMÍTÓDIK, a tényleges importjaiból.
 CSOPORTOK = {
-    "motor": ("trading.", "core.gates", "core.spread_gate", "core.cost_gate",
-              "core.momentum", "core.tf_align", "core.market_state",
+    # ⚠ A kapu-MÉRÉSEK v3.29.1 óta a `gates/` csomagban vannak; a KERET maradt a
+    # `core`-ban (`gates`, `gate_bands`, `gate_params`, `gate_layout`).
+    "motor": ("trading.", "gates.", "core.gates", "core.gate_bands",
+              "core.gate_params", "core.market_state",
               "core.market_strategy", "core.regime", "core.signal_detector",
               "core.indicator_engine", "core.risk_manager", "core.order_exec",
               "core.mt5_connector", "core.risk_reduction", "core.risky_mode",
               "core.rr_state", "core.exit_signal", "core.position_build",
               "core.build_state", "core.execution_params", "core.trade_costs",
-              "core.vol_baseline", "core.live_lock", "core.position_meta",
+              "core.live_lock", "core.position_meta",
               "core.adopted", "core.pnl_split", "core.correlation",
-              "core.trade_mode", "core.gate_params"),
+              "core.trade_mode"),
     # ⚠ KÉT csomag (v3.29.0): a KERET (`strategy/`) és a TARTALOM
     # (`strategies/`). Egy csoportba tartoznak: aki az egyikhez nyúl, a
     # másikat is elronthatja.

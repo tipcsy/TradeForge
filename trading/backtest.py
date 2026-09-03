@@ -751,7 +751,7 @@ def _pair_momentum(cfg, symbol, strategy_name, m15, df_m1, exec_gates: bool) -> 
         return out
     try:
         from core import gates as _gt
-        from core import momentum as _momx
+        from gates import momentum as _momx
         if not _gt.active(_gt.effects_for(cfg or {}, symbol, strategy_name,
                                           for_backtest=True),
                           _gt.MOMENTUM):
@@ -768,7 +768,7 @@ def _pair_momentum(cfg, symbol, strategy_name, m15, df_m1, exec_gates: bool) -> 
 def _build_tf_align_evaluator(cfg, symbol, strategy_name, df_m1,
                               want: str = "gate"):
     """A TF-együttállás VÉGREHAJTÁSI kapu historikus kiértékelője a backtesthez —
-    UGYANAZ a logika, mint az él (`core.tf_align`) és a viz jel-replay-e
+    UGYANAZ a logika, mint az él (`gates.tf_align`) és a viz jel-replay-e
     (`live_trader.tf_align_gate_fn`), csak az adat a backtest saját M1-jéből jön.
 
     A kapu idősíkonként `sign(close − SMA(sma_period))`; a belépő csak akkor enged,
@@ -779,7 +779,7 @@ def _build_tf_align_evaluator(cfg, symbol, strategy_name, df_m1,
     A `df_m1` a TELJES (nem a test-ablakra vágott) M1 → a magasabb idősíkok SMA-ja
     a test-ablak elején is warmupolt (nem blokkol feleslegesen).
 
-    KONVENCIÓ (közös a viz-replay-jel, `core.tf_align.build_historical_gate`): a jel
+    KONVENCIÓ (közös a viz-replay-jel, `gates.tf_align.build_historical_gate`): a jel
     pillanatában FORMÁLÓDÓ TF-gyertyát nézzük, de annak a záróára az AKKOR ISMERT ár
     (a döntést hozó M1-gyertya close-a), NEM a gyertya végleges záróára. Ez utóbbi
     LOOK-AHEAD volt: egy M15-kapunál akár 15 percnyi jövőbelátás, amitől a backtest
@@ -793,7 +793,7 @@ def _build_tf_align_evaluator(cfg, symbol, strategy_name, df_m1,
     döntés, tehát a kettő nem csúszhat szét."""
     try:
         import numpy as _np
-        from core import tf_align as _tfa
+        from gates import tf_align as _tfa
         # ⚠ A STRATÉGIA is számít: az együttállás idősíkjai stratégiánként
         # eltérhetnek (H1-en döntő stratégiának az M1/M5/M15 zajt mér, nem
         # kontextust) — `tf_align.per_strategy`.
@@ -1176,8 +1176,8 @@ def run_pair(
 
     # ── Végrehajtási kapuk (él-paritás, opcionális) ─────────────────────────
     # exec_gates=True → a backtest ugyanazokat a VÉGREHAJTÁSI kapukat modellezi,
-    # amiket az él: (1) spread-kapu (core.spread_gate — közös képlet), (2) TF-
-    # együttállás (core.tf_align, ha a `cfg`-ben erre a stratégiára be van kapcsolva).
+    # amiket az él: (1) spread-kapu (gates.spread_gate — közös képlet), (2) TF-
+    # együttállás (gates.tf_align, ha a `cfg`-ben erre a stratégiára be van kapcsolva).
     # Alap KI → a meglévő hívók (optimizer stb.) BITAZONOSAK maradnak. A TF-kaput a
     # TELJES (vágatlan) df_m1-ből építjük, hogy a magasabb idősíkok SMA-ja warmupolt.
     #
@@ -1186,9 +1186,9 @@ def run_pair(
     # hívó BEADHATJA előre megépítve (`tf_eval=`) — az optimalizáló ablakonként
     # EGYSZER építi, nem trialonként. Az alapérték a saját építés (a `None`
     # ÉRVÉNYES érték: „nincs kapu ezen a páron/stratégián").
-    from core import spread_gate as _spread_gate
+    from gates import spread_gate as _spread_gate
     from core import gates as _gt
-    from core import vol_baseline as _volb
+    from gates import vol_baseline as _volb
     from core import gate_bands as _gb
     _exec_gates = bool(exec_gates)
     if tf_eval is not _TF_EVAL_AUTO:
@@ -1236,7 +1236,7 @@ def run_pair(
     _mom_series, _mom_cfg, _mom_mode = None, None, None
     if _exec_gates and _gt.active(_gate_eff, _gt.MOMENTUM):
         try:
-            from core import momentum as _momx
+            from gates import momentum as _momx
             _mom_cfg = _gt.momentum_config(pair_cfg, cfg)
             _mom_mode = _gt.mode_for(cfg or {}, symbol, strategy.name)
             _mom_series = _momx.series_at(df_m1, df_m15.index, _mom_cfg)
@@ -1639,7 +1639,7 @@ def run_pair(
                         _failed[_gt.MARKET] = bool(_cat) and _cat in _mkt_adverse
                         _lvl[_gt.MARKET] = _cat
                     if _mom_series is not None:
-                        from core import momentum as _momx
+                        from gates import momentum as _momx
                         _mv = _mom_series.get(m15_times[m15_ptr], float("nan"))
                         _failed[_gt.MOMENTUM] = _momx.failed(
                             _mv, signal, _mom_mode, _mom_cfg)
@@ -1706,7 +1706,7 @@ def run_pair(
                     # mérőszáma a spread és a TERVEZETT stop viszonya, tehát
                     # előbb tudni kell, mekkora stopot szán a stratégia.
                     if _exec_gates and _gt.active(_gate_eff, _gt.COST):
-                        from core import cost_gate as _cgx
+                        from gates import cost_gate as _cgx
                         _csp = _cspread_arr[i] if _cspread_arr is not None else float("nan")
                         if not (_csp > 0):
                             _csp = _sp
@@ -2084,7 +2084,7 @@ def run_portfolio_backtest(
     tf_lo = strategy.timeframes()[1].label
 
     # ── Végrehajtási kapuk (él-paritás, opcionális) — UGYANAZ, mint a run_pair-ben ──
-    from core import spread_gate as _spread_gate
+    from gates import spread_gate as _spread_gate
     from core import gates as _gt
     from core import gate_bands as _gb
     _exec_gates = bool(exec_gates)
@@ -2502,7 +2502,7 @@ def run_portfolio_backtest(
                         # mint a `run_pair`-ben: a küszöbei a stratégia saját
                         # paraméterei, tehát `exec_gates=False` mellett is élnek.
                         if _gt.active(_eff, _gt.VOLATILITY):
-                            from core import vol_baseline as _volbx
+                            from gates import vol_baseline as _volbx
                             _failed[_gt.VOLATILITY] = _volbx.failed(
                                 m15_row.get("atr"), params,
                                 m15_row.get("atr_avg", 0))
@@ -2541,7 +2541,7 @@ def run_portfolio_backtest(
                                                        and _cat in info["mkt_adverse"])
                                 _lvl[_gt.MARKET] = _cat
                             if info.get("mom_series") is not None:
-                                from core import momentum as _momx
+                                from gates import momentum as _momx
                                 _mv = info["mom_series"].get(m15_df.index[ptr],
                                                              float("nan"))
                                 _failed[_gt.MOMENTUM] = _momx.failed(
@@ -2564,7 +2564,7 @@ def run_portfolio_backtest(
                             # (Ugyanaz, mint a run_pair-ben: a mérőszám a spread
                             # és a TERVEZETT stop viszonya, tehát a terv UTÁN dől el.)
                             if _exec_gates and _gt.active(info["gate_eff"], _gt.COST):
-                                from core import cost_gate as _cgx
+                                from gates import cost_gate as _cgx
                                 _ccap = _gt.cost_max_distortion(pair_cfg, cfg)
                                 _cf = {_gt.COST: _cgx.failed(sl_points, tp_points,
                                                              sp, _ccap)}

@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from core import applog
 applog.harden_console()
 
-from core import cost_gate as cg
+from gates import cost_gate as cg
 from core import gates as g
 
 results = []

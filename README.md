@@ -565,7 +565,8 @@ git stash pop
 ├── main.py                  ← belépési pont (download / dashboard / live / backtest / optimize)
 ├── version.py               ← alkalmazásnév és verzió (egy helyen)
 ├── config.example.json      ← config-minta (a valódi config.json gitignore-olt)
-├── core/                    ← MT5-kapcsolat, indikátorok, kockázat, kapuk, végrehajtás
+├── core/                    ← MT5-kapcsolat, indikátorok, kockázat, végrehajtás + a kapu-KERET
+├── gates/                   ← a KAPUK maguk (spread, költség, lendület, együttállás, volatilitás) + `docs/`
 ├── trading/                 ← élő motor és backtest
 ├── strategy/                ← a stratégia-KERET (base, visual, settings, registry)
 ├── strategies/              ← a STRATÉGIÁK maguk + saját configjaik (`config/`) és doksijuk (`docs/`)
@@ -1285,7 +1286,8 @@ git stash pop
 ├── main.py                  ← entry point (download / dashboard / live / backtest / optimize)
 ├── version.py               ← application name and version (in one place)
 ├── config.example.json      ← config sample (the real config.json is gitignored)
-├── core/                    ← MT5 connection, indicators, risk, gates, execution
+├── core/                    ← MT5 connection, indicators, risk, execution + the gate FRAMEWORK
+├── gates/                   ← the GATES themselves (spread, cost, momentum, alignment, volatility) + `docs/`
 ├── trading/                 ← live engine and backtest
 ├── strategy/                ← the strategy FRAMEWORK (base, visual, settings, registry)
 ├── strategies/              ← the STRATEGIES themselves + their configs (`config/`) and docs (`docs/`)

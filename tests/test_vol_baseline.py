@@ -27,7 +27,7 @@ _applog.harden_console()
 import numpy as np                                  # noqa: E402
 import pandas as pd                                 # noqa: E402
 
-from core import vol_baseline as vb                 # noqa: E402
+from gates import vol_baseline as vb                 # noqa: E402
 from strategy import get_strategy_by_name           # noqa: E402
 
 _results = []

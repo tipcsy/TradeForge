@@ -50,7 +50,7 @@ def _check_gate_preconditions(cfg: dict, out: list) -> None:
     elsőt mutatja. Ha a mérés forrása hiányzik, a kapu némán átenged mindent."""
     from core import gates as _g
     from core import market_strategy as _ms
-    from core import tf_align as _tfa
+    from gates import tf_align as _tfa
     from strategy import enabled_strategy_names
 
     for sym, pc in (cfg.get("pairs") or {}).items():

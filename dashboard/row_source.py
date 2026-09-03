@@ -64,7 +64,7 @@ def _momentum_cell(ctx: dict, on_click=None, symbol: str = None) -> dict:
 
     A `value` a RENDEZÉSHEZ kell (a `↑`/`↓` előjelet visszafejteni törékeny)."""
     import math
-    from core import momentum as _m
+    from gates import momentum as _m
     val = ctx.get("momentum")
     click = (lambda: on_click(symbol)) if (on_click and symbol) else None
     if val is None or (isinstance(val, float) and math.isnan(val)):
@@ -88,7 +88,7 @@ def _volatility_cell(ctx: dict, on_click=None, symbol: str = None) -> dict:
     stratégiánkénti hatást a jelzés-cella KERETE mondja meg (`frame_state`) —
     ugyanaz a szétválasztás, mint a többi kapunál."""
     import math
-    from core import vol_baseline as _vb
+    from gates import vol_baseline as _vb
     atr = ctx.get("atr_price")
     base = ctx.get("atr_baseline")
     click = (lambda: on_click(symbol)) if (on_click and symbol) else None
@@ -118,7 +118,7 @@ def _cost_cell(ctx: dict, on_click=None, symbol: str = None) -> dict:
     (és így a nullszaldó win-rate) a spreadtől nem változik — csak az út lesz
     hosszabb a nyeréshez, mint a vesztéshez."""
     import math
-    from core import cost_gate as _cg
+    from gates import cost_gate as _cg
     sl, tp = ctx.get("plan_sl_points"), ctx.get("plan_tp_points")
     sp, cap = ctx.get("spread_points"), ctx.get("cost_max_distortion")
     click = (lambda: on_click(symbol)) if (on_click and symbol) else None

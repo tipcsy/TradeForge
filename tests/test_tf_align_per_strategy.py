@@ -22,7 +22,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 import core.applog as _applog
 _applog.harden_console()
 
-from core import tf_align as tfa                    # noqa: E402
+from gates import tf_align as tfa                    # noqa: E402
 
 _results = []
 _fail = []

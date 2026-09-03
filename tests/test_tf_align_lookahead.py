@@ -7,7 +7,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from core import tf_align as tfa
+from gates import tf_align as tfa
 
 results = []
 

@@ -75,7 +75,7 @@ MAGIC_OFFSET = 2
 #
 # ⚠ A LETÖLTÖTT adat marad M15 + M1 (`timeframes()`): a durvább gyertyát ebből
 # mintázzuk át. Így nem kell új adatforrás, és a resample UGYANAZ a képlet, amit
-# az `ml_ai` és a `core.tf_align` is használ (bal-zárt, bal-címkés — mint az MT5).
+# az `ml_ai` és a `gates.tf_align` is használ (bal-zárt, bal-címkés — mint az MT5).
 DEFAULT_TF_MIN = 60
 ALLOWED_TF_MIN = (15, 30, 60, 120, 240)
 _tf_cache: dict = {}

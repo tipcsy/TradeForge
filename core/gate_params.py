@@ -276,7 +276,7 @@ def measured_rows(key: str, ctx: dict) -> list:
                  ctx.get("market_name") or _t("gp.val.none_sel")),
                 (_t("gp.row.classification"), ctx.get("market_label") or "—")]
     if key == _g.COST:
-        from core import cost_gate as _cg
+        from gates import cost_gate as _cg
         sl, tp = ctx.get("plan_sl_points"), ctx.get("plan_tp_points")
         sp = ctx.get("spread_points")
         cap = ctx.get("cost_max_distortion")
@@ -290,7 +290,7 @@ def measured_rows(key: str, ctx: dict) -> list:
             rows.append((_t("gp.row.limit"), f"{float(cap) * 100:+.0f}%"))
         return rows
     if key == _g.VOLATILITY:
-        from core import vol_baseline as _vb
+        from gates import vol_baseline as _vb
         atr = ctx.get("atr_price")
         base = ctx.get("atr_baseline")
         prm = ctx.get("vol_params") or {}
@@ -315,7 +315,7 @@ def measured_rows(key: str, ctx: dict) -> list:
                      else _t("gp.val.frozen")))
         return rows
     if key == _g.MOMENTUM:
-        from core import momentum as _m
+        from gates import momentum as _m
         val = ctx.get("momentum")
         thr = ctx.get("momentum_idle_threshold")
         v = val if val is not None else float("nan")
@@ -355,7 +355,7 @@ def momentum_states() -> str:
 def momentum_state_text(value, threshold) -> str:
     """Az állapot a MÉRÉSSEL EGYÜTT — a puszta szó nem mondja meg, mihez képest."""
     import math as _math
-    from core import momentum as _m
+    from gates import momentum as _m
     if value is None or _math.isnan(float(value)):
         return _t("gp.mom.no_data")
     mag, thr = abs(float(value)), float(threshold)

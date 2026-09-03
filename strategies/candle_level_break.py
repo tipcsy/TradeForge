@@ -69,7 +69,7 @@ _STAGES = (("level",  _t("stage.level")),
 def _to_level_tf(df: pd.DataFrame) -> pd.DataFrame:
     """M15 → H4 átmintázás. A KÖZÖS helperrel (bal-zárt, bal-címkés, mint az MT5)
     — ugyanaz a képlet, amit a `bollinger_squeeze`, az `ml_ai` és a
-    `core.tf_align` is használ, hogy a gyertya-határok sehol ne csússzanak el."""
+    `gates.tf_align` is használ, hogy a gyertya-határok sehol ne csússzanak el."""
     if df is None or len(df) < 2:
         return df
     from core.indicator_engine import resample_ohlc

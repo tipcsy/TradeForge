@@ -416,7 +416,7 @@ class BacktestDialog:
 
         # ── Végrehajtási kapuk (él-paritás) ─────────────────────────────────
         # Bekapcsolva a backtest UGYANAZT a két VÉGREHAJTÁSI kaput modellezi, amit az
-        # él: spread-kapu (core.spread_gate) + TF-együttállás (ha az adott stratégiára/
+        # él: spread-kapu (gates.spread_gate) + TF-együttállás (ha az adott stratégiára/
         # instrumentumra a configban be van kapcsolva). Így a backtest nem nyit olyan
         # belépőt, amit élesben egy kapu kiszűrne. Alap: BE. KI → nyers jelek.
         grow = tk.Frame(body, bg=BG)

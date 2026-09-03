@@ -44,9 +44,9 @@ from core import viz_prefs as _vp
 from core import trade_mode as _tmode
 from core import adopted
 from core import order_exec
-from core import spread_gate
+from gates import spread_gate
 from core import gates as _gates
-from core import vol_baseline as _vol_baseline
+from gates import vol_baseline as _vol_baseline
 from core import gate_bands as _gate_bands_mod
 from core import symbol_policy as _sym_policy
 from core import opt_activity as _opt_activity
@@ -1019,7 +1019,8 @@ def apply_gate_state(objects: list, bars: dict, symbol: str, strategy_name: str,
         return objects
     try:
         from strategy import visual as viz
-        from core import gates as _g, vol_baseline as _vb, spread_gate as _sg
+        from core import gates as _g
+        from gates import vol_baseline as _vb, spread_gate as _sg
 
         # ⚠ `cfg` kell: a `_run_cfg` csak az élő motorban van feltöltve — export-úton
         # üres, és akkor a kapu-hatások az ALAPÉRTELMEZÉSRE esnének vissza (a
@@ -1128,7 +1129,7 @@ def tf_align_visual_objects(symbol: str) -> list:
     _VIZ_TF = {1: "M1", 5: "M5", 15: "M15", 30: "M30", 60: "H1", 240: "H4"}
     try:
         from strategy import visual as viz
-        from core import tf_align as _tfa
+        from gates import tf_align as _tfa
         _, tfs, sma, _g = _tfa.config_for(_run_cfg, symbol)
         if not _tfa.viz_on(_run_cfg, symbol):
             return []
@@ -1146,13 +1147,13 @@ def tf_align_gate_fn(symbol: str, strategy_name: str, params: dict):
     kapun). None, ha a kapu nincs bekapcsolva / nincs kapuzva ez a stratégia. Így a
     charton csak az a belépő-jelölő marad, ami élesben is végrehajtódott volna.
 
-    A kiértékelés a `core.tf_align.build_historical_gate`-tel megy — UGYANAZ a
+    A kiértékelés a `gates.tf_align.build_historical_gate`-tel megy — UGYANAZ a
     függvény, amit a backtest is használ (közös forrás → a chart jelölői és a
     backtest kötései nem csúszhatnak szét), és look-ahead NÉLKÜL: a formálódó
     TF-gyertya záróára az AKKOR ISMERT ár, nem a gyertya végleges close-a."""
     try:
         import numpy as _np
-        from core import tf_align as _tfa
+        from gates import tf_align as _tfa
         # A stratégia is számít: az idősíkok stratégiánként eltérhetnek
         # (`tf_align.per_strategy`) — lásd `core/tf_align._merged`.
         en, tfs, sma, gate = _tfa.config_for(_run_cfg, symbol, strategy_name)
@@ -2320,7 +2321,7 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
     if ds is not None and atr_val is not None:
         ds.atr_price = float(atr_val)
     if sym_info and atr_val is not None and sym_info.point > 0:
-        # A spread-kaput a KÖZÖS core.spread_gate dönti — UGYANAZ a képlet, amit a
+        # A spread-kaput a KÖZÖS gates.spread_gate dönti — UGYANAZ a képlet, amit a
         # backtest is használ (egy forrás → sose csúszik szét). A bróker pont-alapú
         # spreadjét pipbe váltjuk (spread_pts × point / point_size).
         current_spread_points = sym_info.spread * sym_info.point / point_size
@@ -2865,7 +2866,7 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
     tf_gate_ok = True
     if signal != "NONE" and _gates.active(_gate_eff, _gates.TF_ALIGN):
         try:
-            from core import tf_align as _tfa
+            from gates import tf_align as _tfa
             _tf_en, _tf_tfs, _tf_sma, _tf_gate = _tfa.config_for(
                 _run_cfg, symbol, getattr(state.strategy, 'name', None))
             # A régi `tf_align.gate` LISTA a hatás forrása is (legacy öröklés a
@@ -2901,7 +2902,7 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
     _mom_ok = True
     if signal != "NONE" and _gates.active(_gate_eff, _gates.MOMENTUM):
         try:
-            from core import momentum as _mom
+            from gates import momentum as _mom
             _mcfg = _gates.momentum_config(pair_cfg, _run_cfg)
             _mval = _mom.rpm(mt5_connector.tf_closes(
                 symbol, _mom.needed_timeframes(_mcfg), _mom.needed_bars(_mcfg)),
@@ -3049,7 +3050,7 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
             # mekkora stopot szán a stratégia (a min-stop tágítás UTÁN, mert a
             # ténylegesen vállalt kockázat az).
             if _gates.active(_gate_eff, _gates.COST):
-                from core import cost_gate as _cgx
+                from gates import cost_gate as _cgx
                 _spr_pts = float(getattr(sym_info, "spread", 0) or 0)
                 _ccap = _gates.cost_max_distortion(pair_cfg, _run_cfg)
                 _cf = {_gates.COST: _cgx.failed(sl_points, tp_points,

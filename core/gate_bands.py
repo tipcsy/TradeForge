@@ -237,7 +237,7 @@ def momentum_level(value, signal: str, mode: str, params: dict = None) -> float:
       félkész sávozás könnyen okozna (a `dir` némán hatástalanná válna).
 
     A kettő közül a ROSSZABB (nagyobb) szint érvényes."""
-    from core import momentum as _m
+    from gates import momentum as _m
     lvl = 0.0
     p = {**_m.DEFAULTS, **(params or {})}
     if mode in ("idle", "both"):
@@ -335,12 +335,12 @@ def two_sided_level(measured, lo, hi) -> float:
 
 
 def level_volatility(atr, params: dict, base) -> float:
-    """A volatilitás-kapu szintje a KÖZÖS mércéből (`core.vol_baseline`).
+    """A volatilitás-kapu szintje a KÖZÖS mércéből (`gates.vol_baseline`).
 
     ⚠ UGYANAZ a sáv, amiből a `vol_baseline.failed` is dolgozik — egy forrás,
     hogy a szint és az ítélet ne csúszhasson szét. 100% pontosan ott van, ahol a
     `failed` True-ra vált."""
-    from core import vol_baseline as _vb
+    from gates import vol_baseline as _vb
     b = _vb.effective(params or {}, base)
     if not b or b <= 0:
         return None

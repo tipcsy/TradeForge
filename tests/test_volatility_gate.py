@@ -8,7 +8,7 @@ sot! Igy egyre »egyszerubb« a strategiank!"
 AMI VALTOZOTT. A szures eddig HAROM strategia `bt_entry`-jeben allt kulon-kulon
 (`wpr_sma`, `bollinger_squeeze`, `candle_level_break`), a `trend_pullback`-ben es
 az `ml_ai`-ban viszont NEM — vagyis attol fuggott, melyik strategia masolta be.
-Most egy helyen dol el (`core.vol_baseline.failed` + `core.gates.decide`).
+Most egy helyen dol el (`gates.vol_baseline.failed` + `core.gates.decide`).
 
 AMI NEM VALTOZOTT (es ezt orizzuk itt a legszigorubban): a VISELKEDES. A kapu
 `block`-kal indul, mert a regi szuro feltetel nelkul futott; a „kikapcsolt"
@@ -34,7 +34,8 @@ def check(name, ok, detail=""):
 
 
 import pandas as pd                                        # noqa: E402
-from core import gates as g, vol_baseline as vb            # noqa: E402
+from core import gates as g                                # noqa: E402
+from gates import vol_baseline as vb                       # noqa: E402
 from trading import backtest as bt                         # noqa: E402
 
 PRM = {"atr_min_pct": 0.9, "atr_max_pct": 3.2, "atr_avg_ref": 272.75}

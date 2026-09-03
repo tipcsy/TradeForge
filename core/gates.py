@@ -161,17 +161,21 @@ KEYS = tuple(g["key"] for g in REGISTRY)
 
 
 def doc_path(key: str):
-    """A kapu leírásának útvonala: `core/docs/<kulcs>.md`.
+    """A kapu leírásának útvonala: `gates/docs/<kulcs>.md`.
 
     Ugyanaz a minta, mint a stratégiáknál (`strategies/docs/<név>.md`): a leírás
     FÁJLBAN él, nem a kódban — szerkeszthető anélkül, hogy hozzányúlnál a
     logikához, és a beállító ablak „Leírás" lapja mindig a lemezről olvassa.
 
+    ⚠ AZ ÚTVONAL A TARTALOM-CSOMAGRA MUTAT (v3.29.1): a leírás a kapuval együtt
+    költözik, nem a kerettel. Egy kapu így egy darabban mozdítható — ez a `.tfg`
+    csomagolás (a 2026-09-02 lista #3 pontja) előfeltétele.
+
     ⚠ NYELVFÜGGŐ: angol felületen `<kulcs>.en.md`, ha létezik — különben a
     magyar eredeti."""
-    from pathlib import Path as _P
     from core.i18n import doc_path as _doc_path
-    return _doc_path(_P(__file__).resolve().parent / "docs", key)
+    from gates import paths as _gp
+    return _doc_path(_gp.docs_dir(), key)
 
 
 def doc_text(key: str) -> str:
@@ -490,7 +494,7 @@ def backtest_differs(cfg: dict, symbol: str, strategy: str) -> list:
 
 def _eval_spread(ctx: dict):
     """A mért spread a megengedett határon belül van-e. A határt a hívó számolja
-    (`core.spread_gate`) — itt csak összevetünk, hogy a modul tiszta maradjon."""
+    (`gates.spread_gate`) — itt csak összevetünk, hogy a modul tiszta maradjon."""
     cur = ctx.get("spread_points")
     cap = ctx.get("max_spread_points")
     if cur is None:
@@ -535,7 +539,7 @@ def _eval_cost(ctx: dict):
     """A spread okozta RR-torzítás. A MÉRT bemenetet (tervezett SL/TP + spread) a
     hívó adja: a stop a STRATÉGIA terve (`sl_tp_points`), nem a kapué."""
     import math as _math
-    from core import cost_gate as _cg
+    from gates import cost_gate as _cg
     sl = ctx.get("plan_sl_points")
     tp = ctx.get("plan_tp_points")
     sp = ctx.get("spread_points")
@@ -555,7 +559,7 @@ def _eval_cost(ctx: dict):
 
 
 def _eval_momentum(ctx: dict):
-    """A piac „fordulatszáma" (`core.momentum`).
+    """A piac „fordulatszáma" (`gates.momentum`).
 
     A kijelzés NEM ismeri a jel irányát (az instrumentum szintjén állunk), ezért
     itt csak az ALAPJÁRAT-ot tudjuk eldönteni — az irány-szűrő irány-tudatos, azt
@@ -575,12 +579,12 @@ def _eval_momentum(ctx: dict):
 
 
 def _eval_volatility(ctx: dict):
-    """Az ATR a stratégia kalibrált sávjában van-e (`core.vol_baseline`).
+    """Az ATR a stratégia kalibrált sávjában van-e (`gates.vol_baseline`).
 
     v3.27.0 óta VALÓDI kapu: a hatása (blokkol / kockázatcsökkentés / ki) dönt,
     mint bárhol máshol. Ami NEM változott: a küszöbök a stratégia optimalizált
     paraméterei (`atr_min_pct`/`atr_max_pct`) — lásd `PARAM_DRIVEN`."""
-    from core import vol_baseline as _vb
+    from gates import vol_baseline as _vb
     atr, base = ctx.get("atr_price"), ctx.get("atr_baseline")
     if not atr or not base:
         return UNKNOWN, _t("gate.why.no_atr")
@@ -747,7 +751,7 @@ def ctx_from_state(ds, params: dict, pair_cfg: dict) -> dict:
     cap = 0.0
     if point_size:
         try:
-            from core import spread_gate as _sg
+            from gates import spread_gate as _sg
             cap = _sg.max_spread_points(
                 getattr(ds, "atr_price", None), point_size, params or {},
                 normal_spread_points=(pair_cfg or {}).get("backtest_spread_points"))
@@ -789,7 +793,7 @@ def ctx_from_state(ds, params: dict, pair_cfg: dict) -> dict:
 
 def cost_max_distortion(pair_cfg: dict, cfg: dict = None) -> float:
     """A megengedett RR-torzítás erre a párra (alap ← globális ← pár)."""
-    from core import cost_gate as _cg
+    from gates import cost_gate as _cg
     out = _cg.DEFAULT_MAX_DISTORTION
     for section in ((cfg or {}).get("gates") or {},
                     (pair_cfg or {}).get("gates") or {}):
@@ -808,7 +812,7 @@ def momentum_config(pair_cfg: dict, cfg: dict = None) -> dict:
     A hatás/mód per stratégia dől el, a MÉRÉS viszont instrumentum-tulajdonság:
     egy páron egy fordulatszámmérő van, különben a `Lendület` oszlop nem tudna
     mit mutatni."""
-    from core import momentum as _m
+    from gates import momentum as _m
     out = dict(_m.DEFAULTS)
     for section in ((cfg or {}).get("gates") or {}, (pair_cfg or {}).get("gates") or {}):
         g = section.get(MOMENTUM)

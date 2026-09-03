@@ -162,7 +162,7 @@ def futtat(fk: dict) -> dict:
         # vissza, hogy „nem léptél volna be" — ami nem válasz.
         #
         # ⚠ ÉS MIÉRT A PARAMÉTERBEN, ÉS NEM A MOTORBAN: a `0` a szűrő
-        # dokumentált kikapcsolt értéke (`core.vol_baseline.band`), tehát ehhez
+        # dokumentált kikapcsolt értéke (`gates.vol_baseline.band`), tehát ehhez
         # nem kell új ág a backtestben. A jelölt-lista UGYANEBBŐL a dictből
         # épül, így az ujjlenyomat-ellenőrzés is rendben van.
         params = {**params, "atr_min_pct": 0, "atr_max_pct": 0}

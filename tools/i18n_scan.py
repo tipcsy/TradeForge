@@ -172,13 +172,13 @@ def main(argv):
     # eredetit mutatja), de MENNYISÉG — és a katalógus 100%-a mellett is
     # maradhat lefordítatlan doksi.
     print("\nLEÍRÁSOK (.md)")
-    # ⚠ A kapuknál NEM minden `.md` leírás: a `core/docs/` fejlesztői jegyzeteket
-    # is tart (`tick_storage.md`), amit a felület sosem mutat. A lista ezért a
-    # REGISZTRÁLT kapukhoz igazodik — különben a jelentés olyasmit kérne
-    # számon, amit senki nem olvas a programban.
+    # ⚠ A lista a REGISZTRÁLT kapukhoz igazodik — különben a jelentés olyasmit
+    # kérne számon, amit senki nem olvas a programban. (A `core/docs/` maradt
+    # fejlesztői jegyzeteknek, pl. `tick_storage.md`; a KAPUK leírásai v3.29.1
+    # óta a kapuval együtt, a `gates/docs/`-ban élnek.)
     from core import gates as _gates
     for label, folder, only in (
-            ("kapuk", ROOT / "core" / "docs", set(_gates.KEYS)),
+            ("kapuk", ROOT / "gates" / "docs", set(_gates.KEYS)),
             ("stratégiák", ROOT / "strategies" / "docs", None)):
         base = sorted(p for p in folder.glob("*.md")
                       if p.name.count(".") == 1

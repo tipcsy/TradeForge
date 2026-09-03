@@ -1,7 +1,7 @@
 """A rendszer SAJAT kapui, bar-onkent kiszamolva - kutatasi hasznalatra.
 
-Nem ujrairom oket: a `core.regime`, `core.tf_align`, `core.spread_gate`,
-`core.momentum`, `core.cost_gate` fuggvenyeit hivom, ugyanazokkal az
+Nem ujrairom oket: a `core.regime`, `gates.tf_align`, `gates.spread_gate`,
+`gates.momentum`, `gates.cost_gate` fuggvenyeit hivom, ugyanazokkal az
 alapertekekkel, mint a motor. Igy amit itt merek, az atvihето elesbe.
 """
 from __future__ import annotations
@@ -21,9 +21,9 @@ from pathlib import Path
 
 import lab
 from core import regime as _regime
-from core import momentum as _mom
-from core import spread_gate as _sg
-from core import cost_gate as _cg
+from gates import momentum as _mom
+from gates import spread_gate as _sg
+from gates import cost_gate as _cg
 
 # A kapuk alapertelmezett hatokoret a config adja; itt a DOKUMENTALT alapokat
 # hasznaljuk (core/execution_params.DEFAULTS + gates.MARKET_ADVERSE_DEFAULT).

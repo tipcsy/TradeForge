@@ -66,7 +66,7 @@ def _save_spread(cfg: dict, symbol: str, values: dict, all_symbols: list):
 
 
 def _load_tf_align(cfg: dict, symbol: str) -> dict:
-    from core import tf_align as _tfa
+    from gates import tf_align as _tfa
     en, tfs, sma, _gate = _tfa.config_for(cfg, symbol)
     return {"enabled": en, "timeframes": list(tfs), "sma_period": sma,
             "viz": _tfa.viz_on(cfg, symbol)}
@@ -130,7 +130,7 @@ def _save_momentum(cfg: dict, symbol: str, values: dict, all_symbols: list):
     szótárba, ahol a per-stratégia hatás/mód is lakik. Nem ütköznek: a mérési
     kulcsok (`basis`, `sma_fast`, …) és a stratégia-nevek diszjunktak (a `market`
     kapu `adverse` kulcsa ugyanígy él a stratégia-nevek mellett)."""
-    from core import momentum as _m
+    from gates import momentum as _m
     for sym in all_symbols:
         pc = cfg.setdefault("pairs", {}).setdefault(sym, {})
         g = pc.setdefault("gates", {}).setdefault(_g.MOMENTUM, {})
@@ -150,7 +150,7 @@ def _load_cost(cfg: dict, symbol: str) -> dict:
 
 
 def _save_cost(cfg: dict, symbol: str, values: dict, all_symbols: list):
-    from core import cost_gate as _cg
+    from gates import cost_gate as _cg
     for sym in all_symbols:
         pc = cfg.setdefault("pairs", {}).setdefault(sym, {})
         g = pc.setdefault("gates", {}).setdefault(_g.COST, {})

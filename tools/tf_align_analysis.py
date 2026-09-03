@@ -34,7 +34,7 @@ sys.path.insert(0, str(ROOT))
 from strategy.settings import load_config
 from strategy import get_strategy
 from core.params_store import params_file, set_active_strategy
-from core import tf_align as _tfa
+from gates import tf_align as _tfa
 from trading.backtest import load_data, run_pair
 
 _SMA_N = 50    # trend-irány idősíkonként: close vs SMA(_SMA_N)
@@ -55,7 +55,7 @@ def _trend_sign(df: pd.DataFrame, n: int = _SMA_N) -> pd.Series:
 
 
 def _bars(df: pd.DataFrame):
-    """(nyitó-idő unix, záróár) — a `core.tf_align` historikus kiértékelőjének
+    """(nyitó-idő unix, záróár) — a `gates.tf_align` historikus kiértékelőjének
     bemenete."""
     return ((df.index.view("int64") // 1_000_000_000).astype(np.int64),
             df["close"].to_numpy(dtype=float))
@@ -98,7 +98,7 @@ def analyze(symbol, cfg, strategy, ib, oos_frac=0.4, with_m1=False):
         return
 
     # Idősík-jelek: M5 (M1-ből), M15 (nyers), H1 (M1-ből). Opcionálisan M1 (zajos).
-    # A trend-előjelek a KÖZÖS, look-ahead-mentes magból (core.tf_align). Korábban
+    # A trend-előjelek a KÖZÖS, look-ahead-mentes magból (gates.tf_align). Korábban
     # `sign(bar_close − SMA)` volt, `asof(nyitó_idő)`-vel kiolvasva: az a kötés
     # idejét TARTALMAZÓ gyertya VÉGLEGES záróárából számolt — vagyis a besorolás
     # jövőt látott (H1-nél akár egy órányit), és ez torzította a mért „élt".

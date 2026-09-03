@@ -136,7 +136,7 @@ def resample_ohlc(df, minutes: int):
 
     Csak FELFELÉ (durvább idősík) értelmes; a hívó dolga ezt biztosítani. A
     `label`/`closed` alapértelmezés (bal-zárt, bal-címkés) EGYEZIK az MT5-ével és
-    a `core.tf_align` resample-jével: a gyertya a NYITÓ idejével azonosított."""
+    a `gates.tf_align` resample-jével: a gyertya a NYITÓ idejével azonosított."""
     agg = {"open": "first", "high": "max", "low": "min", "close": "last"}
     if "volume" in df.columns:
         agg["volume"] = "sum"
