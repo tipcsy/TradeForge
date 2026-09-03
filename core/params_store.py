@@ -68,6 +68,22 @@ def done_marker(symbol: str, strategy: str | None = None) -> Path:
     return strategy_dir(strategy) / f"{symbol}_study.done"
 
 
+def space_marker(symbol: str, strategy: str | None = None) -> Path:
+    """A KERESÉSI TÉR ujjlenyomata a study mellett.
+
+    ⚠ MIÉRT KELL (2026-09-02-i felhasználói jelzés, mérve 09-03). Az optuna
+    study perzisztens (SQLite), és a folytatás kulcsa CSAK a szimbólum — a
+    keresési tér nincs benne. Ha közben átírod egy paraméter tartományát (pl.
+    `keltner_period` 10–20 → 4–30), a folytatott study
+    * az ÚJ trialokat már az új tartományból mintázza, DE
+    * a RÉGI trialokat is megtartja a régi értékekkel, és
+    * a „legjobb" az ÖSSZES trial közül kerül ki — jellemzően egy régiből.
+    A felhasználó pontosan ezt látta: 14 lehetséges variációt írt ki a futás,
+    az eredmény mégis a régi 10–20 sávból jött. Semmi nem hibázott — a program
+    csak NEM VETTE ÉSZRE, hogy már mást keres."""
+    return strategy_dir(strategy) / f"{symbol}_study.space"
+
+
 def stop_marker(symbol: str, strategy: str | None = None) -> Path:
     """Leállítás-kérés marker: a GUI hozza létre, a futó optimalizáló/tanító
     szubprocessz trial-/lépés-határon észleli és kilép (user-cancel). A futás

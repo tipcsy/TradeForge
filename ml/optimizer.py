@@ -52,7 +52,8 @@ log = logging.getLogger(__name__)
 # importok változatlanul működjenek. A tárolás elrendezését lásd ott.
 from core.params_store import (            # noqa: E402  (re-export)
     PARAMS_DIR, set_active_strategy, active_strategy, strategy_dir,
-    params_file, trials_file, study_db, done_marker, stop_marker, migrate_flat_layout,
+    params_file, trials_file, study_db, done_marker, stop_marker, space_marker,
+    migrate_flat_layout,
 )
 
 
@@ -488,6 +489,25 @@ def _param_split(strategy, opt_cfg: dict) -> tuple[list, list]:
     sig = [k for k in specs if param_class(scfg, k) != EXEC_PARAM]
     exe = [k for k in specs if param_class(scfg, k) == EXEC_PARAM]
     return sig, exe
+
+
+def ter_ujjlenyomat(opt_cfg: dict, extra: dict = None) -> str:
+    """A KERESÉSI TÉR stabil ujjlenyomata.
+
+    Mindent tartalmaz, ami egy trial JELENTÉSÉT megváltoztatja: a paraméter-
+    tartományokat (`min`/`max`/`step` + a `gt`/`lt` függések), és a hívó által
+    adott extrát (rr-keresés, beágyazott mód). ⚠ A kulcsok RENDEZVE mennek bele,
+    különben ugyanaz a tér két különböző ujjlenyomatot adna attól függően,
+    milyen sorrendben olvastuk be a configot."""
+    import hashlib
+    import json as _json
+    specs = {}
+    for k, v in (opt_cfg or {}).items():
+        if isinstance(v, dict) and "min" in v:
+            specs[k] = {m: v.get(m) for m in ("min", "max", "step", "gt", "lt")}
+    nyers = _json.dumps({"specs": specs, "extra": extra or {}},
+                        sort_keys=True, default=str)
+    return hashlib.sha1(nyers.encode("utf-8")).hexdigest()[:16]
 
 
 def _suggest_params(trial, opt_cfg: dict, base_params: dict,
@@ -1029,6 +1049,51 @@ def optimize_pair_optuna(
             done_flag.unlink(missing_ok=True)
         except Exception as e:
             log.debug("%s — study reset hiba: %s", symbol, e)
+
+    # ── A KERESÉSI TÉR VÁLTOZOTT-E? ──────────────────────────────────────
+    # ⚠ Ha igen, a folytatás HAMIS eredményt adna: a régi trialok a régi
+    # tartományból származnak, és a „legjobb" közülük is kikerülhet. Ilyenkor
+    # ÚJAT kezdünk — de a régi `.db`-t nem dobjuk el, csak félretesszük.
+    _fp = ter_ujjlenyomat(opt_cfg, {
+        # ⚠ A KOCKÁZATCSÖKKENTÉS-KERESÉS és a BEÁGYAZOTT mód is a TÉR része:
+        # bekapcsolva más dimenziók kerülnek a trialba, tehát a régi trialok nem
+        # összemérhetők az újakkal.
+        "rr": bool(optimize_rr), "rr_presets": sorted(
+            opt_cfg.get("rr_presets") or _RR_PRESETS),
+        "nested": bool(nested), "exec_gates": bool(exec_gates),
+        "strategy": strategy.name,
+    })
+    _fp_fajl = space_marker(symbol, strategy.name)
+    _db = study_db(symbol, strategy.name)
+    if _db.exists():
+        try:
+            _regi = _fp_fajl.read_text(encoding="utf-8").strip() if _fp_fajl.exists() else ""
+        except OSError:
+            _regi = ""
+        if _regi != _fp:
+            _uj_nev = _db.with_suffix(
+                f".db.regi-{time.strftime('%Y%m%d-%H%M%S')}")
+            try:
+                _db.rename(_uj_nev)
+                log.warning(
+                    "%s/%s — a KERESÉSI TÉR megváltozott az előző futás óta "
+                    "(%s → %s). Új optimalizálás indul; a félbehagyott study "
+                    "félretéve: %s.  ⇒ Enélkül a régi tartományból származó "
+                    "trialok is versenyeznének, és a „legjobb” közülük is "
+                    "kikerülhetne — vagyis a beállított tartomány NEM "
+                    "érvényesülne.",
+                    symbol, strategy.name, _regi or "ismeretlen", _fp,
+                    _uj_nev.name)
+            except OSError as e:
+                # ⚠ NEM HALLGATUNK: ha nem tudjuk félretenni, inkább mondjuk
+                # meg, mint hogy csendben rossz tartománnyal folytassunk.
+                log.error("%s — a régi study nem tehető félre (%s); a folytatás "
+                          "RÉGI tartományú trialokat is tartalmazhat!", symbol, e)
+    try:
+        _fp_fajl.parent.mkdir(parents=True, exist_ok=True)
+        _fp_fajl.write_text(_fp, encoding="utf-8")
+    except OSError as e:
+        log.debug("%s — a tér-ujjlenyomat nem menthető: %s", symbol, e)
 
     # Perzisztens study (SQLite) → megszakadás után FOLYTATHATÓ ugyanarra a párra.
     study = optuna.create_study(
