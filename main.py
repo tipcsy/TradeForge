@@ -12,6 +12,8 @@ Parancsok:
   python main.py backtest     — backtest futtatás az alapértelmezett paraméterekkel
   python main.py lab          — kézi laboratórium: chart-ablak (Qt, külön processz)
   python main.py lab-mpl      — ugyanaz a régi, matplotlib-es felülettel
+  python main.py pack <név>   — stratégia becsomagolása `.tfs` fájlba
+  python main.py install <f>  — stratégia-csomag telepítése (⚠ kódot hoz be)
 
 Az `optimize` pár × STRATÉGIA szinten dolgozik. Stratégia megadása nélkül minden
 páron a SAJÁT engedélyezett stratégiái futnak (pairs.<sym>.strategies) — ugyanaz a
@@ -22,6 +24,11 @@ halmaz, amit a motor is futtat:
   python main.py optimize Ger40 --strategy ml_ai  — egy pár, egy stratégia (tanítható → tanítás)
   python main.py optimize --strategy ml_ai        — minden pár, csak az ml_ai
   python main.py optimize -s wpr_sma,ml_ai        — vesszős rövid alak
+
+A `.tfs` egy átnevezett zip: a stratégia modulja, a segédmoduljai, a configja
+és a leírásai. Optimalizált paramétert NEM visz — az eredmény, nem a stratégia.
+⚠ A telepítés FUTTATHATÓ PYTHON KÓDOT hoz be, ezért külön megerősítést kér
+(`--yes`). Csak olyan csomagot telepíts, ami TŐLED származik.
 
 TradeForge — Copyright (C) 2026 tipcsy. Ez a program MINDENFÉLE GARANCIA NÉLKÜL
 készült, és szabadon terjesztheted a GNU GPL v3 feltételei szerint (lásd LICENSE).
@@ -415,6 +422,86 @@ def cmd_lab_mpl(argv=None):
     return _lab(argv or [])
 
 
+def cmd_pack(argv=None):
+    """`pack <nev> [--out MAPPA] [--version X]` — stratégia becsomagolása `.tfs`-be.
+
+    A csomag a stratégia MOSTANI állapotát rögzíti (modul + segédmodulok +
+    config + leírások). NEM viszi az optimalizált paramétereket: azok eredmények,
+    nem a stratégia."""
+    from strategy import pack, registered_strategy_names
+    argv = list(argv or [])
+    if not argv or argv[0].startswith("-"):
+        print("Hasznalat: python main.py pack <nev> [--out MAPPA] [--version X]")
+        print("Betoltott strategiak: " + ", ".join(registered_strategy_names()))
+        return 1
+    nev = argv[0]
+    out = ver = None
+    i = 1
+    while i < len(argv):
+        if argv[i] == "--out" and i + 1 < len(argv):
+            out = argv[i + 1]
+            i += 1
+        elif argv[i] == "--version" and i + 1 < len(argv):
+            ver = argv[i + 1]
+            i += 1
+        i += 1
+    try:
+        p = pack.build(nev, out, version=ver or "1.0.0")
+    except pack.PackError as e:
+        print(f"NEM sikerult: {e}")
+        return 1
+    print(f"Kesz: {p}  ({p.stat().st_size} bajt)")
+    return 0
+
+
+def cmd_install(argv=None):
+    """`install <fajl.tfs> [--overwrite]` — stratégia-csomag telepítése.
+
+    ⚠ EGY `.tfs` FUTTATHATO PYTHON KOD. A telepites ugyanaz a bizalmi lepes,
+    mint egy `.exe` elinditasa — ezert a parancs ELOBB KIIRJA, mit hozna be, es
+    csak `--yes` mellett telepit kerdes nelkul."""
+    from strategy import pack
+    argv = list(argv or [])
+    if not argv or argv[0].startswith("-"):
+        print("Hasznalat: python main.py install <fajl.tfs> [--overwrite] [--yes]")
+        return 1
+    fajl = argv[0]
+    overwrite = "--overwrite" in argv
+    igen = "--yes" in argv or "-y" in argv
+    try:
+        man, gondok = pack.check(fajl, overwrite=overwrite)
+    except pack.PackError as e:
+        print(f"NEM telepitheto: {e}")
+        return 1
+    print(f"Csomag:   {man['name']}  v{man.get('version')}  (api {man.get('api')})")
+    print(f"Keszult:  {man.get('created_by')}")
+    print("Fajlok:   " + ", ".join(man["_files"]))
+    if gondok:
+        print("GONDOK:")
+        for g in gondok:
+            print("  • " + g)
+        if not overwrite:
+            return 1
+    if not igen:
+        print()
+        print("⚠ A telepites PYTHON KODOT hoz be es futtathatova tesz. Ha ez a")
+        print("  fajl nem tolem szarmazik, NE telepitsd. Megerositeshez: --yes")
+        return 1
+    try:
+        man = pack.install(fajl, overwrite=overwrite)
+    except pack.PackError as e:
+        print(f"NEM telepitheto: {e}")
+        return 1
+    print("Telepitve:")
+    for f in man["installed"]:
+        print("  " + f)
+    if man.get("needs_optimize"):
+        print()
+        print(f"⚠ Nincs meg optimalizalt parameter erre a strategiara. Futtasd:")
+        print(f"    python main.py optimize --strategy {man['name']}")
+    return 0
+
+
 COMMANDS = {
     "download":  (cmd_download,   []),
     "optimize":  (cmd_optimize,   "symbols"),
@@ -425,6 +512,8 @@ COMMANDS = {
     "dashboard": (cmd_dashboard,  []),
     "lab":       (cmd_lab,        "argv"),
     "lab-mpl":   (cmd_lab_mpl,    "argv"),
+    "pack":      (cmd_pack,       "argv"),
+    "install":   (cmd_install,    "argv"),
 }
 
 

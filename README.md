@@ -274,6 +274,36 @@ Két dolgot érdemes tudni:
   belépő-ablakot (SSH-n nem is látszana): jelentkezz be egyszer a grafikus
   felületen, és másold a `data/licence_token.json`-t a másik gépre.
 
+### Stratégia-csomag (`.tfs`)
+
+Egy stratégia egyetlen fájlba csomagolható és onnan telepíthető — a modul, a
+segédmoduljai, a configja és a leírásai együtt:
+
+```bash
+python main.py pack wpr_sma                  # → data/packs/wpr_sma-1.0.0.tfs
+python main.py install wpr_sma-1.0.0.tfs     # megmutatja, mit hozna be
+python main.py install wpr_sma-1.0.0.tfs --yes
+```
+
+A `.tfs` egy **átnevezett zip**: `manifest.json` + `<név>.py` + `config.json` +
+`docs/<név>.md`. Ha a stratégiának saját segédmodulja van (mint az `ml_ai`-nak a
+`ml_features` és a `ml_train`), azok is bekerülnek — enélkül a csomag betöltés
+után importhibával esne szét.
+
+> **⚠ A telepítés futtatható Python kódot hoz be.** Ugyanaz a bizalmi lépés, mint
+> egy `.exe` elindítása. Ezért a parancs előbb kiírja, mit hozna be, és csak
+> `--yes` mellett telepít. Csak olyan csomagot telepíts, ami tőled származik.
+
+**Amit a csomag NEM visz:** az optimalizált paramétereket és a betanított
+modelleket. Azok *eredmények*, nem a stratégia — és páronként mások. Egy frissen
+telepített stratégiát tehát optimalizálni kell, mielőtt kereskedne; a telepítő ki
+is írja, ha ez a helyzet.
+
+**Kompatibilitás.** A csomag `api` mezője mondja meg, melyik szerződésre íródott a
+stratégia. Ha nem illik ehhez a programhoz, a telepítés elutasítja — és
+megmondja, melyik oldalt kell frissíteni (a programot vagy a stratégiát). A
+szerződés részletei: [`strategy/contract.py`](strategy/contract.py).
+
 ### Kézi laboratórium (`tools/lab_scenario.py`)
 
 „Mi lett volna, ha **itt** lépek be, és **itt** mentesítem a kockázatot?" Egy
@@ -994,6 +1024,36 @@ Two things worth knowing:
 * **Licence sign-in does not happen here.** Console mode deliberately does not
   open a sign-in window (it would not show over SSH): sign in once in the GUI
   and copy `data/licence_token.json` to the other machine.
+
+### Strategy package (`.tfs`)
+
+A strategy can be packed into a single file and installed from it — the module,
+its helper modules, its config and its docs together:
+
+```bash
+python main.py pack wpr_sma                  # → data/packs/wpr_sma-1.0.0.tfs
+python main.py install wpr_sma-1.0.0.tfs     # shows what it would bring in
+python main.py install wpr_sma-1.0.0.tfs --yes
+```
+
+A `.tfs` is a **renamed zip**: `manifest.json` + `<name>.py` + `config.json` +
+`docs/<name>.md`. If the strategy has its own helper modules (as `ml_ai` has
+`ml_features` and `ml_train`), those travel with it — without them the package
+would fall apart with an import error *after* loading.
+
+> **⚠ Installing brings in executable Python code.** It is the same act of trust
+> as launching an `.exe`. That is why the command first prints what it would
+> install and only proceeds with `--yes`. Only install packages that came from you.
+
+**What the package does NOT carry:** optimised parameters and trained models.
+Those are *results*, not the strategy — and they differ per instrument. A freshly
+installed strategy therefore needs optimising before it can trade; the installer
+says so when that is the case.
+
+**Compatibility.** The package's `api` field states which contract the strategy
+was written against. If it does not match this program, the install is refused —
+and the message says which side needs updating (the program or the strategy).
+Details: [`strategy/contract.py`](strategy/contract.py).
 
 ### Manual laboratory (`tools/lab_scenario.py`)
 
