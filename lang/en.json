@@ -1163,5 +1163,21 @@
   "gb.now": "now: {value}",
   "contract.err.not_int": "the strategy's `api` field is not a number ({value})",
   "contract.err.too_new": "built for a NEWER program (api {api}, this one supports up to {program}) → update TradeForge",
-  "contract.err.too_old": "built against an OLDER contract (api {api}, oldest supported is {minimum}) → the strategy needs updating"
+  "contract.err.too_old": "built against an OLDER contract (api {api}, oldest supported is {minimum}) → the strategy needs updating",
+  "pack.btn.install": "Load package…",
+  "pack.btn.export": "Pack selected…",
+  "pack.hint": "(.tfs — one strategy in one file)",
+  "pack.filetype": "TradeForge strategy",
+  "pack.filetype.all": "All files",
+  "pack.dlg.open": "Open strategy package",
+  "pack.dlg.save": "Save strategy to a package",
+  "pack.dlg.confirm.title": "Install this strategy?",
+  "pack.dlg.confirm.body": "{name}  v{version}   (api {api})\nCreated by: {by}\n\nThe package contains:\n  {files}\n\n⚠ Installing brings EXECUTABLE PYTHON CODE onto your machine — the same act of trust as launching an .exe.\nOnly continue if this file came from YOU.",
+  "pack.dlg.overwrite.title": "Overwrite the existing one?",
+  "pack.dlg.overwrite.body": "A strategy named {name} already exists. Installing will OVERWRITE its module, config and docs.\n\nSaved (optimised) parameters are kept — but if the strategy's logic changed, those were tuned for DIFFERENT code.",
+  "pack.msg.problems": "The package cannot be installed:\n• {list}",
+  "pack.msg.installed": "Installed: {name}. To put it to use, move it to the Enabled side and save.",
+  "pack.msg.needs_optimize": "⚠ No optimised parameters yet — run the optimiser on it ({name}).",
+  "pack.msg.pick_first": "Select a strategy in the list first.",
+  "pack.msg.saved": "Saved: {path}"
 }

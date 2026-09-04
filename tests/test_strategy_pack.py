@@ -231,6 +231,53 @@ check("a telepites megerositest ker (--yes)", "--yes" in _main)
 check("...es KIMONDJA, hogy futtathato kodrol van szo",
       "PYTHON KODOT" in _main)
 
+
+# ══ 8. A FELULET: gombok a Beallitas > Strategiak lapon ════════════════
+# ⚠ A felhasznalo kepe: „Inkabb ugy kepzelem el, mint egy excel fajlt, hogy be
+# kell tolteni, es ugy hasznalni." A betoltes ezert a strategia-lista MELLETT
+# van: a csomag a GEPRE hozza a strategiat, a lista pedig HASZNALATBA veszi —
+# a ketto szandekosan ket kulon dontes.
+_gui = (ROOT / "dashboard" / "gui.py").read_text(encoding="utf-8")
+check("van Csomag-betoltese gomb", "pack.btn.install" in _gui)
+check("van Kijelolt-csomagolasa gomb", "pack.btn.export" in _gui)
+check("a telepites elott MEGERositest ker", "pack.dlg.confirm.title" in _gui)
+check("...es a megerosites KIIRJA, mit hozna be",
+      "pack.dlg.confirm.body" in _gui)
+# ⚠ A NEV-UTKOZEST NEM a hibauzenet SZOVEGEBOL ismerjuk fel (az az elso
+# forditasnal neman elromlana), hanem ujra megkerdezzuk `overwrite=True`-val.
+check("a felulíras eldontese nem szoveg-illesztes",
+      "check(f, overwrite=True)" in _gui)
+check("sikeres telepites utan a lista AZONNAL bovul",
+      "_strat_ed.add(" in _gui)
+check("...es szol, ha meg nincs optimalizalt parameter",
+      "pack.msg.needs_optimize" in _gui)
+
+# A pontos celfajl (a „Mentes maskent" ablakbol) — ne irjuk felul a
+# felhasznalo altal valasztott nevet a sajatunkkal.
+_sajat = TMP / "sajat_nev.tfs"
+_ki = pack.build("wpr_sma", out_file=_sajat)
+check("a `build` a MEGADOTT celfajlba ir", _ki == _sajat and _sajat.exists(),
+      str(_ki))
+
+# Az OrderEditor uj metodusai (ezekre epul a felulet).
+try:
+    import tkinter as tk
+    _root = tk.Tk()
+    _root.withdraw()
+except Exception as _ex:
+    print(f"SKIP  az OrderEditor resze (nincs kepernyo: {_ex})")
+    _root = None
+
+if _root is not None:
+    from dashboard.order_editor import OrderEditor
+    _ed = OrderEditor(_root, {"a": "a", "b": "b"}, ["a"])
+    check("a frissen telepitett a KIKAPCSOLT oldalra kerul",
+          _ed.add("uj") and "uj" in _ed.disabled() and "uj" not in _ed.get(),
+          f"on={_ed.get()} off={_ed.disabled()}")
+    check("a mar meglevot nem veszi fel megegyszer", not _ed.add("uj"))
+    check("kijeloles nelkul a `selected` ures", _ed.selected() == "")
+    _root.destroy()
+
 shutil.rmtree(TMP, ignore_errors=True)
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")

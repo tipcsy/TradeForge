@@ -111,6 +111,34 @@ class OrderEditor:
     def _down(self):
         self._shift(1)
 
+    # ── Bővítés / lekérdezés ─────────────────────────────────────────────
+    def add(self, key: str, label: str = "", enabled: bool = False) -> bool:
+        """ÚJ tétel felvétele futás közben. `False`, ha már szerepel.
+
+        ⚠ MIÉRT KELL. A `.tfs` telepítése közben új stratégia kerül a gépre. Ha
+        a lista csak az ablak MEGNYITÁSAKOR épülne fel, a felhasználó a sikeres
+        telepítés után egy változatlan listát látna — vagyis pontosan azt, hogy
+        „nem történt semmi". Az újat ALAPBÓL a kikapcsolt oldalra tesszük: a
+        gépre kerülés és a használatba vétel két különböző döntés."""
+        if key in self._labels:
+            return False
+        self._labels[key] = label or key
+        if enabled:
+            self._on_keys.append(key)
+            self._on.insert("end", self._labels[key])
+        else:
+            self._off_keys.append(key)
+            self._off.insert("end", self._labels[key])
+        return True
+
+    def selected(self) -> str:
+        """A ÉPPEN kijelölt tétel kulcsa (bármelyik oldalon), vagy `""`."""
+        for lb, keys in ((self._on, self._on_keys), (self._off, self._off_keys)):
+            sel = lb.curselection()
+            if sel and sel[0] < len(keys):
+                return keys[sel[0]]
+        return ""
+
     # ── Eredmény ─────────────────────────────────────────────────────────
     def get(self) -> list:
         """A BEKAPCSOLTAK kulcsai, a beállított sorrendben."""

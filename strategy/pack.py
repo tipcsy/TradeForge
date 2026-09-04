@@ -131,11 +131,15 @@ def helper_modules(name: str) -> list:
     return sorted(talalt)
 
 
-def build(name: str, out_dir=None, version: str = "1.0.0") -> Path:
+def build(name: str, out_dir=None, version: str = "1.0.0", out_file=None) -> Path:
     """Egy TELEPÍTETT stratégia becsomagolása `.tfs`-be. A kész fájl útját adja.
 
     A csomag a stratégia MOSTANI állapotát rögzíti: a modult, a segédmoduljait,
-    a configját és a leírásait."""
+    a configját és a leírásait.
+
+    `out_file`: PONTOS célfájl (a felület „Mentés másként" ablakából). Ilyenkor
+    az `out_dir` és a névképzés kimarad — a felhasználó által választott nevet
+    nem írjuk felül a sajátunkkal."""
     from strategy import paths as _paths, registered_strategy_names
     from strategy import get_strategy_by_name
     from version import APP_NAME, APP_VERSION
@@ -153,9 +157,13 @@ def build(name: str, out_dir=None, version: str = "1.0.0") -> Path:
     segedek = helper_modules(name)
     dokik = sorted(p for p in _paths.docs_dir().glob(f"{name}.*md"))
 
-    out_dir = Path(out_dir) if out_dir else (_paths.ROOT / "data" / "packs")
-    out_dir.mkdir(parents=True, exist_ok=True)
-    cel = out_dir / f"{name}-{version}{SUFFIX}"
+    if out_file:
+        cel = Path(out_file)
+        cel.parent.mkdir(parents=True, exist_ok=True)
+    else:
+        out_dir = Path(out_dir) if out_dir else (_paths.ROOT / "data" / "packs")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        cel = out_dir / f"{name}-{version}{SUFFIX}"
 
     tartalom = {f"{name}.py": modul, "config.json": cfg}
     for m in segedek:

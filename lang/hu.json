@@ -1163,5 +1163,21 @@
   "gb.now": "most: {value}",
   "contract.err.not_int": "a stratégia `api` mezője nem szám ({value})",
   "contract.err.too_new": "ÚJABB programhoz készült (api {api}, ez a program {program}-ig tud) → frissítsd a TradeForge-ot",
-  "contract.err.too_old": "RÉGEBBI szerződésre épül (api {api}, a legrégebbi támogatott {minimum}) → a stratégiát kell átírni"
+  "contract.err.too_old": "RÉGEBBI szerződésre épül (api {api}, a legrégebbi támogatott {minimum}) → a stratégiát kell átírni",
+  "pack.btn.install": "Csomag betöltése…",
+  "pack.btn.export": "Kijelölt csomagolása…",
+  "pack.hint": "(.tfs — a stratégia egy fájlban)",
+  "pack.filetype": "TradeForge stratégia",
+  "pack.filetype.all": "Minden fájl",
+  "pack.dlg.open": "Stratégia-csomag megnyitása",
+  "pack.dlg.save": "Stratégia mentése csomagba",
+  "pack.dlg.confirm.title": "Telepíted ezt a stratégiát?",
+  "pack.dlg.confirm.body": "{name}  v{version}   (api {api})\nKészítette: {by}\n\nA csomag tartalma:\n  {files}\n\n⚠ A telepítés FUTTATHATÓ PYTHON KÓDOT hoz be a gépedre — ugyanaz a bizalmi lépés, mint egy .exe elindítása.\nCsak akkor folytasd, ha ez a fájl TŐLED származik.",
+  "pack.dlg.overwrite.title": "Felülírod a meglévőt?",
+  "pack.dlg.overwrite.body": "Már van {name} nevű stratégia. A telepítés FELÜLÍRJA a modulját, a configját és a leírását.\n\nA mentett (optimalizált) paraméterek megmaradnak — de ha a stratégia logikája változott, azok már MÁS kódra készültek.",
+  "pack.msg.problems": "A csomag nem telepíthető:\n• {list}",
+  "pack.msg.installed": "Telepítve: {name}. A használatba vételhez told át a Bekapcsolt oldalra, és mentsd el.",
+  "pack.msg.needs_optimize": "⚠ Nincs még optimalizált paraméter — futtasd rá az optimalizálást ({name}).",
+  "pack.msg.pick_first": "Előbb jelölj ki egy stratégiát a listában.",
+  "pack.msg.saved": "Elmentve: {path}"
 }

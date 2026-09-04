@@ -4043,6 +4043,108 @@ class DashboardWindow:
             note=_t("gui2.a_program_a_bekapcsoltakat"))
         _strat_ed.frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
+        # ── CSOMAG (`.tfs`): betöltés / mentés ───────────────────────────
+        # ⚠ A FELHASZNÁLÓ KÉPE (2026-09-02): „Inkább úgy képzelem el, mint egy
+        # excel fájlt, hogy be kell tölteni, és úgy használni." A betöltés ITT
+        # van, a stratégia-lista MELLETT — mert a két lépés összetartozik:
+        # a csomag a GÉPRE hozza a stratégiát, a lista pedig HASZNÁLATBA veszi.
+        # A kettő szándékosan külön: egy telepítés nem kezd el magától kereskedni.
+        _pk = tk.Frame(_st, bg=BG)
+        _pk.pack(fill="x", padx=10, pady=(0, 10))
+        _pk_msg = tk.Label(_st, text="", bg=BG, fg=FG_GRAY, font=self._small_font,
+                           anchor="w", justify="left", wraplength=620)
+        _pk_msg.pack(anchor="w", padx=10, pady=(0, 10))
+
+        def _pack_hiba(txt):
+            _pk_msg.config(text=txt, fg=FG_RED)
+
+        def _pack_ok(txt):
+            _pk_msg.config(text=txt, fg=FG_GREEN)
+
+        def _csomag_betolt():
+            from tkinter import filedialog, messagebox
+            from strategy import pack as _pack
+            f = filedialog.askopenfilename(
+                parent=popup, title=_t("pack.dlg.open"),
+                filetypes=[(_t("pack.filetype"), "*" + _pack.SUFFIX),
+                           (_t("pack.filetype.all"), "*.*")])
+            if not f:
+                return
+            try:
+                man, gondok = _pack.check(f)
+            except _pack.PackError as e:
+                _pack_hiba(str(e))
+                return
+            # ⚠ A MEGERŐSÍTÉS ELŐTT MEGMUTATJUK, MIT HOZNÁNK BE. A telepítés
+            # futtatható Python kódot tesz a gépre — ugyanaz a bizalmi lépés,
+            # mint egy `.exe` elindítása. Ezt nem szabad egy kattintással,
+            # tájékoztatás nélkül megtenni.
+            # ⚠ A NÉV-ÜTKÖZÉS NEM UGYANOLYAN GOND, mint a többi: az feloldható
+            # (felúlírással), a többi nem. A kettőt úgy különítjük el, hogy
+            # MEGKÉRDEZZÜK a csomagot felülírás mellett is — így nem a hibaüzenet
+            # SZÖVEGÉBŐL következtetünk, ami az első fordításnál némán elromlana.
+            _man2, _valodi = _pack.check(f, overwrite=True)
+            if _valodi:
+                _pack_hiba(_t("pack.msg.problems",
+                              list="\n• ".join(_valodi)))
+                return
+            _felul = bool(gondok)
+            if _felul and not messagebox.askyesno(
+                    _t("pack.dlg.overwrite.title"),
+                    _t("pack.dlg.overwrite.body", name=man["name"]),
+                    parent=popup):
+                return
+            if not messagebox.askyesno(
+                    _t("pack.dlg.confirm.title"),
+                    _t("pack.dlg.confirm.body", name=man["name"],
+                       version=man.get("version", "?"), api=man.get("api", "?"),
+                       by=man.get("created_by", "?"),
+                       files="\n  ".join(man["_files"])),
+                    parent=popup):
+                return
+            try:
+                man = _pack.install(f, overwrite=_felul)
+            except _pack.PackError as e:
+                _pack_hiba(str(e))
+                return
+            # A lista AZONNAL bővül — különben a sikeres telepítés után a
+            # felhasználó változatlan listát látna, vagyis „nem történt semmi".
+            _strat_ed.add(man["name"])
+            _uzenet = _t("pack.msg.installed", name=man["name"])
+            if man.get("needs_optimize"):
+                _uzenet += "  " + _t("pack.msg.needs_optimize", name=man["name"])
+            _pack_ok(_uzenet)
+
+        def _csomag_ment():
+            from tkinter import filedialog
+            from strategy import pack as _pack
+            nev = _strat_ed.selected()
+            if not nev:
+                _pack_hiba(_t("pack.msg.pick_first"))
+                return
+            f = filedialog.asksaveasfilename(
+                parent=popup, title=_t("pack.dlg.save"),
+                defaultextension=_pack.SUFFIX,
+                initialfile=f"{nev}-1.0.0{_pack.SUFFIX}",
+                filetypes=[(_t("pack.filetype"), "*" + _pack.SUFFIX)])
+            if not f:
+                return
+            try:
+                out = _pack.build(nev, out_file=f)
+            except _pack.PackError as e:
+                _pack_hiba(str(e))
+                return
+            _pack_ok(_t("pack.msg.saved", path=str(out)))
+
+        tk.Button(_pk, text=_t("pack.btn.install"), command=_csomag_betolt,
+                  bg=BG_HEADER, fg=FG_WHITE, font=self._small_font, bd=0,
+                  padx=12, pady=4, activebackground=BG).pack(side="left")
+        tk.Button(_pk, text=_t("pack.btn.export"), command=_csomag_ment,
+                  bg=BG_HEADER, fg=FG_WHITE, font=self._small_font, bd=0,
+                  padx=12, pady=4, activebackground=BG).pack(side="left", padx=8)
+        tk.Label(_pk, text=_t("pack.hint"), bg=BG, fg=FG_GRAY_DIM,
+                 font=self._small_font).pack(side="left", padx=(8, 0))
+
         # ── TELEGRAM lap ─────────────────────────────────────────────────
         # ⚠ MIÉRT KELLETT IDE KAPCSOLÓ. A válaszos kötés (`notify.answer_trading`)
         # a v3.12.0 óta MEGVOLT, de sehol nem lehetett bekapcsolni: a kulcs

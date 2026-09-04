@@ -285,6 +285,11 @@ python main.py install wpr_sma-1.0.0.tfs     # megmutatja, mit hozna be
 python main.py install wpr_sma-1.0.0.tfs --yes
 ```
 
+**Felületről is:** ⚙ Beállítás → **Stratégiák** fül → `Csomag betöltése…` /
+`Kijelölt csomagolása…`. A betöltés a gépre hozza a stratégiát; a
+**használatba vétel** külön lépés (told át a „Bekapcsolt" oldalra, és mentsd)
+— egy telepítés nem kezd el magától kereskedni.
+
 A `.tfs` egy **átnevezett zip**: `manifest.json` + `<név>.py` + `config.json` +
 `docs/<név>.md`. Ha a stratégiának saját segédmodulja van (mint az `ml_ai`-nak a
 `ml_features` és a `ml_train`), azok is bekerülnek — enélkül a csomag betöltés
@@ -1035,6 +1040,11 @@ python main.py pack wpr_sma                  # → data/packs/wpr_sma-1.0.0.tfs
 python main.py install wpr_sma-1.0.0.tfs     # shows what it would bring in
 python main.py install wpr_sma-1.0.0.tfs --yes
 ```
+
+**From the UI as well:** ⚙ Settings → **Strategies** tab → `Load package…` /
+`Pack selected…`. Loading brings the strategy onto the machine; **putting it
+to use** is a separate step (move it to the "Enabled" side and save) — an
+install never starts trading on its own.
 
 A `.tfs` is a **renamed zip**: `manifest.json` + `<name>.py` + `config.json` +
 `docs/<name>.md`. If the strategy has its own helper modules (as `ml_ai` has
