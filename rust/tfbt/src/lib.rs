@@ -22,6 +22,8 @@
 //! verziót adni (`wpr_sma_v1`): a Python oldal csak akkor használja, ha a
 //! stratégia kifejezetten ezt a magot deklarálja.
 
+pub mod exec;
+
 use std::slice;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -179,7 +181,7 @@ fn m1_entry(s: &mut State, prev: f64, cur: f64, p: &WprParams) -> u8 {
 /// ⚠ EMELNI KELL, ha a viselkedés változik. Egy régi `.dll` egy új Python-logika
 /// mellett NÉMÁN mást számolna; a verzió-eltérésnél a Python inkább nem
 /// használja a natív utat, mint hogy rossz számot adjon.
-pub const KERNEL_ABI: i32 = 1;
+pub const KERNEL_ABI: i32 = 2;
 
 #[no_mangle]
 pub extern "C" fn tfbt_abi_version() -> i32 {

@@ -336,6 +336,116 @@ def _update_stops(trade: "Trade", high: float, low: float, rr: dict,
                     trade.sl = new_sl
 
 
+# ---------------------------------------------------------------------------
+# Natív végrehajtási út — opcionális gyorsítás, soha nem kötelező
+# ---------------------------------------------------------------------------
+# ⚠ A PRESET-KÓD KÖTÖTT: ugyanaz, mint a `PRESET_*` a Rust oldalon
+# (`rust/tfbt/src/exec.rs`). Egy elcsúszott kód némán MÁS pozíciókezelést
+# futtatna — `none` helyett trailinget, vagy fordítva.
+_NATV_PRESET_KOD = {"none": 0.0, "off": 1.0, "risky": 2.0}
+_NATV_PRESETEK = frozenset(_NATV_PRESET_KOD)
+
+
+def _natv_exec(m1, t1_ns, t15_ns, delta_ns, n15, day_idx, h_arr, l_arr, c_arr,
+               spread_arr, cspread_arr, spread_fallback,
+               sig_at, entry_decision, m1_index, allowed_hours,
+               point_size, pv1_point, pair_cfg, trading_cfg, sizing_cfg,
+               rr_spec, initial_balance, sl_first, cc_on, cc_delta):
+    """A végrehajtási ciklus natívan — kötés-szótárak listája, vagy `None`.
+
+    `None` = a natív út nem használható (nincs könyvtár, hiányzó adat, betelt
+    kimeneti keret); a hívó ilyenkor a Python-ciklust futtatja, UGYANAZZAL az
+    eredménnyel, csak lassabban.
+
+    ⚠ A BELÉPŐ-TERVEK ITT SZÜLETNEK, a `_entry_decision`-nal — vagyis PONTOSAN
+    ugyanazzal a kóddal, amit a Python-ciklus is hív. Ez nem kényelem, hanem a
+    paritás feltétele: két külön belépő-logika előbb-utóbb szétcsúszna, és a
+    natív út némán más stratégiát futtatna."""
+    import numpy as np
+    from core import native as _natv
+
+    if not _natv.available():
+        return None
+    n = len(t1_ns)
+    if n == 0:
+        return []
+
+    # A bar spreadje a Python-ciklus szabálya szerint: NaN/0 → config-tartalék.
+    spread = (np.where(spread_arr > 0, spread_arr, spread_fallback)
+              if spread_arr is not None
+              else np.full(n, spread_fallback, dtype=float))
+    # A belépő-spread (`close_spread`): a 0 azt jelenti „nincs", a natív oldal
+    # ilyenkor az átlagra esik vissza — ugyanaz a szabály, mint a Pythonban.
+    cspread = (np.where(cspread_arr > 0, cspread_arr, 0.0)
+               if cspread_arr is not None else np.zeros(n, dtype=float))
+    # ⚠ AZ ORA A SOR SAJAT oraja (`m1_time.hour`), nem az epoch-bol szamolt —
+    # tz-tudatos indexnel a ketto elterhet. A `DatetimeIndex` azert kell, mert
+    # a hivo egy sima listat is adhat (a `_m1_index` az).
+    off_hour = (np.zeros(n, dtype=np.uint8) if allowed_hours is None
+                else (~np.isin(np.asarray(pd.DatetimeIndex(m1.index).hour),
+                               list(allowed_hours))).astype(np.uint8))
+
+    # Az M15-mutató a jelző báron. A Python-ciklus egy `while`-lal lépteti; a
+    # két képlet UGYANAZT adja: a legutóbb LEZÁRT M15 gyertya indexét (a legelső
+    # bárokon, amíg egy sem zárt, a 0-t).
+    ptr = np.clip(np.searchsorted(t15_ns + delta_ns, t1_ns, side="right") - 1,
+                  0, max(n15 - 1, 0))
+
+    sig = np.zeros(n, dtype=np.uint8)
+    sl_pts = np.zeros(n, dtype=float)
+    tp_pts = np.zeros(n, dtype=float)
+    gate_risk = np.ones(n, dtype=float)
+    entry_atr = np.zeros(n, dtype=float)
+    for i, irany in sig_at.items():
+        if not (0 <= i < n) or n15 == 0:
+            continue
+        _sp = float(spread[i])
+        terv = entry_decision(i, m1_index[i], float(c_arr[i]), irany,
+                              int(ptr[i]), _sp, _sp / point_size)
+        if terv is None:
+            continue
+        gate_risk[i], sl_pts[i], tp_pts[i], entry_atr[i] = terv
+        sig[i] = 1 if irany == "BUY" else 2
+
+    _w3 = pair_cfg.get("swap_3x_weekday", _costs.DEFAULT_3X_WEEKDAY)
+    prm = {
+        "point_size": point_size,
+        "pv1_point": pv1_point,
+        "min_lot": pair_cfg.get("min_lot", 0.01),
+        "lot_step": pair_cfg.get("lot_step", 0.01),
+        "max_open_slots": trading_cfg["max_open_slots"],
+        # ⚠ KÉT kockázati százalék: a MÉRETEZÉS a kapu-hatással csökkentett
+        # (`sizing_cfg`), a SLOT-SÚLY a számla eredeti kerete (`trading_cfg`).
+        "account_risk_pct": sizing_cfg["account_risk_pct"],
+        "slot_risk_pct": trading_cfg["account_risk_pct"],
+        "daily_limit_usd": float(trading_cfg.get("daily_loss_limit_usd", 0) or 0),
+        "daily_limit_pct": float(trading_cfg.get("daily_loss_limit_pct", 0.015)),
+        "initial_balance": initial_balance,
+        "be_pct": rr_spec.get("breakeven_pct", 0.5),
+        "be_buffer_points": float(rr_spec.get("be_buffer_points", 0.0) or 0.0),
+        "trail_act_atr": rr_spec.get("trail_activation_atr", 0.5),
+        "trail_dist_atr": rr_spec.get("trail_distance_atr", 0.4),
+        "risky_trail_factor": RISKY_TRAIL_FACTOR,
+        # A jutalék ABSZOLÚT értékkel költség (`trade_costs.commission_usd`).
+        "commission_per_lot": abs(float(pair_cfg.get("commission_per_lot", 0.0) or 0.0)),
+        "swap_long_per_lot": float(pair_cfg.get("swap_long_per_lot", 0.0) or 0.0),
+        "swap_short_per_lot": float(pair_cfg.get("swap_short_per_lot", 0.0) or 0.0),
+        "cost_cut_ns": float(cc_delta.value) if cc_on else 0.0,
+        "sl_first": 1.0 if sl_first else 0.0,
+        "preset": _NATV_PRESET_KOD[str(rr_spec.get("preset", ""))],
+        # `None` → nincs háromszoros nap; a natív oldal a negatívot így érti.
+        "rollover3_weekday": -1.0 if _w3 is None else float(int(_w3)),
+        "cost_cut_on": 1.0 if cc_on else 0.0,
+        "max_lot": float(pair_cfg.get("max_lot") or 0.0),
+    }
+    return _natv.run_exec(
+        {"t_ns": t1_ns, "high": h_arr, "low": l_arr, "close": c_arr,
+         "spread": spread, "close_spread": cspread, "day_idx": day_idx,
+         "off_hour": off_hour, "signal": sig, "sl_pts": sl_pts,
+         "tp_pts": tp_pts, "gate_risk": gate_risk, "entry_atr": entry_atr},
+        prm)
+
+
 def daily_limit_usd(trading_cfg: dict, balance: float) -> float:
     """A napi veszteség-limit ÉRTÉKE $-ban — EGY igazságforrás (live + backtest +
     GUI). Az abszolút `daily_loss_limit_usd` nyer, ha > 0 (a felületről állítható);
@@ -1410,6 +1520,238 @@ def run_pair(
     _h_arr, _l_arr, _c_arr = (_m1_col_arr["high"], _m1_col_arr["low"],
                               _m1_col_arr["close"])
 
+    def _entry_decision(i, m1_time, _bar_c, signal, m15_ptr, _sp, spread_points):
+        """A belepo DONTESE es TERVE — minden, ami nem fugg a szamla allapotatol.
+
+        Visszaad `(gate_risk, sl_points, tp_points)`-ot, vagy `None`-t, ha a
+        belepo elmarad (kapu blokkol, a strategia nem ad tervet, a swing-stop
+        nem szamolhato, a koltseg-kapu blokkol).
+
+        ⚠ MIERT KULON FUGGVENY. Ez a blokk KIZAROLAG a bar sajat adataibol
+        dolgozik — a szamla egyenlege, a szabad slotok es a nyitott pozíciok
+        NEM szerepelnek benne. Ezert ELORE kiszamolhato az OSSZES jelzo barra,
+        egyetlen menetben, es a vegrehajtasi ciklus mar csak kesz terveket kap.
+        A natív vegrehajtasi mag (`core/native.py`) pontosan ezt hasznalja ki.
+        A hivo ket helyrol jon (a Python-ciklus baronkent, az elokeszito menet
+        jelzesenkent), es MINDKETTONEK ugyanazt kell kapnia — ezert nincs itt
+        semmi allapot, es ezert nem lehet ide allapotot betenni.
+        """
+        m15_row = _row_at(_cols15, _arr15, _index15, m15_ptr)
+
+        # ── Végrehajtási kapuk (él-paritás) — a stratégia-jel ELŐTT ─────
+        # Ugyanazok a kapuk, amik élesben is szűrnek — és ugyanazzal a
+        # HATÁSSAL (blokkol / kockázatcsökkentés / ki), a közös
+        # `core.gates.decide`-on keresztül. A MÉRÉS itt is irány-tudatos.
+        _gate_risk = 1.0
+        _failed, _lvl = {}, {}
+        # ⚠ A VOLATILITÁS A BLOKKON KÍVÜL van: `exec_gates=False` mellett
+        # is mérjük, mert a küszöbei a stratégia saját paraméterei
+        # (`gates.PARAM_DRIVEN`). v3.27.0 előtt ugyanez a `bt_entry`-ben
+        # futott, szintén feltétel nélkül — a viselkedés tehát változatlan.
+        if _gt.active(_gate_eff, _gt.VOLATILITY):
+            _failed[_gt.VOLATILITY] = _volb.failed(
+                m15_row.get("atr"), params, m15_row.get("atr_avg", 0))
+            if _bands.get(_gt.VOLATILITY):
+                _lvl[_gt.VOLATILITY] = _gb.level_volatility(
+                    m15_row.get("atr"), params, m15_row.get("atr_avg", 0))
+        if _exec_gates:
+            if _gt.active(_gate_eff, _gt.SPREAD):
+                _atr_e = m15_row.get("atr", float("nan"))
+                if _atr_e and not pd.isna(_atr_e):
+                    _sp_e = _cspread_arr[i] if _cspread_arr is not None else float("nan")
+                    if not (_sp_e > 0):
+                        _sp_e = _spread_arr[i] if _spread_arr is not None else _spread_fallback
+                    _ok_s, _cap_s = _spread_gate.spread_ok(
+                        _sp_e / point_size, float(_atr_e), point_size, params,
+                        pair_cfg.get("backtest_spread_points"))
+                    _failed[_gt.SPREAD] = not _ok_s
+                    if _bands.get(_gt.SPREAD):
+                        _lvl[_gt.SPREAD] = _gb.scalar_level(
+                            _sp_e / point_size, _cap_s)
+            if _tf_eval is not None:
+                # A belépő M1-gyertya nyitó-idejére, a DÖNTÉSKOR ISMERT árral
+                # (ennek az M1-gyertyának a záróára) — a formálódó TF-gyertya
+                # záróára ez, nem a (még ismeretlen) végleges close.
+                _failed[_gt.TF_ALIGN] = not _tf_eval(
+                    int(m1_time.timestamp()), float(_bar_c), signal)
+                if _tf_count is not None:
+                    _lvl[_gt.TF_ALIGN] = _tf_count(
+                        int(m1_time.timestamp()), float(_bar_c), signal)
+            if _mkt_series is not None:
+                _cat = _mkt_series.get(m15_times[m15_ptr])
+                _failed[_gt.MARKET] = bool(_cat) and _cat in _mkt_adverse
+                _lvl[_gt.MARKET] = _cat
+            if _mom_series is not None:
+                from gates import momentum as _momx
+                _mv = _mom_series.get(m15_times[m15_ptr], float("nan"))
+                _failed[_gt.MOMENTUM] = _momx.failed(
+                    _mv, signal, _mom_mode, _mom_cfg)
+                if _bands.get(_gt.MOMENTUM):
+                    _lvl[_gt.MOMENTUM] = _gb.momentum_level(
+                        _mv, signal, _mom_mode, _mom_cfg)
+        # A SÁVOK feloldása: a létra a mért szintből hatást csinál; ahol
+        # nincs létra, ott a kapu saját ítélete (`_failed`) dönt, mint eddig.
+        _eff_now = _gb.effects_at(_gate_eff, _bands, _failed, _lvl)
+        _dec = _gt.decide(_gb.failed_at(_eff_now, _failed), _eff_now)
+        if _dec["blocked"]:
+            return None
+        _gate_risk = _dec["risk_factor"]
+
+        # A stratégia adja a pozíciótervet (SL/TP + saját szűrők); None → kihagyás
+        plan = strategy.bt_entry(m15_row, params, point_size)
+
+        if plan is not None:
+            sl_points, tp_points = plan
+            # SL-módszer: `swing20` → az utolsó N M1 gyertya swingjéből (ATR
+            # helyett): BUY = legalacsonyabb LOW − spread, SELL = legmagasabb
+            # HIGH + spread; a TP marad tp_rr_ratio × SL-táv. (`atr` = a régi.)
+            # Az alapértelmezést a STRATÉGIA adja (lásd Strategy.default_sl_method).
+            if params.get("sl_method", strategy.default_sl_method) == "swing20":
+                _nb = int(params.get("sl_swing_bars", 20) or 20)
+                _lo = m1["low"].iloc[max(0, i - _nb + 1):i + 1].to_numpy()
+                _hi = m1["high"].iloc[max(0, i - _nb + 1):i + 1].to_numpy()
+                _sw = calc_swing_sl_tp_points(float(_bar_c), signal,
+                                            _lo, _hi, params, point_size, spread_points)
+                if _sw is None:
+                    return None
+                sl_points, tp_points = _sw
+
+            # ── KÉZI SL/TP (a labor charton húzott szintjei) ──────────
+            # ⚠ A STRATÉGIA TERVÉT ÍRJA FELÜL, de csak arra az EGY
+            # belépőre, amelyikhez a felhasználó szintet rajzolt. A TP a
+            # megadott R-szorzóból adódik — ahogy a charton is: húzod az
+            # SL-t, a TP arányosan mozog. Minden más (méretezés, BE,
+            # trailing, kapuk) változatlanul a motoré.
+            _kezi_lv = ((manual_events or {}).get("levels") or {})
+            if _kezi_lv:
+                _lv = _kezi_lv.get(m1_time)
+                if _lv is not None:
+                    _sl_ar, _tp_rr = _lv
+                    # ⚠ A BELÉPŐ ÁRÁTÓL mérünk, nem a gyertya záróárától.
+                    # A chart BID gyertyákat mutat, a BUY viszont ASK-on
+                    # nyit — a bid-től mérve a stop a SPREADDEL arrébb
+                    # landolt, mint ahova a felhasználó húzta (mérve:
+                    # 1,91 UsaTec-en). Így oda kerül, ahova rajzolta.
+                    _be_ar = float(_bar_c) + (spread_points * point_size
+                                              if signal == "BUY" else 0.0)
+                    _tav = abs(_be_ar - float(_sl_ar)) / point_size
+                    # ⚠ A NULLA TÁVOLSÁG ÉRTELMETLEN: a stopot a belépőre
+                    # húzva a kockázat nulla lenne, és az „1 R" elveszítené
+                    # a jelentését. Ilyenkor a stratégia terve marad.
+                    if _tav > 0:
+                        sl_points = _tav
+                        tp_points = _tav * max(0.0, float(_tp_rr))
+
+            # ── KÖLTSÉG/KOCKÁZAT kapu — a TERV ISMERETÉBEN ────────────
+            # Ez az EGYETLEN kapu, ami a belépő-terv UTÁN dől el: a
+            # mérőszáma a spread és a TERVEZETT stop viszonya, tehát
+            # előbb tudni kell, mekkora stopot szán a stratégia.
+            if _exec_gates and _gt.active(_gate_eff, _gt.COST):
+                from gates import cost_gate as _cgx
+                _csp = _cspread_arr[i] if _cspread_arr is not None else float("nan")
+                if not (_csp > 0):
+                    _csp = _sp
+                _cf = {_gt.COST: _cgx.failed(sl_points, tp_points,
+                                             _csp / point_size, _cost_cap)}
+                # SÁV: a szint a TORZÍTÁS és a plafon aránya (100% = a
+                # kapu saját határa) — a `distortion` ugyanaz a képlet,
+                # amiből a bináris ítélet is születik.
+                _cl = ({_gt.COST: _gb.scalar_level(
+                    _cgx.distortion(sl_points, tp_points,
+                                    _csp / point_size), _cost_cap)}
+                    if _bands.get(_gt.COST) else {})
+                _ceff = _gb.effects_at(_gate_eff, _bands, _cf, _cl)
+                _cdec = _gt.decide(_gb.failed_at(_ceff, _cf), _ceff)
+                if _cdec["blocked"]:
+                    return None
+                _gate_risk = min(_gate_risk, _cdec["risk_factor"])
+            # ⚠ A BELEPO M15-ATR-je is a BAR adata, nem a szamlae — ezert itt
+            # a helye. A kotes ezt tarolja (`entry_atr`), es ebbol szamol a
+            # breakeven/trailing; a hivonak nem kell ujra M15-sort epitenie.
+            _e_atr = m15_row.get("atr", float("nan"))
+            _e_atr = 0.0 if pd.isna(_e_atr) else float(_e_atr or 0.0)
+            return _gate_risk, sl_points, tp_points, _e_atr
+        return None
+
+
+    # ── NATÍV VÉGREHAJTÁSI ÚT (opcionális gyorsítás) ──────────────────────
+    # ⚠ CSAK AMIT ISMER. A natív ciklus a MAG esetet tudja: SL/TP a bid/ask
+    # modellel, `none`/`off`/`risky` preset (BE + trailing), cost-cut, napi
+    # limit, slot-keret, méretezés, jutalék/swap. Minden más — részleges zárás
+    # (Felező/Pajzs/Fibo), pozícióépítés, kiszállási jel, esemény-napló, kézi
+    # szintek, `max_lot`, haladás-jelentés — a PYTHON-úton fut. Egy „majdnem
+    # jó" natív út rosszabb, mint a semmi: némán MÁS backtestet adna.
+    #
+    # ⚠ MIÉRT ITT DŐL EL. A `_entry_decision` a bar SAJÁT adataiból dolgozik,
+    # ezért a belépő-tervek ELŐRE kiszámolhatók, és a ciklus már csak kész
+    # terveket hajt végre — pontosan az, amit egy natív mag el tud végezni.
+    #
+    # ⚠ AZ ELMARADÁS INDOKA NAPLÓZVA. Egy gyorsítás, ami NÉMÁN nem kapcsol be,
+    # a legrosszabb fajta: hetekig hiszed, hogy fut. A `debug` szint megmondja,
+    # melyik feltétel zárta ki — és ha egyik sem, akkor tényleg futott.
+    _nat_indok = ""
+    if not _cached:
+        _nat_indok = "nincs előre épített jelölt-lista"
+    elif record_events:
+        _nat_indok = "esemény-napló (record_events)"
+    elif _build_cfg is not None:
+        _nat_indok = "pozícióépítés"
+    elif _exit_at is not None:
+        _nat_indok = "kiszállási jel"
+    elif _bigmove_at is not None:
+        _nat_indok = "Pajzs↔Fibo auto"
+    elif progress_callback is not None:
+        _nat_indok = "haladás-jelentés"
+    elif (manual_events or {}):
+        _nat_indok = "kézi események"
+    elif str(rr_spec.get("preset", "")) not in _NATV_PRESETEK:
+        _nat_indok = f"preset={rr_spec.get('preset')!r}"
+    elif trading_cfg.get("max_open_slots") != sizing_cfg.get("max_open_slots"):
+        _nat_indok = "eltérő max_open_slots"
+
+    _nat_kotesek = None
+    if _nat_indok:
+        log.debug("%s: natív végrehajtás KIMARAD — %s", symbol, _nat_indok)
+    else:
+        _nat_kotesek = _natv_exec(
+            m1, _t1_ns, _t15_ns, _delta_ns, _n15_bar, _day_idx,
+            _h_arr, _l_arr, _c_arr, _spread_arr, _cspread_arr, _spread_fallback,
+            _sig_at, _entry_decision, _m1_index, allowed_hours,
+            point_size, pv1_point, pair_cfg, trading_cfg, sizing_cfg,
+            rr_spec, initial_balance, _sl_first, _cc_on, _cc_delta)
+
+    if _nat_kotesek is not None:
+        _balance = initial_balance
+        for _k in _nat_kotesek:
+            _tr = Trade(
+                symbol=symbol,
+                direction=("BUY" if _k["dir"] == 1.0 else "SELL"),
+                open_time=_m1_index[_k["open_i"]],
+                open_price=_k["open_price"], sl=_k["sl"], tp=_k["tp"],
+                lot=_k["lot"], point_size=point_size, pv1_point=pv1_point,
+                sl_points=_k["sl_points"], entry_atr=_k["entry_atr"],
+                entry_balance=_k["entry_balance"], risk_usd=_k["risk_usd"],
+                risk_pct=(_k["risk_usd"] / _k["entry_balance"] * 100
+                          if _k["entry_balance"] > 0 else 0),
+                slot_weight=_k["slot_weight"])
+            _tr.legs = [(_tr.open_price, _tr.lot)]
+            _tr.build_ref = _tr.open_price
+            _tr.risk_free = _k["risk_free"] != 0.0
+            _tr.status = _k["status"]
+            if _k["close_i"] >= 0:
+                _tr.close_time = _m1_index[_k["close_i"]]
+                _tr.close_price = _k["close_price"]
+                _tr.pnl_usd = _k["pnl"]
+                _tr.commission_usd = _k["comm"]
+                _tr.swap_usd = _k["swap"]
+                _tr.pnl_points = ((_tr.close_price - _tr.open_price)
+                                  if _tr.direction == "BUY"
+                                  else (_tr.open_price - _tr.close_price)) / point_size
+                _balance += _tr.pnl_usd
+                result.balance_curve.append((_tr.close_time, _balance))
+            result.trades.append(_tr)
+        return result
+
     for i in range(_m1_n):
         m1_time = _m1_index[i]
         # A bar három ára — a végrehajtás (SL/TP/BE/trailing, belépő-ár) CSAK
@@ -1715,138 +2057,10 @@ def run_pair(
 
             if (signal != "NONE" and free_slots > 0 and not _off_hour
                     and not _limit_hit and m15_ptr < len(m15_times)):
-                m15_row = _row_at(_cols15, _arr15, _index15, m15_ptr)
-
-                # ── Végrehajtási kapuk (él-paritás) — a stratégia-jel ELŐTT ─────
-                # Ugyanazok a kapuk, amik élesben is szűrnek — és ugyanazzal a
-                # HATÁSSAL (blokkol / kockázatcsökkentés / ki), a közös
-                # `core.gates.decide`-on keresztül. A MÉRÉS itt is irány-tudatos.
-                _gate_risk = 1.0
-                _failed, _lvl = {}, {}
-                # ⚠ A VOLATILITÁS A BLOKKON KÍVÜL van: `exec_gates=False` mellett
-                # is mérjük, mert a küszöbei a stratégia saját paraméterei
-                # (`gates.PARAM_DRIVEN`). v3.27.0 előtt ugyanez a `bt_entry`-ben
-                # futott, szintén feltétel nélkül — a viselkedés tehát változatlan.
-                if _gt.active(_gate_eff, _gt.VOLATILITY):
-                    _failed[_gt.VOLATILITY] = _volb.failed(
-                        m15_row.get("atr"), params, m15_row.get("atr_avg", 0))
-                    if _bands.get(_gt.VOLATILITY):
-                        _lvl[_gt.VOLATILITY] = _gb.level_volatility(
-                            m15_row.get("atr"), params, m15_row.get("atr_avg", 0))
-                if _exec_gates:
-                    if _gt.active(_gate_eff, _gt.SPREAD):
-                        _atr_e = m15_row.get("atr", float("nan"))
-                        if _atr_e and not pd.isna(_atr_e):
-                            _sp_e = _cspread_arr[i] if _cspread_arr is not None else float("nan")
-                            if not (_sp_e > 0):
-                                _sp_e = _spread_arr[i] if _spread_arr is not None else _spread_fallback
-                            _ok_s, _cap_s = _spread_gate.spread_ok(
-                                _sp_e / point_size, float(_atr_e), point_size, params,
-                                pair_cfg.get("backtest_spread_points"))
-                            _failed[_gt.SPREAD] = not _ok_s
-                            if _bands.get(_gt.SPREAD):
-                                _lvl[_gt.SPREAD] = _gb.scalar_level(
-                                    _sp_e / point_size, _cap_s)
-                    if _tf_eval is not None:
-                        # A belépő M1-gyertya nyitó-idejére, a DÖNTÉSKOR ISMERT árral
-                        # (ennek az M1-gyertyának a záróára) — a formálódó TF-gyertya
-                        # záróára ez, nem a (még ismeretlen) végleges close.
-                        _failed[_gt.TF_ALIGN] = not _tf_eval(
-                            int(m1_time.timestamp()), float(_bar_c), signal)
-                        if _tf_count is not None:
-                            _lvl[_gt.TF_ALIGN] = _tf_count(
-                                int(m1_time.timestamp()), float(_bar_c), signal)
-                    if _mkt_series is not None:
-                        _cat = _mkt_series.get(m15_times[m15_ptr])
-                        _failed[_gt.MARKET] = bool(_cat) and _cat in _mkt_adverse
-                        _lvl[_gt.MARKET] = _cat
-                    if _mom_series is not None:
-                        from gates import momentum as _momx
-                        _mv = _mom_series.get(m15_times[m15_ptr], float("nan"))
-                        _failed[_gt.MOMENTUM] = _momx.failed(
-                            _mv, signal, _mom_mode, _mom_cfg)
-                        if _bands.get(_gt.MOMENTUM):
-                            _lvl[_gt.MOMENTUM] = _gb.momentum_level(
-                                _mv, signal, _mom_mode, _mom_cfg)
-                # A SÁVOK feloldása: a létra a mért szintből hatást csinál; ahol
-                # nincs létra, ott a kapu saját ítélete (`_failed`) dönt, mint eddig.
-                _eff_now = _gb.effects_at(_gate_eff, _bands, _failed, _lvl)
-                _dec = _gt.decide(_gb.failed_at(_eff_now, _failed), _eff_now)
-                if _dec["blocked"]:
-                    prev_m1_row = m1_row
-                    continue
-                _gate_risk = _dec["risk_factor"]
-
-                # A stratégia adja a pozíciótervet (SL/TP + saját szűrők); None → kihagyás
-                plan = strategy.bt_entry(m15_row, params, point_size)
-
-                if plan is not None:
-                    sl_points, tp_points = plan
-                    # SL-módszer: `swing20` → az utolsó N M1 gyertya swingjéből (ATR
-                    # helyett): BUY = legalacsonyabb LOW − spread, SELL = legmagasabb
-                    # HIGH + spread; a TP marad tp_rr_ratio × SL-táv. (`atr` = a régi.)
-                    # Az alapértelmezést a STRATÉGIA adja (lásd Strategy.default_sl_method).
-                    if params.get("sl_method", strategy.default_sl_method) == "swing20":
-                        _nb = int(params.get("sl_swing_bars", 20) or 20)
-                        _lo = m1["low"].iloc[max(0, i - _nb + 1):i + 1].to_numpy()
-                        _hi = m1["high"].iloc[max(0, i - _nb + 1):i + 1].to_numpy()
-                        _sw = calc_swing_sl_tp_points(float(_bar_c), signal,
-                                                    _lo, _hi, params, point_size, spread_points)
-                        if _sw is None:
-                            prev_m1_row = m1_row
-                            continue
-                        sl_points, tp_points = _sw
-
-                    # ── KÉZI SL/TP (a labor charton húzott szintjei) ──────────
-                    # ⚠ A STRATÉGIA TERVÉT ÍRJA FELÜL, de csak arra az EGY
-                    # belépőre, amelyikhez a felhasználó szintet rajzolt. A TP a
-                    # megadott R-szorzóból adódik — ahogy a charton is: húzod az
-                    # SL-t, a TP arányosan mozog. Minden más (méretezés, BE,
-                    # trailing, kapuk) változatlanul a motoré.
-                    _kezi_lv = ((manual_events or {}).get("levels") or {})
-                    if _kezi_lv:
-                        _lv = _kezi_lv.get(m1_time)
-                        if _lv is not None:
-                            _sl_ar, _tp_rr = _lv
-                            # ⚠ A BELÉPŐ ÁRÁTÓL mérünk, nem a gyertya záróárától.
-                            # A chart BID gyertyákat mutat, a BUY viszont ASK-on
-                            # nyit — a bid-től mérve a stop a SPREADDEL arrébb
-                            # landolt, mint ahova a felhasználó húzta (mérve:
-                            # 1,91 UsaTec-en). Így oda kerül, ahova rajzolta.
-                            _be_ar = float(_bar_c) + (spread_points * point_size
-                                                      if signal == "BUY" else 0.0)
-                            _tav = abs(_be_ar - float(_sl_ar)) / point_size
-                            # ⚠ A NULLA TÁVOLSÁG ÉRTELMETLEN: a stopot a belépőre
-                            # húzva a kockázat nulla lenne, és az „1 R" elveszítené
-                            # a jelentését. Ilyenkor a stratégia terve marad.
-                            if _tav > 0:
-                                sl_points = _tav
-                                tp_points = _tav * max(0.0, float(_tp_rr))
-
-                    # ── KÖLTSÉG/KOCKÁZAT kapu — a TERV ISMERETÉBEN ────────────
-                    # Ez az EGYETLEN kapu, ami a belépő-terv UTÁN dől el: a
-                    # mérőszáma a spread és a TERVEZETT stop viszonya, tehát
-                    # előbb tudni kell, mekkora stopot szán a stratégia.
-                    if _exec_gates and _gt.active(_gate_eff, _gt.COST):
-                        from gates import cost_gate as _cgx
-                        _csp = _cspread_arr[i] if _cspread_arr is not None else float("nan")
-                        if not (_csp > 0):
-                            _csp = _sp
-                        _cf = {_gt.COST: _cgx.failed(sl_points, tp_points,
-                                                     _csp / point_size, _cost_cap)}
-                        # SÁV: a szint a TORZÍTÁS és a plafon aránya (100% = a
-                        # kapu saját határa) — a `distortion` ugyanaz a képlet,
-                        # amiből a bináris ítélet is születik.
-                        _cl = ({_gt.COST: _gb.scalar_level(
-                            _cgx.distortion(sl_points, tp_points,
-                                            _csp / point_size), _cost_cap)}
-                            if _bands.get(_gt.COST) else {})
-                        _ceff = _gb.effects_at(_gate_eff, _bands, _cf, _cl)
-                        _cdec = _gt.decide(_gb.failed_at(_ceff, _cf), _ceff)
-                        if _cdec["blocked"]:
-                            prev_m1_row = m1_row
-                            continue
-                        _gate_risk = min(_gate_risk, _cdec["risk_factor"])
+                _plan = _entry_decision(i, m1_time, float(_bar_c), signal,
+                                        m15_ptr, _sp, spread_points)
+                if _plan is not None:
+                    _gate_risk, sl_points, tp_points, _entry_atr = _plan
 
                     # KAPU-hatás: `kockázatcsökkentés` → kisebb mérettel lépünk be
                     # (ugyanaz a mechanizmus, mint a Risky `cautious`-é: az
@@ -1895,8 +2109,7 @@ def run_pair(
                         pv1_point=pv1_point,
                         sl_points=sl_points,
                         # a belépéskori ATR (ÁRban) — ehhez mér a trailing
-                        entry_atr=(float(m15_row.get("atr", 0.0) or 0.0)
-                                   if not pd.isna(m15_row.get("atr", float("nan"))) else 0.0),
+                        entry_atr=_entry_atr,
                         entry_balance=balance,
                         risk_usd=risk_usd,
                         risk_pct=risk_usd / balance * 100 if balance > 0 else 0,
