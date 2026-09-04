@@ -1022,6 +1022,25 @@ def build_signal_series(
     _cols15, _arr15 = _oszlop_tombok(m15)
     _index15 = list(m15.index)
 
+    # ── NATÍV MAG (opcionális) ────────────────────────────────────────
+    # ⚠ CSAK AKKOR, ha MINDEN feltétel teljesül; bármelyik hiánya → Python-út.
+    # Egy „majdnem jó" natív út rosszabb, mint a semmi: némán mást számolna.
+    #   • a stratégia deklarál natív magot (`native_kernel`),
+    #   • a könyvtár betölthető és az ABI stimmel (`core.native`),
+    #   • NINCS óra-szűrős állapot-nullázás (azt a natív mag nem ismeri).
+    _nat = None
+    if (getattr(strategy, "native_kernel", "") == "wpr_sma_v1"
+            and not (allowed_hours is not None and _reset_on_off)):
+        from core import native as _native
+        _nat = _native.wpr_sma_signals(m15, m1, params, _m15_delta.value)
+    if _nat is not None:
+        return SignalSeries(
+            m15=m15, m1=m1, signals=_nat, strategy_name=strategy.name,
+            fingerprint=_signal_fingerprint(strategy.name, params),
+            allowed_hours=(frozenset(allowed_hours)
+                           if allowed_hours is not None else None),
+            span=(test_start, test_end))
+
     signals: dict = {}
     prev_row = None
     for i in range(len(_index)):
@@ -1144,6 +1163,25 @@ def run_pair(
     # ⚠ A kézi események időzónáját EGYSZER rendezzük el, a hurkon kívül (lásd
     # `_normalize_manual`) — a beadó oldalon könnyű naiv időt megadni.
     manual_events = _normalize_manual(manual_events, df_m1.index)
+    # ── NATÍV JELÖLT-LISTA, ha van (v3.34.0) ──────────────────────────────
+    # ⚠ MIÉRT ITT. Az optimalizáló LAPOS ága `signal_series=None`-nal hívja a
+    # `run_pair`-t, tehát a jelzés-állapotgép a ciklusban fut — a natív mag oda
+    # nem ér el. Enélkül a Rust-gyorsítás pontosan azt a futást hagyná ki, ami
+    # miatt az egész készült (500 trial × 4 ablak).
+    #
+    # ⚠ A `_cached` ÚT NEM ÚJ: a söprés évek óta ezt járja, és `run_pair` a
+    # `state`-et KIZÁRÓLAG a két állapotgép-hookhoz használja — más nem függ
+    # tőle. A két út különbsége így csak annyi, hogy a jelzések előre készen
+    # vannak. Ha a natív mag nem elérhető, a `build_signal_series` a Python-utat
+    # járja, tehát ez az ág ilyenkor NEM lép be (nem cserélünk kódutat ok nélkül).
+    if signal_series is None and getattr(strategy, "native_kernel", ""):
+        from core import native as _native
+        if _native.available():
+            signal_series = build_signal_series(
+                symbol, df_m15, df_m1, params, pair_cfg, strategy=strategy,
+                test_start=test_start, test_end=test_end,
+                allowed_hours=allowed_hours)
+
     _cached = signal_series is not None
     if _cached and not signal_series.for_params(params, allowed_hours,
                                                 test_start, test_end):

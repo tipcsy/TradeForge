@@ -1,0 +1,18 @@
+[package]
+name = "tfbt"
+version = "0.1.0"
+edition = "2021"
+description = "TradeForge natív backtest-mag (C-ABI, a Python ctypes-szal hívja)"
+
+[lib]
+name = "tfbt"
+# ⚠ cdylib, NEM PyO3. A PyO3 a CPython ABI-jához kötne (Windowson MSVC-hez is),
+# és minden Python-frissítésnél újra kellene fordítani. Egy sima C-ABI könyvtárat
+# a `ctypes` bármelyik Pythonból betölt, és a GNU-toolchainnel is elkészül.
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"

@@ -274,6 +274,21 @@ class Strategy(ABC):
     # vagy újabb — a betöltés ezt a számot nézi.
     api: int = STRATEGY_API
 
+    # ── NATÍV (Rust) GYORSÍTÓ MAG — opcionális, stratégiánként ───────────
+    # ⚠ ÜRES = nincs, és ez a HELYES ALAPÉRTELMEZÉS. A natív mag a stratégia
+    # logikájának MÁSODIK megvalósítása; ha egy stratégia nem deklarál magot, a
+    # motor a Python-úton megy — ugyanazzal az eredménnyel, csak lassabban.
+    #
+    # ⚠ A NÉV VERZIÓT IS TARTALMAZ (`wpr_sma_v1`). Ha a stratégia logikája
+    # változik, a nevet EMELNI kell: egy régi natív mag egy új Python-logika
+    # mellett NÉMÁN mást számolna, és pont ez a projekt legdrágább hibafajtája.
+    # A `core.native` a nevet és a könyvtár ABI-verzióját is ellenőrzi.
+    #
+    # ⚠ A PYTHON MARAD A REFERENCIA. A natív mag SZÁRMAZTATOTT gyorsítás, amit
+    # paritás-teszt köt a Pythonhoz (`tests/test_native_kernel.py`). Eltérésnél
+    # a Python a helyes.
+    native_kernel: str = ""
+
     # ROVID nev a SZUK helyekre: chart-jelolo es a dashboard oszlop-fejlece.
     # A `bollinger_squeeze_breakout` 26 karakter — egy chart-cimken es egy
     # tablazat-fejlecben egyarant hasznalhatatlan. A HOSSZU nev marad ott, ahol

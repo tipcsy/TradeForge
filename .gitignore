@@ -25,3 +25,8 @@ lab_*.json
 
 # IDE-beallitasok (PyCharm/IntelliJ) — gep- es felhasznalo-fuggo, nem a projekte.
 .idea/
+
+# Rust natív gyorsító mag — a FORRÁS a repóban, a lefordított bináris nem
+# (gépfüggő, és `python tools/build_native.py` bármikor előállítja).
+rust/tfbt/target/
+*.dll
