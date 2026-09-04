@@ -1160,5 +1160,8 @@
   "gb.hint.category": "Besorolásonként egy hatás. Ami nincs felsorolva, azt a kapu átengedi.",
   "gb.no_bands": "Nincs sáv — a kapu egyetlen küszöbe dönt (a fenti hatással).",
   "gb.inherited": "Örökölt ({source})",
-  "gb.now": "most: {value}"
+  "gb.now": "most: {value}",
+  "contract.err.not_int": "a stratégia `api` mezője nem szám ({value})",
+  "contract.err.too_new": "ÚJABB programhoz készült (api {api}, ez a program {program}-ig tud) → frissítsd a TradeForge-ot",
+  "contract.err.too_old": "RÉGEBBI szerződésre épül (api {api}, a legrégebbi támogatott {minimum}) → a stratégiát kell átírni"
 }

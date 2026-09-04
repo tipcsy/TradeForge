@@ -38,6 +38,22 @@ _SKIP_MODULES = {"ml_features", "ml_train"}
 
 _REGISTRY: "dict[str, type] | None" = None   # név → Strategy-osztály (lazán felderítve)
 
+# Amit a szerződés-kapu KIZÁRT: `{név: indok}`. A felderítés tölti; a felület és
+# a config-ellenőrzés innen tudja megmondani, MIÉRT nem látszik egy stratégia,
+# ami pedig ott van a mappában. Enélkül a „nincs is ilyen" és a „van, de nem
+# kompatibilis" ránézésre EGYFORMA lenne.
+_INCOMPATIBLE: dict = {}
+
+
+def incompatible_strategies() -> dict:
+    """`{név: indok}` — a szerződés-kapun fennakadt stratégiák.
+
+    ⚠ A felderítés LUSTA: amíg senki nem kérte a registryt, ez üres. Ezért a
+    hívó előbb kérje le a neveket (`registered_strategy_names`), és csak utána
+    ezt — különben egy inkompatibilis csomag néma maradna."""
+    _registry()
+    return dict(_INCOMPATIBLE)
+
 
 def _registry() -> "dict[str, type]":
     """A `strategies/` csomag AUTOMATIKUS felderítése: végignézi a moduljait, és a
@@ -65,8 +81,21 @@ def _registry() -> "dict[str, type]":
             if (isinstance(obj, type) and issubclass(obj, Strategy)
                     and obj is not Strategy):
                 sn = getattr(obj, "name", None)
-                if sn and sn not in reg:
-                    reg[sn] = obj
+                if not sn or sn in reg:
+                    continue
+                # ⚠ A SZERZŐDÉS-KAPU. Egy más API-verzióra írt stratégia NEM
+                # kerül be — és nem némán marad ki: a napló megmondja, MELYIK
+                # oldalt kell frissíteni (a programot vagy a stratégiát).
+                # Enélkül egy kívülről behozott csomag betöltődne, majd valahol
+                # mélyen, futás közben törne el — vagy ami rosszabb, működni
+                # látszana és mást csinálna.
+                from strategy import contract as _contract
+                ok, indok = _contract.compatible(getattr(obj, "api", None))
+                if not ok:
+                    log.warning("Stratégia KIMARAD — %s: %s", sn, indok)
+                    _INCOMPATIBLE[sn] = indok
+                    continue
+                reg[sn] = obj
     _REGISTRY = dict(sorted(reg.items()))
     return _REGISTRY
 
@@ -225,4 +254,5 @@ __all__ = [
     "get_strategy", "get_strategy_by_name", "default_strategy_name",
     "enabled_strategy_names", "strategies_for", "registered_strategy_names",
     "available_strategy_names", "strategy_availability",
+    "incompatible_strategies",
 ]

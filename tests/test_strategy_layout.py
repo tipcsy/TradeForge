@@ -69,8 +69,10 @@ check("a config es a docs a TARTALOMMAL koltozott",
       sp.config_file("wpr_sma").exists() and sp.docs_dir().is_dir(),
       f"{sp.config_file('wpr_sma')} / {sp.docs_dir()}")
 
+# ⚠ A LISTA SZANDEKOSAN TETELES, nem mintara illesztett: egy uj fajl a
+# keretben DONTES, nem veletlen — es itt kell kimondani, hogy az.
 KERET = {"__init__.py", "base.py", "visual.py", "settings.py",
-         "signal_journal.py", "paths.py"}
+         "signal_journal.py", "paths.py", "contract.py"}
 _van = {f.name for f in (ROOT / "strategy").glob("*.py")}
 check("a keret-csomagban PONTOSAN a keret van", _van == KERET,
       f"tobblet={sorted(_van - KERET)} hianyzik={sorted(KERET - _van)}")

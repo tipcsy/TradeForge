@@ -359,12 +359,37 @@ def _check_invisible_signal_mode(cfg: dict, out: list) -> None:
             syms[0] if len(syms) == 1 else None))
 
 
+# ---------------------------------------------------------------------------
+# 3d. Stratégia, ami OTT VAN, de a szerződés-kapun fennakadt
+# ---------------------------------------------------------------------------
+
+def _check_incompatible_strategies(cfg: dict, out: list) -> None:
+    """Egy `.tfs`-ből behozott (vagy kézzel bemásolt) stratégia, ami MÁS
+    API-verzióra íródott, nem töltődik be.
+
+    ⚠ MIÉRT KELL EZ A LELET. A kizárás a naplóban ott van, de a felületen a
+    „nincs is ilyen stratégia" és a „van, de nem kompatibilis" ránézésre
+    EGYFORMA: mindkettő üres hely. Ez a sor kimondja a különbséget, és azt is,
+    melyik oldalt kell frissíteni."""
+    try:
+        from strategy import incompatible_strategies
+    except Exception:
+        return
+    for nev, indok in (incompatible_strategies() or {}).items():
+        out.append(_finding(
+            WARN, "incompatible_strategy",
+            f"A(z) {nev!r} stratégia a mappában van, de NEM töltődött be: "
+            f"{indok}. Amíg ez így marad, sem a listákban nem jelenik meg, sem "
+            f"kereskedni nem tud."))
+
+
 _CHECKS = (
     _check_gate_preconditions,
     _check_stale_strategy_keys,
     _check_costs,
     _check_sizing,
     _check_volatility_gate_off,
+    _check_incompatible_strategies,
     _check_daily_limit,
     _check_gate_config_shadowing,
     _check_same_symbol_policy,

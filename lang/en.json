@@ -1160,5 +1160,8 @@
   "gb.hint.category": "One effect per classification. Anything not listed passes.",
   "gb.no_bands": "No bands — the gate's single threshold decides (with the effect above).",
   "gb.inherited": "Inherited ({source})",
-  "gb.now": "now: {value}"
+  "gb.now": "now: {value}",
+  "contract.err.not_int": "the strategy's `api` field is not a number ({value})",
+  "contract.err.too_new": "built for a NEWER program (api {api}, this one supports up to {program}) → update TradeForge",
+  "contract.err.too_old": "built against an OLDER contract (api {api}, oldest supported is {minimum}) → the strategy needs updating"
 }

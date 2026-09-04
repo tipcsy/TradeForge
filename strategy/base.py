@@ -236,10 +236,43 @@ class MarketData:
 # Stratégia interfész
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# A SZERZŐDÉS VERZIÓJA — meddig kompatibilis egy stratégia a programmal?
+# ---------------------------------------------------------------------------
+# ⚠ A KÉRÉS (2026-09-02, a `.tfs` csomagolás kapcsán): „meddig kompatibilis egy
+# stratégia a programmal? Erre kellene egy kidolgozás, vagy egy szigorúbb
+# verziókezelés."
+#
+# `STRATEGY_API`      amit EZ a program nyújt
+# `STRATEGY_API_MIN`  a legrégebbi, amit még kiszolgálunk
+#
+# A stratégia a saját `api` mezőjében mondja meg, melyik szerződésre íródott. A
+# betöltés (`strategy/__init__._registry`) ezt veti össze — és eltérésnél NEM
+# tölti be, hanem HANGOSAN megmondja, melyik oldalt kell frissíteni.
+#
+# ⚠ MIKOR KELL EMELNI, ÉS MIKOR NEM: a szabályok a `strategy/contract.py`
+# fejlécében vannak, egy helyen. Röviden: emelni akkor kell, ha egy MA MŰKÖDŐ
+# stratégia elromlana tőle. Új hook alapértelmezéssel, új MarketData-mező vagy
+# új config-kulcs NEM ilyen.
+#
+# ⚠ A SZÁM ÖNMAGÁBAN NEM VÉD. Egy verziószám annyit ér, amennyire fegyelmezetten
+# emelik — ebben a projektben a `version.py` már ÖT funkción át nem emelkedett.
+# Ezért a szám mellett a szerződésről UJJLENYOMAT is készül
+# (`contract.fingerprint`), és a `tests/test_strategy_contract.py` bukik, ha az
+# interfész elmozdul. Nem tiltja a változást — döntést kényszerít.
+STRATEGY_API = 1
+STRATEGY_API_MIN = 1
+
+
 class Strategy(ABC):
     """A vázhoz csatlakozó stratégia szerződése."""
 
     name: str = "strategy"
+
+    # MELYIK szerződésre íródott ez a stratégia. A repóban lévők értelemszerűen
+    # a mostanira; egy KÍVÜLRŐL behozott csomag (`.tfs`) viszont lehet régebbi
+    # vagy újabb — a betöltés ezt a számot nézi.
+    api: int = STRATEGY_API
 
     # ROVID nev a SZUK helyekre: chart-jelolo es a dashboard oszlop-fejlece.
     # A `bollinger_squeeze_breakout` 26 karakter — egy chart-cimken es egy
