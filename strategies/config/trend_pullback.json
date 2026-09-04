@@ -44,11 +44,11 @@
     "atr_ref_period": {
       "min": 100,
       "max": 300,
-      "step": 50
+      "step": 15
     },
     "keltner_period": {
-      "min": 10,
-      "max": 20,
+      "min": 4,
+      "max": 30,
       "step": 2
     },
     "keltner_mult": {
