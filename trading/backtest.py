@@ -1396,6 +1396,13 @@ def run_pair(
     _t15_ns = _epoch_ns(m15.index)
     _delta_ns = _m15_delta.value
     _n15_bar = len(m15_times)
+    # A NAP indexe barononkent, vektorizaltan (UTC-nap; a `.date()` is azt adja).
+    _day_idx = _t1_ns // 86_400_000_000_000
+    _prev_day_idx = -1
+    day_key = ""
+    # A napi limit gyorsitotara: az egyenleg csak zaraskor valtozik.
+    _dl_balance = None
+    _dl_cache = 0.0
     _cols15, _arr15 = _oszlop_tombok(m15)
     _index15 = list(m15.index)
     _sig_at = signal_series.signals if _cached else {}
@@ -1455,9 +1462,22 @@ def run_pair(
         #
         # (Ugyanaz a minta, mint az óra-szűrőnél: ott is csak a BELÉPŐ tiltott,
         # a figyelés folyamatos — lásd a `_off_hour` kezelését lentebb.)
-        day_key = str(m1_time.date())
+        # ⚠ A NAPI KULCS napvaltaskor valtozik, nem baronkent. A
+        # `str(m1_time.date())` 152 833x futott — 0,12 mp trialonkent, azert,
+        # hogy ~130 kulonbozo sztringet allitson elo. Az osszehasonlitas most
+        # int64-en megy (a nap indexe), a sztring csak a valtasnal epul.
+        _di = _day_idx[i]
+        if _di != _prev_day_idx:
+            _prev_day_idx = _di
+            day_key = str(m1_time.date())
         daily_loss = daily_pnl.get(day_key, 0.0)
-        daily_limit = daily_limit_usd(trading_cfg, balance)
+        # ⚠ A LIMIT csak az EGYENLEGTOL fugg (vagy fix). Baronkent ujraszamolni
+        # 152 833 fuggvenyhivas + 2 dict-olvasas volt (0,07 mp); az egyenleg
+        # viszont csak zaraskor valtozik.
+        if balance != _dl_balance:
+            _dl_balance = balance
+            _dl_cache = daily_limit_usd(trading_cfg, balance)
+        daily_limit = _dl_cache
         _limit_hit = daily_loss <= -daily_limit
 
         # M15 állapot: minden ÚJONNAN ZÁRT M15 gyertyát EGYSZER dolgozunk fel, a
@@ -1671,8 +1691,16 @@ def run_pair(
         # (mint eddig) ÉS a SÚLYOZOTT kockázati keret. Egy pozíció annyi slotot
         # fogyaszt, ahányszorosa a kockázata egy slot keretének; kis számlán a
         # `min_lot` miatt ez 1-nél több is lehet.
-        occupied = sum(1 for t in open_trades if not t.risk_free)
-        occupied_w = sum(t.slot_weight for t in open_trades if not t.risk_free)
+        # ⚠ A BAROK 97%-AN NINCS NYITOTT POZICIO (merve: 4 599 kezelt bar a
+        # 152 833-bol). A ket generator-kifejezes ilyenkor is felepult es
+        # lefutott — 305 668 `sum()` hivas trialonkent, 0,12 mp, nullaert.
+        # Az ures eset most kulon ag; a szamitas VALTOZATLAN, ha van pozicio.
+        if open_trades:
+            occupied = sum(1 for t in open_trades if not t.risk_free)
+            occupied_w = sum(t.slot_weight for t in open_trades if not t.risk_free)
+        else:
+            occupied = 0
+            occupied_w = 0.0
         free_slots = trading_cfg["max_open_slots"] - occupied
 
         # M1 belépési jelzés. A jelzés-ÁLLAPOTGÉP (bt_on_low_close) MINDEN M1-báron fut —
