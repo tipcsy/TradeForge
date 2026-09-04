@@ -939,6 +939,50 @@ def _prepare_frames(df_m15, df_m1, params, strategy, test_start, test_end):
     return m15, m1
 
 
+# ---------------------------------------------------------------------------
+# A PER-BAR ADATELÉRÉS — mérve, nem sejtve
+# ---------------------------------------------------------------------------
+# ⚠ A LELET (2026-09-04, a Rust-kérdés profilozásából). Egy trial (Ger40, 6 hónap,
+# 152 833 M1 + 10 193 M15 bár) 2,76 mp, és ebből MINDÖSSZE 0,8% a valódi,
+# vektorizált számítás. A többi értelmezés: objektum-építés, `.iloc`, és
+# Timestamp-aritmetika. A jelölt-lista két legdrágább tétele:
+#
+#     M15 állapotgép `.iloc[ptr]`-rel      0,348 mp
+#     ...ugyanaz tömbökből                 0,027 mp   → 13×
+#
+# és a mutató-léptetés, ami MINDEN M1 báron két pandas Timestampet hasonlít
+# össze (152 833× trial-enként), holott két int64 is elég.
+#
+# ⚠ A STRATÉGIA-SZERZŐDÉS VÁLTOZATLAN. A `bt_on_high_close` továbbra is egy
+# Series-szerű sort kap; a `_Row` dict-leszármazott a `[...]`, a `.get()` és a
+# `.name` hármast viszi — pontosan azt, amit a hookok használnak (az `ml_ai`
+# a `.name`-et gyorsítótár-kulcsként). Egyetlen stratégiát sem kellett átírni.
+
+
+def _oszlop_tombok(df):
+    """`(oszlopnevek, {oszlop: numpy tömb})` — a per-bar hozzáférés alapja."""
+    cols = list(df.columns)
+    return cols, {c: df[c].to_numpy() for c in cols}
+
+
+def _epoch_ns(idx):
+    """A DatetimeIndex nanoszekundumban, int64 tömbként.
+
+    ⚠ NANOSZEKUNDUM, nem másodperc: a másodpercre kerekítés egy nem egész
+    másodperces idősík-deltánál NÉMÁN elcsúsztatná a gyertyahatárt. A `Timedelta`
+    `.value`-ja is ns, tehát a kettő ugyanabban a mértékegységben marad."""
+    return idx.values.astype("int64")
+
+
+def _row_at(cols, arr, index, i):
+    """A stratégiának átadott SOR az `i`. bárhoz — tömbökből, nem `.iloc`-kal."""
+    r = _Row()
+    r.name = index[i]
+    for c in cols:
+        r[c] = arr[c][i]
+    return r
+
+
 def build_signal_series(
     symbol: str,
     df_m15: pd.DataFrame,
@@ -967,28 +1011,33 @@ def build_signal_series(
     _m15_delta = _signal_bar_delta(strategy, params)
     _reset_on_off = bool(params.get("no_trade_resets_signal", False))
 
-    _cols = list(m1.columns)
-    _arr = {c: m1[c].to_numpy() for c in _cols}
+    _cols, _arr = _oszlop_tombok(m1)
     _index = list(m1.index)
+    # A mutató-léptetés int64-en megy (lásd `_epoch_ns`); a Timestamp-lista
+    # megmarad, mert az ÓRA-szűrőnek és a sor `.name`-jének kell.
+    _t1_ns = _epoch_ns(m1.index)
+    _t15_ns = _epoch_ns(m15.index)
+    _delta_ns = _m15_delta.value
+    _n15 = len(m15_times)
+    _cols15, _arr15 = _oszlop_tombok(m15)
+    _index15 = list(m15.index)
 
     signals: dict = {}
     prev_row = None
     for i in range(len(_index)):
         m1_time = _index[i]
-        row = _Row()
-        row.name = m1_time
-        for _c in _cols:
-            row[_c] = _arr[_c][i]
+        row = _row_at(_cols, _arr, _index, i)
         # Óra-szűrő: a no-trade óra CSAK akkor nullázza az állapotot, ha a param
         # be van kapcsolva — ugyanaz a feltétel, mint a run_pair-ben. Ezért része a
         # gyorsítótár azonosságának is (`allowed_hours`).
         if (allowed_hours is not None and m1_time.hour not in allowed_hours
                 and _reset_on_off):
             state = strategy.bt_new_state(symbol)
-        while (m15_ptr + 1 < len(m15_times)
-               and m15_times[m15_ptr + 1] + _m15_delta <= m1_time):
+        _ti = _t1_ns[i]
+        while m15_ptr + 1 < _n15 and _t15_ns[m15_ptr + 1] + _delta_ns <= _ti:
             m15_ptr += 1
-            state = strategy.bt_on_high_close(state, m15.iloc[m15_ptr], params)
+            state = strategy.bt_on_high_close(
+                state, _row_at(_cols15, _arr15, _index15, m15_ptr), params)
         if prev_row is not None:
             sig = strategy.bt_on_low_close(state, prev_row, row, params)
             if sig != "NONE":
@@ -1301,10 +1350,16 @@ def run_pair(
     # (`key = hi_row.name`). Ezért a sor egy dict-leszármazott, ami a `.name`-et is
     # viszi — így EGYETLEN stratégiát sem kell módosítani, a gyorsítás
     # viselkedés-semleges marad. (Mérve: 20,7× az iterrows()-hoz képest.)
-    _m1_cols = list(m1.columns)
-    _m1_col_arr = {c: m1[c].to_numpy() for c in _m1_cols}
+    _m1_cols, _m1_col_arr = _oszlop_tombok(m1)
     _m1_index = list(m1.index)          # pandas Timestamp — kell a .hour/.date()
     _m1_n = len(_m1_index)
+    # A M15-mutató léptetése int64-en; a `_row_at` a `bt_on_high_close` sorát adja.
+    _t1_ns = _epoch_ns(m1.index)
+    _t15_ns = _epoch_ns(m15.index)
+    _delta_ns = _m15_delta.value
+    _n15_bar = len(m15_times)
+    _cols15, _arr15 = _oszlop_tombok(m15)
+    _index15 = list(m15.index)
     _sig_at = signal_series.signals if _cached else {}
 
     _h_arr, _l_arr, _c_arr = (_m1_col_arr["high"], _m1_col_arr["low"],
@@ -1372,14 +1427,15 @@ def run_pair(
         # újrafuttatta a M15-állapotgépet a FORMÁLÓDÓ (open ≤ t) barra → look-ahead ÉS
         # az M1 arming-állapot ismételt újraszámítása → valós belépők maradtak ki (pl.
         # a délutáni trendben). Egy M15 bar (nyitó m15_times[j]) egy TF-periódus múlva zár.
-        while (m15_ptr + 1 < len(m15_times)
-               and m15_times[m15_ptr + 1] + _m15_delta <= m1_time):
+        while (m15_ptr + 1 < _n15_bar
+               and _t15_ns[m15_ptr + 1] + _delta_ns <= _t1_ns[i]):
             m15_ptr += 1
             # A mutató léptetése tiszta időbélyeg-összehasonlítás (olcsó, és a
             # kiszállási jel/építés is használja) → az MINDIG fut. Az állapotgép
             # csak akkor, ha nincs előre megépített jelölt-lista.
             if not _cached:
-                state = strategy.bt_on_high_close(state, m15.iloc[m15_ptr], params)
+                state = strategy.bt_on_high_close(
+                    state, _row_at(_cols15, _arr15, _index15, m15_ptr), params)
 
         # Nyitott pozíciók kezelése (SL/TP/breakeven/trailing) — BID/ASK modellel
         _sp = _spread_arr[i] if _spread_arr is not None else float("nan")
@@ -1593,7 +1649,7 @@ def run_pair(
 
             if (signal != "NONE" and free_slots > 0 and not _off_hour
                     and not _limit_hit and m15_ptr < len(m15_times)):
-                m15_row = m15.iloc[m15_ptr]
+                m15_row = _row_at(_cols15, _arr15, _index15, m15_ptr)
 
                 # ── Végrehajtási kapuk (él-paritás) — a stratégia-jel ELŐTT ─────
                 # Ugyanazok a kapuk, amik élesben is szűrnek — és ugyanazzal a
@@ -2210,8 +2266,14 @@ def run_portfolio_backtest(
         # A kockázatcsökkentő spec: globális rr (mind a párra), különben a
         # per-pár választott preset (rr_state) + gyenge-minősítés auto-risky.
         _rr_pair = rr if rr else _pair_auto_rr(sym, pair_risky.get(sym, False))
+        # A per-bar sor-epites tombokbol (mint a run_pair-ben) — a `.iloc`
+        # baronkent uj pandas Series-t epitene. EGYSZER oldjuk fel, par-szinten.
+        _c15, _a15 = _oszlop_tombok(m15)
         pair_data[sym] = {
             "m15":       m15,
+            "cols15":    _c15,
+            "arr15":     _a15,
+            "index15":   list(m15.index),
             "m1":        m1,
             "m15_times": m15.index.tolist(),
             "m15_ptr":   0,
@@ -2486,7 +2548,9 @@ def run_portfolio_backtest(
                     ptr = info["m15_ptr"]
                     m15_df = info["m15"]
                     if ptr < len(m15_df):
-                        m15_row = m15_df.iloc[ptr]
+                        m15_row = _row_at(info["cols15"],
+                                          info["arr15"],
+                                          info["index15"], ptr)
                         point_size = pair_cfg["point_size"]
                         pv1_point  = pair_cfg["pv1_point"]
                         sp       = pair_cfg.get("backtest_spread_points", spread_default)
