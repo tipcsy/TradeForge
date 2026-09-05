@@ -1132,24 +1132,14 @@ def build_signal_series(
     _cols15, _arr15 = _oszlop_tombok(m15)
     _index15 = list(m15.index)
 
-    # ── NATÍV MAG (opcionális) ────────────────────────────────────────
-    # ⚠ CSAK AKKOR, ha MINDEN feltétel teljesül; bármelyik hiánya → Python-út.
-    # Egy „majdnem jó" natív út rosszabb, mint a semmi: némán mást számolna.
-    #   • a stratégia deklarál natív magot (`native_kernel`),
-    #   • a könyvtár betölthető és az ABI stimmel (`core.native`),
-    #   • NINCS óra-szűrős állapot-nullázás (azt a natív mag nem ismeri).
-    _nat = None
-    if (getattr(strategy, "native_kernel", "") == "wpr_sma_v1"
-            and not (allowed_hours is not None and _reset_on_off)):
-        from core import native as _native
-        _nat = _native.wpr_sma_signals(m15, m1, params, _m15_delta.value)
-    if _nat is not None:
-        return SignalSeries(
-            m15=m15, m1=m1, signals=_nat, strategy_name=strategy.name,
-            fingerprint=_signal_fingerprint(strategy.name, params),
-            allowed_hours=(frozenset(allowed_hours)
-                           if allowed_hours is not None else None),
-            span=(test_start, test_end))
+    # ⚠ ITT NINCS NATÍV ÚT, ÉS EZ SZÁNDÉKOS. v3.34.0–v3.36.0 között állt itt egy
+    # `wpr_sma`-specifikus natív jelzés-mag; 2026-09-05-én kikerült, mert a
+    # STRATÉGIA-LOGIKA DUPLÁZÁSA szembement a saját szabályunkkal: a stratégia
+    # EGY helyen van, Pythonban. (Ugyanezzel az érvvel utasítottuk el az MQL5-ös
+    # szimulált végrehajtést — lásd `rust/tfbt/src/lib.rs` fejléce.)
+    #
+    # A natív VÉGREHAJTÁS megmaradt, és az MINDEN stratégiával működik: nem tud
+    # a stratégiáról, kész belépő-terveket hajt végre.
 
     signals: dict = {}
     prev_row = None
@@ -1284,13 +1274,16 @@ def run_pair(
     # tőle. A két út különbsége így csak annyi, hogy a jelzések előre készen
     # vannak. Ha a natív mag nem elérhető, a `build_signal_series` a Python-utat
     # járja, tehát ez az ág ilyenkor NEM lép be (nem cserélünk kódutat ok nélkül).
-    if signal_series is None and getattr(strategy, "native_kernel", ""):
-        from core import native as _native
-        if _native.available():
-            signal_series = build_signal_series(
-                symbol, df_m15, df_m1, params, pair_cfg, strategy=strategy,
-                test_start=test_start, test_end=test_end,
-                allowed_hours=allowed_hours)
+    # ⚠ NEM ÉPÍTÜNK MAGUNKTÓL jelölt-listát. Volt ilyen ág, amíg a `wpr_sma`-nak
+    # natív jelzés-magja volt: ott az építés olcsó volt (0,82 mp), tehát megérte
+    # a natív VÉGREHAJTÁSÉRT cserébe. A mag kivezetése után az építés minden
+    # stratégián a Python-cikluson megy, és MÉRVE drágább, mint amit nyerünk:
+    # 1,37 mp építés + 0,78 mp futás = 2,15 mp, szemben az 1,65 mp-es futással.
+    #
+    # ⚠ AZ OPTIMALIZÁLÁS EZTŐL NEM LASSUL: ott a listát a HÍVÓ adja
+    # (`ml/optimizer.py` ablakonként EGYSZER építi, és minden trialen
+    # újrahasznosítja), tehát a natív végrehajtás ott MINDEN stratégián
+    # bekapcsol — ellenőrizve a `trend_pullback`-en és a bollingeren is.
 
     _cached = signal_series is not None
     if _cached and not signal_series.for_params(params, allowed_hours,

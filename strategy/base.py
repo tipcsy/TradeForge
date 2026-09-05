@@ -274,20 +274,16 @@ class Strategy(ABC):
     # vagy újabb — a betöltés ezt a számot nézi.
     api: int = STRATEGY_API
 
-    # ── NATÍV (Rust) GYORSÍTÓ MAG — opcionális, stratégiánként ───────────
-    # ⚠ ÜRES = nincs, és ez a HELYES ALAPÉRTELMEZÉS. A natív mag a stratégia
-    # logikájának MÁSODIK megvalósítása; ha egy stratégia nem deklarál magot, a
-    # motor a Python-úton megy — ugyanazzal az eredménnyel, csak lassabban.
+    # ⚠ ITT NINCS `native_kernel`, ÉS EZ SZÁNDÉKOS (2026-09-05).
+    # v3.34.0–v3.36.0 között egy stratégia deklarálhatott natív (Rust)
+    # jelzés-magot. Az a mag a stratégia logikájának MÁSODIK megvalósítása volt
+    # — pontosan az a „két forrás, ami külön romlik el", amivel az MQL5-ös
+    # szimulált végrehajtást is elutasítottuk. A stratégia EGY helyen van:
+    # ebben a Python-modulban.
     #
-    # ⚠ A NÉV VERZIÓT IS TARTALMAZ (`wpr_sma_v1`). Ha a stratégia logikája
-    # változik, a nevet EMELNI kell: egy régi natív mag egy új Python-logika
-    # mellett NÉMÁN mást számolna, és pont ez a projekt legdrágább hibafajtája.
-    # A `core.native` a nevet és a könyvtár ABI-verzióját is ellenőrzi.
-    #
-    # ⚠ A PYTHON MARAD A REFERENCIA. A natív mag SZÁRMAZTATOTT gyorsítás, amit
-    # paritás-teszt köt a Pythonhoz (`tests/test_native_kernel.py`). Eltérésnél
-    # a Python a helyes.
-    native_kernel: str = ""
+    # A natív VÉGREHAJTÁS megmaradt (`rust/tfbt/src/exec.rs`), de az nem tud a
+    # stratégiáról: kész belépő-terveket hajt végre, és MINDEN stratégiával
+    # működik. Egy új stratégiának tehát semmit nem kell deklarálnia.
 
     # ROVID nev a SZUK helyekre: chart-jelolo es a dashboard oszlop-fejlece.
     # A `bollinger_squeeze_breakout` 26 karakter — egy chart-cimken es egy

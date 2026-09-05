@@ -74,6 +74,56 @@ check("a Python csak a harom ismert presetet engedi at",
       set(bt._NATV_PRESETEK) == {"none", "off", "risky"},
       str(sorted(bt._NATV_PRESETEK)))
 
+# ── 1/b. A LEGFONTOSABB SZABALY: NINCS STRATEGIA-LOGIKA A RUSTBAN ──────
+# ⚠ EZ AZ OR A `test_native_kernel.py` HELYET VETTE AT (2026-09-05). Addig a
+# `wpr_sma` jelzes-allapotgepe DUPLAN letezett: Pythonban es Rustban. A
+# felhasznalo mutatott ra, hogy ez szembemegy a sajat szabalyunkkal — ugyanazzal
+# az ervvel utasitottuk el az MQL5-os szimulalt vegrehajtast: KET FORRAS, AMI
+# KULON ROMLIK EL. A strategia EGY helyen van, Pythonban.
+#
+# Ez a teszt azt orzi, hogy ne kusszon vissza. Ha valaki strategia-logikat tesz
+# a Rustba, ITT bukik el — nem fel ev mulva egy neman elteren futo backteszten.
+# ⚠ A KOMMENTEKET LE KELL VAGNI. A `lib.rs` fejlece epp arrol szol, hogy MIT
+# vezettunk ki es miert — abban szerepel a `wpr_sma` neve. Az or a KODOT nezi.
+def _kod_nelkul_komment(txt: str) -> str:
+    ki, i, n = [], 0, len(txt)
+    while i < n:
+        if txt.startswith("//", i):                 # sor-komment (a //! is)
+            i = txt.find(chr(10), i)
+            if i < 0:
+                break
+        elif txt.startswith("/*", i):               # blokk-komment
+            v = txt.find("*/", i)
+            i = n if v < 0 else v + 2
+        else:
+            ki.append(txt[i]); i += 1
+    return "".join(ki)
+
+
+_RS_ALL = _kod_nelkul_komment("".join(
+    (ROOT / "rust" / "tfbt" / "src" / f).read_text(encoding="utf-8")
+    for f in ("lib.rs", "exec.rs")))
+from strategy import registered_strategy_names                # noqa: E402
+_nevek = [n for n in registered_strategy_names() if n.lower() in _RS_ALL.lower()]
+check("a Rust konyvtarban NINCS strategia-nev", not _nevek, str(_nevek))
+for _jel in ("wpr", "sma_period", "keltner", "bollinger", "stoch", "signal_detector"):
+    check(f"...es nincs benne strategia-fogalom: `{_jel}`",
+          _jel not in _RS_ALL.lower())
+check("egyetlen strategia sem deklaral natív magot",
+      not any(hasattr(_s, "native_kernel")
+              for _s in [__import__("strategy", fromlist=["x"]).get_strategy_by_name(n)
+                         for n in registered_strategy_names()]))
+check("a lib.rs kimondja, hogy ez SZANDEKOS hatar",
+      "NINCS, ÉS NEM IS LESZ STRATÉGIA-LOGIKA" in
+      (ROOT / "rust" / "tfbt" / "src" / "lib.rs").read_text(encoding="utf-8"))
+
+# ── 1/c. A KONYVTAR a repobol ki, a FORRAS benne ───────────────────────
+_gi = (ROOT / ".gitignore").read_text(encoding="utf-8")
+check("a lefordított konyvtar ki van zarva a repobol",
+      any(x in _gi for x in ("*.dll", "rust/tfbt/target", "target/")), "")
+check("a Rust FORRAS viszont a repoban van",
+      (ROOT / "rust" / "tfbt" / "src" / "exec.rs").exists())
+
 # ── 2. A VISSZAESES ES AZ INDOK ────────────────────────────────────────
 check("a natív ut kikapcsolhato (TFBT_NATIVE=0)", "TFBT_NATIVE" in
       io.open(ROOT / "core" / "native.py", encoding="utf-8").read())

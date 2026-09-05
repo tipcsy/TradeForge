@@ -147,7 +147,6 @@ class WprSmaStrategy(Strategy):
     # Van natív (Rust) jelzés-magja — lásd `core/native.py`. A viselkedés
     # forrása TOVÁBBRA IS az itteni Python-kód; a natív mag annak hű portja,
     # amit paritás-teszt köt hozzá. Mag nélküli gépen minden ugyanígy megy.
-    native_kernel = "wpr_sma_v1"
     short = "WPRSma"
 
     # --- Megjelenítés -----------------------------------------------------
