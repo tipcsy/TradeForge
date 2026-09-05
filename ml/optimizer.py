@@ -1549,9 +1549,35 @@ def _optimize_symbol_locked(symbol, df_m15, df_m1, cfg, initial_balance,
         if result is not None and "error" not in result:
             done_flag.touch()                      # 'Utolsó opt:' címke + állapot
     elif method == "optuna" and _OPTUNA_AVAILABLE:
-        log.info("  Optuna Bayesian optimalizálás (%d trial, walk-forward)...", max_trials)
+        # ⚠ AZ OOS-SZELET LEVÁGÁSA — 2026-09-05 előtt EZ HIÁNYZOTT, és ez volt a
+        # projekt legdrágább fajta hibája: néma, és a mérést hitelesíti.
+        #
+        # A modul fejléce ezt ígéri: „1. TRAIN adat (history_start →
+        # test_start_date) … 3. TEST adat (test_start_date → ma): out-of-sample
+        # validálás". A `grid` és a `random` ág tartotta is (megkapják a
+        # `test_start`-ot) — az OPTUNA ág viszont a TELJES szeletet kapta, és a
+        # walk-forward 3-4. ablaka a deklarált holdoutban tesztelt:
+        #
+        #     train 2025-01-01 · test_start 2026-05-01
+        #     Ablak 3: TEST 2026-05-04 -> 2026-07-04   <- a holdoutban
+        #     Ablak 4: TEST 2026-07-04 -> 2026-09-04   <- a holdoutban
+        #
+        # Utána ugyanezen a szakaszon futott a „validálás" (lentebb), tehát a
+        # jelentett OOS-minőség olyan adaton mérődött, amit a keresés MÁR LÁTOTT.
+        # A projekt ezt már megmérte: a szennyezett OOS-számok 2,51×-esre fújtak.
+        #
+        # ⚠ A VALIDÁLÁS A TELJES `df_m15`-öt kapja továbbra is — csak a KERESÉS
+        # nem láthatja a holdoutot. A walk-forward magától alkalmazkodik a
+        # rövidebb adathoz (visszafelé épít, és megáll, ha nem fér el).
+        _m15_opt = df_m15[df_m15.index < ts_test]
+        _m1_opt = df_m1[df_m1.index < ts_test]
+        if len(_m15_opt) < 200 or len(_m1_opt) < 200:
+            return {"error": f"túl kevés TRAIN adat a test_start ({test_start}) előtt"}
+        log.info("  Optuna Bayesian optimalizálás (%d trial, walk-forward) — "
+                 "a keresés a %s ELŐTTI adaton (OOS érintetlen)",
+                 max_trials, test_start)
         result = optimize_pair_optuna(
-            symbol, df_m15, df_m1, opt_cfg, base_params, pair_cfg, trading_cfg,
+            symbol, _m15_opt, _m1_opt, opt_cfg, base_params, pair_cfg, trading_cfg,
             initial_balance, strategy,
             n_trials=max_trials,
             n_splits=opt_cfg.get("wf_n_splits", 4),
