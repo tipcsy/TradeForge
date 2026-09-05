@@ -18,11 +18,36 @@ from typing import Optional
 PATH = Path(__file__).resolve().parents[1] / "data" / "correlation_mode.json"
 
 # Állapotok (a K gomb körbe lépteti)
-INACTIVE = "Inaktív"
-ALERT    = "Jelző"          # csak jelöl/villog, nem avatkozik be
-STRONGER = "Csak erősebb"   # korrelált újat blokkol (az erősebb nyit elsőként)
-HALF     = "Fél méret"      # korrelált pozíció fele mérettel
+# ⚠ AZONOSÍTÓ, NEM FELIRAT (0011). Korábban a magyar szó VOLT az érték
+# (`INACTIVE = "Inaktív"`), és ez az érték **lemezre is kerül**
+# (`data/correlation_mode.json`). Két baja volt:
+#
+#   • lefordíthatatlan — a felirat megváltoztatása a MENTETT ÁLLAPOTOT
+#     érvénytelenítette volna (a `load()` csak a `MODES`-ban lévőt fogadja el,
+#     tehát a régi mentés némán visszaesett volna az alapértelmezésre);
+#   • kódolás-érzékeny — az „Inaktív" ékezete egy más kódolású gépen máshogy
+#     jön vissza, és ugyanaz a néma visszaesés történik.
+#
+# Ugyanaz a szétválasztás, mint a paraméter-kategóriáknál: az ÉRTÉK azonosító,
+# a felirat az i18n-ből jön (`corr_mode.*`).
+INACTIVE = "inactive"
+ALERT    = "alert"          # csak jelöl/villog, nem avatkozik be
+STRONGER = "stronger"       # korrelált újat blokkol (az erősebb nyit elsőként)
+HALF     = "half"           # korrelált pozíció fele mérettel
 MODES = [INACTIVE, ALERT, STRONGER, HALF]
+
+# A RÉGI (magyar felirat) mentések beolvasása. ⚠ Enélkül egy meglévő
+# `correlation_mode.json` NÉMÁN elveszne, és a mód visszaugrana `alert`-re.
+_LEGACY_MODE = {"Inaktív": INACTIVE, "Jelző": ALERT,
+                "Csak erősebb": STRONGER, "Fél méret": HALF}
+
+
+def mode_label(mode: str) -> str:
+    """A mód FELIRATA a felülethez (az i18n-ből; ismeretlennél maga az azonosító)."""
+    from core.i18n import t as _t
+    kulcs = f"corr_mode.{mode}"
+    felirat = _t(kulcs)
+    return felirat if felirat and felirat != kulcs else str(mode)
 
 _lock = threading.Lock()
 _mode = ALERT   # alap: csak jelez, semmit nem tilt csendben
@@ -35,6 +60,7 @@ def load() -> str:
             if PATH.exists():
                 with open(PATH, encoding="utf-8") as f:
                     m = json.load(f).get("mode")
+                m = _LEGACY_MODE.get(m, m)     # régi, magyar feliratú mentés
                 if m in MODES:
                     _mode = m
         except Exception:
@@ -49,6 +75,7 @@ def get_mode() -> str:
 
 def set_mode(mode: str):
     global _mode
+    mode = _LEGACY_MODE.get(mode, mode)
     if mode not in MODES:
         return
     with _lock:

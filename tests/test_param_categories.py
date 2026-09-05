@@ -169,6 +169,34 @@ check("a regi feliratok megfeleltetese megmaradt (regi .tfs csomagokhoz)",
       len(S._LEGACY_CAT) >= 19, str(len(S._LEGACY_CAT)))
 
 
+
+# ── 7. UGYANEZ A KORRELACIO-MODOKRA ─────────────────────────────────────
+# ⚠ Ezek MENTETT azonositok (`data/correlation_mode.json`), es korabban a
+# MAGYAR FELIRAT volt maga az ertek (`INACTIVE = "Inaktív"`). A felirat
+# barmilyen valtoztatasa — forditas VAGY kodolas-elteres — a mentett allapotot
+# ervenytelenitette volna: a `load()` csak a MODES-ban levot fogadja el, tehat
+# a regi mentes NEMAN visszaesik az alapertelmezesre.
+from core import correlation as C   # noqa: E402
+
+check("a korrelacio-modok azonositok (ascii, kisbetu)",
+      all(m.isascii() and m == m.lower() for m in C.MODES), str(C.MODES))
+check("...es van feliratuk", [C.mode_label(m) for m in C.MODES]
+      == ["Inaktív", "Jelző", "Csak erősebb", "Fél méret"],
+      str([C.mode_label(m) for m in C.MODES]))
+check("ismeretlen mod ONMAGAT mutatja", C.mode_label("nincs_ilyen") == "nincs_ilyen")
+
+# A REGI, magyar feliratu mentes tovabbra is beolvashato.
+check("a regi magyar ertek azonositova valik betolteskor",
+      C._LEGACY_MODE.get("Csak erősebb") == C.STRONGER)
+check("...es a set_mode is elfogadja",
+      (C.set_mode("Fél méret"), C.get_mode())[1] == C.HALF)
+C.PATH.unlink(missing_ok=True)          # a teszt ne hagyjon maga utan allapotot
+
+for lang in ("hu", "en"):
+    d = json.loads((ROOT / "lang" / f"{lang}.json").read_text(encoding="utf-8"))
+    _h = [m for m in C.MODES if f"corr_mode.{m}" not in d]
+    check(f"{lang}: minden korrelacio-modnak van felirata", not _h, str(_h))
+
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")
 sys.exit(0 if all(results) else 1)
