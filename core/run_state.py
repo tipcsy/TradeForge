@@ -69,9 +69,10 @@ def live_strategies(cfg: dict, symbol: str, strat_names: list[str],
 def set_state(cfg: dict, symbol: str, strategy: str, state: str) -> None:
     """A (symbol, strategy) szándék beállítása a futásidejű cfg-ben (helyben).
 
-    Frissíti a `pairs.<sym>.run_state[strategy]`-t ÉS szinkronizálja a szimbólum-
-    szintű `enabled`-et (= van-e bármely "live"). A KIÍRÁST (config.json mentés) a
-    hívó (GUI `_save_main_config`) végzi — ez a modul csak a dict-et módosítja."""
+    Frissíti a `pairs.<sym>.run_state[strategy]`-t. Az `enabled`-et CSAK FELFELÉ
+    szinkronizálja (`live` állításnál bekapcsolja) — leállításnál NEM kapcsolja
+    ki; az indoklás lent, a kódnál. A KIÍRÁST (config.json mentés) a hívó (GUI
+    `_save_main_config`) végzi — ez a modul csak a dict-et módosítja."""
     pc = _pair(cfg, symbol)
     if pc is None:
         return
@@ -80,4 +81,30 @@ def set_state(cfg: dict, symbol: str, strategy: str, state: str) -> None:
         rs = {}
         pc["run_state"] = rs
     rs[strategy] = LIVE if state == LIVE else STOPPED
-    pc["enabled"] = any(v == LIVE for v in rs.values())
+    # ⚠ CSAK FELFELÉ SZINKRONIZÁLUNK. Korábban itt ez állt:
+    #
+    #     pc["enabled"] = any(v == LIVE for v in rs.values())
+    #
+    # …vagyis az UTOLSÓ stratégia leállítása a PÁRT is kikapcsolta. Ez két
+    # különböző dolgot mosott össze:
+    #
+    #     enabled    = a pár JÁTÉKBAN van   (adat-letöltés, backteszt, hangolás,
+    #                                        megjelenítés)
+    #     run_state  = kereskedünk-e vele MOST
+    #
+    # A motor amúgy is a kettő SZORZATÁVAL dolgozik (`_enabled & _intent`, lásd
+    # a 2026-08-05-i kétlistás auditot) — az egyik tényezőt a másikból számolni
+    # épp ezt a szorzatot rontja el.
+    #
+    # ⚠ MI TÖRTÉNT (2026-09-05). A `wpr_sma` referencia-alapvonal lett: 12 páron
+    # `stopped`, de engedélyezve marad, hogy hangolható és backtestelhető
+    # legyen. A régi szinkronnal EGYETLEN Play/Stop-nyomás után a pár
+    # `enabled: False` lett volna → és mivel KILENC helyen szűrnek erre (köztük
+    # a `run_optimizer`, a `download_history` és a `download_ticks`), a pár
+    # némán kiesett volna a hangolásból ÉS az adat-frissítésből. Az alapvonal
+    # elavult volna, anélkül hogy bárki csinált volna valamit.
+    #
+    # Kikapcsolni ezután a pár `strategies` listájának ürítésével + `enabled`
+    # átállításával lehet — az EXPLICIT, nem mellékhatás.
+    if state == LIVE:
+        pc["enabled"] = True

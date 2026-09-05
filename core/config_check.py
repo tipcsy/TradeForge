@@ -362,6 +362,45 @@ def _check_optimizer_skip(cfg: dict, out: list) -> None:
                 f"paraméter-ablak Optimalizálás lapján kapcsold vissza őket. "
                 f"Kihagyva: {', '.join(sorted(kihagy))}.", sym))
 
+
+def _check_empty_strategies(cfg: dict, out: list) -> None:
+    """Engedélyezett pár ÜRES `strategies` listával — némán az ALAPÉRTELMEZETT fut.
+
+    ⚠ ÉLESBEN MEGTÖRTÉNT (2026-09-05), és majdnem kereskedés lett belőle. A 0018
+    előre rögzített küszöbei **elutasították** a USDJPY-t és az EURHUF-ot, tehát
+    le kellett kerülniük a `wpr_sma`-ról. Ki is vettem a `strategies`
+    listájukból — és pont az ELLENKEZŐJE történt:
+
+        strategies: []        -> `enabled_strategy_names` visszaesik az
+                                 ALAPÉRTELMEZETT stratégiára = `wpr_sma`
+        nincs run_state       -> a legacy ág az `enabled`-ből ad LIVE-ot
+        nincs strategy_mode   -> az alapérték VALÓDI kötés (nem `signal`)
+
+    Vagyis a két ELUTASÍTOTT pár élesben kereskedett volna azzal a stratégiával,
+    amiről épp leszedtük őket. A `strategies` lista ürítése tehát NEM
+    kikapcsolás — a valódi kapcsoló az `enabled: False`.
+
+    Az üres lista visszaesése maga SZÁNDÉKOS (a régi, egy-stratégiás configok
+    bitazonosan induljanak) — de némán történik, és a config ilyenkor mást
+    állít, mint amit a felhasználó gondol. Ezért `WARN`."""
+    from strategy import default_strategy_name
+
+    try:
+        alap = default_strategy_name(cfg)
+    except Exception:
+        alap = "?"
+    for sym, pc in (cfg.get("pairs") or {}).items():
+        if not (isinstance(pc, dict) and pc.get("enabled")):
+            continue
+        if pc.get("strategies"):
+            continue
+        out.append(_finding(
+            WARN, "empty_strategies_fallback",
+            f"{sym}: a `strategies` lista ÜRES, de a pár engedélyezett → némán "
+            f"az ALAPÉRTELMEZETT stratégia fut rajta ({alap!r}). Az üres lista "
+            f"NEM kikapcsolás! Ha a pár tényleg ne fusson: `enabled: false`. Ha "
+            f"fusson, de mást: írd bele a `strategies` listába.", sym))
+
 def _check_same_symbol_policy(cfg: dict, out: list) -> None:
     """Két KÖTŐ stratégia egy páron `independent` házirenddel egymással SZEMBE is
     nyithat (hedge számlán). Ez lehet szándékos — de legyen kimondva.
@@ -477,6 +516,7 @@ _CHECKS = (
     _check_invisible_signal_mode,
     _check_untuned_pairs,
     _check_optimizer_skip,
+    _check_empty_strategies,
 )
 
 

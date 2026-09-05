@@ -38,15 +38,38 @@ CFG = {"pairs": {"GOLD": {"enabled": True,
 check("csak a 'live' szandeku strategia fut",
       rs.live_strategies(CFG, "GOLD", ["wpr_sma", "ml_ai"]) == ["wpr_sma"],
       str(rs.live_strategies(CFG, "GOLD", ["wpr_sma", "ml_ai"])))
-# Az `enabled` a SZIMBOLUM szintje: van-e barmely elo strategia. Ezen dol el,
-# hogy a motor egyaltalan hozzanyul-e a parhoz.
+# ⚠ MEGVALTOZOTT SZERZODES (2026-09-05). Itt eredetileg ez allt:
+#
+#     „az UTOLSO strategia leallitasa az `enabled`-et is leveszi"  -> False
+#
+# Az indoklas az volt, hogy „az `enabled` a SZIMBOLUM szintje: van-e barmely
+# elo strategia; ezen dol el, hogy a MOTOR hozzanyul-e a parhoz". A motorra
+# nezve ez helyes volt — csak eppen az `enabled`-re KILENC helyen szurnek, es a
+# tobbi nem kereskedes, hanem KARBANTARTAS: `run_optimizer`, `download_history`,
+# `download_ticks`, es harom kutatoeszkoz.
+#
+# ⚠ MI TORTENT. A `wpr_sma` referencia-alapvonal lett (0020): 12 paron
+# `stopped`, de engedelyezve marad, hogy hangolhato es backtestelheto legyen.
+# A regi szinkronnal EGYETLEN Play/Stop-nyomas utan a par `enabled: False` lett
+# volna -> nemán kiesik a hangolasbol ES az adat-frissitesbol. Az alapvonal
+# elavult volna, anelkul hogy barki csinalt volna valamit.
+#
+# A KET JELENTES szetvalasztva:
+#     enabled    = a par JATEKBAN van (adat, backteszt, hangolas, megjelenites)
+#     run_state  = kereskedunk-e vele MOST
+# A motor amugy is a kettő SZORZATAVAL dolgozik (`_enabled & _intent`).
+# Kikapcsolni EXPLICIT modon lehet: `enabled: false`. Reszletek:
+# `tests/test_run_state_enabled.py`.
 check("az `enabled` szinkronban marad (van elo strategia)",
       CFG["pairs"]["GOLD"]["enabled"] is True)
 rs.set_state(CFG, "GOLD", "wpr_sma", rs.STOPPED)
-check("az UTOLSO strategia leallitasa az `enabled`-et is leveszi",
-      CFG["pairs"]["GOLD"]["enabled"] is False)
+check("az UTOLSO strategia leallitasa NEM veszi le az `enabled`-et "
+      "(a par jatekban marad: hangolas, adat)",
+      CFG["pairs"]["GOLD"]["enabled"] is True)
+check("...de a SZANDEK stopped, tehat a motor nem futtatja",
+      rs.live_strategies(CFG, "GOLD", ["wpr_sma", "ml_ai"]) == [])
 rs.set_state(CFG, "GOLD", "ml_ai", rs.LIVE)
-check("...es egy strategia inditasa vissza is kapcsolja",
+check("...egy strategia inditasa FELFELE tovabbra is szinkronizal",
       CFG["pairs"]["GOLD"]["enabled"] is True)
 
 # Legacy (meg nincs run_state map): a regi config valtozatlanul mukodik.

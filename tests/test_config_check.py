@@ -468,6 +468,43 @@ check_("a pairs nem-par kulcsai nem buktatjak az ellenorzest",
       isinstance(cc.check(_cfg_furcsa), list))
 
 
+# ---------------------------------------------------------------------------
+# URES `strategies` LISTA — nemán az ALAPERTELMEZETT fut
+# ---------------------------------------------------------------------------
+# ⚠ ELESBEN MEGTORTENT (2026-09-05), es majdnem kereskedés lett belole. A 0018
+# elore rogzitett kuszobei ELUTASITOTTAK a USDJPY-t es az EURHUF-ot, tehat le
+# kellett kerulniuk a wpr_sma-rol. Ki is kerultek a `strategies` listajukbol —
+# es pont az ELLENKEZOJE tortent:
+#     strategies: []       -> visszaeses az ALAPERTELMEZETT strategiara (wpr_sma)
+#     nincs run_state      -> a legacy ag az `enabled`-bol ad LIVE-ot
+#     nincs strategy_mode  -> az alapertek VALODI kotes (nem `signal`)
+# A ket elutasitott par igy elesben kereskedett volna azzal, amirol leszedtuk.
+_cfg_ures = {"pairs": {"USDJPY": {"enabled": True, "strategies": []}},
+             "strategy": {"name": "wpr_sma"}, "available_strategies": {"wpr_sma": True}}
+_fu = [x for x in cc.check(_cfg_ures) if x["code"] == "empty_strategies_fallback"]
+check_("az ures strategies lista engedelyezett paron LELET", len(_fu) == 1,
+      str([x["code"] for x in cc.check(_cfg_ures)]))
+if _fu:
+    check_("...WARN, mert nemán mast futtat, mint amit a config latszik allitani",
+          _fu[0]["level"] == "warn", _fu[0]["level"])
+    check_("...megmondja, hogy az ures lista NEM kikapcsolas",
+          "NEM kikapcsolas" in _fu[0]["message"].replace("á", "a") or
+          "NEM kikapcsol" in _fu[0]["message"])
+    check_("...es megnevezi a valodi kapcsolot", "enabled" in _fu[0]["message"])
+
+# KIKAPCSOLT paron nincs lelet — ott az ures lista helyes allapot.
+_cfg_ki = {"pairs": {"USDJPY": {"enabled": False, "strategies": []}},
+           "strategy": {"name": "wpr_sma"}, "available_strategies": {"wpr_sma": True}}
+check_("kikapcsolt paron az ures lista NEM lelet",
+      not [x for x in cc.check(_cfg_ki) if x["code"] == "empty_strategies_fallback"])
+
+# Kitoltott listaval sincs lelet.
+_cfg_van = {"pairs": {"USDJPY": {"enabled": True, "strategies": ["wpr_sma"]}},
+            "strategy": {"name": "wpr_sma"}, "available_strategies": {"wpr_sma": True}}
+check_("kitoltott listaval nincs lelet",
+      not [x for x in cc.check(_cfg_van) if x["code"] == "empty_strategies_fallback"])
+
+
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")
 sys.exit(0 if all(results) else 1)
