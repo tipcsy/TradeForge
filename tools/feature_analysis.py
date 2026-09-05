@@ -40,6 +40,7 @@ from strategy import get_strategy
 from core.params_store import params_file, set_active_strategy
 from core import regime
 from trading.backtest import load_data, run_pair
+from core.i18n import t as _t
 
 _MIN_OOS_N = 40   # kvintilisenként ennyi alatt óvatosan
 
@@ -173,7 +174,7 @@ def analyze(symbol, cfg, strategy, ib, oos_frac=0.4):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Feature-keresés IS/OOS")
+    ap = argparse.ArgumentParser(description=_t("cli.feature_analysis.feature_kereses_is_oos"))
     ap.add_argument("--symbol", default=None)
     ap.add_argument("--oos-frac", type=float, default=0.4)
     args = ap.parse_args()

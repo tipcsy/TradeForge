@@ -40,6 +40,7 @@ from strategy import get_strategy_by_name, default_strategy_name
 from strategy.settings import load_config
 from trading.backtest import load_data
 from trading.live_trader import pair_visual_lines
+from core.i18n import t as _t
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)-8s %(message)s",
                     datefmt="%Y-%m-%d %H:%M:%S")
@@ -181,16 +182,14 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--symbol", required=True)
     ap.add_argument("--from", dest="t_from", required=True, help="YYYY-MM-DD")
-    ap.add_argument("--to", dest="t_to", required=True, help="YYYY-MM-DD (a nap VÉGÉIG)")
-    ap.add_argument("--strategy", default=None, help="alap: a config elsődlegese")
+    ap.add_argument("--to", dest="t_to", required=True, help=_t("cli.viz_export.yyyy_mm_dd_a_nap_vegeig"))
+    ap.add_argument("--strategy", default=None, help=_t("cli.viz_export.alap_a_config_elsodlegese"))
     ap.add_argument("--suffix", default="",
-                    help="külön fájlnév, pl. _BT → TFV_<SYM>_BT.csv (alap: az élővel közös)")
+                    help=_t("cli.viz_export.kulon_fajlnev_pl_bt_tfv_sym_bt"))
     ap.add_argument("--show-trades", action="store_true",
-                    help="a VALÓS kötések nyilai is kerüljenek rá (manuális teszthez NE)")
+                    help=_t("cli.viz_export.a_valos_kotesek_nyilai_is_keru"))
     ap.add_argument("--no-gates", action="store_true",
-                    help="NYERS jelzések: se spread-, se együttállás-kapu, se "
-                         "volatilitás-szűrő. A chart ilyenkor TÖBBET mutat, mint "
-                         "amennyit az él megkötne — kísérlethez, nem paritáshoz.")
+                    help=_t("cli.viz_export.nyers_jelzesek_se_spread_se_eg"))
     args = ap.parse_args()
 
     ok, msg = export_window(args.symbol, args.t_from, args.t_to,

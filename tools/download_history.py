@@ -318,6 +318,7 @@ except ImportError:                     # POSIX
 
 
 from contextlib import contextmanager
+from core.i18n import t as _t
 
 
 @contextmanager
@@ -411,14 +412,13 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Historikus M15/M1 adat letöltése MT5-ből.")
+        description=_t("cli.download_history.historikus_m15_m1_adat_letolte"))
     parser.add_argument(
         "--symbol",
-        help="EGYETLEN szimbólum letöltése (a GUI hívja külön processzben új "
-             "instrumentum felvételekor). Elhagyva: az összes aktív pár.")
+        help=_t("cli.download_history.egyetlen_szimbolum_letoltese_a"))
     parser.add_argument(
         "--tfs", default="M15,M1",
-        help="Vesszővel elválasztott időkeretek (pl. M15,M1).")
+        help=_t("cli.download_history.vesszovel_elvalasztott_idokere"))
     args = parser.parse_args()
 
     from strategy.settings import load_config

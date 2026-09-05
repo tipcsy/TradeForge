@@ -64,6 +64,7 @@ sys.path.insert(0, str(ROOT))
 
 import MetaTrader5 as mt5                     # noqa: E402
 from core import mt5_connector                # noqa: E402
+from core.i18n import t as _t
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)-8s %(message)s")
 log = logging.getLogger(__name__)
@@ -197,21 +198,20 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--all", action="store_true",
-                    help="a bróker TELJES kínálata (nem csak a Market Watch)")
+                    help=_t("cli.symbol_scan.a_broker_teljes_kinalata_nem_c"))
     ap.add_argument("--grep", default="",
-                    help="vesszős szűrő a névre (pl. 500,oil,jpy)")
+                    help=_t("cli.symbol_scan.vesszos_szuro_a_nevre_pl_500_o"))
     ap.add_argument("--max-cost", type=float, default=None,
-                    help="csak ennél olcsóbb instrumentumok (koltsegR)")
+                    help=_t("cli.symbol_scan.csak_ennel_olcsobb_instrumentu"))
     ap.add_argument("--limit", type=int, default=200)
     ap.add_argument("--futures", action="store_true",
-                    help="a lejáratos (határidős) szerződéseket is mutassa")
+                    help=_t("cli.symbol_scan.a_lejaratos_hataridos_szerzode"))
     ap.add_argument("--no-ticks", action="store_true",
-                    help="hagyja ki a tick-alapú pontosítást (gyors, de OPTIMISTA)")
+                    help=_t("cli.symbol_scan.hagyja_ki_a_tick_alapu_pontosi"))
     ap.add_argument("--path", default="",
-                    help="MÁSIK MT5 terminál elérési útja (a config.json helyett); "
-                         "a terminálban már be kell lépni a kívánt számlára")
+                    help=_t("cli.symbol_scan.masik_mt5_terminal_eleresi_utj"))
     ap.add_argument("--commission", type=float, default=0.0,
-                    help="ODA-VISSZA jutalék 1.0 lotra, a számla devizájában")
+                    help=_t("cli.symbol_scan.oda_vissza_jutalek_1_0_lotra_a"))
     args = ap.parse_args()
 
     if args.path:

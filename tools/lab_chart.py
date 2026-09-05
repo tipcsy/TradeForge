@@ -76,6 +76,7 @@ import numpy as np
 import pandas as pd
 
 from strategy import visual as viz
+from core.i18n import t as _t
 
 
 # ── Színek: EGY forrásból ─────────────────────────────────────────────────
@@ -276,7 +277,7 @@ def allapot_sav(ax, objektumok, tengely: "Idotengely") -> int:
             ax.add_patch(_sav(x, 3, szin("orange")))
     ax.set_ylim(0, 4)
     ax.set_yticks([0.5, 1.5, 2.5, 3.5])
-    ax.set_yticklabels(["no-trade", "irány", "ablak", "piac"], fontsize=7)
+    ax.set_yticklabels(["no-trade", _t("lab.irany"), "ablak", "piac"], fontsize=7)
     return len(allapotok)
 
 
@@ -296,7 +297,7 @@ def kiserok(objektumok) -> list:
         elif isinstance(o, viz.TfOnly):
             ki.append(f"csak M{o.minutes} charton")
         elif isinstance(o, viz.Alert):
-            ki.append(f"RIASZTÁS: {o.text}")
+            ki.append(_t("lab.alert", text=o.text))
         elif isinstance(o, viz.Label):
             ki.extend(str(o.text).split("|"))
     return ki
@@ -320,27 +321,25 @@ def keszit(symbol: str, strategy_name: str, tf_perc: int,
     cfg = cfg if cfg is not None else load_config(ROOT / "config.json")
     pair_cfg = (cfg.get("pairs") or {}).get(symbol)
     if not pair_cfg:
-        return None, [], f"a(z) {symbol} nincs a config.json `pairs` blokkjában"
+        return None, [], _t("lab.err.pair_not_in_config", symbol=symbol)
     if not strategy_name:
         # ⚠ „nincs stratégia": TISZTA chart, a rajz-objektumok nélkül. A
         # gyertyák ugyanabból a parquetből jönnek — csak a jelölők maradnak el.
         df15, df1 = bt.load_data(symbol)
         if df15 is None or df1 is None:
-            return None, [], (f"nincs letöltött adat a(z) {symbol} párhoz — "
-                              f"`python main.py download`")
+            return None, [], (_t("lab.err.no_data", symbol=symbol))
         chart = _vag(chart_barok(df1, df15, tf_perc), tol, ig)
         if chart is None or len(chart) < 2:
-            return None, [], "a megadott időszakra nincs elég gyertya"
+            return None, [], _t("lab.a_megadott_idoszakra_nincs_ele")
         return chart, [], ""
     try:
         strategy = get_strategy_by_name(strategy_name)
     except Exception:
-        return None, [], f"ismeretlen stratégia: {strategy_name!r}"
+        return None, [], _t("lab.err.unknown_strategy", name=repr(strategy_name))
 
     df15, df1 = bt.load_data(symbol)
     if df15 is None or df1 is None:
-        return None, [], (f"nincs letöltött adat a(z) {symbol} párhoz — "
-                          f"`python main.py download`")
+        return None, [], (_t("lab.err.no_data", symbol=symbol))
 
     cs = config_for_strategy(cfg, strategy_name)
     params = strategy_params(symbol, strategy_name, cs,
@@ -363,7 +362,7 @@ def keszit(symbol: str, strategy_name: str, tf_perc: int,
 
     chart = _vag(chart_barok(df1, df15, tf_perc), tol, ig)
     if chart is None or len(chart) < 2:
-        return None, objektumok, "a megadott időszakra nincs elég gyertya"
+        return None, objektumok, _t("lab.a_megadott_idoszakra_nincs_ele")
     return chart, objektumok, ""
 
 
@@ -404,11 +403,11 @@ class LabAblak:
         self.cfg = load_config(ROOT / "config.json")
         self._parok = sorted((self.cfg.get("pairs") or {}).keys())
         if not self._parok:
-            raise SystemExit("HIBA: a config.json `pairs` blokkja üres.")
+            raise SystemExit(_t("lab.hiba_a_config_json_pairs_blokk"))
 
         self.root = tk.Tk()
         from version import APP_NAME, APP_VERSION
-        self.root.title(f"{APP_NAME} {APP_VERSION} — kézi laboratórium")
+        self.root.title(_t("lab.window_title", app=APP_NAME, version=APP_VERSION))
         self.root.geometry("1500x900")
 
         sav = tk.Frame(self.root)
@@ -426,27 +425,27 @@ class LabAblak:
         self._sym_box.pack(side="left", padx=(4, 12))
         self._sym_box.bind("<<ComboboxSelected>>", lambda e: self._strat_lista())
 
-        tk.Label(sav, text="Stratégia").pack(side="left")
+        tk.Label(sav, text=_t("lab.strategia")).pack(side="left")
         self._strat_box = ttk.Combobox(sav, textvariable=self._strat, width=18,
                                        state="readonly")
         self._strat_box.pack(side="left", padx=(4, 12))
 
-        tk.Label(sav, text="Idősík").pack(side="left")
+        tk.Label(sav, text=_t("lab.idosik")).pack(side="left")
         for perc, cimke in IDOSIKOK:
             tk.Radiobutton(sav, text=cimke, value=perc, variable=self._tf,
                            command=self.betolt).pack(side="left")
 
-        tk.Label(sav, text="  -tól").pack(side="left")
+        tk.Label(sav, text=_t("lab.tol")).pack(side="left")
         tk.Entry(sav, textvariable=self._tol, width=17).pack(side="left", padx=2)
         tk.Label(sav, text="-ig").pack(side="left")
         tk.Entry(sav, textvariable=self._ig, width=17).pack(side="left", padx=2)
-        tk.Button(sav, text="Betölt", command=self.betolt).pack(side="left", padx=8)
+        tk.Button(sav, text=_t("lab.betolt"), command=self.betolt).pack(side="left", padx=8)
 
         # ── A FORGATÓKÖNYV-GOMBOK ────────────────────────────────────
         gs = tk.Frame(self.root)
         gs.pack(fill="x", padx=8, pady=(0, 4))
         self._mod = tk.StringVar(value="")
-        tk.Label(gs, text="Kattintás:").pack(side="left")
+        tk.Label(gs, text=_t("lab.kattintas")).pack(side="left")
         for ertek, cimke in (("BUY", "Add BUY"), ("SELL", "Add SELL"),
                              ("BE", "Add BE")):
             tk.Radiobutton(gs, text=cimke, value=ertek, variable=self._mod,
@@ -471,21 +470,20 @@ class LabAblak:
         self._rr_mezok = {}
         for _k, _cim, _sz in (("breakeven_pct", "BE", 5),
                               ("trail_activation_atr", "trail@", 5),
-                              ("trail_distance_atr", "táv", 5)):
+                              ("trail_distance_atr", _t("lab.tav"), 5)):
             tk.Label(gs, text=f" {_cim}:").pack(side="left")
             _v = tk.StringVar(value=str(_alap.get(_k, "")))
             tk.Entry(gs, textvariable=_v, width=_sz).pack(side="left")
             self._rr_mezok[_k] = _v
 
         self._epites = tk.BooleanVar(value=False)
-        tk.Checkbutton(gs, text="Start építés", variable=self._epites).pack(
+        tk.Checkbutton(gs, text=_t("lab.start_epites"), variable=self._epites).pack(
             side="left", padx=(0, 12))
-        tk.Button(gs, text="Töröl", command=self.torol, width=8).pack(
+        tk.Button(gs, text=_t("lab.torol"), command=self.torol, width=8).pack(
             side="left", padx=2)
-        tk.Button(gs, text="JSON mentés", command=self.ment).pack(
+        tk.Button(gs, text=_t("lab.json_mentes"), command=self.ment).pack(
             side="left", padx=(12, 2))
-        tk.Label(gs, text="  (húzd a jelölőt / SL / TP · jobb gomb: törli"
-                          " · a Play futtat)", fg="#888").pack(side="left")
+        tk.Label(gs, text=_t("lab.huzd_a_jelolot_sl_tp_jobb_gomb"), fg="#888").pack(side="left")
 
         # ── LEJÁTSZÓ ─────────────────────────────────────────────────
         ls = tk.Frame(self.root)
@@ -497,19 +495,19 @@ class LabAblak:
                              ("▶", 1), ("▶▶", 50), ("⏭", 1000)):
             tk.Button(ls, text=cimke, width=4,
                       command=lambda n=lepes: self.leptet(n)).pack(side="left")
-        tk.Label(ls, text="  sebesség").pack(side="left")
+        tk.Label(ls, text=_t("lab.sebesseg")).pack(side="left")
         self._sebesseg = tk.DoubleVar(value=4.0)     # gyertya / másodperc
         tk.Scale(ls, from_=0.5, to=400.0, resolution=0.5, orient="horizontal",
                  variable=self._sebesseg, length=160,
                  showvalue=True).pack(side="left")
         self._csak_eddig = tk.BooleanVar(value=True)
-        tk.Checkbutton(ls, text="csak eddig látszik",
+        tk.Checkbutton(ls, text=_t("lab.csak_eddig_latszik"),
                        variable=self._csak_eddig,
                        command=self._rajzol).pack(side="left", padx=(12, 4))
         self._bidask = tk.BooleanVar(value=True)
         tk.Checkbutton(ls, text="BID/ASK", variable=self._bidask,
                        command=self._rajzol).pack(side="left")
-        tk.Button(ls, text="Lejátszás vége", command=self.kurzor_le).pack(
+        tk.Button(ls, text=_t("lab.lejatszas_vege"), command=self.kurzor_le).pack(
             side="left", padx=(12, 2))
 
         self._allapot = tk.Label(self.root, text="", anchor="w", fg="#666")
@@ -550,9 +548,9 @@ class LabAblak:
         self._fak = {}
         for kulcs, cim, oszlopok in (
             ("nyitott", "Nyitott",
-             ("idő", "ir", "belépő", "most", "P&L", "R", "SL", "TP", "perc")),
-            ("lezart", "Lezárt",
-             ("idő", "ir", "belépő", "kilépő", "P&L", "R", "vége")),
+             (_t("lab.ido"), "ir", _t("lab.belepo"), "most", "P&L", "R", "SL", "TP", "perc")),
+            ("lezart", _t("lab.lezart"),
+             (_t("lab.ido"), "ir", _t("lab.belepo"), _t("lab.kilepo"), "P&L", "R", _t("lab.vege"))),
         ):
             _k = tk.Frame(fulek)
             fulek.add(_k, text=cim)
@@ -890,7 +888,7 @@ class LabAblak:
     def betolt(self) -> None:
         _elozo_ido = self._lathato_ido()
         _kurzor_t = self._kurzor_ido()
-        self._allapot.config(text="betöltés…", fg="#666")
+        self._allapot.config(text=_t("lab.betoltes"), fg="#666")
         self.root.update_idletasks()
         try:
             chart, objs, uzenet = keszit(
@@ -932,8 +930,8 @@ class LabAblak:
         # mert a kijelölésen kívülre esik, azt tudni kell — a csendben kevesebbet
         # mutató chart ebben a projektben már többször tévútra vitt.
         self._allapot.config(
-            text=(f"{len(chart)} gyertya · {db['kirajzolt']} jelölő kirajzolva"
-                  f" · {db['idon_kivul']} a kijelölésen kívül"
+            text=(_t("lab.status.markers", bars=len(chart), drawn=db["kirajzolt"],
+                     outside=db["idon_kivul"])
                   + ("   |   " + "   ".join(kiserok(objs)) if objs else "")),
             fg="#666")
 
@@ -1107,8 +1105,11 @@ class LabAblak:
             if mit == "tp":
                 if ev.ydata is None:
                     return
-                _t, _d, _sl, _regi_rr = self._belepok[i]
-                _be = self._be_ar(_t)
+                # ⚠ A valtozo NEM `_t` lehet: az a fordito (`core.i18n`) neve
+                # ebben a modulban, es egy azonos nevu lokalis az EGESZ
+                # fuggvenyben elfedne (`tests/test_i18n.py` orzi).
+                _ido, _d, _sl, _regi_rr = self._belepok[i]
+                _be = self._be_ar(_ido)
                 if _be is None or _sl is None:
                     return
                 _tav = abs(_be - _sl)
@@ -1120,18 +1121,18 @@ class LabAblak:
                 _uj_rr = max(0.0, _d1 * (float(ev.ydata) - _be) / _tav)
                 if abs(_uj_rr - _regi_rr) < 1e-9:
                     return
-                self._belepok[i] = (_t, _d, _sl, _uj_rr)
+                self._belepok[i] = (_ido, _d, _sl, _uj_rr)
             elif mit == "sl":
                 # ⚠ FÜGGŐLEGES HÚZÁS: az SL az ÁR tengelyen mozog, az idő
                 # marad. A TP nem külön objektum — a stop távolságából adódik,
                 # tehát MAGÁTÓL követi (ez a felhasználó kérése).
                 if ev.ydata is None:
                     return
-                _t, _d, _regi, _rr = self._belepok[i]
+                _ido, _d, _regi, _rr = self._belepok[i]
                 _uj = float(ev.ydata)
                 if _regi is not None and abs(_uj - _regi) < 1e-12:
                     return
-                self._belepok[i] = (_t, _d, _uj, _rr)
+                self._belepok[i] = (_ido, _d, _uj, _rr)
             elif mit == "be":
                 if t == self._be_ido:
                     return                 # ugyanaz a perc — ne rajzoljunk újra
@@ -1301,11 +1302,10 @@ class LabAblak:
         """A megrajzolt forgatókönyv lefuttatása a VALÓDI motoron."""
         if not self._belepok:
             self._eredmeny_cimke.config(
-                text="Előbb tegyél le legalább egy belépőt "
-                     "(Add BUY / Add SELL, majd kattints a chartra).",
+                text=_t("lab.elobb_tegyel_le_legalabb_egy_b"),
                 fg="#a60")
             return
-        self._eredmeny_cimke.config(text="futtatás…", fg="#666")
+        self._eredmeny_cimke.config(text=_t("lab.futtatas"), fg="#666")
         self.root.update_idletasks()
         try:
             from tools.lab_scenario import futtat as _futtat
@@ -1424,7 +1424,7 @@ class LabAblak:
         zart = [t for t in res.closed if t.close_time is not None]
         if not zart:
             self._eredmeny_cimke.config(
-                text="Egyetlen kötés sem született ezen a terven.", fg="#a60")
+                text=_t("lab.egyetlen_kotes_sem_szuletett_e"), fg="#a60")
             return
         _r = 0.0
         for t in zart:
@@ -1435,7 +1435,7 @@ class LabAblak:
         _pnl = sum(t.pnl_usd for t in zart)
         _veg = " · ".join(f"{str(t.close_time)[11:16]} {t.status}" for t in zart[:6])
         self._eredmeny_cimke.config(
-            text=(f"{len(zart)} lezárt kötés · összesen {_pnl:+.2f} · {_r:+.2f} R"
+            text=(_t("lab.status.closed", n=len(zart), pnl=f"{_pnl:+.2f}", r=f"{_r:+.2f}")
                   + (f"   |   {_veg}" if _veg else "")), fg="#046")
 
     def _be_ar(self, t):
@@ -1576,7 +1576,7 @@ class LabAblak:
                       linewidth=2.2, alpha=0.95, zorder=12)
         self._ax.plot(_x, _y, "o", color=szin("cyan"), markersize=3.5,
                       zorder=12)
-        self._ax.annotate("SL útja (BE / trailing)", (_x[-1], _y[-1]),
+        self._ax.annotate(_t("lab.sl_utja_be_trailing"), (_x[-1], _y[-1]),
                           color=szin("cyan"), fontsize=8, ha="left",
                           va="center", zorder=12,
                           xytext=(4, 0), textcoords="offset points")
@@ -1587,10 +1587,10 @@ class LabAblak:
 
 def main(argv=None) -> int:
     import argparse
-    ap = argparse.ArgumentParser(description="TradeForge kézi laboratórium (chart)")
+    ap = argparse.ArgumentParser(description=_t("lab.tradeforge_kezi_laboratorium_c"))
     ap.add_argument("--symbol")
     ap.add_argument("--strategy")
-    ap.add_argument("--tf", type=int, default=15, help="chart-idősík percben")
+    ap.add_argument("--tf", type=int, default=15, help=_t("lab.chart_idosik_percben"))
     ap.add_argument("--from", dest="tol")
     ap.add_argument("--to", dest="ig")
     a = ap.parse_args(argv)

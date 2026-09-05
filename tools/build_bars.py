@@ -45,6 +45,7 @@ import pyarrow.parquet as pq
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from core.i18n import t as _t
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s  %(levelname)-8s %(message)s",
@@ -194,11 +195,10 @@ def status(syms) -> pd.DataFrame:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--symbols", default="", help="vesszős lista")
+    ap.add_argument("--symbols", default="", help=_t("cli.build_bars.vesszos_lista"))
     ap.add_argument("--tfs", default="M1,M15", help="pl. M1,M5,M15,H1")
     ap.add_argument("--write", action="store_true",
-                    help="ÍRJA is a data/<tf>/<SYM>.parquet fájlokat "
-                         "(alapból csak ellenőriz)")
+                    help=_t("cli.build_bars.irja_is_a_data_tf_sym_parquet"))
     ap.add_argument("--status", action="store_true")
     args = ap.parse_args()
 

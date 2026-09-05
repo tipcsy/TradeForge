@@ -34,6 +34,7 @@ from strategy import get_strategy
 from core.params_store import params_file, set_active_strategy
 from core import regime
 from trading.backtest import load_data, run_pair
+from core.i18n import t as _t
 
 _ORDER = [regime.CLEAN_BULL, regime.CLEAN_BEAR, regime.RANGING, regime.TRANSITION,
           regime.DEAD, regime.VOLATILE_BULL, regime.VOLATILE_BEAR,
@@ -150,10 +151,10 @@ def analyze(symbol: str, cfg: dict, strategy, ib: float, oos_frac: float = 0.4,
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Regime-elemzés IS/OOS + Wilson-CI")
+    ap = argparse.ArgumentParser(description=_t("cli.regime_analysis.regime_elemzes_is_oos_wilson_c"))
     ap.add_argument("--symbol", default=None)
     ap.add_argument("--oos-frac", type=float, default=0.4,
-                    help="az adat utolsó ennyi hányada az OOS (alap: 0.4)")
+                    help=_t("cli.regime_analysis.az_adat_utolso_ennyi_hanyada_a"))
     args = ap.parse_args()
 
     cfg = load_config(str(ROOT / "config.json"))

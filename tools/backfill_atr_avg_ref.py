@@ -28,6 +28,7 @@ from core.params_store import PARAMS_DIR
 from strategy import get_strategy_by_name
 from strategy.settings import load_config
 from trading.backtest import load_data
+from core.i18n import t as _t
 
 
 def _compute_ref(strategy, df_m15, df_m1, params, point_size):
@@ -41,9 +42,9 @@ def _compute_ref(strategy, df_m15, df_m1, params, point_size):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="atr_avg_ref backfill a mentett paraméterekbe.")
+    ap = argparse.ArgumentParser(description=_t("cli.backfill_atr_avg_ref.atr_avg_ref_backfill_a_mentett"))
     ap.add_argument("--force", action="store_true",
-                    help="A már meglévő atr_avg_ref-et is újraszámolja.")
+                    help=_t("cli.backfill_atr_avg_ref.a_mar_meglevo_atr_avg_ref_et_i"))
     args = ap.parse_args()
 
     cfg = load_config(ROOT / "config.json")

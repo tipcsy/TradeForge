@@ -46,6 +46,7 @@ sys.path.insert(0, str(ROOT))
 
 import MetaTrader5 as mt5                     # noqa: E402
 from core import mt5_connector                # noqa: E402
+from core.i18n import t as _t
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)-8s %(message)s")
 log = logging.getLogger(__name__)
@@ -170,12 +171,11 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--symbols", default="",
-                    help="vesszős lista; elhagyva a config aktív párjai")
+                    help=_t("cli.tick_probe.vesszos_lista_elhagyva_a_confi"))
     ap.add_argument("--quick", action="store_true",
-                    help="CSAK a legkorábbi tick ideje (szimbólumonként EGY hívás, "
-                         "másodpercek) — nem tölt le mintanapokat")
+                    help=_t("cli.tick_probe.csak_a_legkorabbi_tick_ideje_s"))
     ap.add_argument("--keep", action="store_true",
-                    help="a letöltött mintahónap maradjon meg a data/ticks alatt")
+                    help=_t("cli.tick_probe.a_letoltott_mintahonap_maradjo"))
     args = ap.parse_args()
 
     cfg = json.load(io.open(ROOT / "config.json", encoding="utf-8"))

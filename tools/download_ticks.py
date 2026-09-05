@@ -55,6 +55,7 @@ sys.path.insert(0, str(ROOT))
 
 import MetaTrader5 as mt5                     # noqa: E402
 from core import mt5_connector                # noqa: E402
+from core.i18n import t as _t
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s  %(levelname)-8s %(message)s",
@@ -305,17 +306,17 @@ def status(syms) -> pd.DataFrame:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--symbols", default="", help="vesszős lista")
+    ap.add_argument("--symbols", default="", help=_t("cli.build_bars.vesszos_lista"))
     ap.add_argument("--from", dest="frm", default="",
-                    help="kezdő dátum (YYYY-MM-DD)")
-    ap.add_argument("--to", dest="to", default="", help="záró dátum (kizárólag)")
+                    help=_t("cli.download_ticks.kezdo_datum_yyyy_mm_dd"))
+    ap.add_argument("--to", dest="to", default="", help=_t("cli.download_ticks.zaro_datum_kizarolag"))
     ap.add_argument("--all-history", action="store_true",
-                    help="a `data/tick_probe.csv`-ben MÉRT legkorábbi ticktől")
+                    help=_t("cli.download_ticks.a_data_tick_probe_csv_ben_mert"))
     ap.add_argument("--consolidate", action="store_true",
-                    help="a letöltés után vonja össze a lezárt hónapokat")
+                    help=_t("cli.download_ticks.a_letoltes_utan_vonja_ossze_a"))
     ap.add_argument("--keep-days", action="store_true",
-                    help="összevonás után a napi fájlok is maradjanak meg")
-    ap.add_argument("--status", action="store_true", help="csak a jelenlegi állapot")
+                    help=_t("cli.download_ticks.osszevonas_utan_a_napi_fajlok"))
+    ap.add_argument("--status", action="store_true", help=_t("cli.download_ticks.csak_a_jelenlegi_allapot"))
     args = ap.parse_args()
 
     cfg = json.load(io.open(ROOT / "config.json", encoding="utf-8"))

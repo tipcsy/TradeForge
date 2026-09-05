@@ -57,6 +57,7 @@ import logging
 logging.disable(logging.INFO)
 
 import pandas as pd
+from core.i18n import t as _t
 
 MINTA = {
     "symbol": "UsaTec",
@@ -102,14 +103,14 @@ def betolt(ut: Path) -> dict:
     try:
         fk = json.loads(_szoveg(ut.read_bytes()))
     except FileNotFoundError:
-        _hiba(f"nincs ilyen fájl: {ut}")
+        _hiba(_t("lab.err.no_such_file", path=ut))
     except UnicodeDecodeError as ex:
-        _hiba(f"a forgatókönyv kódolása nem olvasható ({ex}) — mentsd UTF-8-ban")
+        _hiba(_t("lab.err.bad_encoding", err=ex))
     except json.JSONDecodeError as ex:
-        _hiba(f"a forgatókönyv nem érvényes JSON ({ex})")
+        _hiba(_t("lab.err.bad_json", err=ex))
     for kulcs in ("symbol", "from", "to"):
         if not fk.get(kulcs):
-            _hiba(f"hiányzó kulcs a forgatókönyvben: '{kulcs}'")
+            _hiba(_t("lab.err.missing_key", key=kulcs))
     return fk
 
 
@@ -123,7 +124,7 @@ def _ido(x, mit: str, tz=None):
     try:
         t = pd.Timestamp(x)
     except Exception:
-        _hiba(f"értelmezhetetlen időpont ({mit}): {x!r}")
+        _hiba(_t("lab.err.bad_time", what=mit, value=repr(x)))
     if tz is not None:
         t = t.tz_localize(tz) if t.tzinfo is None else t.tz_convert(tz)
     return t
@@ -139,7 +140,7 @@ def futtat(fk: dict) -> dict:
     sym = str(fk["symbol"])
     pair_cfg = (cfg.get("pairs") or {}).get(sym)
     if not pair_cfg:
-        _hiba(f"a(z) {sym} nincs a config.json `pairs` blokkjában")
+        _hiba(_t("lab.err.pair_not_in_config", symbol=sym))
     strat_nev = str(fk.get("strategy") or "").strip()
     if not strat_nev:
         from strategy import default_strategy_name
@@ -147,7 +148,7 @@ def futtat(fk: dict) -> dict:
     try:
         strategy = get_strategy_by_name(strat_nev)
     except Exception:
-        _hiba(f"ismeretlen stratégia: {strat_nev!r}")
+        _hiba(_t("lab.err.unknown_strategy", name=repr(strat_nev)))
     cs = config_for_strategy(cfg, strat_nev)
     params = strategy_params(sym, strat_nev, cs, fallback=default_params(strategy, cs))
 
@@ -169,7 +170,7 @@ def futtat(fk: dict) -> dict:
 
     df15, df1 = bt.load_data(sym)
     if df15 is None or df1 is None:
-        _hiba(f"nincs letöltött adat a(z) {sym} párhoz — `python main.py download`")
+        _hiba(_t("lab.err.no_data", symbol=sym))
 
     _tol, _ig = str(fk["from"]), str(fk["to"])
     # A JELÖLT-LISTA: ugyanazokkal a paraméterekkel épül, amivel futtatunk —
@@ -178,7 +179,7 @@ def futtat(fk: dict) -> dict:
                                      strategy=strategy,
                                      test_start=_tol, test_end=_ig)
     if len(sorozat.m1) == 0:
-        _hiba(f"a megadott időszakra ({_tol} … {_ig}) nincs M1 adat")
+        _hiba(_t("lab.err.no_m1_in_period", start=_tol, end=_ig))
 
     _sajat = _sajat_belepo
     _bejegyzett = []
@@ -189,15 +190,15 @@ def futtat(fk: dict) -> dict:
         _idx = sorozat.m1.index
         uj = {}
         for be in (fk.get("entries") or []):
-            t = _ido(be.get("time"), "belépő", _idx.tz)
+            t = _ido(be.get("time"), _t("lab.belepo"), _idx.tz)
             irany = str(be.get("direction") or "BUY").upper()
             if irany not in ("BUY", "SELL"):
-                _hiba(f"a belépő iránya csak BUY vagy SELL lehet: {irany!r}")
+                _hiba(_t("lab.err.bad_direction", value=repr(irany)))
             # A LEGKÖZELEBBI M1 bár — de csak ha tényleg közel van. Egy órával
             # arrébb tett belépő NEM ugyanaz a kötés; inkább szóljunk.
             poz = _idx.get_indexer([t], method="nearest")
             if len(poz) == 0 or poz[0] < 0:
-                _hiba(f"a(z) {t} belépőhöz nincs M1 bár az időszakban")
+                _hiba(_t("lab.err.no_bar_for_entry", time=t))
             _tenyleges = _idx[poz[0]]
             if abs((_tenyleges - t).total_seconds()) > 300:
                 _hiba(f"a(z) {t} belépőhöz a legközelebbi M1 bár {_tenyleges} — "
@@ -269,30 +270,24 @@ def _perc(t) -> str:
 def kiir(ki: dict) -> None:
     res, sym = ki["res"], ki["sym"]
     print(f"{sym} / {ki['strategy']}  —  "
-          + ("KÉZI belépők" if ki["sajat"] else "a STRATÉGIA belépői")
-          + ("  · végrehajtási kapuk BE" if ki["kapuk"]
-             else "  · kapuk és volatilitás-szűrő KI"))
+          + (_t("lab.kezi_belepok") if ki["sajat"] else _t("lab.a_strategia_belepoi"))
+          + (_t("lab.vegrehajtasi_kapuk_be") if ki["kapuk"]
+             else _t("lab.kapuk_es_volatilitas_szuro_ki")))
     if ki["sajat"]:
         for t, irany in ki["bejegyzett"]:
             print(f"   megadva: {_perc(t)}  {irany}")
         if not ki["bejegyzett"]:
-            print("   (nem adtál meg belépőt — a futás üres lesz)")
+            print(_t("lab.nem_adtal_meg_belepot_a_futas"))
     print()
     zart = res.closed
     if not zart and not res.trades:
         # ⚠ NEM HALLGATUNK: a nulla kötés lehet az, hogy a KAPU fogta meg
         # (spread, volatilitás, együttállás), és ezt tudni kell.
         if ki["kapuk"]:
-            print("Egyetlen kötés sem született, és a VÉGREHAJTÁSI KAPUK be "
-                  "vannak kapcsolva — a spread-, volatilitás- vagy "
-                  "TF-együttállás-kapu valamelyike megfoghatta.")
-            print('Ha a kézi belépőt kapuk NÉLKÜL akarod látni, tedd a '
-                  'forgatókönyvbe:  "exec_gates": false')
+            print(_t("lab.egyetlen_kotes_sem_szuletett_e_2"))
+            print(_t("lab.ha_a_kezi_belepot_kapuk_nelkul"))
         else:
-            print("Egyetlen kötés sem született, pedig a végrehajtási kapuk "
-                  "ki vannak kapcsolva. A méretezés (min_lot / szabad slot / "
-                  "napi limit) foghatta meg — vagy a megadott időpontra nem "
-                  "esik használható bár.")
+            print(_t("lab.egyetlen_kotes_sem_szuletett_p"))
         return
     # ⚠ AZ ÁR A PONT-MÉRET SZERINTI TIZEDESEKKEL. A `%.5g` egy Ger40/UsaTec
     # szintnél „29532"-t ad a belépőre ÉS a stopra is — a kettő ránézésre
@@ -306,7 +301,7 @@ def kiir(ki: dict) -> None:
         return f"{float(v):.{_tiz}f}" if v is not None else "—"
 
     _w = max(12, _tiz + 8)
-    print(f"{'belépő':<17} {'ir':<4} {'ár':>{_w}} {'SL (nyitó)':>{_w}} "
+    print(f"{_t('lab.belepo'):<17} {'ir':<4} {'ár':>{_w}} {'SL (nyitó)':>{_w}} "
           f"{'TP':>{_w}} {'kilépő':<17} {'P&L':>9} {'R':>7}  vége")
     print("-" * (104 + 3 * _tiz))
     _ossz_r = 0.0
@@ -329,14 +324,16 @@ def kiir(ki: dict) -> None:
               + (f"  [{t.rr_technique}]" if t.rr_technique else ""))
     print("-" * (104 + 3 * _tiz))
     _s = res.summary(ki["balance"])
-    print(f"{len(zart)} lezárt kötés · összesen {sum(t.pnl_usd for t in zart):+.2f} "
-          f"· {_ossz_r:+.2f} R")
+    print(_t("lab.status.closed", n=len(zart),
+             pnl=f"{sum(t.pnl_usd for t in zart):+.2f}",
+             r=f"{_ossz_r:+.2f}"))
     if _s.get("trades"):
         # ⚠ A `win_rate` ARÁNY (0–1), nem százalék — az első kiírásom „1.0%"-ot
         # mutatott 100% helyett. A `max_drawdown` kulcs neve sem `max_dd`.
-        print(f"találat {100 * _s.get('win_rate', 0):.1f}% · "
-              f"PF {_s.get('profit_factor', 0):.2f} · "
-              f"max DD {_s.get('max_drawdown', 0):.2f}")
+        print(_t("lab.status.stats",
+             win=f"{100 * _s.get('win_rate', 0):.1f}",
+             pf=f"{_s.get('profit_factor', 0):.2f}",
+             dd=f"{_s.get('max_drawdown', 0):.2f}"))
     # ⚠ AZ ESEMÉNY-NAPLÓ A LÉNYEG: ebből látszik, MIKOR mozdult a stop, mikor
     # épített, mikor zárt részlegesen — a labor épp erre való.
     for t in res.trades:
@@ -344,7 +341,8 @@ def kiir(ki: dict) -> None:
             continue
         print(f"\n   {_perc(t.open_time)} {t.direction} eseményei:")
         for ev in t.events:
-            _tipus, _t, _ar, _sl, _tp, _lot, _komment = (list(ev) + [""] * 7)[:7]
+            # ⚠ NEM `_t`: az a fordito neve ebben a modulban.
+            _tipus, _ido, _ar, _sl, _tp, _lot, _komment = (list(ev) + [""] * 7)[:7]
             _reszlet = []
             if _ar:
                 _reszlet.append(f"ár {_ar:g}")
@@ -356,14 +354,14 @@ def kiir(ki: dict) -> None:
                 _reszlet.append(f"lot {_lot:g}")
             if _komment:
                 _reszlet.append(str(_komment))
-            print(f"      {_perc(_t):<17} {_tipus:<14} " + " · ".join(_reszlet))
+            print(f"      {_perc(_ido):<17} {_tipus:<14} " + " · ".join(_reszlet))
 
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("forgatokonyv", nargs="?", help="a JSON fájl útja")
+    ap.add_argument("forgatokonyv", nargs="?", help=_t("lab.a_json_fajl_utja"))
     ap.add_argument("--minta", action="store_true",
-                    help="kiinduló forgatókönyv-sablon a kimenetre")
+                    help=_t("lab.kiindulo_forgatokonyv_sablon_a"))
     a = ap.parse_args(argv)
     if a.minta:
         print(json.dumps(MINTA, ensure_ascii=False, indent=2))

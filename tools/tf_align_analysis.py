@@ -36,6 +36,7 @@ from strategy import get_strategy
 from core.params_store import params_file, set_active_strategy
 from gates import tf_align as _tfa
 from trading.backtest import load_data, run_pair
+from core.i18n import t as _t
 
 _SMA_N = 50    # trend-irány idősíkonként: close vs SMA(_SMA_N)
 
@@ -184,10 +185,10 @@ def analyze(symbol, cfg, strategy, ib, oos_frac=0.4, with_m1=False):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="TF-összhang teszt")
+    ap = argparse.ArgumentParser(description=_t("cli.tf_align_analysis.tf_osszhang_teszt"))
     ap.add_argument("--symbol", default=None)
     ap.add_argument("--oos-frac", type=float, default=0.4)
-    ap.add_argument("--with-m1", action="store_true", help="az M1 idősík is (zajos)")
+    ap.add_argument("--with-m1", action="store_true", help=_t("cli.tf_align_analysis.az_m1_idosik_is_zajos"))
     args = ap.parse_args()
     cfg = load_config(str(ROOT / "config.json"))
     strategy = get_strategy(cfg)

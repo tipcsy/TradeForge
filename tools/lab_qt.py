@@ -50,6 +50,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 from strategy import visual as viz
 from tools.lab_chart import (IDOSIKOK, NINCS_STRAT, Idotengely, keszit, szin)
+from core.i18n import t as _t
 
 log = logging.getLogger(__name__)
 
@@ -152,9 +153,9 @@ class LabAblak(QtWidgets.QMainWindow):
         self._parok = sorted(k for k, v in (self.cfg.get("pairs") or {}).items()
                              if isinstance(v, dict))
         if not self._parok:
-            raise SystemExit("HIBA: a config.json `pairs` blokkja üres.")
+            raise SystemExit(_t("lab.hiba_a_config_json_pairs_blokk"))
 
-        self.setWindowTitle(f"{APP_NAME} {APP_VERSION} — kézi laboratórium")
+        self.setWindowTitle(_t("lab.window_title", app=APP_NAME, version=APP_VERSION))
         self.resize(1500, 950)
 
         # ── Állapot ──────────────────────────────────────────────────────
@@ -191,10 +192,10 @@ class LabAblak(QtWidgets.QMainWindow):
             self._sym.setCurrentText(symbol)
         self._sym.currentTextChanged.connect(lambda *_: self._strat_lista())
         s1.addWidget(self._sym)
-        s1.addWidget(QtWidgets.QLabel("Stratégia"))
+        s1.addWidget(QtWidgets.QLabel(_t("lab.strategia")))
         self._strat = QtWidgets.QComboBox()
         s1.addWidget(self._strat)
-        s1.addWidget(QtWidgets.QLabel("Idősík"))
+        s1.addWidget(QtWidgets.QLabel(_t("lab.idosik")))
         self._tf = QtWidgets.QComboBox()
         for perc, cimke in IDOSIKOK:
             self._tf.addItem(cimke, perc)
@@ -202,7 +203,7 @@ class LabAblak(QtWidgets.QMainWindow):
                                      if tf_perc in [p for p, _ in IDOSIKOK] else 2))
         self._tf.currentIndexChanged.connect(lambda *_: self.betolt())
         s1.addWidget(self._tf)
-        s1.addWidget(QtWidgets.QLabel("-tól"))
+        s1.addWidget(QtWidgets.QLabel(_t("lab.tol_2")))
         self._tol = QtWidgets.QLineEdit(tol or "")
         self._tol.setFixedWidth(120)
         s1.addWidget(self._tol)
@@ -210,7 +211,7 @@ class LabAblak(QtWidgets.QMainWindow):
         self._ig = QtWidgets.QLineEdit(ig or "")
         self._ig.setFixedWidth(120)
         s1.addWidget(self._ig)
-        _b = QtWidgets.QPushButton("Betölt")
+        _b = QtWidgets.QPushButton(_t("lab.betolt"))
         _b.clicked.connect(self.betolt)
         s1.addWidget(_b)
         s1.addStretch(1)
@@ -218,7 +219,7 @@ class LabAblak(QtWidgets.QMainWindow):
         # 2. sor: terv-eszközök
         s2 = QtWidgets.QHBoxLayout()
         fo.addLayout(s2)
-        s2.addWidget(QtWidgets.QLabel("Kattintás:"))
+        s2.addWidget(QtWidgets.QLabel(_t("lab.kattintas")))
         self._mod = None
         self._mod_gombok = {}
         for ertek, cimke in (("BUY", "Add BUY"), ("SELL", "Add SELL"),
@@ -235,7 +236,7 @@ class LabAblak(QtWidgets.QMainWindow):
         self._tp_rr.setValue(2.0)
         s2.addWidget(self._tp_rr)
         s2.addWidget(QtWidgets.QLabel("R"))
-        self._epites = QtWidgets.QCheckBox("Start építés")
+        self._epites = QtWidgets.QCheckBox(_t("lab.start_epites"))
         s2.addWidget(self._epites)
 
         # BE / trailing
@@ -244,7 +245,7 @@ class LabAblak(QtWidgets.QMainWindow):
         self._rr_mezok = {}
         for _k, _cim in (("breakeven_pct", "BE"),
                          ("trail_activation_atr", "trail@"),
-                         ("trail_distance_atr", "táv")):
+                         ("trail_distance_atr", _t("lab.tav"))):
             s2.addWidget(QtWidgets.QLabel(f" {_cim}:"))
             _e = QtWidgets.QLineEdit(str(_alap.get(_k, "")))
             _e.setFixedWidth(48)
@@ -252,7 +253,7 @@ class LabAblak(QtWidgets.QMainWindow):
             s2.addWidget(_e)
             self._rr_mezok[_k] = _e
 
-        for cimke, fn in (("Töröl", self.torol), ("JSON mentés", self.ment)):
+        for cimke, fn in ((_t("lab.torol"), self.torol), (_t("lab.json_mentes"), self.ment)):
             g = QtWidgets.QPushButton(cimke)
             g.clicked.connect(fn)
             s2.addWidget(g)
@@ -270,7 +271,7 @@ class LabAblak(QtWidgets.QMainWindow):
             g.setFixedWidth(40)
             g.clicked.connect(lambda _c=False, n=lepes: self.leptet(n))
             s3.addWidget(g)
-        s3.addWidget(QtWidgets.QLabel("sebesség"))
+        s3.addWidget(QtWidgets.QLabel(_t("lab.sebesseg_2")))
         self._sebesseg = QtWidgets.QSlider(QtCore.Qt.Horizontal)
         self._sebesseg.setRange(1, 2000)      # gyertya / másodperc
         self._sebesseg.setValue(8)
@@ -280,7 +281,7 @@ class LabAblak(QtWidgets.QMainWindow):
         self._sebesseg.valueChanged.connect(
             lambda v: self._seb_cimke.setText(str(v)))
         s3.addWidget(self._seb_cimke)
-        self._csak_eddig = QtWidgets.QCheckBox("csak eddig látszik")
+        self._csak_eddig = QtWidgets.QCheckBox(_t("lab.csak_eddig_latszik"))
         self._csak_eddig.setChecked(True)
         self._csak_eddig.stateChanged.connect(lambda *_: self._kurzor_rajz())
         s3.addWidget(self._csak_eddig)
@@ -288,7 +289,7 @@ class LabAblak(QtWidgets.QMainWindow):
         self._bidask.setChecked(True)
         self._bidask.stateChanged.connect(lambda *_: self._kurzor_rajz())
         s3.addWidget(self._bidask)
-        g = QtWidgets.QPushButton("Lejátszás vége")
+        g = QtWidgets.QPushButton(_t("lab.lejatszas_vege"))
         g.clicked.connect(self.kurzor_le)
         s3.addWidget(g)
         s3.addStretch(1)
@@ -320,9 +321,9 @@ class LabAblak(QtWidgets.QMainWindow):
         self._tablak = {}
         for kulcs, cim, oszlopok in (
             ("nyitott", "Nyitott",
-             ("idő", "ir", "belépő", "most", "P&L", "R", "SL", "TP", "perc")),
-            ("lezart", "Lezárt",
-             ("idő", "ir", "belépő", "kilépő", "P&L", "R", "vége")),
+             (_t("lab.ido"), "ir", _t("lab.belepo"), "most", "P&L", "R", "SL", "TP", "perc")),
+            ("lezart", _t("lab.lezart"),
+             (_t("lab.ido"), "ir", _t("lab.belepo"), _t("lab.kilepo"), "P&L", "R", _t("lab.vege"))),
         ):
             t = QtWidgets.QTableWidget(0, len(oszlopok))
             t.setHorizontalHeaderLabels(oszlopok)
@@ -397,7 +398,7 @@ class LabAblak(QtWidgets.QMainWindow):
 
     # ── Betöltés és rajzolás ─────────────────────────────────────────────
     def betolt(self) -> None:
-        self._allapot.setText("betöltés…")
+        self._allapot.setText(_t("lab.betoltes"))
         QtWidgets.QApplication.processEvents()
         _kurzor_t = self._kurzor_ido()
         try:
@@ -431,8 +432,8 @@ class LabAblak(QtWidgets.QMainWindow):
         self._belepok_rajz()
         self._kurzor_rajz()
         self._allapot.setText(
-            f"{len(chart)} gyertya · {_db['kirajzolt']} jelölő · "
-            f"{_db['idon_kivul']} a kijelölésen kívül")
+            _t("lab.status.markers_short", bars=len(chart), drawn=_db["kirajzolt"],
+               outside=_db["idon_kivul"]))
 
     def _objektumok_rajza(self) -> dict:
         """A stratégia rajz-objektumai. Ugyanaz a forrás, mint az MT5-charton."""
@@ -749,7 +750,7 @@ class LabAblak(QtWidgets.QMainWindow):
     def ment(self) -> None:
         import json
         ut, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Forgatókönyv mentése", "fk.json", "JSON (*.json)")
+            self, _t("lab.forgatokonyv_mentese"), "fk.json", "JSON (*.json)")
         if not ut:
             return
         try:
@@ -770,7 +771,7 @@ class LabAblak(QtWidgets.QMainWindow):
     def futtat(self) -> None:
         if not self._belepok:
             return
-        self._allapot.setText("futtatás…")
+        self._allapot.setText(_t("lab.futtatas"))
         QtWidgets.QApplication.processEvents()
         try:
             from tools.lab_scenario import futtat as _futtat
@@ -845,8 +846,9 @@ class LabAblak(QtWidgets.QMainWindow):
                  if t.close_time is not None]
         if _zart:
             self._allapot.setText(
-                f"{len(_zart)} lezárt kötés · "
-                f"{sum(t.pnl_usd for t in _zart):+.2f} · {sum(_sszeg):+.2f} R")
+                _t("lab.status.closed", n=len(_zart),
+                   pnl=f"{sum(t.pnl_usd for t in _zart):+.2f}",
+                   r=f"{sum(_sszeg):+.2f}"))
 
     # ── Listák ───────────────────────────────────────────────────────────
     def _listak_frissit(self) -> None:
