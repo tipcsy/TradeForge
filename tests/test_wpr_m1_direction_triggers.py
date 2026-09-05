@@ -63,7 +63,10 @@ check("a régi közös kulcs KIKERÜLT a tartományokból", OLD not in _opt)
 _meta = CFG["param_meta"]["params"]
 for _k in ("wpr_m1_buy_trigger", "wpr_m1_sell_trigger"):
     check(f"{_k}: van leírása a paraméter-ablakhoz", _k in _meta)
-    check(f"{_k}: az M1 kategóriába", _meta[_k]["category"].endswith("M1"),
+    # ⚠ A kategória AZONOSÍTÓ, nem felirat (0011) — korábban itt a magyar
+    # „Indikátor – M1" végződésére hasonlítottunk. Épp ez volt a baj: a
+    # csoportosítás a magyar szón (és a benne lévő gondolatjelen) állt.
+    check(f"{_k}: az M1 kategóriába", _meta[_k]["category"] == "indicator_m1",
           _meta[_k]["category"])
     # A trigger a JELET változtatja: újraszámolás kell (nem végrehajtási param).
     check(f"{_k}: jel-újraszámolást igényel", _meta[_k]["recompute"] == "signal")

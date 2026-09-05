@@ -71,46 +71,46 @@
   "param_meta": {
     "_comment": "A Paraméterek ablak csoportosítása + megjegyzései.",
     "categories": [
-      "Belépő – M5",
-      "Volatilitás – M30",
-      "Trend – H1",
-      "SL / TP",
-      "Egyéb"
+      "entry_m5",
+      "volatility_m30",
+      "trend_h1",
+      "sltp",
+      "other"
     ],
     "params": {
       "stoch_period": {
         "recompute": "signal",
-        "category": "Belépő – M5",
+        "category": "entry_m5",
         "comment": "M5 stochastic periódus — a %K keresztezi LEFELÉ a %D-t = visszahúzódás"
       },
       "stoch_d": {
         "recompute": "signal",
-        "category": "Belépő – M5",
+        "category": "entry_m5",
         "comment": "A stochastic %D (jelvonal) simítása"
       },
       "atr_ref_period": {
         "recompute": "signal",
-        "category": "Volatilitás – M30",
+        "category": "volatility_m30",
         "comment": "Az M30 ATR-átlag hossza. A belépő csak akkor él, ha az aktuális ATR e fölött van (élénk piac)"
       },
       "keltner_period": {
         "recompute": "signal",
-        "category": "Trend – H1",
+        "category": "trend_h1",
         "comment": "A H1 Keltner-csatorna periódusa (EMA + ATR)"
       },
       "keltner_mult": {
         "recompute": "signal",
-        "category": "Trend – H1",
+        "category": "trend_h1",
         "comment": "A csatorna szélessége ATR-ben. Az ár a FELSŐ sáv fölött = erős emelkedő trend"
       },
       "sl_atr_mult": {
         "recompute": "exec",
-        "category": "SL / TP",
+        "category": "sltp",
         "comment": "A stop az M15 ATR ennyiszerese"
       },
       "tp_rr_ratio": {
         "recompute": "exec",
-        "category": "SL / TP",
+        "category": "sltp",
         "comment": "A célár a stop-táv ennyiszerese (R)"
       }
     }

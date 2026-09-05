@@ -53,6 +53,90 @@ SIGNAL_PARAM = "signal"
 EXEC_PARAM = "execution"
 
 
+# ---------------------------------------------------------------------------
+# Paraméter-KATEGÓRIÁK — azonosítóval, nem felirattal
+# ---------------------------------------------------------------------------
+# ⚠ MIÉRT AZONOSÍTÓ. A kategória a paraméter-ablak csoportosítása, és eddig a
+# MAGYAR FELIRAT volt maga az adat (`"category": "Indikátor – M15"`). Ez három
+# külön bajt okozott:
+#
+#   1. LEFORDÍTHATATLAN. Egy angol csapatnak a config semmit nem mond, és ha
+#      lefordítanánk, a csoportosítás SZÉTESNE: a kód a magyar szóra hasonlít,
+#      tehát minden paraméter az „Egyéb" ágra kerülne.
+#   2. KÓDOLÁS-ÉRZÉKENY. Egy más karakterkódolású gépen az ékezet (vagy a
+#      gondolatjel „–", ami NEM kötőjel) máshogy jön vissza → néma rossz ág.
+#   3. MÁR EL IS TÖRT. A configokban `"SL / TP"` ÉS `"SL/TP"` is szerepelt —
+#      ugyanaz a fogalom, két írásmód, KÉT külön csoport a felületen.
+#
+# Mostantól a config AZONOSÍTÓT tárol (`"category": "sltp"`), a feliratot az
+# i18n adja (`param_cat.sltp`). Új nyelv = 1 JSON, a stratégia-configok nem
+# változnak.
+CAT_OTHER = "other"          # az ismeretlen kulcsok gyűjtője (mindig a végén)
+CAT_EXEC = "execution"       # a közös, stratégia-független végrehajtási blokk
+
+# A RÉGI (magyar felirat) → azonosító megfeleltetés. ⚠ Kell, és nem átmenetileg:
+# egy `.tfs` csomag hozhat régi formátumú configot, és attól még működnie kell.
+_LEGACY_CAT = {
+    "Belépő": "entry",                    "Belépő – M5": "entry_m5",
+    "Bollinger": "bollinger",             "Egyéb": CAT_OTHER,
+    "Idősík": "timeframe",                "Indikátor – M1": "indicator_m1",
+    "Indikátor – M15": "indicator_m15",   "Keltner": "keltner",
+    "Kitörés": "breakout",                "Kockázatkezelés": "risk",
+    "ML modell": "ml_model",              "Piac-szűrő": "market_filter",
+    "SL / TP": "sltp",                    "SL/TP": "sltp",
+    "Szint": "level",                     "Trend – H1": "trend_h1",
+    "Trend-szűrő": "trend_filter",        "Volatilitás – M30": "volatility_m30",
+    "Összeszűkülés": "squeeze",           "Végrehajtás": CAT_EXEC,
+}
+
+
+def category_id(nev) -> str:
+    """Egy kategória-mező → azonosító. Régi magyar feliratot is elfogad.
+
+    ⚠ ISMERETLEN ÉRTÉK VÁLTOZATLANUL MEGY TOVÁBB (nem lesz belőle „other"):
+    egy külső stratégia saját kategóriát hozhat, és annak a csoportosítása
+    akkor is legyen helyes, ha a feliratát nem ismerjük. A megjelenítés ilyenkor
+    magát az azonosítót mutatja — látható, nem néma."""
+    if not nev:
+        return CAT_OTHER
+    nev = str(nev)
+    return _LEGACY_CAT.get(nev, nev)
+
+
+def param_category(cfg: dict, key: str) -> str:
+    """Egy paraméter kategória-AZONOSÍTÓJA (ismeretlen → `other`)."""
+    meta = ((cfg.get("param_meta") or {}).get("params") or {}).get(key) or {}
+    return category_id(meta.get("category"))
+
+
+def category_order(cfg: dict) -> list:
+    """A megjelenítési sorrend AZONOSÍTÓKKAL (a duplikátumok kiszűrve).
+
+    ⚠ A duplikátum-szűrés nem kozmetika: a `"SL / TP"` és a `"SL/TP"` UGYANARRA
+    az azonosítóra képződik, tehát a listában kétszer állna."""
+    ki, latott = [], set()
+    for nev in ((cfg.get("param_meta") or {}).get("categories") or []):
+        cid = category_id(nev)
+        if cid not in latott:
+            latott.add(cid)
+            ki.append(cid)
+    return ki
+
+
+def category_label(cid: str, cfg: "dict | None" = None) -> str:
+    """A kategória FELIRATA: i18n → a config saját `category_labels` → az azonosító.
+
+    A középső ág a `.tfs` csomagoknak kell: egy külső stratégia hozhat olyan
+    kategóriát, amire a mi nyelvi fájljainkban nincs kulcs."""
+    from core.i18n import t as _t
+    kulcs = f"param_cat.{cid}"
+    felirat = _t(kulcs)
+    if felirat and felirat != kulcs:
+        return felirat
+    sajat = ((cfg or {}).get("param_meta") or {}).get("category_labels") or {}
+    return str(sajat.get(cid) or cid)
+
+
 def param_class(cfg: dict, key: str) -> str:
     """Egy paraméter osztálya: `"signal"` vagy `"execution"`.
 

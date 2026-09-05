@@ -40,97 +40,97 @@
   "param_meta": {
     "_comment": "A Paraméterek ablak csoportosítása + megjegyzései. A 'categories' a megjelenítési SORREND; a 'params.<kulcs>' megadja a kategóriát és a (szerkeszthető) megjegyzést. Ismeretlen kulcs → 'Egyéb'. A megjegyzéseket a GUI-ból is lehet szerkeszteni (Mentéskor ide íródnak vissza).",
     "categories": [
-      "Indikátor – M15",
-      "Indikátor – M1",
-      "SL / TP",
-      "Kockázatkezelés",
-      "Piac-szűrő",
-      "Egyéb"
+      "indicator_m15",
+      "indicator_m1",
+      "sltp",
+      "risk",
+      "market_filter",
+      "other"
     ],
     "params": {
       "sma_period": {
         "recompute": "signal",
-        "category": "Indikátor – M15",
+        "category": "indicator_m15",
         "comment": "SMA periódus — a trendirány (ár az SMA felett=BUY, alatt=SELL)"
       },
       "wpr_m15_period": {
         "recompute": "signal",
-        "category": "Indikátor – M15",
+        "category": "indicator_m15",
         "comment": "M15 WPR periódus"
       },
       "wpr_m15_buy_extreme": {
         "recompute": "signal",
-        "category": "Indikátor – M15",
+        "category": "indicator_m15",
         "comment": "M15 alsó extrém — BUY felfegyverzés e alatt"
       },
       "wpr_m15_buy_trigger": {
         "recompute": "signal",
-        "category": "Indikátor – M15",
+        "category": "indicator_m15",
         "comment": "M15 BUY trigger — felfelé átütve nyílik a BUY ablak"
       },
       "wpr_m15_sell_extreme": {
         "recompute": "signal",
-        "category": "Indikátor – M15",
+        "category": "indicator_m15",
         "comment": "M15 felső extrém — SELL felfegyverzés e fölött"
       },
       "wpr_m15_sell_trigger": {
         "recompute": "signal",
-        "category": "Indikátor – M15",
+        "category": "indicator_m15",
         "comment": "M15 SELL trigger — lefelé átütve nyílik a SELL ablak"
       },
       "wpr_m1_period": {
         "recompute": "signal",
-        "category": "Indikátor – M1",
+        "category": "indicator_m1",
         "comment": "M1 WPR periódus (belépő időzítés)"
       },
       "wpr_m1_buy_extreme": {
         "recompute": "signal",
-        "category": "Indikátor – M1",
+        "category": "indicator_m1",
         "comment": "M1 alsó extrém — BUY belépő felfegyverzés"
       },
       "wpr_m1_sell_extreme": {
         "recompute": "signal",
-        "category": "Indikátor – M1",
+        "category": "indicator_m1",
         "comment": "M1 felső extrém — SELL belépő felfegyverzés"
       },
       "wpr_m1_sell_trigger": {
         "recompute": "signal",
-        "category": "Indikátor – M1",
+        "category": "indicator_m1",
         "comment": "M1 SELL trigger — lefelé átütve tüzel a SELL belépő"
       },
       "wpr_m1_buy_trigger": {
         "recompute": "signal",
-        "category": "Indikátor – M1",
+        "category": "indicator_m1",
         "comment": "M1 BUY trigger — felfelé átütve tüzel a BUY belépő"
       },
       "sl_atr_mult": {
         "recompute": "execution",
-        "category": "SL / TP",
+        "category": "sltp",
         "comment": "SL = ATR × ez"
       },
       "tp_rr_ratio": {
         "recompute": "execution",
-        "category": "SL / TP",
+        "category": "sltp",
         "comment": "TP = SL × ez (kockázat/hozam arány)"
       },
       "no_trade_resets_signal": {
         "recompute": "signal",
-        "category": "Kockázatkezelés",
+        "category": "risk",
         "comment": "A no-trade (szürke) óra resetelje-e az M15 ablakot (alap: KI)"
       },
       "atr_min_pct": {
         "recompute": "execution",
-        "category": "Piac-szűrő",
+        "category": "market_filter",
         "comment": "Min. ATR — túl csendes piac kizárása"
       },
       "atr_max_pct": {
         "recompute": "execution",
-        "category": "Piac-szűrő",
+        "category": "market_filter",
         "comment": "Max. ATR — kaotikus piac kizárása"
       },
       "atr_baseline_bars": {
         "recompute": "signal",
-        "category": "Piac-szűrő",
+        "category": "market_filter",
         "comment": "A min/max ATR MÉRCÉJE: 0 = a mentett atr_avg_ref (befagyasztott), >0 = gördülő ablak ennyi M15 gyertyára (96 = 1 nap, 8640 = 90 nap). Rezsimváltásnál a befagyasztott mérce némán lekapcsolhatja a párt. | ⚠ JEL-osztály: a bt_indicators SZÁMOLJA az atr_avg oszlopot belőle, tehát a gyorsítótárazott indikátor-táblát is megváltoztatja — végrehajtásinak minősítve a söprés némán hamis eredményt adna. (Az optimalizáló nem hangolja, így ez nem kerül sebességet.)"
       }
     }

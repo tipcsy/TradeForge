@@ -43,6 +43,7 @@ from core.params_store import (
 from core import execution_params as _execp
 from core import risk_reduction as _rrx
 from core.i18n import t as _t, num as _fmtnum
+from strategy import settings as _sset
 
 log = logging.getLogger(__name__)
 
@@ -53,12 +54,14 @@ log = logging.getLogger(__name__)
 # ⚠ A BE/trailing v1.96.0 óta NEM ITT van: a kockázatcsökkentő beállító ablakban
 # jelenik meg, és CSAK azokon a preseteken, ahol tényleg hat (Fibo/Harmados
 # preseten például semmit nem csinált — lásd `core.risk_reduction.be_trail_active`).
-# ⚠ NEM FORDÍTJUK — ez ADAT-AZONOSÍTÓ, nem felirat. A paraméter-kategóriák
-# nevei a stratégiák config-JSON-jaiban élnek (`param_meta.categories`), és
-# a kód ezekre hasonlít. Lefordítva a csoportosítás szétesne: minden
-# paraméter az „Egyéb" ágra kerülne. A kategóriák nyelvesítése külön
-# lépés (a configban kellene kódot tárolni, felirattal együtt).
-_EXEC_CATEGORY = "Végrehajtás"
+# ⚠ AZONOSÍTÓ, NEM FELIRAT (0011). Korábban itt a magyar szó állt, és a config
+# is azt tárolta — a csoportosítás tehát a MAGYAR SZÓRA hasonlított. Ez
+# lefordíthatatlan volt (angol felületen minden paraméter az „Egyéb" ágra esett
+# volna), kódolás-érzékeny (az ékezet és a gondolatjel „–" nem kötőjel), és már
+# el is tört: a configokban `"SL / TP"` ÉS `"SL/TP"` is szerepelt, két külön
+# csoportot adva ugyanarra a fogalomra. A feliratot most az i18n adja
+# (`param_cat.*`), a config azonosítót tárol.
+_EXEC_CATEGORY = _sset.CAT_EXEC
 _EXEC_KEYS = frozenset(_execp.DEFAULTS)
 _EXEC_PARAM_META = {
     "atr_period": {"category": _EXEC_CATEGORY,
@@ -531,14 +534,17 @@ class InstrumentParamsDialog:
         # A 'categories' a megjelenítési SORREND; a 'params.<kulcs>' adja a kategóriát
         # és a (szerkeszthető) megjegyzést. Ismeretlen kulcs → 'Egyéb' a végén.
         _pm     = self.cfg.get("param_meta") or {}
-        _cat_ord = list(_pm.get("categories") or [])
+        # AZONOSÍTÓK (a régi magyar feliratot a `category_order` is elfogadja —
+        # egy `.tfs` csomag hozhat régi formátumú configot).
+        _cat_ord = _sset.category_order(self.cfg)
         _pmeta  = {**(_pm.get("params") or {}), **_EXEC_PARAM_META}
         if _EXEC_CATEGORY not in _cat_ord:
-            _insert_at = _cat_ord.index("Egyéb") if "Egyéb" in _cat_ord else len(_cat_ord)
+            _insert_at = (_cat_ord.index(_sset.CAT_OTHER)
+                          if _sset.CAT_OTHER in _cat_ord else len(_cat_ord))
             _cat_ord.insert(_insert_at, _EXEC_CATEGORY)
 
         def _cat_of(k):
-            return (_pmeta.get(k, {}) or {}).get("category") or "Egyéb"
+            return _sset.category_id((_pmeta.get(k, {}) or {}).get("category"))
 
         # ── EGY paraméter = EGY sor: érték ÉS söprési tartomány ─────────────
         # Korábban ugyanazt a paramétert három helyen kellett kezelni (érték itt,
@@ -589,8 +595,10 @@ class InstrumentParamsDialog:
             # Kategória-elválasztó fejléc (név + vékony vonal)
             hdr = tk.Frame(form, bg=BG)
             hdr.grid(row=_r, column=0, columnspan=_NCOL, sticky="we", pady=(8, 1))
-            tk.Label(hdr, text=cat, bg=BG, fg=FG_BLUE, font=self._sf,
-                     anchor="w").pack(side="left")
+            # ⚠ A `cat` AZONOSÍTÓ — a feliratot itt, a MEGJELENÍTÉSKOR oldjuk fel.
+            # Ismeretlen azonosítónál magát az azonosítót mutatja: látható, nem néma.
+            tk.Label(hdr, text=_sset.category_label(cat, self.cfg), bg=BG,
+                     fg=FG_BLUE, font=self._sf, anchor="w").pack(side="left")
             tk.Frame(hdr, bg=BG_HEADER, height=1).pack(
                 side="left", fill="x", expand=True, padx=(8, 0))
             _r += 1

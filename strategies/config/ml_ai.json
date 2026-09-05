@@ -29,44 +29,44 @@
   "param_meta": {
     "_comment": "A Paraméterek ablak csoportosítása + megjegyzései. A BE/trailing a KOCKÁZATCSÖKKENTŐ blokkban jelenik meg (preset-függően), az atr_period és a spread-kapu a közös \"Végrehajtás\" kategóriában — egyik sem a stratégiáé (lásd strategy/base.py).",
     "categories": [
-      "ML modell",
-      "SL / TP",
-      "Egyéb"
+      "ml_model",
+      "sltp",
+      "other"
     ],
     "params": {
       "signal_tf_min": {
         "recompute": "signal",
-        "category": "ML modell",
+        "category": "ml_model",
         "comment": "A JEL idősíkja percben (5/15/30/60). Változtatás után ÚJRA KELL TANÍTANI — a régi modell más gyertyákra tanult. STRATÉGIA-szintű: a strategy/config/ml_ai.json-ban állítsd."
       },
       "ml_warmup_bars": {
         "recompute": "signal",
-        "category": "ML modell",
+        "category": "ml_model",
         "comment": "Élő feature-ablak mélysége (jel-idősík gyertyában) — min. ~700 kell az indikátor-bemelegítéshez"
       },
       "dynamic_sltp": {
         "recompute": "execution",
-        "category": "SL / TP",
+        "category": "sltp",
         "comment": "true: SL = ATR14 × szorzó; false: fix sl_pips/tp_pips"
       },
       "sl_atr_mult": {
         "recompute": "execution",
-        "category": "SL / TP",
+        "category": "sltp",
         "comment": "SL = ATR14 × ez (dynamic_sltp esetén)"
       },
       "tp_rr_ratio": {
         "recompute": "execution",
-        "category": "SL / TP",
+        "category": "sltp",
         "comment": "TP = SL × ez (kockázat/hozam arány)"
       },
       "sl_points": {
         "recompute": "execution",
-        "category": "SL / TP",
+        "category": "sltp",
         "comment": "Fix SL pipben (dynamic_sltp=false esetén; a tanítás írja páronként)"
       },
       "tp_points": {
         "recompute": "execution",
-        "category": "SL / TP",
+        "category": "sltp",
         "comment": "Fix TP pipben (dynamic_sltp=false esetén)"
       }
     }
