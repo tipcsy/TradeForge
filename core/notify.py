@@ -417,9 +417,21 @@ def trade_event(row: dict) -> bool:
         strat = str(row.get("strategy") or "")
         if kind == CLOSE:
             _p = row.get("pnl_usd")
-            szoveg = _t("notify.close", symbol=sym, strategy=strat,
-                        ticket=row.get("ticket"),
-                        pnl=("?" if _p is None else f"{float(_p):+.2f}"))
+            # ⚠ A PUSZTA P&L NEM MOND SEMMIT a méret nélkül: +6,93 $ lehet
+            # remek (0,7 R egy 10 $-os téten) és lehet gyenge (0,07 R egy
+            # 100 $-oson). Az R-t a belépéskori kockázatból számoljuk
+            # (`position_meta`), mert az MT5-ből a stop már felülíródott.
+            _r = None
+            if _p is not None:
+                try:
+                    from core import position_meta as _pmeta
+                    _r = _pmeta.r_multiple(row.get("ticket"), float(_p))
+                except Exception:
+                    _r = None
+            szoveg = _t("notify.close_r" if _r is not None else "notify.close",
+                        symbol=sym, strategy=strat, ticket=row.get("ticket"),
+                        pnl=("?" if _p is None else f"{float(_p):+.2f}"),
+                        **({"r": f"{_r:+.2f}"} if _r is not None else {}))
         else:
             szoveg = _t("notify.open" if kind == OPEN else "notify.signal",
                         symbol=sym, strategy=strat,
@@ -436,12 +448,26 @@ def trade_event(row: dict) -> bool:
 
 
 def sl_moved(symbol: str, strategy: str, ticket: int, sl: float,
-             breakeven: bool = False) -> bool:
-    """Elmozdult a stop (breakeven vagy trailing)."""
-    return _kuld(Event(
-        kind=SL_MOVE, symbol=symbol, strategy=strategy,
-        text=_t("notify.be" if breakeven else "notify.sl_move",
-                symbol=symbol, ticket=int(ticket), sl=_szam(sl, symbol))))
+             breakeven: bool = False, r=None, locked_ccy=None) -> bool:
+    """Elmozdult a stop.
+
+    `breakeven`: ez az ELSŐ átlépés a nyereség-oldalra (a kockázat most szűnt
+    meg) — a további lépések már trailingek. ⚠ Eddig itt a „kockázatmentes-e
+    MOST" kérdés állt, ami az első átlépés UTÁN is végig igaz marad, ezért
+    minden trailing-lépés „KOCKÁZATMENTESÍTVE" néven ment ki. A felhasználó
+    hatszor egymás után kapta ugyanazt a mondatot, miközben a stop épp
+    lépkedett fölfelé.
+
+    `r` / `locked_ccy`: mennyi van BEBIZTOSÍTVA, ha innen kiütődik a pozíció.
+    Egy árszint önmagában nem mondja meg — ezt a két számot akarjuk látni."""
+    van_r = r is not None and locked_ccy is not None
+    kulcs = ("notify.be_r" if breakeven else "notify.sl_move_r") if van_r else             ("notify.be" if breakeven else "notify.sl_move")
+    mezok = dict(symbol=symbol, ticket=int(ticket), sl=_szam(sl, symbol))
+    if van_r:
+        mezok["r"] = f"{float(r):+.2f}"
+        mezok["money"] = f"{float(locked_ccy):+.2f}"
+    return _kuld(Event(kind=SL_MOVE, symbol=symbol, strategy=strategy,
+                       text=_t(kulcs, **mezok)))
 
 
 def signal_offer(ajanlat) -> bool:

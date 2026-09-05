@@ -265,6 +265,41 @@ def r_multiple(ticket, pnl_ccy) -> "float | None":
         return None
 
 
+def stop_r(ticket, sl_price: float, is_buy: bool,
+           point_size: float) -> "tuple[float, float] | None":
+    """A STOPNÁL bebiztosított eredmény: `(R, pénz)`. None, ha nem számolható.
+
+    ⚠ MIÉRT KELL. A trailing SL értesítése eddig csak az új stop ÁRÁT mondta
+    meg („stop a belépőn: 26118.87"). Egy árszint viszont nem mond semmit arról,
+    hogy MENNYI van bebiztosítva — ahhoz fejben kellett kivonni a belépőt, majd
+    elosztani a kockázattal. Ez az a két szám, amit tényleg tudni akarunk:
+    „ha innen kiütődöm, 3 $-t viszek, ami 0,3 R".
+
+    A számítás a belépéskori adatból megy (`entry_price`, `sl_points`,
+    `risk_ccy`), NEM az MT5 aktuális stopjából — azt a breakeven és a trailing
+    épp felülírja (lásd a modul fejlécét). Így nem kell tick-érték sem: az
+    eredeti stop-távolság DEFINÍCIÓ SZERINT 1 R, tehát elég arányt számolni.
+    """
+    m = meta_of(ticket)
+    if not m:
+        return None
+    try:
+        entry = float(m.get("entry_price") or 0.0)
+        sl_points = float(m.get("sl_points") or 0.0)
+        risk = float(m.get("risk_ccy") or 0.0)
+        sl_price = float(sl_price)
+        point_size = float(point_size)
+    except (TypeError, ValueError):
+        return None
+    # Az eredeti stop-távolság ÁRBAN. Bármelyik hiánya → nincs mihez mérni.
+    tav = sl_points * point_size
+    if not (entry > 0 and tav > 0 and risk > 0 and sl_price > 0):
+        return None
+    nyereseg = (sl_price - entry) if is_buy else (entry - sl_price)
+    r = nyereseg / tav
+    return r, r * risk
+
+
 def prune(open_tickets=None, keep_days: int = 3):
     """Takarítás induláskor: a régen lezárt bejegyzések törlése.
 

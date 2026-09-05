@@ -860,7 +860,8 @@ def _warn_once(key, msg: str, *args) -> None:
 
 
 def sl_journal_append(symbol: str, ticket: int, t_server: int, sl: float,
-                     breakeven: bool = False, strategy: str = "") -> None:
+                     breakeven: bool = False, strategy: str = "",
+                     r=None, locked_ccy=None) -> None:
     """Egy SL-mozgás hozzáfűzése a `data/sl_moves/<SYM>.csv`-hez. Az idő a
     `pos.time_update` (a módosítás SZERVER-ideje) → egyezik a gyertya-idővel.
 
@@ -870,7 +871,8 @@ def sl_journal_append(symbol: str, ticket: int, t_server: int, sl: float,
     try:
         from core import notify
         notify.sl_moved(symbol, strategy or (strategy_of_ticket(ticket) or ""),
-                        ticket, sl, breakeven=breakeven)
+                        ticket, sl, breakeven=breakeven,
+                        r=r, locked_ccy=locked_ccy)
     except Exception:
         log.debug("értesítés: az SL-mozgás kimaradt", exc_info=True)
     try:
@@ -2420,8 +2422,22 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
             # tud veszíteni. Ezt jelenti a felhasználónak a „BE behúzva".
             _be = bool(pos.sl) and (pos.sl >= pos.price_open if pos.type == 0
                                     else pos.sl <= pos.price_open)
+            # ⚠ …DE AZ ÉRTESÍTÉSNEK NEM EZ A KÉRDÉSE. A `_be` azt mondja meg,
+            # hogy MOST kockázatmentes-e — és az az első átlépés után VÉGIG igaz
+            # marad. Emiatt minden további trailing-lépés is
+            # „KOCKÁZATMENTESÍTVE" néven ment ki: a felhasználó hatszor kapta
+            # ugyanazt a mondatot, miközben a stop épp lépkedett fölfelé.
+            # Az ESEMÉNY az első átlépés; utána már „SL mozgatva".
+            _elso_be = _be and not pstate.get("be_hirdetve")
+            pstate["be_hirdetve"] = _be      # visszaesésnél újra hirdethető
+            # Mennyi van BEBIZTOSÍTVA, ha innen kiütődik? Egy árszint ezt nem
+            # mondja meg — a két szám, amit tudni akarunk: pénz és R.
+            _rp = position_meta.stop_r(ticket, pos.sl,
+                                       pos.type == mt5.ORDER_TYPE_BUY, point_size)
             sl_journal_append(symbol, ticket, int(pos.time_update), pos.sl,
-                              breakeven=_be, strategy=strategy.name)
+                              breakeven=_elso_be, strategy=strategy.name,
+                              r=(_rp[0] if _rp else None),
+                              locked_ccy=(_rp[1] if _rp else None))
         # Kézi/külső SL-húzás felismerése: ha a JELENLEGI SL már eléri a költség-
         # tudatos BE-szintet a profit oldalon (bárki mozgatta — pl. a felhasználó a
         # charton), az ugyanúgy „BE kész". A naiv (költséget nem fedező) BE-t NEM
