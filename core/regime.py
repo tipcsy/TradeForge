@@ -66,13 +66,31 @@ DEFAULT_PARAMS = {
     "adx_dead":       15.0,   # e alatt „érdektelen" (alvó piac)
     "di_strong":      10.0,   # |DI_diff| e fölött határozott irány
     "di_flat":        5.0,    # |DI_diff| e alatt iránytalan
-    "atr_hi":         1.5,    # e fölött „ideges" (magas volatilitás)
+    # ⚠ 1,5 VOLT, ÉS AZ RÉS VOLT — nem szándék. A „Szép" ág plafonja
+    # `atr_clean_hi = 1,3`, tehát az 1,3 és 1,5 közötti sávra EGYETLEN szabály
+    # sem illeszkedett, és a sor a lánc végi `UNCATEGORIZED`-ba esett. Mérve
+    # (1 336 526 M15 gyertya, 8 pár): a besorolatlanok 21,9%-a ITT keletkezett,
+    # köztük a legtisztább trendek is — GOLD 2019-06-20 02:15: ADX 55,4,
+    # DI_diff +32,3, ar 1,44 → „nincs rá kategória". Az 1,3-ra húzva az
+    # „Ideges" ott kezdődik, ahol a „Szép" véget ér.
+    #   irányos 27,4% → 34,2% · besorolatlan 24,0% → 18,7%
+    # Egyetlen kategória sem VESZÍT: csak olyan gyertyák kapnak nevet, amiknek
+    # eddig semmilyen nem volt. (A felhasználó döntése, 2026-09-04.)
+    "atr_hi":         1.3,    # e fölött „ideges" (magas volatilitás)
     "atr_uncertain":  1.3,    # ADX gyenge + e fölött → Bizonytalanság (v2)
     "atr_low":        0.7,    # e alatt „alvó" piac
     "atr_clean_lo":   0.7,    # „szép" trend volatilitás-sávja
     "atr_clean_hi":   1.3,
     "atr_range_lo":   0.8,    # oldalazás volatilitás-sávja
     "atr_range_hi":   1.2,
+    # ── Távolság a mozgóátlagtól (`dist_norm`) — a Szép chart definícióból ──
+    # ⚠ MÉRT, DE MÉG NEM OSZTÁLYOZ. A küszöbök a tananyagból valók
+    # (≥ 0,3 trend, < 0,15 oldalazás); hogy beépüljenek-e a `_classify_row`-ba,
+    # azt mérés dönti el (`0016 - Szép chart score`).
+    "dist_ma_period":  200,
+    "dist_atr_period":  14,
+    "dist_trend":      0.30,   # e fölött az ár „elszakadt" a MA-tól → trend
+    "dist_flat":       0.15,   # e alatt tapad → oldalazás
 }
 
 
@@ -110,13 +128,49 @@ def atr_ratio(df: pd.DataFrame, n: int = 14, avg_n: int = 100) -> pd.Series:
     return atr / base.replace(0, np.nan)
 
 
+def dist_norm(df: pd.DataFrame, ma_n: int = 200, atr_n: int = 14) -> pd.Series:
+    """|Close − SMA(ma_n)| / ATR(atr_n) — az ár TÁVOLSÁGA a mozgóátlagtól,
+    a piac saját zajszintjében mérve.
+
+    ⚠ MIÉRT KELL, ÉS MIÉRT HIÁNYZOTT. A `Tananyagok/Szép chart definíció`
+    szerint ez a v2 osztályozó **`távolság_norm`** paramétere (validált küszöb:
+    ≥ 0,3 trend, < 0,15 oldalazás) — de a megvalósításból KIMARADT: a `features`
+    három dimenziót adott (adx, di_diff, atr_ratio), ezt nem. Az előadó
+    szóhasználatában ez a *„a hullám nem ér hozzá a mozgóátlaghoz"*, vagyis a
+    „szép chart" egyik fő ismérve.
+
+    ⚠ A TANANYAG KÉT HELYEN MÁST ÍR a nevezőre: egyszer ATR(100)-at, egyszer
+    ATR(14)-et. Itt az **ATR(14)** a hivatkozott képlet szerinti (a részletes
+    matematikai szakasz ezt adja), és `atr_n`-nel felülírható — a döntést mérés
+    dönti el, nem tipp.
+
+    ⚠ OK-OKOZATI: csak a múltat nézi (rolling/Wilder), tehát az i. bár értéke az
+    i. bár zárásakor ismert — nincs look-ahead.
+
+    ⚠ EZ EGYELŐRE CSAK MÉRT DIMENZIÓ: a `_classify_row` NEM használja. Egy új
+    tengely bevezetése MINDEN kategória-besorolást elmozdítana, azt pedig előbb
+    meg kell mérni. (Lásd `0016 - Szép chart score`.)"""
+    close = df["close"]
+    ma = close.rolling(ma_n).mean()
+    high, low = df["high"], df["low"]
+    prev = close.shift(1)
+    tr = pd.concat([high - low, (high - prev).abs(), (low - prev).abs()],
+                   axis=1).max(axis=1)
+    atr = _wilder(tr, atr_n)
+    return (close - ma).abs() / atr.replace(0, np.nan)
+
+
 def features(df: pd.DataFrame, params: dict | None = None) -> pd.DataFrame:
-    """A regime-dimenziók idősorai: adx, di_diff, atr_ratio (egy DataFrame-ben)."""
+    """A regime-dimenziók idősorai: adx, di_diff, atr_ratio, dist_norm.
+
+    ⚠ A `dist_norm` MÉRT, de a besorolás (`_classify_row`) NEM használja — lásd
+    a `dist_norm` docstringjét."""
     p = {**DEFAULT_PARAMS, **(params or {})}
     adx, pdi, mdi = adx_di(df, int(p["adx_period"]))
     ar = atr_ratio(df, int(p["atr_period"]), int(p["atr_avg_period"]))
-    return pd.DataFrame({"adx": adx, "di_diff": pdi - mdi, "atr_ratio": ar},
-                        index=df.index)
+    dn = dist_norm(df, int(p["dist_ma_period"]), int(p["dist_atr_period"]))
+    return pd.DataFrame({"adx": adx, "di_diff": pdi - mdi, "atr_ratio": ar,
+                         "dist_norm": dn}, index=df.index)
 
 
 def _classify_row(adx: float, di_diff: float, ar: float, p: dict) -> str:

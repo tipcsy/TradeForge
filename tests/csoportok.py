@@ -52,7 +52,8 @@ CSOPORTOK = {
     # `core`-ban (`gates`, `gate_bands`, `gate_params`, `gate_layout`).
     "motor": ("trading.", "gates.", "core.gates", "core.gate_bands",
               "core.gate_params", "core.market_state",
-              "core.market_strategy", "core.regime", "core.signal_detector",
+              "core.market_strategy", "core.regime", "core.chart_quality",
+              "core.signal_detector",
               "core.indicator_engine", "core.risk_manager", "core.order_exec",
               "core.mt5_connector", "core.risk_reduction", "core.risky_mode",
               "core.rr_state", "core.exit_signal", "core.position_build",

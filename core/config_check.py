@@ -281,6 +281,87 @@ def _check_gate_config_shadowing(cfg: dict, out: list) -> None:
 # 6. Több stratégia egy páron, házirend nélkül
 # ---------------------------------------------------------------------------
 
+def _check_untuned_pairs(cfg: dict, out: list) -> None:
+    """Engedélyezett pár+stratégia, aminek NINCS optimalizált paraméter-készlete.
+
+    ⚠ MIÉRT NEM ELÉG, HOGY „FUT". A hangolatlan pár SZÁNDÉKOSAN elindulhat
+    (lásd a `untuned-pair-can-run` leletet) — az alap paraméterekkel dolgozik.
+    Csakhogy azok nem ehhez az instrumentumhoz készültek, és a hatás nem
+    kicsi: mérve (2026-09-05, wpr_sma, teljes előzmény) az USDJPY hangolatlanul
+    **15 036 kötést** adott — az ÖSSZES kötés 57%-át —, és −889 $-t; az EURHUF
+    további −717 $-t. A két hangolatlan pár együtt −1 607 $, miközben a teljes
+    eredmény −813 $ volt. Vagyis a portfólió-szintű szám nagyrészt RÓLUK szólt,
+    és ezt semmi nem mondta meg.
+
+    A lelet szintje `INFO`, nem `WARN`: ez nem hiba, hanem állapot. De látszania
+    kell — különben minden összesített mérés némán torzul."""
+    from pathlib import Path as _P
+    from strategy import enabled_strategy_names
+
+    gyoker = _P(__file__).resolve().parents[1] / "data" / "optimized_params"
+    for sym, pc in (cfg.get("pairs") or {}).items():
+        if not (isinstance(pc, dict) and pc.get("enabled")):
+            continue
+        for nev in (enabled_strategy_names(cfg, sym) or []):
+            if (gyoker / nev / f"{sym}.json").exists():
+                continue
+            out.append(_finding(
+                INFO, "untuned_pair",
+                f"{sym}/{nev}: nincs optimalizált paraméter-készlet → az ALAP "
+                f"paraméterekkel fut. Ezek nem ehhez az instrumentumhoz "
+                f"készültek; a kötésszám és az eredmény is félrevihet egy "
+                f"portfólió-szintű mérést. Futtasd: "
+                f"`python main.py optimize {sym} --strategy {nev}`.", sym))
+
+
+
+def _check_optimizer_skip(cfg: dict, out: list) -> None:
+    """Van-e „csak EZEKET hangold" terv, ami a keresési teret megcsonkítja?
+
+    ⚠ MI TÖRTÉNT (2026-09-05). A tiszta lapos újrahangolás elindult, és a Ger40
+    **4 perc alatt „végzett"** az 500 trialból — mert a keresés EGYETLEN dimenzión
+    ment (`wpr_m1_period`), a másik 14 ki volt kapcsolva. Az optuna kimerítette a
+    25 elemű rácsot és leállt. A készlet elkészült, a napló nem panaszkodott,
+    és a fájlon semmi nem árulta el, hogy nem az történt, amit kértünk.
+
+    A tervet a paraméter-ablak menti (`pairs.<SYM>.optimizer_skip.<strategy>`), és
+    jellemzően EGY kísérletre szól („most csak az SMA-t") — de a configban ott
+    marad. Öt ilyen maradt bent hónapokkal a kísérletük után: Ger40, UK100,
+    Usa500, EURCHF (`wpr_sma`) és UsaInd (`trend_pullback`).
+
+    Az optimalizáló KIÍRJA a kihagyást (`… paraméter KIHAGYVA a keresésből`) —
+    tehát nem néma. Csakhogy egy több órás futás elején egyszer megjelenő INFO-sor
+    könnyen elvész; a döntés (elindítom-e egyáltalán) meg ELŐTTE születik. Ezért
+    szól a config-ellenőrzés is, ahol a felhasználó a futás előtt néz.
+
+    `INFO`, nem `WARN`: a szűkített keresés lehet szándékos. De legyen kimondva."""
+    from core import opt_plan as _oplan
+    from strategy import enabled_strategy_names
+    from strategy.settings import config_for_strategy
+
+    for sym, pc in (cfg.get("pairs") or {}).items():
+        if not isinstance(pc, dict):
+            continue                       # a `pairs` nem-pár kulcsai (pl. `_active`)
+        for nev in (enabled_strategy_names(cfg, sym) or []):
+            kihagy = _oplan.skip_keys(cfg, sym, nev)
+            if not kihagy:
+                continue
+            try:
+                osszes = len(_oplan.tuned_specs(
+                    config_for_strategy(cfg, nev).get("optimizer") or {}))
+            except Exception:
+                osszes = 0
+            marad = (osszes - len(kihagy)) if osszes else 0
+            out.append(_finding(
+                INFO, "optimizer_skip",
+                f"{sym}/{nev}: a keresési tér MEGCSONKÍTVA — {len(kihagy)} "
+                f"paraméter ki van hagyva"
+                + (f", csak {marad} marad a {osszes}-ből" if osszes else "")
+                + f". Egy optimalizálás így nem azt hangolja, amit a tartományok "
+                f"ígérnek (és hamarabb is „végez”). Ha ez már nem szándékos, a "
+                f"paraméter-ablak Optimalizálás lapján kapcsold vissza őket. "
+                f"Kihagyva: {', '.join(sorted(kihagy))}.", sym))
+
 def _check_same_symbol_policy(cfg: dict, out: list) -> None:
     """Két KÖTŐ stratégia egy páron `independent` házirenddel egymással SZEMBE is
     nyithat (hedge számlán). Ez lehet szándékos — de legyen kimondva.
@@ -394,6 +475,8 @@ _CHECKS = (
     _check_gate_config_shadowing,
     _check_same_symbol_policy,
     _check_invisible_signal_mode,
+    _check_untuned_pairs,
+    _check_optimizer_skip,
 )
 
 

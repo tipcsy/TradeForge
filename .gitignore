@@ -30,3 +30,6 @@ lab_*.json
 # (gépfüggő, és `python tools/build_native.py` bármikor előállítja).
 rust/tfbt/target/
 *.dll
+
+# a session-atmeneti futasnaplok (opt_full.log, tests.log) helye
+scratchpad/
