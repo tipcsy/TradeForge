@@ -115,58 +115,70 @@ def evenkent(df, tr):
     return pd.Series(tr["r"], index=ev).groupby(level=0).sum().to_dict()
 
 
-print("A `trend_pullback` belepoje a HOSSZU mintan")
-print("(a kutato-labor szimulatoraval; egy par = egy pozicio)\n")
-print(f"{'instrumentum':<12} {'ev':>4} {'kotes':>6} {'R':>9} {'R/kotes':>9} "
-      f"{'talalat':>8} {'PF':>6} {'t':>7}")
-print("-" * 68)
+def main() -> None:
+    """A meres futtatasa.
 
-osszes_r = []
-poz_instr = 0
-n_instr = 0
-ev_osszes = {}
-for sym in ("GOLD", "USDJPY", "Ger40", "UsaTec", "UsaInd", "Usa500", "EURUSD"):
-    if not (ROOT / "data" / "m1" / f"{sym}.parquet").exists():
-        continue
-    try:
-        res = merj(sym)
-    except Exception as ex:
-        print(f"{sym:<12} HIBA: {type(ex).__name__}: {ex}")
-        continue
-    if res is None:
-        continue
-    df, tr = res
-    if not len(tr):
-        continue
-    s = lab.stats(tr, df, sym)
-    n_instr += 1
-    if s["R"] > 0:
-        poz_instr += 1
-    osszes_r.append(tr["r"])
-    print(f"{sym:<12} {df.index.year.nunique():>4} {s['n']:>6} {s['R']:>9.1f} "
-          f"{s['R/trade']:>9.3f} {s['win%']:>7.1f}% {s['PF']:>6.2f} "
-          f"{s.get('t', float('nan')):>7.2f}")
-    for e, r in evenkent(df, tr).items():
-        ev_osszes[e] = ev_osszes.get(e, 0.0) + r
+    ⚠ EZ KORABBAN MODUL-SZINTEN ALLT, tehat mar az IMPORT lefuttatta a
+    teljes elemzest (18,8 mp, MT5-adattal). Emiatt a modul nem volt
+    importalhato — se ujrahasznalhato konyvtarkent, se tesztelheto. A
+    `kutatas` teszt-csoport (0012) ezert nem tudta fedni.
+    """
+    print("A `trend_pullback` belepoje a HOSSZU mintan")
+    print("(a kutato-labor szimulatoraval; egy par = egy pozicio)\n")
+    print(f"{'instrumentum':<12} {'ev':>4} {'kotes':>6} {'R':>9} {'R/kotes':>9} "
+          f"{'talalat':>8} {'PF':>6} {'t':>7}")
+    print("-" * 68)
 
-print("-" * 68)
-if osszes_r:
-    r = np.concatenate(osszes_r)
-    t = r.mean() / (r.std(ddof=1) / np.sqrt(len(r))) if r.std() > 0 else 0.0
-    print(f"{'OSSZEVONT':<12} {'':>4} {len(r):>6} {r.sum():>9.1f} "
-          f"{r.mean():>9.3f} {'':>8} {'':>6} {t:>7.2f}")
-    print()
-    print("Evenkent (osszevont R):")
-    for e in sorted(ev_osszes):
-        jel = "+" if ev_osszes[e] > 0 else " "
-        print(f"   {e}  {ev_osszes[e]:>+8.1f} {jel}")
-    poz_ev = sum(1 for v in ev_osszes.values() if v > 0)
-    print()
-    print("AZ ELFOGADASI PROTOKOLL:")
-    print(f"   1. t >= 2                     : t = {t:+.2f}   "
-          f"{'TELJESUL' if t >= 2 else 'NEM'}")
-    print(f"   2. az evek >= 60%-a pozitiv   : {poz_ev}/{len(ev_osszes)} = "
-          f"{100*poz_ev/max(1,len(ev_osszes)):.0f}%   "
-          f"{'TELJESUL' if poz_ev >= 0.6*len(ev_osszes) else 'NEM'}")
-    print(f"   3. >= 3 instrumentumon pozitiv: {poz_instr}/{n_instr}   "
-          f"{'TELJESUL' if poz_instr >= 3 else 'NEM'}")
+    osszes_r = []
+    poz_instr = 0
+    n_instr = 0
+    ev_osszes = {}
+    for sym in ("GOLD", "USDJPY", "Ger40", "UsaTec", "UsaInd", "Usa500", "EURUSD"):
+        if not (ROOT / "data" / "m1" / f"{sym}.parquet").exists():
+            continue
+        try:
+            res = merj(sym)
+        except Exception as ex:
+            print(f"{sym:<12} HIBA: {type(ex).__name__}: {ex}")
+            continue
+        if res is None:
+            continue
+        df, tr = res
+        if not len(tr):
+            continue
+        s = lab.stats(tr, df, sym)
+        n_instr += 1
+        if s["R"] > 0:
+            poz_instr += 1
+        osszes_r.append(tr["r"])
+        print(f"{sym:<12} {df.index.year.nunique():>4} {s['n']:>6} {s['R']:>9.1f} "
+              f"{s['R/trade']:>9.3f} {s['win%']:>7.1f}% {s['PF']:>6.2f} "
+              f"{s.get('t', float('nan')):>7.2f}")
+        for e, r in evenkent(df, tr).items():
+            ev_osszes[e] = ev_osszes.get(e, 0.0) + r
+
+    print("-" * 68)
+    if osszes_r:
+        r = np.concatenate(osszes_r)
+        t = r.mean() / (r.std(ddof=1) / np.sqrt(len(r))) if r.std() > 0 else 0.0
+        print(f"{'OSSZEVONT':<12} {'':>4} {len(r):>6} {r.sum():>9.1f} "
+              f"{r.mean():>9.3f} {'':>8} {'':>6} {t:>7.2f}")
+        print()
+        print("Evenkent (osszevont R):")
+        for e in sorted(ev_osszes):
+            jel = "+" if ev_osszes[e] > 0 else " "
+            print(f"   {e}  {ev_osszes[e]:>+8.1f} {jel}")
+        poz_ev = sum(1 for v in ev_osszes.values() if v > 0)
+        print()
+        print("AZ ELFOGADASI PROTOKOLL:")
+        print(f"   1. t >= 2                     : t = {t:+.2f}   "
+              f"{'TELJESUL' if t >= 2 else 'NEM'}")
+        print(f"   2. az evek >= 60%-a pozitiv   : {poz_ev}/{len(ev_osszes)} = "
+              f"{100*poz_ev/max(1,len(ev_osszes)):.0f}%   "
+              f"{'TELJESUL' if poz_ev >= 0.6*len(ev_osszes) else 'NEM'}")
+        print(f"   3. >= 3 instrumentumon pozitiv: {poz_instr}/{n_instr}   "
+              f"{'TELJESUL' if poz_instr >= 3 else 'NEM'}")
+
+
+if __name__ == "__main__":
+    main()
