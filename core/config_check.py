@@ -26,6 +26,8 @@ from __future__ import annotations
 
 import logging
 
+from core.i18n import t as _t
+
 log = logging.getLogger(__name__)
 
 # Súlyosság. Kettő van, szándékosan:
@@ -63,13 +65,11 @@ def _check_gate_preconditions(cfg: dict, out: list) -> None:
                 if not _ms.market_name_of(pc):
                     out.append(_finding(
                         WARN, "market_gate_no_classifier",
-                        f"{sym}/{sname}: a Piac-kapu be van kapcsolva "
-                        f"({_g.effect_for(cfg, sym, sname, _g.MARKET)}), de a páron "
-                        f"nincs piac-előszűrő kiválasztva (pairs.{sym}."
-                        f"market_strategy) → a kapunak NINCS mit mérnie, sosem "
-                        f"tüzel. Válassz osztályozót "
-                        f"({', '.join(_ms.registered_market_names())}), vagy vedd "
-                        f"a kapu hatását 'none'-ra.", sym))
+                        _t("cfgchk.market_gate_no_classifier", sym=sym,
+                           sname=sname,
+                           effect=_g.effect_for(cfg, sym, sname, _g.MARKET),
+                           classifiers=", ".join(_ms.registered_market_names())),
+                        sym))
             # IDŐSÍK-EGYÜTTÁLLÁS: ha a figyelő ki van kapcsolva, nincs előjel-adat.
             if _g.active(_g.effects_for(cfg, sym, sname), _g.TF_ALIGN):
                 try:
@@ -79,22 +79,24 @@ def _check_gate_preconditions(cfg: dict, out: list) -> None:
                 if not _en:
                     out.append(_finding(
                         WARN, "tf_gate_disabled_watcher",
-                        f"{sym}/{sname}: a TF-együttállás kapu be van kapcsolva, de "
-                        f"maga a figyelő ki van kapcsolva (tf_align.enabled=false) "
-                        f"→ a kapu sosem tüzel.", sym))
+                        _t("cfgchk.tf_gate_disabled_watcher", sym=sym,
+                           sname=sname), sym))
 
 
 # ---------------------------------------------------------------------------
 # 2. Stratégia-hivatkozás, ami nem fut
 # ---------------------------------------------------------------------------
 
-# Per-pár, stratégia-KULCSOS térképek: {config-kulcs: emberi név}
-_STRATEGY_MAPS = {
-    "run_state":       "kereskedés-szándék (Play/Stop)",
-    "strategy_mode":   "kötés módja (valódi / csak jelzés)",
-    "strategy_viz":    "vizualizáció látszik",
-    "strategy_trades": "kötések látszanak",
-}
+# Per-pár, stratégia-KULCSOS térképek. ⚠ A felirat a lelet SZÖVEGÉBE kerül
+# (`{label}`), tehát a felhasználó olvassa → i18n-kulcs, nem magyar literál.
+# A dict KULCSAI viszont config-azonosítók, azok maradnak.
+_STRATEGY_MAP_KEYS = ("run_state", "strategy_mode", "strategy_viz",
+                      "strategy_trades")
+
+
+def _map_label(key: str) -> str:
+    """A config-kulcs emberi neve a lelet szövegéhez."""
+    return _t(f"cfgchk.map.{key}")
 
 
 def _check_stale_strategy_keys(cfg: dict, out: list) -> None:
@@ -111,7 +113,8 @@ def _check_stale_strategy_keys(cfg: dict, out: list) -> None:
         if not isinstance(pc, dict):
             continue
         enabled = set(enabled_strategy_names(cfg, sym) or [])
-        for key, label in _STRATEGY_MAPS.items():
+        for key in _STRATEGY_MAP_KEYS:
+            label = _map_label(key)
             per = pc.get(key)
             if not isinstance(per, dict):
                 continue
@@ -124,9 +127,8 @@ def _check_stale_strategy_keys(cfg: dict, out: list) -> None:
                     continue
                 out.append(_finding(
                     INFO, "stale_strategy_key",
-                    f"{sym}: a(z) {n!r} nincs engedélyezve ezen a páron "
-                    f"(pairs.{sym}.strategies), de van rá {key}={v!r} bejegyzés "
-                    f"({label}) → a motor figyelmen kívül hagyja.", sym))
+                    _t("cfgchk.stale_strategy_key", sym=sym, name=repr(n),
+                       key=key, value=repr(v), label=label), sym))
 
 
 # ---------------------------------------------------------------------------
@@ -148,9 +150,8 @@ def _check_costs(cfg: dict, out: list) -> None:
         if missing:
             out.append(_finding(
                 WARN, "missing_costs",
-                f"{sym}: hiányzó költség-kulcs ({', '.join(missing)}) → a backteszt "
-                f"NULLA költséggel számolna ezen a páron. Töltsd fel: "
-                f"`python tools/refresh_costs.py --write`.", sym))
+                _t("cfgchk.missing_costs", sym=sym,
+                   keys=", ".join(missing)), sym))
 
 
 # ---------------------------------------------------------------------------
@@ -187,10 +188,8 @@ def _check_sizing(cfg: dict, out: list) -> None:
         if missing:
             out.append(_finding(
                 WARN, "missing_sizing",
-                f"{sym}: hiányzik a méretezéshez KÖTELEZŐ kulcs "
-                f"({', '.join(missing)}) → ez a pár NEM fog kereskedni "
-                f"(kimarad az indításnál). Töltsd fel: "
-                f"`python tools/refresh_point_values.py --write`.", sym))
+                _t("cfgchk.missing_sizing", sym=sym,
+                   keys=", ".join(missing)), sym))
 
 
 # ---------------------------------------------------------------------------
@@ -218,12 +217,7 @@ def _check_volatility_gate_off(cfg: dict, out: list) -> None:
         return
     out.append(_finding(
         WARN, "volatility_gate_off",
-        f"A Volatilitás kapu a Beállításokban KI van kapcsolva "
-        f"(dashboard.gate_order), ezért az `atr_min_pct`/`atr_max_pct` "
-        f"küszöbök SEHOL nem szűrnek — sem élesben, sem a backtestben. "
-        f"v3.27.0 előtt ez az oszlop csak kijelzés volt, és a kivétele nem "
-        f"befolyásolta a szűrést. Ha szűrni akarsz, kapcsold vissza a kaput; "
-        f"ha nem, a küszöböket is nullázd, hogy a kettő ne mondjon mást."))
+        _t("cfgchk.volatility_gate_off")))
 
 
 # ---------------------------------------------------------------------------
@@ -244,9 +238,7 @@ def _check_daily_limit(cfg: dict, out: list) -> None:
     if usd > 0 and pct is not None:
         out.append(_finding(
             INFO, "daily_limit_pct_dead",
-            f"A napi limit a rögzített {usd:.0f}$ (daily_loss_limit_usd); a "
-            f"daily_loss_limit_pct={pct} MELLETTE HOLT — csak akkor lépne életbe, "
-            f"ha az usd 0/hiányzó lenne."))
+            _t("cfgchk.daily_limit_pct_dead", usd=f"{usd:.0f}", pct=pct)))
 
 
 # ---------------------------------------------------------------------------
@@ -272,9 +264,8 @@ def _check_gate_config_shadowing(cfg: dict, out: list) -> None:
         if isinstance(ta, dict) and "gate" in ta and not isinstance(pair_g, dict):
             out.append(_finding(
                 WARN, "legacy_tf_gate_shadowed",
-                f"{sym}: a régi tf_align.gate={ta.get('gate')!r} lista HATÁSTALAN, "
-                f"mert a globális `gates.tf_align` szekció megelőzi. Vidd át a "
-                f"beállítást a `gates` szekcióba, vagy töröld a régi listát.", sym))
+                _t("cfgchk.legacy_tf_gate_shadowed", sym=sym,
+                   gate=repr(ta.get("gate"))), sym))
 
 
 # ---------------------------------------------------------------------------
@@ -307,11 +298,7 @@ def _check_untuned_pairs(cfg: dict, out: list) -> None:
                 continue
             out.append(_finding(
                 INFO, "untuned_pair",
-                f"{sym}/{nev}: nincs optimalizált paraméter-készlet → az ALAP "
-                f"paraméterekkel fut. Ezek nem ehhez az instrumentumhoz "
-                f"készültek; a kötésszám és az eredmény is félrevihet egy "
-                f"portfólió-szintű mérést. Futtasd: "
-                f"`python main.py optimize {sym} --strategy {nev}`.", sym))
+                _t("cfgchk.untuned_pair", sym=sym, strategy=nev), sym))
 
 
 
@@ -354,13 +341,11 @@ def _check_optimizer_skip(cfg: dict, out: list) -> None:
             marad = (osszes - len(kihagy)) if osszes else 0
             out.append(_finding(
                 INFO, "optimizer_skip",
-                f"{sym}/{nev}: a keresési tér MEGCSONKÍTVA — {len(kihagy)} "
-                f"paraméter ki van hagyva"
-                + (f", csak {marad} marad a {osszes}-ből" if osszes else "")
-                + f". Egy optimalizálás így nem azt hangolja, amit a tartományok "
-                f"ígérnek (és hamarabb is „végez”). Ha ez már nem szándékos, a "
-                f"paraméter-ablak Optimalizálás lapján kapcsold vissza őket. "
-                f"Kihagyva: {', '.join(sorted(kihagy))}.", sym))
+                _t("cfgchk.optimizer_skip", sym=sym, strategy=nev,
+                   n=len(kihagy),
+                   extra=(_t("cfgchk.optimizer_skip_extra", left=marad,
+                             total=osszes) if osszes else ""),
+                   skipped=", ".join(sorted(kihagy))), sym))
 
 
 def _check_empty_strategies(cfg: dict, out: list) -> None:
@@ -396,10 +381,8 @@ def _check_empty_strategies(cfg: dict, out: list) -> None:
             continue
         out.append(_finding(
             WARN, "empty_strategies_fallback",
-            f"{sym}: a `strategies` lista ÜRES, de a pár engedélyezett → némán "
-            f"az ALAPÉRTELMEZETT stratégia fut rajta ({alap!r}). Az üres lista "
-            f"NEM kikapcsolás! Ha a pár tényleg ne fusson: `enabled: false`. Ha "
-            f"fusson, de mást: írd bele a `strategies` listába.", sym))
+            _t("cfgchk.empty_strategies_fallback", sym=sym,
+               default=repr(alap)), sym))
 
 def _check_same_symbol_policy(cfg: dict, out: list) -> None:
     """Két KÖTŐ stratégia egy páron `independent` házirenddel egymással SZEMBE is
@@ -422,10 +405,9 @@ def _check_same_symbol_policy(cfg: dict, out: list) -> None:
             continue
         out.append(_finding(
             INFO, "independent_multi_strategy",
-            f"{sym}: {len(trading)} stratégia köt valódit ({', '.join(trading)}) "
-            f"'{_sp.INDEPENDENT}' házirenddel → egyszerre nyithatnak EGYMÁSSAL "
-            f"SZEMBE is. Szigorítás: trading.same_symbol_policy = "
-            f"'{_sp.ONE_PER_SYMBOL}' vagy '{_sp.NO_OPPOSITE}'.", sym))
+            _t("cfgchk.independent_multi_strategy", sym=sym, n=len(trading),
+               strategies=", ".join(trading), policy=_sp.INDEPENDENT,
+               one=_sp.ONE_PER_SYMBOL, noopp=_sp.NO_OPPOSITE), sym))
 
 
 # ---------------------------------------------------------------------------
@@ -471,11 +453,8 @@ def _check_invisible_signal_mode(cfg: dict, out: list) -> None:
     for n, syms in by_strategy.items():
         out.append(_finding(
             INFO, "signal_mode_invisible",
-            f"{n}: 'csak jelzés' módban FUT {len(syms)} páron ({', '.join(syms)}), "
-            f"de sem a vizualizációja, sem a kötés-rétege nem látszik "
-            f"(strategy_viz / strategy_trades) → nem látod, mit csinálna, pedig a "
-            f"'csak jelzés' épp ezért van. Kapcsold be az instrumentum "
-            f"beállításainál (kattints a pár nevére).",
+            _t("cfgchk.signal_mode_invisible", name=n, n=len(syms),
+               syms=", ".join(syms)),
             syms[0] if len(syms) == 1 else None))
 
 
@@ -498,9 +477,7 @@ def _check_incompatible_strategies(cfg: dict, out: list) -> None:
     for nev, indok in (incompatible_strategies() or {}).items():
         out.append(_finding(
             WARN, "incompatible_strategy",
-            f"A(z) {nev!r} stratégia a mappában van, de NEM töltődött be: "
-            f"{indok}. Amíg ez így marad, sem a listákban nem jelenik meg, sem "
-            f"kereskedni nem tud."))
+            _t("cfgchk.incompatible_strategy", name=repr(nev), reason=indok)))
 
 
 _CHECKS = (
@@ -557,14 +534,9 @@ def tp_preset_conflict(preset: str, tp_rr) -> "str | None":
         return None
     keeps_stop = str(preset or "").lower() == "none"
     if keeps_stop and tp >= TP_LONG:
-        return (f"a célár {tp:.2f}R (hosszú), de a kockázatcsökkentés KI van "
-                f"kapcsolva (a stop marad a helyén) — védelem nélkül a távoli "
-                f"célárig gyakran nem ér el az ár. Mérve: trailing nélkül a "
-                f"RÖVIDEBB célár (~1,5R) a jobb.")
+        return _t("cfgchk.tp_long_no_rr", tp=f"{tp:.2f}")
     if (not keeps_stop) and tp <= TP_SHORT:
-        return (f"a célár {tp:.2f}R (rövid), miközben a kilépési preset MOZGATJA "
-                f"a stopot — a trailing így levágja a nyertest, mielőtt a célár "
-                f"hozna. Mérve: trailinggel a HOSSZABB célár (~2,5–3R) a jobb.")
+        return _t("cfgchk.tp_short_with_trail", tp=f"{tp:.2f}")
     return None
 
 
@@ -586,7 +558,8 @@ def _check_tp_vs_preset(cfg: dict, out: list, preset_of, tp_of) -> None:
             msg = tp_preset_conflict(preset, tp)
             if msg:
                 out.append(_finding(WARN, "tp_vs_preset",
-                                    f"{sym}/{name}: {msg}", sym))
+                                    _t("cfgchk.tp_vs_preset", sym=sym,
+                                       name=name, msg=msg), sym))
 
 
 def check_with_state(cfg: dict, preset_of=None, tp_of=None) -> list:
