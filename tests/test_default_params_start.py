@@ -77,14 +77,30 @@ check("a wpr_sma-nak is van", bool(lt.default_params(wpr, cfg)))
 
 # ── 2. A FORRAS MEGKULONBOZTETHETO ───────────────────────────────────────
 from core.params_store import params_file
-_tuned = [s for s in cfg["pairs"] if not s.startswith("_")
-          and params_file(s, BB).exists()]
+# ⚠ A KET OLDALT KET KULON STRATEGIA ADJA — SZANDEKOSAN. Korabban mindketto a
+# `BB`-bol jott, es a teszt attol volt zold, hogy a lemezen VELETLENUL volt is
+# meg nem is bollinger-keszlet. A 2026-09-05-i tiszta lap utan a `BB` egyetlen
+# paron sem hangolt (nincs is engedelyezve sehol), es a teszt elofeltetele
+# ledolt — pedig a MERT allitas (a `params_source` megkulonbozteti a ket
+# forrast) valtozatlanul ervenyes es fontos.
+#
+# A `params_source` (szimbolum, strategia) parra valaszol, tehat nem kell a ket
+# oldalnak ugyanabbol a strategiabol jonnie.
+_HANGOLT_STRAT = next(
+    (n for n in ("wpr_sma", "trend_pullback", BB)
+     if any(params_file(s, n).exists() for s in cfg["pairs"] if not s.startswith("_"))),
+    None)
+_tuned = ([s for s in cfg["pairs"] if not s.startswith("_")
+           and params_file(s, _HANGOLT_STRAT).exists()] if _HANGOLT_STRAT else [])
 _untuned = [s for s in cfg["pairs"] if not s.startswith("_")
             and not params_file(s, BB).exists()]
-check("van hangolt ES hangolatlan par is (a teszt mer valamit)",
-      bool(_tuned) and bool(_untuned), f"hangolt={_tuned} hangolatlan={_untuned}")
+check("van hangolt par (barmely strategian) — kulonben nincs mit merni",
+      bool(_tuned), f"strategia={_HANGOLT_STRAT} hangolt={_tuned}")
+check("...es van hangolatlan is", bool(_untuned), f"hangolatlan={len(_untuned)} par")
 if _tuned:
-    check("a mentett keszlet 'tuned'", lt.params_source(_tuned[0], BB) == "tuned")
+    check("a mentett keszlet 'tuned'",
+          lt.params_source(_tuned[0], _HANGOLT_STRAT) == "tuned",
+          f"{_tuned[0]}/{_HANGOLT_STRAT}")
 if _untuned:
     check("a mentett nelkuli 'default'",
           lt.params_source(_untuned[0], BB) == "default")

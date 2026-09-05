@@ -59,9 +59,36 @@ if not _has:
 else:
     rawp = lt.load_pair_params(SYM, "wpr_sma")
     merged = lt.strategy_params(SYM, "wpr_sma", cfg)
-    check("a NYERS json-bol tenyleg hianyzik az atr_period",
-          "atr_period" not in rawp, "ez a hiba elofeltetele")
-    check("a kozos keplet POTOLJA", "atr_period" in merged, str(merged.get("atr_period")))
+
+    # ⚠ AZ ELOFELTETELT MI ALLITJUK ELO, NEM A LEMEZ. Korabban itt az allt, hogy
+    # „a NYERS json-bol hianyzik az atr_period" — es ez IGAZ is volt, amig a
+    # fajl a 2026-08-03-i valtas utani, de a vegrehajtasi kulcsokat MEG nem
+    # visszairo optimalizalobol szarmazott. A 2026-09-05-i tiszta ujrahangolas
+    # utan a friss json MAR TARTALMAZZA oket (`atr_period: 16`), mert az
+    # optimalizalo a base_params-ba fuzi oket (kellenek a strategia hookjainak),
+    # es onnan a mentett params-ba is bekerulnek.
+    #
+    # Ez NEM viselkedesi hiba: a merge `{**base, **execution}` sorrendu, tehat a
+    # KOZOS config nyer, a json-ba sult ertek nem hat. De a teszt igy egy fajl
+    # esetleges tartalmara epult, es a lemez allapotatol fuggoen zold vagy piros
+    # lett. Amit bizonyitani akarunk — hogy a kozos keplet POTOLJA a hianyzo
+    # kulcsot —, azt szintetikus hianyon kell merni.
+    _exec = ep.load_execution_params(SYM, cfg) or {}
+    _csupasz = {k: v for k, v in rawp.items() if k not in _exec}
+    check("a szintetikusan megcsupaszitott params-bol tenyleg hianyzik",
+          "atr_period" not in _csupasz, "ez a hiba elofeltetele")
+    _potolt = lt.strategy_params(SYM, "wpr_sma", cfg, fallback=_csupasz)
+    check("a kozos keplet POTOLJA a hianyzo kulcsot",
+          "atr_period" in _potolt, str(_potolt.get("atr_period")))
+    check("a kozos keplet a VALODI fajlra is potol",
+          "atr_period" in merged, str(merged.get("atr_period")))
+    # ⚠ A KOZOS CONFIG NYER, ha a json-ba is bele van sutve az ertek — kulonben
+    # egy elavult masolat nemán arnyekolna a kozos beallitast (ket forras, ami
+    # kulon romlik el).
+    if "atr_period" in rawp and rawp["atr_period"] != _exec.get("atr_period"):
+        check("...es a KOZOS config nyer a json-ba sult ertek felett",
+              merged["atr_period"] == _exec.get("atr_period"),
+              f"json={rawp['atr_period']} kozos={_exec.get('atr_period')} -> {merged['atr_period']}")
     check("...a strategia sajat szamai valtozatlanok",
           all(merged[k] == v for k, v in rawp.items()
               if k not in (ep.load_execution_params(SYM, cfg) or {})))
