@@ -925,6 +925,7 @@
   "lab.sebesseg_2": "speed",
   "lab.sl_utja_be_trailing": "SL path (BE / trailing)",
   "lab.start_epites": "Start build",
+  "lab.status.account": "{time} · balance {balance} · floating {floating} · equity {equity} · open {open} · max DD {dd}",
   "lab.status.closed": "{n} closed trades · total {pnl} · {r} R",
   "lab.status.markers": "{bars} candles · {drawn} markers drawn · {outside} outside the selection",
   "lab.status.markers_short": "{bars} candles · {drawn} markers · {outside} outside the selection",

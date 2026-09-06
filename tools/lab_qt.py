@@ -141,6 +141,57 @@ class Belepo:
         return be_ar + d * abs(be_ar - self.sl) * max(0.0, self.rr)
 
 
+def szamla_gorbe(chart, trades, kezdo: float):
+    """`(realizált, equity, kezdő)` bar-indexenkénti tömbök.
+
+    ⚠ MIÉRT MODUL-SZINTEN, és nem metódusként: ez a rész SZÁMÍTÁS, nem
+    megjelenítés. Metódusként csak élő Qt-ablakkal lehetne futtatni, tehát
+    tesztelni sem — pedig épp ez az, ami CSENDBEN tud hibázni (egy bar-index
+    elcsúszás nem látszik a charton, csak rossz görbét rajzol).
+
+    ⚠ UGYANAZZAL A KÉPLETTEL számol, mint a „Nyitott" tábla lebegő oszlopa
+    (`R = (ár − belépő) · irány / kockázat`, majd `× risk_usd`). Ha itt külön
+    képlet állna, a görbe és a tábla ugyanarra a pillanatra MÁST mondana — és a
+    felhasználó azt hinné, az egyik hibás.
+
+    A ZÁRÁS bar-ja már a REALIZÁLTHOZ tartozik, nem a lebegőhöz: különben a
+    záró báron kétszer számolnánk ugyanazt az eredményt.
+
+    ⚠ NINCS GYORSÍTÓTÁR, és ez MÉRT döntés — a kurzor minden mozdulatánál
+    (lejátszás közben is) újraszámol:
+
+        25 000 bar,   1 kötés →  0,1 ms
+        25 000 bar,  50 kötés →  0,8 ms
+        25 000 bar, 300 kötés →  4,5 ms
+
+    A lejátszás üteme ennél nagyságrenddel lassabb, tehát a gyorsítótár csak
+    egy elavulási hibalehetőséget adna hozzá (a terv változik, a görbe nem).
+    """
+    idx = chart.index
+    n = len(idx)
+    zar = chart["close"].to_numpy(float)
+    real = np.full(n, float(kezdo), dtype=float)
+    lebeg = np.zeros(n, dtype=float)
+
+    for tr in trades:
+        _d = 1 if tr.direction == "BUY" else -1
+        _a = int(idx.searchsorted(tr.open_time, side="left"))
+        if _a >= n:
+            continue
+        if tr.close_time is None:
+            _b = n
+        else:
+            _b = int(idx.searchsorted(tr.close_time, side="right")) - 1
+            _b = max(_a, min(n, _b))
+            if _b < n:
+                real[_b:] += float(tr.pnl_usd or 0.0)
+        _kock = float(tr.sl_points or 0.0) * float(tr.point_size or 0.0)
+        _risk = float(tr.risk_usd or 0.0)
+        if _kock > 0 and _risk > 0 and _b > _a:
+            lebeg[_a:_b] += (zar[_a:_b] - tr.open_price) * _d / _kock * _risk
+    return real, real + lebeg, float(kezdo)
+
+
 class LabAblak(QtWidgets.QMainWindow):
     """A laboratórium fő ablaka."""
 
@@ -314,6 +365,29 @@ class LabAblak(QtWidgets.QMainWindow):
         self._sav.hideAxis("left")
         self._sav.hideAxis("bottom")
         fo.addWidget(self._sav)
+
+        # ── Számlagörbe (4. lépcső) ──────────────────────────────────────
+        # ⚠ KÉT GÖRBE, és a különbségük a lényeg:
+        #   • REALIZÁLT — csak a lezárt kötések; ez a „mi van a zsebemben".
+        #   • EQUITY    — a realizált PLUSZ a nyitott pozíciók lebegő
+        #                 eredménye; ez az, amit a bróker mutat, és amin a
+        #                 drawdown látszik.
+        # Egy stratégia lehet realizáltban szép és equityben rémes (mély
+        # visszaesések, amiket „kiül") — ezt CSAK a kettő együtt mutatja meg.
+        # `setXLink`: a chart nagyítása/görgetése ezt is viszi, tehát a görbe
+        # mindig ahhoz az idősávhoz tartozik, amit épp nézel.
+        self._egyenleg = pg.PlotWidget()
+        self._egyenleg.setMaximumHeight(110)
+        self._egyenleg.setXLink(self._plot)
+        self._egyenleg.hideAxis("bottom")
+        self._egyenleg.showGrid(y=True, alpha=0.15)
+        self._egyenleg_elemek = []
+        fo.addWidget(self._egyenleg)
+
+        # Az IDŐPILLANAT-nézet: hol állt a számla a kurzornál?
+        self._szamla = QtWidgets.QLabel("")
+        self._szamla.setStyleSheet("color:#9fb4c8;")
+        fo.addWidget(self._szamla)
 
         # ── Listák ───────────────────────────────────────────────────────
         self._fulek = QtWidgets.QTabWidget()
@@ -684,6 +758,12 @@ class LabAblak(QtWidgets.QMainWindow):
     def _terv_valtozott(self, rajzol: bool = True) -> None:
         """A terv változott → a korábbi futtatás érvénytelen."""
         self._eredmeny = None
+        for it in getattr(self, "_egyenleg_elemek", []):
+            self._egyenleg.removeItem(it)
+        if hasattr(self, "_egyenleg_elemek"):
+            self._egyenleg_elemek.clear()
+        if hasattr(self, "_szamla"):
+            self._szamla.setText("")
         for it in self._eredmeny_elemek:
             self._plot.removeItem(it)
         self._eredmeny_elemek.clear()
@@ -786,6 +866,7 @@ class LabAblak(QtWidgets.QMainWindow):
             self._allapot.setText(f"HIBA: {type(ex).__name__}: {ex}")
             return
         self._eredmeny_rajz()
+        self._egyenleg_rajz()
         self._listak_frissit()
 
     def _biztos_eredmeny(self) -> None:
@@ -851,6 +932,57 @@ class LabAblak(QtWidgets.QMainWindow):
                    r=f"{sum(_sszeg):+.2f}"))
 
     # ── Listák ───────────────────────────────────────────────────────────
+    def _szamla_gorbe(self):
+        """`(realizált, equity, kezdő)` — a vékony burok a tiszta számítás körül."""
+        res = (self._eredmeny or {}).get("res")
+        if res is None or self._chart is None or len(self._chart) < 2:
+            return None
+        return szamla_gorbe(self._chart,
+                            getattr(res, "trades", None) or [],
+                            float((self._eredmeny or {}).get("balance") or 0.0))
+
+    def _egyenleg_rajz(self) -> None:
+        for it in self._egyenleg_elemek:
+            self._egyenleg.removeItem(it)
+        self._egyenleg_elemek.clear()
+        g = self._szamla_gorbe()
+        if g is None:
+            self._szamla.setText("")
+            return
+        real, eq, kezdo = g
+        x = np.arange(len(real), dtype=float)
+        # A kezdő egyenleg vonala — enélkül nem látszik, mikor megyünk mínuszba.
+        _ln = pg.InfiniteLine(pos=kezdo, angle=0,
+                              pen=pg.mkPen("#4a5560", style=QtCore.Qt.DashLine))
+        self._egyenleg.addItem(_ln)
+        self._egyenleg_elemek.append(_ln)
+        self._egyenleg_elemek.append(
+            self._egyenleg.plot(x, eq, pen=pg.mkPen("#4ea1ff", width=1)))
+        self._egyenleg_elemek.append(
+            self._egyenleg.plot(x, real, pen=pg.mkPen("#7ecb7e", width=2)))
+        self._szamla_frissit()
+
+    def _szamla_frissit(self) -> None:
+        """Az IDŐPILLANAT-nézet: a számla állapota a kurzornál (vagy a végén)."""
+        g = self._szamla_gorbe()
+        if g is None:
+            self._szamla.setText("")
+            return
+        real, eq, kezdo = g
+        i = self._kurzor if self._kurzor is not None else len(real) - 1
+        i = max(0, min(len(real) - 1, int(i)))
+        _t_kurzor = self._chart.index[i]
+        _res = (self._eredmeny or {}).get("res")
+        _nyitott = sum(1 for tr in (getattr(_res, "trades", None) or [])
+                       if tr.open_time <= _t_kurzor
+                       and (tr.close_time is None or tr.close_time > _t_kurzor))
+        _dd = float(np.min(eq[:i + 1] - np.maximum.accumulate(eq[:i + 1])))
+        self._szamla.setText(_t(
+            "lab.status.account",
+            time=str(_t_kurzor)[:16],
+            balance=f"{real[i]:.2f}", floating=f"{eq[i] - real[i]:+.2f}",
+            equity=f"{eq[i]:.2f}", open=_nyitott, dd=f"{_dd:.2f}"))
+
     def _listak_frissit(self) -> None:
         for t in self._tablak.values():
             t.setRowCount(0)
@@ -894,6 +1026,8 @@ class LabAblak(QtWidgets.QMainWindow):
                     str(tr.open_time)[5:16], tr.direction,
                     self._ar(tr.open_price), str(tr.close_time)[5:16],
                     f"{tr.pnl_usd:+.2f}", f"{_r:+.2f}", tr.status])
+        # A kurzor mozgásakor az IDŐPILLANAT-nézet is frissül.
+        self._szamla_frissit()
 
     @staticmethod
     def _sor(tabla, ertekek) -> None:

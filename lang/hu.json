@@ -925,6 +925,7 @@
   "lab.sebesseg_2": "sebesség",
   "lab.sl_utja_be_trailing": "SL útja (BE / trailing)",
   "lab.start_epites": "Start építés",
+  "lab.status.account": "{time} · egyenleg {balance} · lebegő {floating} · equity {equity} · nyitott {open} · max DD {dd}",
   "lab.status.closed": "{n} lezárt kötés · összesen {pnl} · {r} R",
   "lab.status.markers": "{bars} gyertya · {drawn} jelölő kirajzolva · {outside} a kijelölésen kívül",
   "lab.status.markers_short": "{bars} gyertya · {drawn} jelölő · {outside} a kijelölésen kívül",
