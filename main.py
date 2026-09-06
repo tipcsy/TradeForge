@@ -14,6 +14,8 @@ Parancsok:
   python main.py lab-mpl      — ugyanaz a régi, matplotlib-es felülettel
   python main.py pack <név>   — stratégia becsomagolása `.tfs` fájlba
   python main.py install <f>  — stratégia-csomag telepítése (⚠ kódot hoz be)
+  python main.py pack-gate <kulcs>    — kapu becsomagolása `.tfg` fájlba
+  python main.py install-gate <f>     — kapu-csomag telepítése (⚠ kódot hoz be)
 
 Az `optimize` pár × STRATÉGIA szinten dolgozik. Stratégia megadása nélkül minden
 páron a SAJÁT engedélyezett stratégiái futnak (pairs.<sym>.strategies) — ugyanaz a
@@ -502,6 +504,90 @@ def cmd_install(argv=None):
     return 0
 
 
+def cmd_pack_gate(argv=None):
+    """`pack-gate <kulcs> [--out MAPPA] [--version X]` — kapu becsomagolása `.tfg`-be.
+
+    A csomag a kapu MOSTANI állapotát rögzíti (modul + segédmodulok + leírások).
+
+    ⚠ NEM viszi a kapu SZÁMAIT (spread-szorzó, lendület-küszöb, költség-plafon).
+    Azok a `config.json` `gates` szekciójában laknak, PÁRONKÉNT és
+    STRATÉGIÁNKÉNT örökölve — vagyis a TE beállításaid, nem a kapué."""
+    from core import gates as _g
+    from gates import pack
+    argv = list(argv or [])
+    if not argv or argv[0].startswith("-"):
+        print("Hasznalat: python main.py pack-gate <kulcs> [--out MAPPA] [--version X]")
+        print("Kapuk: " + ", ".join(_g.KEYS))
+        return 1
+    kulcs = argv[0]
+    out = ver = None
+    i = 1
+    while i < len(argv):
+        if argv[i] == "--out" and i + 1 < len(argv):
+            out = argv[i + 1]
+            i += 1
+        elif argv[i] == "--version" and i + 1 < len(argv):
+            ver = argv[i + 1]
+            i += 1
+        i += 1
+    try:
+        p = pack.build(kulcs, out, version=ver or "1.0.0")
+    except pack.PackError as e:
+        print(f"NEM sikerult: {e}")
+        return 1
+    print(f"Kesz: {p}  ({p.stat().st_size} bajt)")
+    return 0
+
+
+def cmd_install_gate(argv=None):
+    """`install-gate <fajl.tfg> [--overwrite] [--yes]` — kapu-csomag telepítése.
+
+    ⚠ EGY `.tfg` FUTTATHATO PYTHON KOD. A telepites ugyanaz a bizalmi lepes,
+    mint egy `.exe` elinditasa — ezert a parancs ELOBB KIIRJA, mit hozna be, es
+    csak `--yes` mellett telepit kerdes nelkul."""
+    from gates import pack
+    argv = list(argv or [])
+    if not argv or argv[0].startswith("-"):
+        print("Hasznalat: python main.py install-gate <fajl.tfg> [--overwrite] [--yes]")
+        return 1
+    fajl = argv[0]
+    overwrite = "--overwrite" in argv
+    igen = "--yes" in argv or "-y" in argv
+    try:
+        man, gondok = pack.check(fajl, overwrite=overwrite)
+    except pack.PackError as e:
+        print(f"NEM telepitheto: {e}")
+        return 1
+    print(f"Kapu:     {man['key']}  v{man.get('version')}  (api {man.get('api')})")
+    print(f"Meres:    a(z) '{man.get('phase')}' fazisban")
+    print(f"Keszult:  {man.get('created_by')}")
+    print("Fajlok:   " + ", ".join(man["_files"]))
+    if gondok:
+        print("GONDOK:")
+        for g in gondok:
+            print("  • " + g)
+        if not overwrite:
+            return 1
+    if not igen:
+        print()
+        print("⚠ A telepites PYTHON KODOT hoz be es futtathatova tesz. Ha ez a")
+        print("  fajl nem tolem szarmazik, NE telepitsd. Megerositeshez: --yes")
+        return 1
+    try:
+        man = pack.install(fajl, overwrite=overwrite)
+    except pack.PackError as e:
+        print(f"NEM telepitheto: {e}")
+        return 1
+    print("Telepitve:")
+    for f in man["installed"]:
+        print("  " + f)
+    if man.get("needs_enable"):
+        print()
+        print("⚠ A kapu hatasa 'none': egyelore SEMMIBE nem szol bele. Bekapcsolni")
+        print("  a felulet kapu-ablakaban lehet, strategiankent.")
+    return 0
+
+
 COMMANDS = {
     "download":  (cmd_download,   []),
     "optimize":  (cmd_optimize,   "symbols"),
@@ -514,6 +600,8 @@ COMMANDS = {
     "lab-mpl":   (cmd_lab_mpl,    "argv"),
     "pack":      (cmd_pack,       "argv"),
     "install":   (cmd_install,    "argv"),
+    "pack-gate":    (cmd_pack_gate,    "argv"),
+    "install-gate": (cmd_install_gate, "argv"),
 }
 
 

@@ -296,6 +296,26 @@ REGISTRY = _BUILTIN + _felderites()
 KEYS = tuple(g["key"] for g in REGISTRY)
 
 
+def refresh_registry() -> tuple:
+    """A registry ÚJRAÉPÍTÉSE — egy frissen telepített kapu után.
+
+    ⚠ ENÉLKÜL A TELEPÍTÉS „NEM CSINÁLNA SEMMIT". A `REGISTRY` importáláskor áll
+    össze; egy `.tfg` telepítése után a kapu tehát csak a program
+    ÚJRAINDÍTÁSA után jelenne meg — a felhasználó pedig azt látná, hogy a
+    telepítés lefutott, és mégsem történt semmi. Ugyanez a lépés van a
+    `.tfs`-nél is (`strategy._REGISTRY = None`).
+
+    ⚠ A `KEYS` MODUL-SZINTŰ NÉV, tehát a `from core.gates import KEYS` alakban
+    importált másolatok NEM frissülnek. A projektben ilyen nincs (mind
+    `_gates.KEYS`-t ír), és a `test_gates_package` őrzi is — de ha lenne, az
+    némán a régi listával dolgozna tovább.
+    """
+    global REGISTRY, KEYS
+    REGISTRY = _BUILTIN + _felderites()
+    KEYS = tuple(g["key"] for g in REGISTRY)
+    return KEYS
+
+
 def entry_of(key: str) -> dict:
     """Egy kapu registry-bejegyzése (üres dict, ha ismeretlen)."""
     for g in REGISTRY:

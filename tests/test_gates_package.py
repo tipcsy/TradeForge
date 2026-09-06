@@ -68,7 +68,25 @@ def _imports(p: Path) -> set:
 
 
 # ══ 1. A CSOMAG TARTALMA ════════════════════════════════════════════════
-_van = {p.stem for p in (ROOT / "gates").glob("*.py")} - {"__init__", "paths"}
+# ⚠ A `paths` es a `pack` NEM kapu-merok, hanem a csomag INFRASTRUKTURAJA
+# (hol laknak a kapuk · hogyan csomagolodnak `.tfg`-be). Egy kapu-MERO az, ami
+# `GATE`-tel es `measure(ctx)`-szel jelentkezik be.
+_van = {p.stem for p in (ROOT / "gates").glob("*.py")} - {"__init__", "paths", "pack"}
+# ⚠ ES AMI A LISTABAN VAN, AZ TENYLEG MERO LEGYEN: `GATE` + `measure`.
+# Enelkul a fenti kivetel-lista csendben eltakarhatna egy felkesz kaput.
+import importlib as _il
+_nem_mero = []
+for _m in sorted(MEROK):
+    try:
+        _mod = _il.import_module(f"gates.{_m}")
+    except Exception as _e:
+        _nem_mero.append(f"{_m}: {type(_e).__name__}")
+        continue
+    if not isinstance(getattr(_mod, "GATE", None), dict)             or not callable(getattr(_mod, "measure", None)):
+        _nem_mero.append(_m)
+check("minden felsorolt modul TENYLEG kapu-mero (GATE + measure)",
+      not _nem_mero, ", ".join(_nem_mero))
+
 check("a gates/ csomagban PONTOSAN a kapu-merok vannak", _van == MEROK,
       f"tobblet={sorted(_van - MEROK)} hianyzik={sorted(MEROK - _van)}")
 _maradt = [m for m in MEROK if (ROOT / "core" / f"{m}.py").exists()]
