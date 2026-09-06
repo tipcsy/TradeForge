@@ -181,7 +181,19 @@ def szamla_gorbe(chart, trades, kezdo: float):
         if tr.close_time is None:
             _b = n
         else:
-            _b = int(idx.searchsorted(tr.close_time, side="right")) - 1
+            # ⚠ `side="left"`: a kötés azokon a bárokon LEBEG, ahol a bár ideje
+            # a nyitás és a ZÁRÁS KÖZÖTT van, és attól a bártól REALIZÁLT,
+            # amelyiknek az ideje már eléri a zárást.
+            #
+            # ⚠ ELŐSZÖR `side="right") - 1`-et írtam, és az ELCSÚSZOTT egy
+            # bárral, ha a zárás két bár-időpont KÖZÉ esett. Valós adaton ez
+            # nem elméleti: egy M15-ös charton egy 21:00-kor nyílt és 21:06-kor
+            # zárt kötés így a NYITÓ báron már realizáltnak látszott, miközben
+            # a „Nyitott" tábla ugyanabban a pillanatban NYITOTTKÉNT mutatta.
+            # A görbe és a tábla ugyanarra az időpontra mást mondott — épp az,
+            # amit el akartunk kerülni. A tábla szabálya (`close_time > kurzor`)
+            # az elsődleges, a görbe ahhoz igazodik.
+            _b = int(idx.searchsorted(tr.close_time, side="left"))
             _b = max(_a, min(n, _b))
             if _b < n:
                 real[_b:] += float(tr.pnl_usd or 0.0)

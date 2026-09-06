@@ -137,6 +137,34 @@ check("egy báron belül nyíló+záródó kötés csak a realizáltba megy",
       real7[-1] == 1012.0 and np.all(eq7 == real7), f"{real7[-1]}")
 
 
+# ── 6b. A ZARAS KET BAR KOZOTT — a valos adat esete ─────────────────────
+# ⚠ EZT A HIBAT A VIZUALIS ELLENORZES HOZTA KI, nem ez a teszt. Az elso
+# valtozat `searchsorted(..., "right") - 1`-et hasznalt, ami ELCSUSZOTT egy
+# barral, ha a zaras ket bar-idopont KOZE esett. Ger40 M15-on egy 21:00-kor
+# nyilt es 21:06-kor zart kotes igy a NYITO baron mar realizaltnak latszott,
+# mikozben a „Nyitott" tabla ugyanabban a pillanatban NYITOTTKENT mutatta.
+# A tabla szabalya (`close_time > kurzor`) az elsodleges — a gorbe ahhoz igazodik.
+# ⚠ A belepo ar SZANDEKOSAN nem a bar zaroara (101,0 vs 102,0): kulonben a
+# lebego pont nulla lenne, es a lenti allitas nem merne semmit. (Elsore epp
+# 102,0-t irtam, es a teszt jogosan bukott.)
+_koz = Kotes(IDX[2], IDX[2] + pd.Timedelta(minutes=6), "BUY", 101.0, pnl=20.0)
+_r8, _e8, _ = szamla_gorbe(CHART, [_koz], 1000.0)
+check("két bár KÖZÖTT záró kötés a NYITÓ báron még NYITOTT (lebeg)",
+      _r8[2] == 1000.0, f"realizált[2]={_r8[2]} (1000 kell)")
+check("...és a KÖVETKEZŐ bártól realizált",
+      _r8[3] == 1020.0 and _r8[-1] == 1020.0, f"{_r8[3]} … {_r8[-1]}")
+check("...a nyitó báron az equity a LEBEGŐT mutatja (nem a realizáltat)",
+      abs(_e8[2] - 1010.0) < 1e-9, f"eq={_e8[2]} (1010 kell), real={_r8[2]}")
+
+# A tabla es a gorbe UGYANAZT mondja: „nyitott-e a kurzornal?"
+_kurzor_ido = IDX[2]
+_tabla_szerint_nyitva = (_koz.close_time is None or _koz.close_time > _kurzor_ido)
+_gorbe_szerint_nyitva = _r8[2] == 1000.0      # meg nem realizalodott
+check("a TÁBLA és a GÖRBE egyetért abban, hogy nyitott-e",
+      _tabla_szerint_nyitva == _gorbe_szerint_nyitva,
+      f"tábla={_tabla_szerint_nyitva} görbe={_gorbe_szerint_nyitva}")
+
+
 # ── 7. A GORBE HOSSZA = a chart hossza (az X-tengely kozos) ────────────
 check("a görbék hossza a charttal egyezik",
       len(real) == len(CHART) and len(eq) == len(CHART))
