@@ -26,7 +26,8 @@ NAME = _LabelMap("build.mode", MODES)
 _lock = threading.Lock()
 _state: dict[str, dict] = {}
 
-_KEYS = ("mode", "size_factor", "trigger", "r_step", "r_shrink")
+_KEYS = ("mode", "size_factor", "trigger", "r_step", "r_shrink",
+         "target_r")
 
 
 def _norm(v) -> dict:
@@ -41,6 +42,12 @@ def _norm(v) -> dict:
         for k in ("r_step", "r_shrink"):
             if isinstance(v.get(k), (int, float)):
                 d[k] = float(v[k])
+        # ⚠ A csomag célára R-ben. A NEGATÍVAT nullára vágjuk (nincs cél), nem
+        # tartjuk meg: egy negatív cél az ár ROSSZ oldalára tenné a TP-t, amit a
+        # bróker vagy elutasít, vagy azonnal teljesít — mindkettő rosszabb, mint
+        # a cél nélküli futás.
+        if isinstance(v.get("target_r"), (int, float)):
+            d["target_r"] = max(0.0, float(v["target_r"]))
     else:
         d["mode"] = MODE_OFF
     return d

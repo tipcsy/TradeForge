@@ -302,10 +302,13 @@ class BacktestDialog:
             self._build_trig_name.get(), _pb.TRIGGER_CANDLE)
         rstep = _num(self._build_rstep_var.get())
         rshrink = _num(self._build_rshrink_var.get())
+        _tr = _num(self._build_target_var.get())
         return {"mode": mode, "size_factor": sf if sf and sf > 0 else 0.7,
                 "trigger": trig,
                 "r_step": rstep if rstep and rstep > 0 else 1.0,
-                "r_shrink": rshrink if rshrink and 0 < rshrink < 1 else 0.5}
+                "r_shrink": rshrink if rshrink and 0 < rshrink < 1 else 0.5,
+                # A csomag celara R-ben; 0 = nincs cel (ERVENYES ertek).
+                "target_r": _tr if _tr and _tr > 0 else 0.0}
 
     # ── UI ──────────────────────────────────────────────────────────────────
     def _build(self):
@@ -645,6 +648,18 @@ class BacktestDialog:
                  bg=BG_HEADER, fg=FG_WHITE, font=self._sf, relief="flat",
                  insertbackground=FG_WHITE).pack(side="left", padx=(2, 0))
         _attach_tooltip(self._build_rshrink_frame, _t("bt.rshrink_tip"))
+        # Csomag-celar R-ben (0 = nincs cel) — a TELJES csomagra (atlagar +
+        # ossz-kockazat), nem az indulo labra.
+        self._build_target_frame = tk.Frame(brow, bg=BG)
+        tk.Label(self._build_target_frame, text=_t("bt.target_r"), bg=BG,
+                 fg=FG_GRAY, font=self._sf).pack(side="left")
+        self._build_target_var = tk.StringVar(
+            value=str(self._init_build.get("target_r", 0.0)))
+        tk.Entry(self._build_target_frame, textvariable=self._build_target_var,
+                 width=5, bg=BG_HEADER, fg=FG_WHITE, font=self._sf,
+                 relief="flat", insertbackground=FG_WHITE).pack(side="left",
+                                                                padx=(2, 0))
+        _attach_tooltip(self._build_target_frame, _t("idlg.build_target_tip"))
 
         self._update_rr_visibility()
 
@@ -898,7 +913,8 @@ class BacktestDialog:
         (self._exit_frame.grid if show_exit else self._exit_frame.grid_remove)()
         # Építés-vezérlők (sorrend-tartó)
         for f in (self._build_faktor_frame, self._build_trig_frame,
-                  self._build_rstep_frame, self._build_rshrink_frame):
+                  self._build_rstep_frame, self._build_rshrink_frame,
+                  self._build_target_frame):
             f.pack_forget()
         build_on = self._build_mode_name.get() != _bst.NAME[_bst.MODE_OFF]
         trig = {v: k for k, v in _pb.TRIGGER_NAME.items()}.get(
@@ -910,6 +926,7 @@ class BacktestDialog:
                 self._build_rstep_frame.pack(side="left", padx=(8, 0))
             if trig == _pb.TRIGGER_R_CONVERGE:
                 self._build_rshrink_frame.pack(side="left", padx=(8, 0))
+            self._build_target_frame.pack(side="left", padx=(10, 0))
         self._refit_width()
 
     def _refit_width(self):

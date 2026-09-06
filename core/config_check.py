@@ -480,6 +480,31 @@ def _check_incompatible_strategies(cfg: dict, out: list) -> None:
             _t("cfgchk.incompatible_strategy", name=repr(nev), reason=indok)))
 
 
+def _check_build_target_idle(cfg: dict, out: list) -> None:
+    """Beállított csomag-célár KIKAPCSOLT építés mellett — a cél sosem hat.
+
+    ⚠ MIÉRT KELL ERRŐL SZÓLNI. A célár a `data/build_mode.json`-ban él, az
+    építés MÓDJA ugyanott — de a kettő KÜLÖN sor a felületen, és a mód
+    visszaállítása („Ki") nem nullázza a célt. Aki tehát beállít egy 20 R-es
+    célt, majd később kikapcsolja az építést, annak a fájlban ott marad egy
+    szám, ami SEMMIT nem csinál: a cél CSAK ráépítéskor kerül a lábakra.
+
+    Ez ugyanaz a hibaosztály, mint a `optimizer_skip` bennragadt terve: a
+    config csak az ELTÉRÉST rögzíti, tehát egy kész funkció NÉMÁN tétlen
+    maradhat, és a felület mégis mutatja a beállított értéket."""
+    from core import build_state as _bs, position_build as _pb
+    _bs.load()
+    for sym in sorted(cfg.get("pairs") or {}):
+        if not isinstance(sym, str):
+            continue
+        bc = _bs.get_config(sym) or {}
+        if float(bc.get("target_r", 0.0) or 0.0) > 0 and bc.get("mode") == _pb.MODE_OFF:
+            out.append(_finding(
+                INFO, "build_target_idle",
+                _t("cfgchk.build_target_idle", symbol=sym,
+                   target_r=bc.get("target_r")), symbol=sym))
+
+
 _CHECKS = (
     _check_gate_preconditions,
     _check_stale_strategy_keys,
@@ -494,6 +519,7 @@ _CHECKS = (
     _check_untuned_pairs,
     _check_optimizer_skip,
     _check_empty_strategies,
+    _check_build_target_idle,
 )
 
 

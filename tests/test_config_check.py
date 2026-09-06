@@ -505,6 +505,34 @@ check_("kitoltott listaval nincs lelet",
       not [x for x in cc.check(_cfg_van) if x["code"] == "empty_strategies_fallback"])
 
 
+# ── Bennragadt csomag-celar (0001) ────────────────────────────────────────
+# ⚠ A cel a `data/build_mode.json`-ban el, az epites MODJA ugyanott — de a mod
+# „Ki"-re allitasa NEM nullazza a celt, tehat ott maradhat egy szam, ami semmit
+# nem csinal. A teszt STUBOLJA a build_state-et: a valodi fajlt sem olvassuk,
+# sem irjuk.
+from core import build_state as _bs_t, position_build as _pb_t
+
+_bs_orig = _bs_t.get_config
+_cfg_bt = {"pairs": {"EURUSD": {"enabled": True}}}
+try:
+    _bs_t.get_config = lambda s: {**_pb_t.default_config(),
+                                  "target_r": 20.0, "mode": _pb_t.MODE_OFF}
+    _f = [x for x in cc.check(_cfg_bt) if x["code"] == "build_target_idle"]
+    check_("cel + KIKAPCSOLT epites -> lelet", len(_f) == 1)
+    check_("...es megnevezi a parat", _f and _f[0].get("symbol") == "EURUSD")
+
+    _bs_t.get_config = lambda s: {**_pb_t.default_config(),
+                                  "target_r": 20.0, "mode": _pb_t.MODE_AUTO}
+    check_("cel + BEKAPCSOLT epites -> nincs lelet",
+           not [x for x in cc.check(_cfg_bt) if x["code"] == "build_target_idle"])
+
+    _bs_t.get_config = lambda s: {**_pb_t.default_config(), "mode": _pb_t.MODE_OFF}
+    check_("nincs cel + kikapcsolt epites -> nincs lelet",
+           not [x for x in cc.check(_cfg_bt) if x["code"] == "build_target_idle"])
+finally:
+    _bs_t.get_config = _bs_orig
+
+
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")
 sys.exit(0 if all(results) else 1)

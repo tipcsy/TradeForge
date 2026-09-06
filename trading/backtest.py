@@ -88,6 +88,14 @@ class Trade:
     # ── Pozícióépítés (AUTO) — több „láb" (ráépítés) egy átlagárral ──
     legs: list = field(default_factory=list)   # [(price, lot), …]; üres → egyleges
     build_ref: float = 0.0      # a következő ráépítés referencia-záróára
+    # A csomag KÖZÖS célára árban (0 = nincs cél → TP nélkül fut, mint a
+    # `target_r` bevezetése előtt). Minden ráépítéskor újraszámoljuk az ÚJ
+    # átlagárból és az ÚJ össz-kockázatból.
+    pkg_tp: float = 0.0
+    # A csomag BELÉPÉSKORI össz-kockázata (a lábak 1 R-jeinek összege). ⚠ NEM a
+    # pillanatnyi: a közös stop az átlagáron ül, ott a mostani kockázat nulla —
+    # abból a cél a végtelenbe menne.
+    build_risk_usd: float = 0.0
     # ── Esemény-napló (MT5 BacktestReplayer visszajátszáshoz) ──
     # CSAK ha a run_pair `record_events=True`-val fut (a Backtest-ablak); alapból
     # üres → az optimalizáló/portfólió-BT bitazonos, nincs overhead. Minden elem:
@@ -97,9 +105,22 @@ class Trade:
 
     @property
     def built(self) -> bool:
-        """Épített (több lábú) csomag-e? A live ilyenkor TÖRLI a TP-t (minden láb
-        SL-je az átlagáron, TP nélkül fut) — a backtest ezt modellezi."""
+        """Épített (több lábú) csomag-e? A live ilyenkor minden láb TP-jét a
+        csomag KÖZÖS célárára írja (`target_r`), vagy törli (`target_r = 0`,
+        alap) — a backtest ezt a `tp_eff`-fel modellezi."""
         return len(self.legs) > 1
+
+    @property
+    def tp_eff(self) -> float:
+        """A ténylegesen ÉLŐ célár, `0.0` = nincs.
+
+        Egyleges pozíciónál a belépéskori TP. ÉPÍTETT csomagnál a csomag KÖZÖS
+        célára — `target_r = 0` (alap) mellett `0.0`, tehát a csomag TP nélkül
+        fut, pontosan mint a `target_r` bevezetése előtt.
+
+        ⚠ Miért nem lábanként: külön TP-vel az induló láb a saját célján
+        ÖNÁLLÓAN zárna, otthagyva a többit — ez volt a bejelentett hiba."""
+        return self.pkg_tp if self.built else self.tp
 
 
 @dataclass
@@ -1846,12 +1867,14 @@ def run_pair(
                 _ev_sl0, _ev_lot0 = trade.sl, trade.lot
 
             if trade.direction == "BUY":
-                # TP ellenőrzés — ÉPÍTETT csomagnál NINCS TP (a live a ráépítéskor
-                # törli minden láb TP-jét, hogy az induló láb ne zárjon önállóan;
-                # a csomag az átlagár-stopig / kiszállási jelig fut).
+                # TP ellenőrzés a ÉLŐ célárral (`tp_eff`): egyleges pozíciónál a
+                # belépéskori TP, ÉPÍTETT csomagnál a KÖZÖS célár — ami
+                # `target_r = 0` (alap) mellett 0, tehát a csomag TP nélkül fut
+                # az átlagár-stopig / kiszállási jelig, mint eddig.
                 # A BUY a BID-en zár → a TP/SL a BID-sorozaton triggerel. Ha MINDKETTŐ
                 # elérhető egy baron, a sorrendet a `_sl_first` dönti (lásd fent).
-                _tp_hit = (not trade.built) and bid_hi >= trade.tp
+                _tp_e = trade.tp_eff
+                _tp_hit = _tp_e > 0 and bid_hi >= _tp_e
                 _sl_hit = bid_lo <= trade.sl
                 if _sl_hit and (_sl_first or not _tp_hit):
                     trade.close_price = trade.sl
@@ -1860,9 +1883,9 @@ def run_pair(
                     trade.status      = "sl"
                     closed = True
                 elif _tp_hit:
-                    trade.close_price = trade.tp
+                    trade.close_price = _tp_e
                     trade.close_time  = m1_time
-                    trade.pnl_usd     = calc_pnl(trade, trade.tp)
+                    trade.pnl_usd     = calc_pnl(trade, _tp_e)
                     trade.status      = "tp"
                     closed = True
                 else:
@@ -1874,7 +1897,8 @@ def run_pair(
             elif trade.direction == "SELL":
                 # A SELL az ASK-on zár → a TP/SL az ASK-sorozaton triggerel. Ha MINDKETTŐ
                 # elérhető egy baron, a sorrendet a `_sl_first` dönti (lásd fent).
-                _tp_hit = (not trade.built) and ask_lo <= trade.tp
+                _tp_e = trade.tp_eff
+                _tp_hit = _tp_e > 0 and ask_lo <= _tp_e
                 _sl_hit = ask_hi >= trade.sl
                 if _sl_hit and (_sl_first or not _tp_hit):
                     trade.close_price = trade.sl
@@ -1883,9 +1907,9 @@ def run_pair(
                     trade.status      = "sl"
                     closed = True
                 elif _tp_hit:
-                    trade.close_price = trade.tp
+                    trade.close_price = _tp_e
                     trade.close_time  = m1_time
-                    trade.pnl_usd     = calc_pnl(trade, trade.tp)
+                    trade.pnl_usd     = calc_pnl(trade, _tp_e)
                     trade.status      = "tp"
                     closed = True
                 else:
@@ -1969,6 +1993,15 @@ def run_pair(
                         # ráépítés piaci áron a BELÉPŐ oldalon (BUY→ask, SELL→bid)
                         _add_px = float(_bar_c + _sp
                                         if trade.direction == "BUY" else _bar_c)
+                        # Az ADALÉK belépéskori kockázata (1 R): a MOSTANI csomag-
+                        # stopig mért táv — az él pont ezzel a stoppal nyitja az új
+                        # lábat (`_seed_sl`), és a közös stop rögtön utána az új
+                        # átlagárra húzódik, tehát utólag ez sem lenne kinyerhető.
+                        if trade.build_risk_usd <= 0:
+                            trade.build_risk_usd = trade.risk_usd
+                        trade.build_risk_usd += (
+                            _add * abs(_add_px - trade.sl) / point_size * pv1_point
+                            if point_size > 0 and trade.sl else 0.0)
                         trade.legs.append((_add_px, _add))
                         trade.lot = round(sum(l[1] for l in trade.legs), 8)
                         # A stop a NETTÓ null pont: az átlagár + költség (jutalék,
@@ -1978,19 +2011,31 @@ def run_pair(
                         _cbuf = _costs.package_stop_buffer(
                             trade.lot, trade.direction, trade.open_time.timestamp(),
                             m1_time.timestamp(), pair_cfg, _sp)
+                        _avg_uj = _posbuild.average_price(trade.legs)
                         trade.sl  = round(_posbuild.package_stop(
-                            _posbuild.average_price(trade.legs), trade.direction,
+                            _avg_uj, trade.direction,
                             0.0, 0.0, 0.0, cost_buffer=_cbuf)[0], 6)
+                        # A csomag KÖZÖS célára az ÚJ átlagárból és az ÚJ
+                        # össz-kockázatból. `target_r = 0` (alap) → 0.0, azaz a
+                        # csomag TP nélkül fut — bitazonos a korábbi viselkedéssel.
+                        trade.pkg_tp = round(_posbuild.package_target(
+                            _avg_uj, trade.direction, trade.build_risk_usd,
+                            float(_build_cfg.get("target_r", 0.0) or 0.0),
+                            trade.lot, pv1_point, point_size), 6)
                         trade.build_ref = _bc_close
                         if record_events:
                             # Ráépítés: új láb (piaci áron) + az SL az új NETTÓ null
-                            # pontra, és a csomag TP nélkül fut (minden láb TP-je törölve).
+                            # pontra, és a TP a csomag KÖZÖS célárára (0 = törölve,
+                            # azaz a csomag célár nélkül fut).
                             trade.events.append(("BUILD_ADD", m1_time,
                                                  round(float(_bar_c), 6),
-                                                 round(trade.sl, 6), 0.0,
+                                                 round(trade.sl, 6),
+                                                 round(trade.pkg_tp, 6),
                                                  round(_add, 8), "build"))
                             trade.events.append(("TP_MODIFY", m1_time, 0.0, 0.0,
-                                                 0.0, 0.0, "build_no_tp"))
+                                                 round(trade.pkg_tp, 6), 0.0,
+                                                 "build_pkg_tp" if trade.pkg_tp > 0
+                                                 else "build_no_tp"))
 
             if closed:
                 # A részleges zárás(ok)ból már realizált P&L hozzáadása a runner
@@ -2666,13 +2711,15 @@ def run_portfolio_backtest(
             _lotstep = _pc.get("lot_step", 0.01)
             closed   = False
 
+            _tp_e = trade.tp_eff        # 0 = nincs élő célár (épített, cél nélkül)
             if trade.direction == "BUY":
-                # Épített csomagnál NINCS TP (mint a run_pair-ben / élesben)
-                if not trade.built and row["high"] >= trade.tp:
-                    trade.close_price = trade.tp
+                # Épített csomagnál a KÖZÖS célár (mint a run_pair-ben / élesben);
+                # `target_r = 0` (alap) → 0, azaz nincs TP.
+                if _tp_e > 0 and row["high"] >= _tp_e:
+                    trade.close_price = _tp_e
                     trade.close_time  = m1_time
-                    trade.pnl_usd     = calc_pnl(trade, trade.tp)
-                    trade.pnl_points    = (trade.tp - trade.open_price) / point_size
+                    trade.pnl_usd     = calc_pnl(trade, _tp_e)
+                    trade.pnl_points    = (_tp_e - trade.open_price) / point_size
                     trade.status      = "tp";  closed = True
                 elif row["low"] <= trade.sl:
                     trade.close_price = trade.sl
@@ -2685,11 +2732,11 @@ def run_portfolio_backtest(
                                      point_size, _minlot, _lotstep, rr_spec)
 
             else:  # SELL — az ASK-sorozaton (bid + spread)
-                if not trade.built and _lo_x <= trade.tp:
-                    trade.close_price = trade.tp
+                if _tp_e > 0 and _lo_x <= _tp_e:
+                    trade.close_price = _tp_e
                     trade.close_time  = m1_time
-                    trade.pnl_usd     = calc_pnl(trade, trade.tp)
-                    trade.pnl_points    = (trade.open_price - trade.tp) / point_size
+                    trade.pnl_usd     = calc_pnl(trade, _tp_e)
+                    trade.pnl_points    = (trade.open_price - _tp_e) / point_size
                     trade.status      = "tp";  closed = True
                 elif _hi_x >= trade.sl:
                     trade.close_price = trade.sl
@@ -2757,6 +2804,14 @@ def run_portfolio_backtest(
                     _last = min(l[1] for l in trade.legs) if trade.legs else trade.lot
                     _add  = _pb.next_lot(_last, _bcfg["size_factor"], _minlot, _lotstep)
                     if _add > 0:
+                        # Az adalék belépéskori 1 R-je a MOSTANI csomag-stopig
+                        # (lásd a run_pair ágát) — a közös cél ebből számol.
+                        if trade.build_risk_usd <= 0:
+                            trade.build_risk_usd = trade.risk_usd
+                        trade.build_risk_usd += (
+                            _add * abs(float(row["close"]) - trade.sl) / point_size
+                            * trade.pv1_point
+                            if point_size > 0 and trade.sl else 0.0)
                         trade.legs.append((float(row["close"]), _add))
                         trade.lot = round(sum(l[1] for l in trade.legs), 8)
                         # NETTÓ null pont (nem a nyers átlagár) — lásd a run_pair
@@ -2765,9 +2820,14 @@ def run_portfolio_backtest(
                         _cbuf = _costs.package_stop_buffer(
                             trade.lot, trade.direction, trade.open_time.timestamp(),
                             m1_time.timestamp(), _pc, sp * point_size)
+                        _avg_uj = _pb.average_price(trade.legs)
                         trade.sl  = round(_pb.package_stop(
-                            _pb.average_price(trade.legs), trade.direction,
+                            _avg_uj, trade.direction,
                             0.0, 0.0, 0.0, cost_buffer=_cbuf)[0], 6)
+                        trade.pkg_tp = round(_pb.package_target(
+                            _avg_uj, trade.direction, trade.build_risk_usd,
+                            float(_bcfg.get("target_r", 0.0) or 0.0),
+                            trade.lot, trade.pv1_point, point_size), 6)
                         trade.build_ref = _bc_cl
 
             if closed:

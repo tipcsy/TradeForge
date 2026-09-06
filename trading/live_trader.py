@@ -40,6 +40,7 @@ from core import run_state
 from core import config_check as _cfgchk
 from core import exit_signal
 from core import position_build as _position_build
+from core import build_state as _bstate
 from core import viz_prefs as _vp
 from core import trade_mode as _tmode
 from core import adopted
@@ -2718,7 +2719,8 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
     # Csak KOCKÁZATMENTES pozíciónál építünk (1. szabály). A ready = a gyertyás
     # építés-jel az elsődleges időkeret ZÁRT gyertyáján. A ref_close-t a GUI frissíti
     # a tényleges ráépítéskor; itt csak megőrizzük / első alkalommal a belépőre állítjuk.
-    from core import build_state as _bs, position_build as _pb
+    from core import position_build as _pb
+    _bs = _bstate
     _bmode = _bs.get_mode(symbol)
     _rf_pos = [p for p in symbol_positions if slot_mgr.is_risk_free(p.ticket)]
     if _bmode != _pb.MODE_OFF and _rf_pos:
@@ -3413,13 +3415,55 @@ def manual_build(symbol: str, strategy_name: "str | None" = None) -> bool:
         cost_buffer=_cost_buf)
     _stop = order_exec.normalize_price(_stop, info)
 
-    # Minden láb SL-je a közös stopra, ÉS a TP TÖRLÉSE (tp=0): különben az induló láb
-    # a saját TP-jén ÖNÁLLÓAN zárna, otthagyva a TP nélküli adalékokat (ez okozta,
-    # hogy „lezárta a kezdeti pozíciót, és csak a veszteségesek maradtak"). Így a
-    # csomag EGYBEN fut → az átlagár-stopig / kiszállási jelig / kézi zárásig.
+    # Minden láb SL-je a KÖZÖS stopra, és a TP-je a KÖZÖS célárra: különben az
+    # induló láb a saját (belépéskori) TP-jén ÖNÁLLÓAN zárna, otthagyva a többit
+    # (ez okozta, hogy „lezárta a kezdeti pozíciót, és csak a veszteségesek
+    # maradtak"). Így a csomag EGYBEN fut → közös stop / közös cél / kiszállási
+    # jel / kézi zárás. `target_r = 0` (alap) → `tp=0.0`, azaz a mai viselkedés.
+    # ── A CSOMAG KÖZÖS CÉLÁRA (`target_r`, alap 0 = nincs) ────────────────
+    # ⚠ A TP-t eddig FELTÉTEL NÉLKÜL töröltük (`0.0`), és jó okkal: külön TP-vel
+    # az induló láb a saját célján ÖNÁLLÓAN zárt volna, otthagyva a TP nélküli
+    # adalékokat. A megoldás nem a TP hiánya, hanem a KÖZÖS TP: minden láb
+    # UGYANAZT az árat kapja, tehát a csomag EGYBEN zár.
+    #
+    # ⚠ AZ ÖSSZ-KOCKÁZAT A BELÉPÉSKORI (`position_meta`), nem a mostani: a közös
+    # stop az átlagárra kerül, tehát a pillanatnyi kockázat nulla — abból a cél
+    # a végtelenbe menne.
+    _tp_pkg = 0.0
+    _t_r = 0.0
+    try:
+        _t_r = float((_bstate.get_config(symbol) or {}).get("target_r", 0.0) or 0.0)
+        if _t_r > 0:
+            # ⚠ Csak azok a lábak számítanak, amiknek VAN nyilvántartott belépő-
+            # kockázata. Egy hiányzó bejegyzés nem 0 R — az egész csomag célára
+            # lenne alultervezve tőle, ezért ilyenkor inkább NINCS cél.
+            _riskek = [position_meta.risk_of(p.ticket) for p in positions_new]
+            _risk_ossz = (0.0 if any(r is None or float(r) <= 0 for r in _riskek)
+                          else sum(float(r) for r in _riskek))
+            _lot_ossz = sum(float(p.volume or 0.0) for p in positions_new)
+            _tp_pkg = _position_build.package_target(
+                avg, direction, _risk_ossz, _t_r, _lot_ossz,
+                float(_pc.get("pv1_point", 0.0) or 0.0),
+                float(_pc.get("point_size", 0.0) or 0.0))
+            if _tp_pkg > 0:
+                _tp_pkg = order_exec.normalize_price(_tp_pkg, info)
+                log.info("➕ %s — csomag-célár %.1f R → %.*f "
+                         "(össz-kockázat %.2f, lot %.2f)",
+                         symbol, _t_r, digits, _tp_pkg, _risk_ossz, _lot_ossz)
+    except Exception:
+        log.exception("➕ %s — a csomag-célár számítása HIBÁRA futott", symbol)
+        _tp_pkg = 0.0
+    if _t_r > 0 and _tp_pkg <= 0:
+        # ⚠ HANGOSAN: a cél be van állítva, de nem számolható. Némán TP nélkül
+        # futni pont az a hibaosztály, ami ellen ez a projekt küzd — a
+        # felhasználó azt hinné, hogy van célára.
+        log.warning("➕ %s — csomag-célár KÉRVE (%.1f R), de NEM számolható "
+                    "(hiányzó belépő-kockázat vagy pv1_point/point_size) → a "
+                    "csomag TP NÉLKÜL fut.", symbol, _t_r)
+
     _failed = []
     for p in positions_new:
-        if not mt5_connector.modify_position_sltp(p.ticket, _stop, 0.0):
+        if not mt5_connector.modify_position_sltp(p.ticket, _stop, _tp_pkg):
             _failed.append(p.ticket)
             continue
         # CSAK a ténylegesen beállt, nulla-kockázatú stop után jelölünk. Vágott

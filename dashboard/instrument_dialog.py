@@ -919,6 +919,19 @@ class InstrumentParamsDialog:
         _rse.bind("<Return>",   self._on_build_rshrink_save)
         _attach_tooltip(self._build_rshrink_frame,
                         _t("idlg.a_lepes_szorzoja_add"))
+        # Csomag-célár R-ben — csak Építés ≠ Ki. A cél a TELJES csomagra szól
+        # (átlagár + össz-kockázat), nem az induló lábra; 0 = nincs cél.
+        self._build_target_frame = tk.Frame(brow, bg=BG)
+        tk.Label(self._build_target_frame, text=_t("bt.target_r"), bg=BG, fg=FG_GRAY,
+                 font=self._sf).pack(side="left")
+        self._build_target_var = tk.StringVar(value=str(_bc0.get("target_r", 0.0)))
+        _te = tk.Entry(self._build_target_frame, textvariable=self._build_target_var,
+                       width=5, bg=BG_HEADER, fg=FG_WHITE, font=self._sf,
+                       relief="flat", insertbackground=FG_WHITE)
+        _te.pack(side="left", padx=(2, 0))
+        _te.bind("<FocusOut>", self._on_build_target_save)
+        _te.bind("<Return>",   self._on_build_target_save)
+        _attach_tooltip(self._build_target_frame, _t("idlg.build_target_tip"))
 
         self._update_rr_visibility()
 
@@ -1528,7 +1541,13 @@ class InstrumentParamsDialog:
                 "size_factor": _f(self._build_sf_var, 0.7, lo=0),
                 "trigger": trig,
                 "r_step": _f(self._build_rstep_var, 1.0, lo=0),
-                "r_shrink": _f(self._build_rshrink_var, 0.5, lo=0, hi=1)}
+                "r_shrink": _f(self._build_rshrink_var, 0.5, lo=0, hi=1),
+                # ⚠ A CELAR IS IDE TARTOZIK. Enelkul a backteszt a per-par
+                # beallitastol FUGGETLENUL cel nelkul futna, tehat a felulet
+                # mast mutatna, mint amit lemer — pontosan az a hibaosztaly,
+                # ami miatt a config-koherencia-ellenorzo egyaltalan letezik.
+                # `lo=None`: a 0 ERVENYES ertek (nincs cel), nem hibas bemenet.
+                "target_r": max(0.0, _f(self._build_target_var, 0.0))}
 
     def _export_trades(self, rows):
         """A MEGJELENÍTETT (szűrt) kötések CSV-be — a magyar Excel formátumában.
@@ -3817,6 +3836,24 @@ class InstrumentParamsDialog:
         if v > 0:
             self._bst.set_config(self.symbol, r_step=v)
 
+    def _on_build_target_save(self, _event=None):
+        """A csomag célára R-ben (0 = nincs cél).
+
+        ⚠ ÉRVÉNYTELEN VAGY NEGATÍV ÉRTÉKNÉL VISSZAÍRJUK a ténylegesen hatót — a
+        mező sosem mutathat mást, mint amivel a motor dolgozik. (A többi
+        építés-mező csendben eldobja a rosszat; ott a régi érték marad a
+        mezőben, ami ugyanaz, de itt a 0-ra vágás miatt ez látszódhatna
+        eltérésnek.)"""
+        try:
+            v = float(self._build_target_var.get().strip().replace(",", "."))
+        except ValueError:
+            v = None
+        if v is None or v < 0:
+            self._build_target_var.set(
+                str(self._bst.get_config(self.symbol).get("target_r", 0.0)))
+            return
+        self._bst.set_config(self.symbol, target_r=v)
+
     def _on_build_rshrink_save(self, _event=None):
         try:
             v = float(self._build_rshrink_var.get().strip().replace(",", "."))
@@ -3856,7 +3893,8 @@ class InstrumentParamsDialog:
         self._warn_trigger_vs_tp()
         # ── Építés-vezérlők (sorrend-tartó: mind elrejt, majd a látókat sorban pack) ──
         for f in (self._build_faktor_frame, self._build_trig_frame,
-                  self._build_rstep_frame, self._build_rshrink_frame):
+                  self._build_rstep_frame, self._build_rshrink_frame,
+                  self._build_target_frame):
             f.pack_forget()
         build_on = self._build_mode_name.get() != self._bst.NAME[self._bst.MODE_OFF]
         trig = {v: k for k, v in self._pb.TRIGGER_NAME.items()}.get(
@@ -3868,6 +3906,7 @@ class InstrumentParamsDialog:
                 self._build_rstep_frame.pack(side="left", padx=(8, 0))
             if trig == self._pb.TRIGGER_R_CONVERGE:
                 self._build_rshrink_frame.pack(side="left", padx=(8, 0))
+            self._build_target_frame.pack(side="left", padx=(10, 0))
         self._refit_width()
         self._rr_summary_changed()
 

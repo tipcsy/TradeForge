@@ -47,6 +47,10 @@ def default_config() -> dict:
         "trigger":     TRIGGER_CANDLE,   # gyertyás | r_fixed | r_converge
         "r_step":      1.0,     # R-alapú triggernél az (első) lépés R-ben
         "r_shrink":    0.5,     # R-felezőnél a lépés szorzója add-onként (0.5 = felező)
+        # A CSOMAG közös célára R-ben (0 = nincs cél → a lábak TP nélkül futnak,
+        # ez a v3.49.0 előtti viselkedés). A felhasználó kérése: „legyen egy
+        # célár, pl. 20 R", és „első körben a TP célár legyen, ne az SL célár".
+        "target_r":    0.0,
     }
 
 
@@ -136,6 +140,57 @@ def average_price(positions) -> float:
     if tot_v <= 0:
         return 0.0
     return sum(float(p) * float(v) for p, v in positions) / tot_v
+
+
+def package_target(avg: float, direction: str, risk_total: float,
+                   target_r: float, lot_total: float,
+                   pv1_point: float, point_size: float) -> float:
+    """A csomag KÖZÖS célára ÁRBAN — vagy `0.0`, ha nincs cél.
+
+    ⚠ A CÉL A TELJES CSOMAGRA szól (átlagár + ÖSSZ-kockázat), nem az első
+    lábra. Ez a felhasználó kimondott döntése: egy 20 R-es cél azt jelenti,
+    hogy a csomag EGYÜTT hoz 20-szor annyit, mint amennyit a lábak együtt
+    kockáztattak — nem azt, hogy az induló láb hoz 20 R-t.
+
+    A képlet a csomag P&L-jéből jön:
+
+        P&L(pont) = pont · össz_lot · pv1_point          (`risk_from_points`)
+        cél:        P&L = target_r · össz_kockázat
+        →  pont = (target_r · össz_kockázat) / (össz_lot · pv1_point)
+        →  ár   = átlagár ± pont · point_size
+
+    ⚠ A `pv1_point` PONTONKÉNTI, tehát a képlet PONTOT ad, nem árkülönbséget —
+    a `point_size`-zal kell árra váltani. Elsőre kihagytam, és a cél a
+    `point_size` reciprokának arányában lett hibás (EURUSD-n 10 000×).
+
+    ⚠ AZ ÖSSZ-KOCKÁZAT A BELÉPÉSKORI (`position_meta.risk_of` lábanként), NEM a
+    mostani. Miután a közös stop az átlagárra kerül, a pillanatnyi kockázat
+    nulla — abból számolva a cél a végtelenbe menne.
+
+    ⚠ HIÁNYZÓ ADATNÁL `0.0`-t ad (nincs cél), NEM kitalált árat: a hívó ilyenkor
+    a mai viselkedést folytatja (TP nélküli csomag). Egy rossz helyre tett TP
+    rosszabb, mint a hiányzó — az elvinné a csomagot egy véletlen szinten.
+
+    ⚠ MIÉRT A CSOMAGRA ÉS NEM LÁBANKÉNT: lábanként külön TP-vel az induló láb a
+    saját célján ÖNÁLLÓAN zárna, otthagyva a többit — pontosan ez volt a
+    bejelentett hiba („lezárta a kezdeti pozíciót, és csak a veszteségesek
+    maradtak"). Ezért kapja MINDEN láb UGYANEZT az árat.
+    """
+    try:
+        target_r = float(target_r)
+        risk_total = float(risk_total)
+        lot_total = float(lot_total)
+        pv1_point = float(pv1_point)
+        point_size = float(point_size)
+        avg = float(avg)
+    except (TypeError, ValueError):
+        return 0.0
+    if not (target_r > 0 and risk_total > 0 and lot_total > 0
+            and pv1_point > 0 and point_size > 0 and avg > 0):
+        return 0.0
+    pont = (target_r * risk_total) / (lot_total * pv1_point)
+    tav = pont * point_size
+    return avg + (tav if direction == "BUY" else -tav)
 
 
 def package_stop(avg: float, direction: str, price_now: float,
