@@ -180,6 +180,18 @@ class _Savdoboz(QtWidgets.QGraphicsRectItem):
         self.setBrush(brush)
         self.setPen(pg.mkPen(None))
 
+    def sav(self, y1: float, y2: float) -> None:
+        """Az ÁR-sáv (függőleges kiterjedés) átállítása; az x-tartomány marad.
+
+        ⚠ EZ A `LinearRegionItem.setRegion` PÁRJA. A sáv `LinearRegionItem`-ről
+        `QGraphicsRectItem`-re cserélésekor a HÚZÁS-kezelők (`_sl_mozgott`,
+        `_tp_mozgott`, `_belepo_mozgott`) még a régi nevet hívták, és az első
+        SL-húzásnál `AttributeError`-ral megállt a felület. A felület fele
+        ilyenkor működik, a másik fele nem — ezért van a névnek párja, és ezért
+        van rá teszt, ami TÉNYLEGESEN meghúzza a vonalat."""
+        r = self.rect()
+        self.setRect(QtCore.QRectF(r.x(), min(y1, y2), r.width(), abs(y2 - y1)))
+
     def vege(self, x2: float) -> None:
         """A jobb szél áthelyezése. ⚠ Lejátszás közben KÖRÖNKÉNT hívódik, ezért
         csak a geometriát írjuk át — az elem újraépítése (eltávolítás + hozzáadás)
@@ -1160,9 +1172,24 @@ class LabAblak(QtWidgets.QMainWindow):
         self._terv_valtozott(rajzol=False)
         _be = self._be_ar(t)
         if _be is not None and b.sl is not None:
-            b.kock.setRegion((min(_be, b.sl), max(_be, b.sl)))
-            b.cel.setRegion((min(_be, b.tp_ar(_be)), max(_be, b.tp_ar(_be))))
-            b.tp_vonal.setValue(b.tp_ar(_be))
+            self._savok_igazit(b, _be)
+            if b.tp_vonal is not None:
+                b.tp_vonal.setValue(b.tp_ar(_be))
+
+    def _savok_igazit(self, b: "Belepo", be_ar: float) -> None:
+        """A kockázat- és cél-sáv ÁR-tartományának igazítása a húzás után.
+
+        ⚠ EGY HELYEN, ÉS ELLENŐRZÖTT LÉTEZÉSSEL. A húzás-kezelők a FŐSZÁLON
+        futnak: ha egy hiányzó rajz-elemen szállnak el, azzal a felület
+        eseményhurka áll meg (a napló `⛔ A főszál elkapatlan kivétellel állt
+        le.` sora pontosan ez volt). A modell attól még helyes; a kép a
+        következő teljes rajzolásnál úgyis helyreáll."""
+        if b.sl is None:
+            return
+        if b.kock is not None:
+            b.kock.sav(be_ar, b.sl)
+        if b.cel is not None:
+            b.cel.sav(be_ar, b.tp_ar(be_ar))
 
     def _sl_mozgott(self, b: "Belepo") -> None:
         b.sl = float(b.sl_vonal.value())
@@ -1173,8 +1200,7 @@ class LabAblak(QtWidgets.QMainWindow):
         b.tp_vonal.blockSignals(True)
         b.tp_vonal.setValue(b.tp_ar(_be))
         b.tp_vonal.blockSignals(False)
-        b.kock.setRegion((min(_be, b.sl), max(_be, b.sl)))
-        b.cel.setRegion((min(_be, b.tp_ar(_be)), max(_be, b.tp_ar(_be))))
+        self._savok_igazit(b, _be)
         self._terv_valtozott(rajzol=False)
 
     def _tp_mozgott(self, b: "Belepo") -> None:
@@ -1187,7 +1213,7 @@ class LabAblak(QtWidgets.QMainWindow):
         d = 1 if b.irany == "BUY" else -1
         b.rr = max(0.0, d * (float(b.tp_vonal.value()) - _be) / _tav)
         b.tp_vonal.label.setFormat(f"TP {b.rr:0.2f}R")
-        b.cel.setRegion((min(_be, b.tp_ar(_be)), max(_be, b.tp_ar(_be))))
+        self._savok_igazit(b, _be)
         self._terv_valtozott(rajzol=False)
 
     def _be_mozgott(self) -> None:

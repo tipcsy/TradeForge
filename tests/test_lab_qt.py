@@ -152,6 +152,35 @@ if QT_OK:
                   _b0.kock.rect().width() > _sz1,
                   f"{_sz1} -> {_b0.kock.rect().width()}")
 
+            # ══ A VONALAK TÉNYLEGES MEGHÚZÁSA ═══════════════════════════
+            # ⚠ EZ A TESZT EGY VALÓDI ÖSSZEOMLÁS UTÁN SZÜLETETT. A sáv
+            # `LinearRegionItem`-ről `QGraphicsRectItem`-re cserélésekor a
+            # húzás-kezelők még a régi `setRegion`-t hívták — az „Add BUY"
+            # utáni ELSŐ SL-húzás `AttributeError`-t dobott, és mivel ezek a
+            # kezelők a FŐSZÁLON futnak, a felület eseményhurka MEGÁLLT.
+            # A korábbi tesztek mind csak RAJZOLTAK, sosem HÚZTAK — ezért nem
+            # fogták meg. Minden `sigPositionChanged`-kezelőt el kell sütni.
+            _bd = _w._belepok[0]
+            _bear = _w._be_ar(_bd.ido)
+            _bd.sl_vonal.setValue(_bear - 25.0)          # → _sl_mozgott
+            check("az SL HÚZÁSA nem dob kivételt", True)
+            check("...és a modell követi", abs(_bd.sl - (_bear - 25.0)) < 1e-6,
+                  f"{_bd.sl} vs {_bear - 25.0}")
+            check("...és a kockázat-sáv is",
+                  abs(_bd.kock.rect().height() - 25.0) < 1e-6,
+                  str(_bd.kock.rect().height()))
+            _bd.tp_vonal.setValue(_bear + 75.0)          # → _tp_mozgott
+            check("a TP HÚZÁSA nem dob kivételt", True)
+            check("...és az R-szorzó ebből számolódik",
+                  abs(_bd.rr - 3.0) < 1e-6, str(_bd.rr))
+            _bd.vonal.setValue(float(_bd.vonal.value()) + 3)   # → _belepo_mozgott
+            check("a BELÉPŐ-vonal húzása nem dob kivételt", True)
+            # ⚠ Hiányzó rajz-elemmel se álljon meg a főszál
+            _bd.kock, _bd.cel = None, None
+            _w._savok_igazit(_bd, _bear)
+            check("hiányzó sáv-elem esetén sem száll el (a főszál él)", True)
+            _w._belepok_rajz()
+
             # ══ 0022 / 3–4. — A NYITOTT POZÍCIÓ SZINTJEI (MT5-konvenció) ══
             # ⚠ Az esemenynaploig visszamenoen: a JOVOBELI atallitas NEM
             # latszhat, kulonben a lejatszas elarulna, hova huzodik a stop.
