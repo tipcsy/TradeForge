@@ -3911,6 +3911,8 @@ def run(cfg: dict, slot_mgr: SlotManager):
     except Exception as _e:
         log.debug("config-frissesség ellenőrzés kihagyva: %s", _e)
 
+    _cycle_no = 0          # a kör-idő naplózás ütemezéséhez
+
     while not _STOP.is_set():
         try:
             # ⚠ ÉLETJEL a kör ELEJÉN: ez az az időbélyeg, amiből kívülről
@@ -4171,6 +4173,21 @@ def run(cfg: dict, slot_mgr: SlotManager):
             # A kör MUNKA-ideje (a várakozás nélkül) — ebből mérhető, mennyibe
             # kerül a felület, és látszik, ha a motor nem bírja a 10 mp-es ütemet.
             _cycle_times.append(time.time() - last_cycle_ts)
+
+            # ⚠ ÉS NAPLÓZZUK IS, KÖRÖNKÉNT EGYSZER a mintaablak betelte után.
+            # Eddig ezt a számot CSAK a konzolos `state` parancs mutatta —
+            # grafikus módban tehát SEHOL nem látszott, és épp a kettő
+            # ÖSSZEHASONLÍTÁSA a kérdés („mennyibe kerül a felület?"). Egy
+            # mérés, amit az egyik ágon nem lehet leolvasni, nem mérés.
+            # 30 kör = 5 perc, tehát ez nem zajosítja a naplót.
+            # ⚠ A `_cycle_times` maxlen=30 DEQUE: a hossza megáll 30-nál, tehát
+            # a `len(...) % 30 == 0` MINDEN körben igaz lenne (10 mp-enként egy
+            # naplósor). Külön számláló kell.
+            _cycle_no += 1
+            if _cycle_no % _CYCLE_MINTA == 0:
+                _cw_atl, _cw_max = cycle_work_stats()
+                log.info("kör-idő (utolsó %d kör): átlag %.2f mp · max %.2f mp",
+                         len(_cycle_times), _cw_atl, _cw_max)
 
             # ⚠ `wait` és nem `sleep`: a leállítás-kérés azonnal felébreszti, de
             # csak KÖRHATÁRON — a folyamatban lévő pozíció-kezelés lefut.
