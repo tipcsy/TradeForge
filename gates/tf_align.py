@@ -262,3 +262,33 @@ def build_historical_gate(bars_by_tf: dict, sma_period: int):
         return gate_ok(aligned, direction)
 
     return _at
+
+
+# ── A KAPU BEJELENTKEZESE ES MERESE ────────────────────────────────────────
+GATE = {"key": "tf_align", "default_effect": "none", "phase": "signal"}
+
+
+def measure(ctx) -> tuple:
+    """`(bukott_e, szint)` — csak a trenddel EGYEZŐ jel léphet (irány-tudatos).
+
+    ⚠ A szint a jel irányába álló idősíkok SZÁMA — UGYANABBÓL az előjel-listából,
+    amiből a bináris döntés is született. Két külön számolás itt némán
+    szétcsúszna.
+
+    ⚠ FAIL-OPEN: adathiánynál (nincs kapcsolat, hiányzó gyertya) a kapu NEM
+    blokkol — ez a v1.x óta érvényes viselkedés.
+    """
+    if ctx.signal == "NONE":
+        return False, None
+    try:
+        _en, _tfs, _sma, _gate = config_for(ctx.cfg, ctx.symbol, ctx.strategy)
+        if not _en:
+            return False, None
+        _cl = ctx.closes(_tfs, _sma + 5)
+        _dir, _signs = alignment(_cl, _tfs, _sma)
+        _bukott = not gate_ok(_dir, ctx.signal)
+        _szint = (aligned_count(_signs, ctx.signal)
+                  if ctx.has_band("tf_align") else None)
+        return _bukott, _szint
+    except Exception:
+        return False, None

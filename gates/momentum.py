@@ -249,3 +249,47 @@ def cell_text(value: float) -> str:
         return "—"
     arrow = "↑" if value > 0 else ("↓" if value < 0 else "·")
     return f"{arrow}{abs(value):.2f}"
+
+
+# ── A KAPU BEJELENTKEZESE ES MERESE ────────────────────────────────────────
+GATE = {"key": "momentum", "default_effect": "none", "phase": "signal"}
+
+
+def measure(ctx) -> tuple:
+    """`(bukott_e, szint)` — a lendület-kapu KÉTFÉLEKÉPPEN bukhat.
+
+        idle  a piac áll (|fordulat| < küszöb) → ne kössünk bele
+        dir   a fordulat SZEMBEN megy a jellel → ne kössünk ellene
+        both  mindkettő
+
+    Hogy melyik számít, az stratégiánként dől el (`gates.mode_for`).
+
+    ⚠ MELLÉKHATÁS: a mért fordulatszámot a kijelzés-állapotba is beírja
+    (`ctx.ds.momentum`) — a dashboard oszlopa ebből él. Ez SZÁNDÉKOS: két külön
+    mérés két különböző számot mutatna a felületen és a döntésben.
+
+    ⚠ FAIL-OPEN adathiánynál, és az irány-ág is fail-open, ha nincs irány.
+    """
+    from core import gates as _g
+    from core import gate_bands as _gb
+
+    if ctx.signal == "NONE":
+        return False, None
+    try:
+        _mcfg = _g.momentum_config(ctx.pair_cfg, ctx.cfg)
+        _mval = rpm(ctx.closes(needed_timeframes(_mcfg), needed_bars(_mcfg)), _mcfg)
+        if ctx.ds is not None:
+            ctx.ds.momentum = _mval
+        _mmode = _g.mode_for(ctx.cfg or {}, ctx.symbol, ctx.strategy)
+        _bukott = False
+        if _mmode in (_g.MOM_IDLE, _g.MOM_BOTH) and is_idle(_mval, _mcfg):
+            _bukott = True
+        if _mmode in (_g.MOM_DIR, _g.MOM_BOTH):
+            _mdir = direction(_mval)
+            if _mdir and _mdir != ctx.signal:
+                _bukott = True
+        _szint = (_gb.momentum_level(_mval, ctx.signal, _mmode, _mcfg)
+                  if ctx.has_band("momentum") else None)
+        return _bukott, _szint
+    except Exception:
+        return False, None

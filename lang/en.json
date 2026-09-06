@@ -323,6 +323,7 @@
   "exit.tip.wpr_ma_period": "The period of the WPR's moving average (what it crosses).",
   "exit.tip.wpr_period": "WPR period.",
   "gate.all_symbols": "Apply to every instrument (overrides the other pairs' own settings)",
+  "gate.blocked_by": "blocked by the {gate} gate",
   "gate.dialog.title": "{symbol} — {gate} gate",
   "gate.doc.expected_file": "Expected file:",
   "gate.effect.block": "Blocks the entry",

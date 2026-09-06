@@ -43,7 +43,13 @@ def check(name, ok, detail=""):
 from core import gates as g          # noqa: E402
 from gates import paths as gp        # noqa: E402
 
-MEROK = {"spread_gate", "cost_gate", "momentum", "tf_align", "vol_baseline"}
+# ⚠ A `market` 2026-09-06-ig HIANYZOTT innen: a piac-kapu a REGISTRY-ben ott
+# volt, doksija is volt, a feluleten is latszott — de a MERESE a `live_trader`
+# egyik fuggvenyenek kozepen, kezzel beirva elt. Vagyis a `gates/` csomag,
+# aminek epp az lett volna a dolga, hogy „egy kapu egy darabban moz­ithato
+# legyen", ezt az egy kaput nem tartalmazta.
+MEROK = {"spread_gate", "cost_gate", "momentum", "tf_align", "vol_baseline",
+         "market"}
 
 
 def _imports(p: Path) -> set:
@@ -117,8 +123,15 @@ _bt = io.open(ROOT / "trading" / "backtest.py", encoding="utf-8").read()
 check("az elo motor a gates csomagbol mer",
       "from gates import" in _lt, "live_trader")
 check("a backtest is", "from gates import" in _bt, "backtest")
-_regi_imp = [n for n, src in (("live_trader", _lt), ("backtest", _bt))
-             for m in MEROK if f"core.{m}" in src or f"from core import {m}" in src]
+# ⚠ SZO-HATARRA kell illeszteni, nem reszszovegre: a `market` merohoz a
+# `core.market` mintaja belelogna a `core.market_strategy`-ba es a
+# `core.market_state`-be — azok viszont NEM kapuk, hanem a piac-OSZTALYOZO,
+# amit a kapu csak fogyaszt. (Reszszoveges illesztessel a teszt hamisan bukott.)
+import re as _re
+_regi_imp = [f"{n}:{m}" for n, src in (("live_trader", _lt), ("backtest", _bt))
+             for m in MEROK
+             if _re.search(rf"\bcore\.{m}\b", src)
+             or _re.search(rf"\bfrom core import {m}\b", src)]
 check("egyik motor sem hivatkozik a REGI helyre", not _regi_imp,
       ", ".join(sorted(set(_regi_imp))))
 

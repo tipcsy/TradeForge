@@ -121,3 +121,42 @@ def cell_text(sl_points: float, tp_points: float,
     if eff == float("inf"):
         return "∞"
     return f"{eff:.1f}:1 {d * 100:+.0f}%"
+
+
+# ── A KAPU BEJELENTKEZESE ES MERESE ────────────────────────────────────────
+# ⚠ `phase: "plan"` — ez az EGYETLEN kapu, ami a belépő-terv UTÁN dől el: a
+# mérőszáma a spread és a TERVEZETT stop viszonya, tehát előbb tudni kell,
+# mekkora stopot szán a stratégia (a bróker minimum-stop tágítása UTÁN, mert a
+# ténylegesen vállalt kockázat az).
+GATE = {"key": "cost", "default_effect": "none", "phase": "plan"}
+
+
+def measure(ctx) -> tuple:
+    """`(bukott_e, szint)` — a spread mennyire rontja a TERVEZETT kockázat/hozamot."""
+    from core import gates as _g
+    from core import gate_bands as _gb
+
+    if not ctx.sl_points:
+        return False, None
+    _spr = float(getattr(ctx.sym_info, "spread", 0) or 0)
+    _cap = _g.cost_max_distortion(ctx.pair_cfg, ctx.cfg)
+    _szint = (_gb.scalar_level(distortion(ctx.sl_points, ctx.tp_points, _spr), _cap)
+              if ctx.has_band("cost") else None)
+    return bool(failed(ctx.sl_points, ctx.tp_points, _spr, _cap)), _szint
+
+
+def block_log(ctx) -> str:
+    """A blokkolás EMBERI indoklása a naplóba — konkrét számokkal.
+
+    ⚠ MIÉRT A KAPUNÁL. Egy generikus hurok csak annyit tudna kiírni, hogy „a
+    költség-kapu blokkolt" — az meg semmit nem magyaráz. Ez a mondat viszont
+    megmondja, MENNYIRE rontja a spread a tervet, tehát a felhasználó eldöntheti,
+    hogy a plafon szigorú-e vagy az instrumentum drága. A diagnosztika a kapu
+    tudása, nem a motoré.
+    """
+    _spr = float(getattr(ctx.sym_info, "spread", 0) or 0)
+    return (f"a spread a tervezett kockázat/hozamot "
+            f"{distortion(ctx.sl_points, ctx.tp_points, _spr) * 100:.0f}%-kal "
+            f"rontja (tényleges "
+            f"{effective_rr(ctx.sl_points, ctx.tp_points, _spr):.1f}:1) → kimarad. "
+            f"SL={ctx.sl_points:.0f} pont, spread={_spr:.0f} pont.")

@@ -36,6 +36,12 @@ from __future__ import annotations
 
 from core.i18n import LabelMap as _LabelMap, t as _t
 
+# ⚠ A kapu-FELDERÍTÉS naplóz (nem tölthető betöltésű modul, ütköző
+# kulcs, hiányzó `measure`) — enélkül egy hibás `.tfg` NÉMÁN maradna ki.
+import logging
+
+log = logging.getLogger(__name__)
+
 # ── Egy kapu ÁLLAPOTA (mért) ─────────────────────────────────────────────
 PASS = "pass"          # be van kapcsolva és épp ÁTENGED
 BLOCKING = "blocking"  # be van kapcsolva és épp BLOKKOL
@@ -107,21 +113,43 @@ def market_adverse(cfg: dict, symbol: str) -> set:
             return {str(x) for x in g["adverse"]}
     return set(MARKET_ADVERSE_DEFAULT)
 
+# ── MIKOR mér egy kapu? ────────────────────────────────────────────────────
+# ⚠ NEM MINDEGY, és ez nem elméleti: a KÖLTSÉG-kapu mérőszáma a spread és a
+# TERVEZETT stop viszonya, tehát csak azután dőlhet el, hogy a stratégia
+# megmondta, mekkora stopot szán (és a bróker minimum-stop tágítása is megvolt).
+# A többi kapu ennél korábban, a jel ismeretében mér.
+#
+# Ezt eddig a kód SORRENDJE hordozta (két külön, kézzel írt blokk a
+# `live_trader`-ben). Egy behelyezhető kapu viszont nem tudhatja, hova kell
+# beírnia magát — ezért a fázis mostantól a kapu DEKLARÁLT tulajdonsága.
+PHASE_SIGNAL = "signal"   # a jel ismeretében, a belépő-terv ELŐTT
+PHASE_PLAN = "plan"       # a belépő-terv ismeretében (SL/TP már megvan)
+PHASES = (PHASE_SIGNAL, PHASE_PLAN)
+
 # A kapuk SORRENDJE stabil: a kapu-blokk oszlopai így mindig ugyanott vannak.
 # A `default_effect` a beépített alapértelmezés, ha a config nem mond mást — a mai
 # viselkedést tükrözi (spread blokkol; a tf_align a `gate` lista szerint; a piac
 # ma nem blokkol, csak a preset-választáshoz ad bemenetet).
-REGISTRY = (
-    {"key": SPREAD,   "default_effect": EFFECT_BLOCK},
-    {"key": TF_ALIGN, "default_effect": EFFECT_NONE},
-    {"key": MARKET,   "default_effect": EFFECT_NONE},
+#
+# ⚠ A `module` a TARTALOM-csomagbeli modul neve (`gates/<module>.py`). Innen jön
+# a kapu MÉRÉSE (`measure(ctx)`), és ez teszi a kaput egy darabban
+# mozdíthatóvá — a `.tfg` csomagolás előfeltétele.
+_BUILTIN = (
+    {"key": SPREAD,   "default_effect": EFFECT_BLOCK,
+     "module": "spread_gate", "phase": PHASE_SIGNAL},
+    {"key": TF_ALIGN, "default_effect": EFFECT_NONE,
+     "module": "tf_align", "phase": PHASE_SIGNAL},
+    {"key": MARKET,   "default_effect": EFFECT_NONE,
+     "module": "market", "phase": PHASE_SIGNAL},
     # ÚJ kapu alapból NEM szól bele (`none`): egy frissítés SOHA ne kezdjen el
     # némán másképp kereskedni, mint amit tegnap tesztelted. Bekapcsolni a
     # kapu ablakában, stratégiánként kell.
-    {"key": MOMENTUM, "default_effect": EFFECT_NONE},
+    {"key": MOMENTUM, "default_effect": EFFECT_NONE,
+     "module": "momentum", "phase": PHASE_SIGNAL},
     # Költség/kockázat: a spread mennyire torzítja a TERVEZETT RR-t. Alapból
     # `none` — a meglévő párok viselkedése nem változhat egy frissítéstől.
-    {"key": COST,     "default_effect": EFFECT_NONE},
+    {"key": COST,     "default_effect": EFFECT_NONE,
+     "module": "cost_gate", "phase": PHASE_PLAN},
     # ⚠ A VOLATILITÁS AZ EGYETLEN KAPU, AMI `block`-KAL INDUL — és ez nem
     # következetlenség, hanem a viselkedés MEGŐRZÉSE. v3.27.0 előtt a szűrés a
     # stratégia `bt_entry` hookjában volt, és FELTÉTEL NÉLKÜL futott: nem volt
@@ -141,7 +169,8 @@ REGISTRY = (
     # kalibrált sáv alá csúszott (0,51×) — a chart üres maradt, és semmi nem
     # árulta el, miért. Minden más ok (spread, együttállás, piac, lendület,
     # költség) látható kapu volt; ez az aszimmetria került a felhasználónak hetekbe.
-    {"key": VOLATILITY, "default_effect": EFFECT_BLOCK},
+    {"key": VOLATILITY, "default_effect": EFFECT_BLOCK,
+     "module": "vol_baseline", "phase": PHASE_SIGNAL},
 )
 
 # ── PARAMÉTER-VEZÉRELT kapuk: a küszöbük a STRATÉGIA mentett készletében van ──
@@ -157,7 +186,189 @@ REGISTRY = (
 # kérte: „a none onnantól TÉNYLEG azt jelenti, hogy nincs volatilitás-szűrés".
 PARAM_DRIVEN = (VOLATILITY,)
 
+class GateCtx:
+    """A kapu-MÉRÉS bemenete — EGY szerződés, minden kapunak ugyanaz.
+
+    ⚠ MIÉRT KELL. A mérések eddig a `live_trader` egyik függvényének LOKÁLIS
+    változóiból dolgoztak (`spread_ok`, `tf_gate_ok`, `hi_row`, `ds`…). Egy
+    behelyezhető kapu ezekhez nem fér hozzá — és nem is szabadna, hogy hozzáférjen
+    a motor belsejéhez. Ez a doboz mondja meg, MIT kap egy kapu, és semmi mást.
+
+    A `plan` fázisú mezők (`sl_points`, `tp_points`) a `signal` fázisban `None`-ok.
+
+    ⚠ A `closes` FÜGGVÉNY, nem adat: `(timeframes, n) -> {tf: [záróárak]}`. Így a
+    kapu nem importál MT5-öt (a backtest és a teszt mást ad be), és csak akkor
+    kér adatot, ha tényleg kell neki.
+    """
+
+    __slots__ = ("symbol", "strategy", "signal", "cfg", "pair_cfg", "params",
+                 "ds", "hi_row", "spread_ok", "spread_points", "spread_cap",
+                 "closes", "bands", "sl_points", "tp_points", "sym_info")
+
+    def __init__(self, symbol="", strategy="", signal="NONE", cfg=None,
+                 pair_cfg=None, params=None, ds=None, hi_row=None,
+                 spread_ok=True, spread_points=0.0, spread_cap=0.0,
+                 closes=None, bands=None, sl_points=None, tp_points=None,
+                 sym_info=None):
+        self.symbol = symbol
+        self.strategy = strategy
+        self.signal = signal
+        self.cfg = cfg or {}
+        self.pair_cfg = pair_cfg or {}
+        self.params = params or {}
+        self.ds = ds
+        self.hi_row = hi_row
+        self.spread_ok = spread_ok
+        self.spread_points = spread_points
+        self.spread_cap = spread_cap
+        self.closes = closes or (lambda tfs, n: {})
+        self.bands = bands or {}
+        self.sl_points = sl_points
+        self.tp_points = tp_points
+        self.sym_info = sym_info
+
+    def has_band(self, key: str) -> bool:
+        """Van-e SÁV-létra erre a kapura? (Ha nincs, a szintet ki sem számoljuk.)"""
+        return bool((self.bands or {}).get(key))
+
+
+def _felderites() -> tuple:
+    """A `gates/` alatti TOVÁBBI kapuk — amiket nem a keret ismer előre.
+
+    ⚠ EZ TESZI A KAPUT BEHELYEZHETŐVÉ. Eddig a `REGISTRY` egy kézzel írt tuple
+    volt, a mérésük pedig kapunként külön beírva a motorba — egy `.tfg`-vel
+    telepített kapu tehát a lemezen ült volna, listában sehol, és a motor SOHA
+    nem hívta volna. Pontosan az a hibaosztály, ami ellen ez a projekt küzd:
+    kész funkció, ami némán tétlen.
+
+    Egy kapu úgy jelenti be magát, hogy a modulja `GATE` néven ad egy szótárat:
+
+        GATE = {"key": "sajat_kapu", "default_effect": "none",
+                "phase": "signal"}          # + `measure(ctx)` függvény
+
+    ⚠ AZ ÚJ KAPU ALAPBÓL `none`: egy telepítés SOHA nem kezdhet el némán
+    másképp kereskedni. A `default_effect`-et itt felül is bíráljuk, ha a
+    csomag mást írna — a `.tfs`-nél is így van (a telepített stratégia
+    kikapcsolva kerül be).
+    """
+    import importlib
+    import pkgutil
+
+    from gates import paths as _gp
+
+    _beepitett = {g["key"] for g in _BUILTIN}
+    _modulok = {g.get("module") for g in _BUILTIN}
+    ki = []
+    try:
+        for _m in pkgutil.iter_modules([str(_gp.DIR)]):
+            nev = _m.name
+            if nev.startswith("_") or nev in _modulok or nev == "paths":
+                continue
+            try:
+                mod = importlib.import_module(f"{_gp.PACKAGE}.{nev}")
+            except Exception as e:
+                log.warning("a(z) %r kapu-modul nem tölthető be: %s — kimarad", nev, e)
+                continue
+            meta = getattr(mod, "GATE", None)
+            if not isinstance(meta, dict) or not meta.get("key"):
+                continue
+            kulcs = str(meta["key"])
+            if kulcs in _beepitett:
+                log.warning("a(z) %r kapu kulcsa ütközik egy beépítettel — kimarad",
+                            kulcs)
+                continue
+            if not callable(getattr(mod, "measure", None)):
+                log.warning("a(z) %r kapunak nincs `measure(ctx)` függvénye — "
+                            "sosem mérne, ezért kimarad", kulcs)
+                continue
+            _f = str(meta.get("phase") or PHASE_SIGNAL)
+            ki.append({"key": kulcs, "default_effect": EFFECT_NONE,
+                       "module": nev,
+                       "phase": _f if _f in PHASES else PHASE_SIGNAL})
+            _beepitett.add(kulcs)
+    except Exception as e:                    # a felderítés SOHA ne állítsa meg a motort
+        log.warning("kapu-felderítés kihagyva: %s", e)
+    return tuple(ki)
+
+
+REGISTRY = _BUILTIN + _felderites()
+
 KEYS = tuple(g["key"] for g in REGISTRY)
+
+
+def entry_of(key: str) -> dict:
+    """Egy kapu registry-bejegyzése (üres dict, ha ismeretlen)."""
+    for g in REGISTRY:
+        if g["key"] == key:
+            return g
+    return {}
+
+
+def phase_of(key: str) -> str:
+    """MIKOR mér ez a kapu: `signal` (a terv előtt) vagy `plan` (a terv után)."""
+    return entry_of(key).get("phase") or PHASE_SIGNAL
+
+
+def keys_in_phase(phase: str) -> tuple:
+    """A megadott fázisban mérő kapuk, a REGISTRY sorrendjében."""
+    return tuple(g["key"] for g in REGISTRY
+                 if (g.get("phase") or PHASE_SIGNAL) == phase)
+
+
+def gate_module(key: str):
+    """A kapu MÉRŐ modulja (`gates/<module>.py`) — vagy None."""
+    nev = entry_of(key).get("module")
+    if not nev:
+        return None
+    import importlib
+
+    from gates import paths as _gp
+    try:
+        return importlib.import_module(f"{_gp.PACKAGE}.{nev}")
+    except Exception as e:
+        log.warning("a(z) %r kapu modulja nem tölthető be: %s", key, e)
+        return None
+
+
+def block_log(key: str, ctx) -> str:
+    """A blokkolás EMBERI indoklása — a kapu saját mondata, ha van ilyen.
+
+    ⚠ Enélkül egy generikus hurok csak annyit tudna kiírni, hogy „X kapu
+    blokkolt". A költség-kapu viszont meg tudja mondani, MENNYIRE rontja a
+    spread a tervet — és épp ez az, amiből eldöntöd, hogy a plafon szigorú-e
+    vagy az instrumentum drága. A diagnosztika a kapu tudása, nem a motoré.
+    """
+    mod = gate_module(key)
+    fn = getattr(mod, "block_log", None) if mod is not None else None
+    if callable(fn):
+        try:
+            return str(fn(ctx))
+        except Exception:
+            log.debug("a(z) %r kapu indoklása elszállt", key, exc_info=True)
+    return _t("gate.blocked_by", gate=label_of(key))
+
+
+def measure(key: str, ctx) -> tuple:
+    """`(bukott_e, sáv-szint)` — a kapu SAJÁT mérése, a saját moduljából.
+
+    ⚠ FAIL-OPEN: ha a mérés elszáll (hiányzó adat, kapcsolat), a kapu NEM
+    blokkol. Ez nem lustaság, hanem a meglévő viselkedés megőrzése: a TF- és a
+    lendület-kapu eddig is `except: ok = True`-val zárt. Egy néma blokkolás
+    sokkal drágább, mint egy kimaradt szűrés — az utóbbi legalább látszik a
+    kötéseken.
+    """
+    mod = gate_module(key)
+    fn = getattr(mod, "measure", None) if mod is not None else None
+    if not callable(fn):
+        return False, None
+    try:
+        out = fn(ctx)
+    except Exception:
+        log.debug("a(z) %r kapu mérése elszállt — fail-open", key, exc_info=True)
+        return False, None
+    if isinstance(out, tuple):
+        return bool(out[0]), (out[1] if len(out) > 1 else None)
+    return bool(out), None
 
 
 def doc_path(key: str):

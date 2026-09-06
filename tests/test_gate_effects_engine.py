@@ -179,10 +179,17 @@ check("a portfólió-backtest is hívja", bt_src.count("_gt.decide(") >= 2,
       f"{bt_src.count('_gt.decide(')} hívás")
 check("az élő motor MAGA méri a piac-állapotot (nem a GUI-ra vár)",
       "ds.market_state = _cat" in live_src)
+# ⚠ A HORGONY ÁTKÖLTÖZÖTT (2026-09-06). A piac-kapu mérése korábban a
+# `live_trader` közepén, kézzel beírva élt (`_gate_failed[_gates.MARKET] = …`);
+# azóta a saját moduljában van (`gates/market.py`), hogy a kapu egy darabban
+# mozdítható legyen. Az ÁLLÍTÁS változatlan: a kapu a NYERS besorolást nézze,
+# ne a megjelenítendő (fordított) címkét — különben egy nyelvváltás némán
+# átírná, mikor blokkol.
+_market_src = (ROOT / "gates" / "market.py").read_text(encoding="utf-8")
 check("a piac-kapu a NYERS besorolást nézi, nem a magyar címkét",
-      "market_adverse" in live_src and "market_state_label" not in
-      live_src[live_src.index("_gate_failed[_gates.MARKET]") - 400:
-               live_src.index("_gate_failed[_gates.MARKET]")])
+      "market_adverse" in _market_src and "market_state_label" not in _market_src)
+check("...és a mérése a SAJÁT moduljában van, nem a motor közepén",
+      "_gate_failed[_gates.MARKET]" not in live_src)
 
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")

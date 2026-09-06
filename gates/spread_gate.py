@@ -99,3 +99,23 @@ def spread_ok(spread_points: float, atr_price: "float | None", point_size: float
     except (TypeError, ValueError):
         return True, cap
     return sp <= cap, cap
+
+
+# ── A KAPU BEJELENTKEZESE ES MERESE ────────────────────────────────────────
+GATE = {"key": "spread", "default_effect": "block", "phase": "signal"}
+
+
+def measure(ctx) -> tuple:
+    """`(bukott_e, szint)` — a spread-kapu mérése.
+
+    ⚠ A MÉRÉS MAGA MÁR MEGTÖRTÉNT a hívónál (`ctx.spread_ok`): a spreadet a
+    motor amúgy is lekérdezi a belépő-döntéshez, és két lekérdezés két
+    IDŐPONTOT jelentene — a kapu mást mérne, mint amivel a kötés megy ki.
+    Ez a függvény tehát nem újramér, hanem a kapu SZERZŐDÉSÉRE fordítja le.
+    """
+    from core import gate_bands as _gb
+
+    szint = None
+    if ctx.has_band("spread"):
+        szint = _gb.scalar_level(ctx.spread_points, ctx.spread_cap)
+    return (not ctx.spread_ok), szint

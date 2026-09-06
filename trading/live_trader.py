@@ -2870,89 +2870,33 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
     _gate_failed = {}
     _gate_level = {}
 
-    # Spread — a mérés fentebb megtörtént (`spread_ok`); ha a kapu ki van
-    # kapcsolva erre a stratégiára, a bukás nem számít.
-    _gate_failed[_gates.SPREAD] = (not spread_ok) if _gates.active(
-        _gate_eff, _gates.SPREAD) else False
-    if _gate_bands.get(_gates.SPREAD):
-        _gate_level[_gates.SPREAD] = _gate_bands_mod.scalar_level(
-            current_spread_points, _cap_pips)
-
-    # TF-együttállás: csak a trenddel EGYEZŐ jel léphet (irány-tudatos).
-    tf_gate_ok = True
-    if signal != "NONE" and _gates.active(_gate_eff, _gates.TF_ALIGN):
-        try:
-            from gates import tf_align as _tfa
-            _tf_en, _tf_tfs, _tf_sma, _tf_gate = _tfa.config_for(
-                _run_cfg, symbol, getattr(state.strategy, 'name', None))
-            # A régi `tf_align.gate` LISTA a hatás forrása is (legacy öröklés a
-            # gates modulban) — itt már csak a figyelés be/ki számít.
-            if _tf_en:
-                _tf_cl = mt5_connector.tf_closes(symbol, _tf_tfs, _tf_sma + 5)
-                _tf_dir, _tf_signs = _tfa.alignment(_tf_cl, _tf_tfs, _tf_sma)
-                tf_gate_ok = _tfa.gate_ok(_tf_dir, signal)
-                # SÁV: hány idősík áll a jel irányába — UGYANABBÓL az
-                # előjel-listából, amiből a bináris döntés is született.
-                if _gate_bands.get(_gates.TF_ALIGN):
-                    _gate_level[_gates.TF_ALIGN] = _tfa.aligned_count(
-                        _tf_signs, signal)
-        except Exception:
-            tf_gate_ok = True
-    _gate_failed[_gates.TF_ALIGN] = not tf_gate_ok
-
-    # Piac-állapot: a besorolás a `ds`-en már ott van (a kijelzés tölti). Eddig
-    # SEMMIT nem tett — most a konfigurált „kedvezőtlen" halmaz dönt.
-    _market_ok = True
-    if signal != "NONE" and _gates.active(_gate_eff, _gates.MARKET):
-        _cat = getattr(ds, "market_state", "") or ""
-        if _cat and _cat in _gates.market_adverse(_run_cfg or {}, symbol):
-            _market_ok = False
-        _gate_level[_gates.MARKET] = _cat
-    _gate_failed[_gates.MARKET] = not _market_ok
-
-    # Lendület („fordulatszám") — KÉTFÉLEKÉPPEN bukhat, és hogy melyik számít, az
-    # stratégiánként dől el (`gates.mode_for`):
-    #   idle  a piac áll (|fordulat| < küszöb) → ne kössünk bele
-    #   dir   a fordulat SZEMBEN megy a jellel → ne kössünk ellene (irány-tudatos,
-    #         ezért van itt és nem az `evaluate`-ben — mint a TF-együttállásnál)
-    _mom_ok = True
-    if signal != "NONE" and _gates.active(_gate_eff, _gates.MOMENTUM):
-        try:
-            from gates import momentum as _mom
-            _mcfg = _gates.momentum_config(pair_cfg, _run_cfg)
-            _mval = _mom.rpm(mt5_connector.tf_closes(
-                symbol, _mom.needed_timeframes(_mcfg), _mom.needed_bars(_mcfg)),
-                _mcfg)
-            ds.momentum = _mval
-            _mmode = _gates.mode_for(_run_cfg or {}, symbol, strategy.name)
-            if _mmode in (_gates.MOM_IDLE, _gates.MOM_BOTH) and _mom.is_idle(
-                    _mval, _mcfg):
-                _mom_ok = False
-            if _mmode in (_gates.MOM_DIR, _gates.MOM_BOTH):
-                _mdir = _mom.direction(_mval)
-                # Adathiánynál (`_mdir` üres) NEM szűrünk — fail-open, ugyanúgy,
-                # ahogy a spread-kapu is teszi.
-                if _mdir and _mdir != signal:
-                    _mom_ok = False
-            if _gate_bands.get(_gates.MOMENTUM):
-                _gate_level[_gates.MOMENTUM] = _gate_bands_mod.momentum_level(
-                    _mval, signal, _mmode, _mcfg)
-        except Exception:
-            _mom_ok = True
-    _gate_failed[_gates.MOMENTUM] = not _mom_ok
-
-    # Volatilitás: az ATR a stratégia kalibrált sávjában van-e. v3.27.0 előtt ez a
-    # stratégia `bt_entry`-jében volt, feltétel nélkül; most KAPU, tehát a hatása
-    # (blokkol / kockázatcsökkentés / ki) is állítható. A MÉRÉST ugyanabból a
-    # sorból végezzük, amiből a `bt_entry` is dolgozott (`hi_row`, a stratégia
-    # `bt_indicators`-ából) — így a döntés bemenete bitre ugyanaz.
-    _gate_failed[_gates.VOLATILITY] = bool(
-        hi_row is not None and _gates.active(_gate_eff, _gates.VOLATILITY)
-        and _vol_baseline.failed(hi_row.get("atr"), params,
-                                 hi_row.get("atr_avg", 0)))
-    if hi_row is not None and _gate_bands.get(_gates.VOLATILITY):
-        _gate_level[_gates.VOLATILITY] = _gate_bands_mod.level_volatility(
-            hi_row.get("atr"), params, hi_row.get("atr_avg", 0))
+    # ── A KAPUK MÉRÉSE — EGY hurok, kapunként EGY modul ────────────────────
+    # ⚠ ITT KORÁBBAN ÖT, KÉZZEL BEÍRT BLOKK ÁLLT (spread, tf_align, market,
+    # momentum, volatility). Ez azt jelentette, hogy egy kapu NEM volt „egy
+    # darabban mozdítható": a mérése a motor közepén élt, a modulja meg a
+    # `gates/` alatt. Egy `.tfg`-vel telepített kapu így a lemezen ült volna,
+    # listában sehol, és a motor SOHA nem hívta volna — kész funkció, ami némán
+    # tétlen. Mostantól minden kapu a SAJÁT `measure(ctx)`-ét adja, és a keret
+    # hívja végig őket a `REGISTRY` sorrendjében.
+    #
+    # ⚠ A SORREND SZÁMÍT: a lendület-kapu mérése MELLÉKHATÁSSAL jár (beírja a
+    # fordulatszámot a kijelzés-állapotba). A `KEYS` sorrendje ugyanaz, mint a
+    # korábbi kézi blokkoké volt.
+    _gctx = _gates.GateCtx(
+        symbol=symbol, strategy=strategy.name, signal=signal,
+        cfg=_run_cfg or {}, pair_cfg=pair_cfg, params=params, ds=ds,
+        hi_row=hi_row, spread_ok=spread_ok,
+        spread_points=current_spread_points, spread_cap=_cap_pips,
+        closes=lambda tfs, n: mt5_connector.tf_closes(symbol, tfs, n),
+        bands=_gate_bands)
+    for _gk in _gates.keys_in_phase(_gates.PHASE_SIGNAL):
+        if not _gates.active(_gate_eff, _gk):
+            _gate_failed[_gk] = False
+            continue
+        _gf, _gl = _gates.measure(_gk, _gctx)
+        _gate_failed[_gk] = _gf
+        if _gl is not None:
+            _gate_level[_gk] = _gl
 
     # A SÁVOK feloldása: a mért szintből hatás lesz. Sáv nélkül a kapu saját
     # ítélete dönt (`_gate_failed`) — bitre a v3.28.0 előtti viselkedés.
@@ -3060,32 +3004,35 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
                          "(%.1f pip); a lot ennek megfelelően kisebb, az R:R változatlan.",
                          symbol, signal, sl_points)
 
-            # ── KÖLTSÉG/KOCKÁZAT kapu — a TERV ISMERETÉBEN ────────────────────
-            # Ez az EGYETLEN kapu, ami a belépő-terv UTÁN dől el: a mérőszáma a
-            # spread és a TERVEZETT stop viszonya, tehát előbb tudni kell,
-            # mekkora stopot szán a stratégia (a min-stop tágítás UTÁN, mert a
-            # ténylegesen vállalt kockázat az).
-            if _gates.active(_gate_eff, _gates.COST):
-                from gates import cost_gate as _cgx
-                _spr_pts = float(getattr(sym_info, "spread", 0) or 0)
-                _ccap = _gates.cost_max_distortion(pair_cfg, _run_cfg)
-                _cf = {_gates.COST: _cgx.failed(sl_points, tp_points,
-                                                _spr_pts, _ccap)}
-                # SÁV: a szint a torzítás és a plafon aránya (100% = a határ).
-                _cl = ({_gates.COST: _gate_bands_mod.scalar_level(
-                    _cgx.distortion(sl_points, tp_points, _spr_pts), _ccap)}
-                    if _gate_bands.get(_gates.COST) else {})
+            # ── A TERV-FÁZISÚ kapuk — a BELÉPŐ-TERV ISMERETÉBEN ───────────────
+            # ⚠ Vannak kapuk, amik csak itt dönthetnek el: a költség-kapu
+            # mérőszáma a spread és a TERVEZETT stop viszonya, tehát előbb tudni
+            # kell, mekkora stopot szán a stratégia (a min-stop tágítás UTÁN,
+            # mert a ténylegesen vállalt kockázat az). Ezt eddig a kód SORRENDJE
+            # hordozta; mostantól a kapu DEKLARÁLJA (`phase: "plan"`).
+            _plan_keys = [k for k in _gates.keys_in_phase(_gates.PHASE_PLAN)
+                          if _gates.active(_gate_eff, k)]
+            if _plan_keys:
+                _pctx = _gates.GateCtx(
+                    symbol=symbol, strategy=strategy.name, signal=signal,
+                    cfg=_run_cfg or {}, pair_cfg=pair_cfg, params=params,
+                    ds=ds, bands=_gate_bands, sl_points=sl_points,
+                    tp_points=tp_points, sym_info=sym_info)
+                _cf, _cl = {}, {}
+                for _pk in _plan_keys:
+                    _pf, _pl = _gates.measure(_pk, _pctx)
+                    _cf[_pk] = _pf
+                    if _pl is not None:
+                        _cl[_pk] = _pl
                 _ceff = _gate_bands_mod.effects_at(_gate_eff, _gate_bands, _cf, _cl)
-                if _cf[_gates.COST] or _ceff[_gates.COST] != _gates.EFFECT_NONE:
+                if any(_cf.values()) or any(
+                        _ceff.get(k) != _gates.EFFECT_NONE for k in _plan_keys):
                     _cd = _gates.decide(_gate_bands_mod.failed_at(_ceff, _cf), _ceff)
                     if _cd["blocked"]:
-                        log.info("⛔ %s %s — a spread a tervezett kockázat/hozamot "
-                                 "%.0f%%-kal rontja (tényleges %.1f:1) → kimarad. "
-                                 "SL=%.0f pont, spread=%.0f pont.",
-                                 symbol, signal,
-                                 _cgx.distortion(sl_points, tp_points, _spr_pts) * 100,
-                                 _cgx.effective_rr(sl_points, tp_points, _spr_pts),
-                                 sl_points, _spr_pts)
+                        # A kapu SAJÁT indoklása, ha van — az mond konkrét
+                        # számokat; enélkül a kapu neve marad.
+                        _ok_szoveg = _gates.block_log(_cd["blocked"][0], _pctx)
+                        log.info("⛔ %s %s — %s", symbol, signal, _ok_szoveg)
                         return
                     _gate_dec["risk_factor"] = min(_gate_dec.get("risk_factor", 1.0),
                                                    _cd["risk_factor"])

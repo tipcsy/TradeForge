@@ -137,3 +137,27 @@ def failed(atr, params: dict, row_atr_avg=0.0) -> bool:
         return False
     lo, hi = band(params or {}, base)
     return bool((lo > 0 and a < lo) or (hi > 0 and a > hi))
+
+
+# ── A KAPU BEJELENTKEZESE ES MERESE ────────────────────────────────────────
+GATE = {"key": "volatility", "default_effect": "block", "phase": "signal"}
+
+
+def measure(ctx) -> tuple:
+    """`(bukott_e, szint)` — az ATR a stratégia kalibrált sávjában van-e?
+
+    ⚠ A MÉRÉS UGYANABBÓL A SORBÓL megy, amiből a stratégia `bt_entry`-je is
+    dolgozott (`ctx.hi_row`, a `bt_indicators` kimenete) — így a döntés bemenete
+    bitre ugyanaz, mint v3.27.0 előtt, amikor ez még a stratégiában volt.
+
+    ⚠ Sor nélkül (`hi_row is None`) NEM mérünk és nem is blokkolunk.
+    """
+    from core import gate_bands as _gb
+
+    if ctx.hi_row is None:
+        return False, None
+    _atr = ctx.hi_row.get("atr")
+    _avg = ctx.hi_row.get("atr_avg", 0)
+    _szint = (_gb.level_volatility(_atr, ctx.params, _avg)
+              if ctx.has_band("volatility") else None)
+    return bool(failed(_atr, ctx.params, _avg)), _szint

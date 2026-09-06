@@ -323,6 +323,7 @@
   "exit.tip.wpr_ma_period": "A WPR mozgóátlagának periódusa (ezt keresztezi).",
   "exit.tip.wpr_period": "WPR periódus.",
   "gate.all_symbols": "Az összes instrumentumra vonatkozzon (felülírja a többi pár saját beállítását)",
+  "gate.blocked_by": "a(z) {gate} kapu blokkolt",
   "gate.dialog.title": "{symbol} — {gate} kapu",
   "gate.doc.expected_file": "Várt fájl:",
   "gate.effect.block": "Akadályozza a beszállást",
