@@ -4030,6 +4030,112 @@ class DashboardWindow:
             note=_t("gui2.a_kikapcsolt_kapu_oszlopa"))
         _gate_ed.frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
+        # ── CSOMAG (`.tfg`): betöltés / mentés ───────────────────────────
+        # Ugyanaz a minta, mint a stratégiáknál (`.tfs`, lent) — és SZÁNDÉKOSAN
+        # ugyanaz: a csomag a GÉPRE hozza a kaput, a lista pedig HASZNÁLATBA
+        # veszi. A kettő külön: egy telepítés nem kezd el magától szűrni.
+        #
+        # ⚠ A KAPUNÁL EZ MÉG HANGSÚLYOSABB, mint a stratégiánál. Egy telepített
+        # kapu hatása `none`, tehát a listába bekerülve is CSAK LÁTSZIK —
+        # blokkolni vagy méretet csökkenteni akkor kezd, ha a kapu-ablakban
+        # stratégiánként beállítod. Ezt a telepítés utáni üzenet ki is mondja.
+        _gpk = tk.Frame(_kp, bg=BG)
+        _gpk.pack(fill="x", padx=10, pady=(0, 6))
+        _gpk_msg = tk.Label(_kp, text="", bg=BG, fg=FG_GRAY, font=self._small_font,
+                            anchor="w", justify="left", wraplength=620)
+        _gpk_msg.pack(anchor="w", padx=10, pady=(0, 10))
+
+        def _gpack_hiba(txt):
+            _gpk_msg.config(text=txt, fg=FG_RED)
+
+        def _gpack_ok(txt):
+            _gpk_msg.config(text=txt, fg=FG_GREEN)
+
+        def _gcsomag_betolt():
+            from tkinter import filedialog, messagebox
+
+            from gates import pack as _gpack
+            f = filedialog.askopenfilename(
+                parent=popup, title=_t("gpack.dlg.open"),
+                filetypes=[(_t("gpack.filetype"), "*" + _gpack.SUFFIX),
+                           (_t("pack.filetype.all"), "*.*")])
+            if not f:
+                return
+            try:
+                man, gondok = _gpack.check(f)
+            except _gpack.PackError as e:
+                _gpack_hiba(str(e))
+                return
+            # ⚠ A NÉV-ÜTKÖZÉS NEM UGYANOLYAN GOND, mint a többi: az feloldható
+            # (felülírással), a többi nem. Ezért a csomagot felülírás MELLETT is
+            # megkérdezzük — így nem a hibaüzenet SZÖVEGÉBŐL következtetünk,
+            # ami az első fordításnál némán elromlana.
+            _man2, _valodi = _gpack.check(f, overwrite=True)
+            if _valodi:
+                _gpack_hiba(_t("pack.msg.problems", list="\n• ".join(_valodi)))
+                return
+            _felul = bool(gondok)
+            if _felul and not messagebox.askyesno(
+                    _t("gpack.dlg.overwrite.title"),
+                    _t("gpack.dlg.overwrite.body", key=man["key"]),
+                    parent=popup):
+                return
+            # ⚠ A MEGERŐSÍTÉS ELŐTT MEGMUTATJUK, MIT HOZNÁNK BE. A telepítés
+            # futtatható Python kódot tesz a gépre — ugyanaz a bizalmi lépés,
+            # mint egy `.exe` elindítása.
+            if not messagebox.askyesno(
+                    _t("gpack.dlg.confirm.title"),
+                    _t("gpack.dlg.confirm.body", key=man["key"],
+                       version=man.get("version", "?"), api=man.get("api", "?"),
+                       phase=man.get("phase", "?"),
+                       by=man.get("created_by", "?"),
+                       files="\n  ".join(man["_files"])),
+                    parent=popup):
+                return
+            try:
+                man = _gpack.install(f, overwrite=_felul)
+            except _gpack.PackError as e:
+                _gpack_hiba(str(e))
+                return
+            # A lista AZONNAL bővül — különben a sikeres telepítés után a
+            # felhasználó változatlan listát látna, vagyis „nem történt semmi".
+            _gate_ed.add(man["key"], _gts.label_of(man["key"]))
+            _uz = _t("gpack.msg.installed", key=man["key"])
+            if man.get("needs_enable"):
+                _uz += "  " + _t("gpack.msg.needs_enable")
+            _gpack_ok(_uz)
+
+        def _gcsomag_ment():
+            from tkinter import filedialog
+
+            from gates import pack as _gpack
+            kulcs = _gate_ed.selected()
+            if not kulcs:
+                _gpack_hiba(_t("gpack.msg.pick_first"))
+                return
+            f = filedialog.asksaveasfilename(
+                parent=popup, title=_t("gpack.dlg.save"),
+                defaultextension=_gpack.SUFFIX,
+                initialfile=f"{kulcs}-1.0.0{_gpack.SUFFIX}",
+                filetypes=[(_t("gpack.filetype"), "*" + _gpack.SUFFIX)])
+            if not f:
+                return
+            try:
+                out = _gpack.build(kulcs, out_file=f)
+            except _gpack.PackError as e:
+                _gpack_hiba(str(e))
+                return
+            _gpack_ok(_t("pack.msg.saved", path=str(out)))
+
+        tk.Button(_gpk, text=_t("gpack.btn.install"), command=_gcsomag_betolt,
+                  bg=BG_HEADER, fg=FG_WHITE, font=self._small_font, bd=0,
+                  padx=12, pady=4, activebackground=BG).pack(side="left")
+        tk.Button(_gpk, text=_t("gpack.btn.export"), command=_gcsomag_ment,
+                  bg=BG_HEADER, fg=FG_WHITE, font=self._small_font, bd=0,
+                  padx=12, pady=4, activebackground=BG).pack(side="left", padx=8)
+        tk.Label(_gpk, text=_t("gpack.hint"), bg=BG, fg=FG_GRAY_DIM,
+                 font=self._small_font).pack(side="left", padx=(8, 0))
+
         # ── STRATÉGIÁK lap ───────────────────────────────────────────────
         _st = _page["strategies"]
         tk.Label(_st, text=_t("gui.mely_strategiak_elerhetok_es"),

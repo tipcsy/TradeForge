@@ -226,6 +226,38 @@ finally:
     import shutil
     shutil.rmtree(TMP, ignore_errors=True)
 
+# ── 5b. A FELULETI BEKOTES ─────────────────────────────────────────────
+# ⚠ A `.tfs`-nel a csomagolas a ⚙ Beallitas -> Strategiak lapon van. A kapuknal
+# ugyanez a KAPUK lapra kerult. Ez forras-szintu or: egy kesobbi szerkesztes
+# konnyen kiejti a gombokat, es akkor a `.tfg` csak parancssorbol lenne elerheto
+# — a felhasznalo szamara pedig „nincs is".
+_gui = (ROOT / "dashboard" / "gui.py").read_text(encoding="utf-8")
+check_("a felulet a KAPU-csomagolot hasznalja (gates.pack)",
+       "from gates import pack as _gpack" in _gui)
+for _k in ("gpack.btn.install", "gpack.btn.export"):
+    check_(f"...és ott a gomb ({_k})", f'_t("{_k}")' in _gui)
+check_("a telepites utan a lista AZONNAL bovul",
+       "_gate_ed.add(man[\"key\"]" in _gui,
+       "különben a sikeres telepítés után „nem történt semmi”")
+check_("...és a felhasznalo megtudja, hogy a kapu meg nem szur",
+       '_t("gpack.msg.needs_enable")' in _gui)
+# A megerosites ELOTT lathato, mit hozunk be — a telepites KODOT hoz be.
+check_("a megerősítő ablak felsorolja a fajlokat",
+       "gpack.dlg.confirm.body" in _gui and "files=" in _gui)
+
+import json as _json
+for _lang in ("hu", "en"):
+    _d = _json.loads((ROOT / "lang" / f"{_lang}.json").read_text(encoding="utf-8"))
+    _hiany = [k for k in ("gpack.btn.install", "gpack.btn.export", "gpack.hint",
+                          "gpack.dlg.open", "gpack.dlg.save",
+                          "gpack.dlg.overwrite.title", "gpack.dlg.overwrite.body",
+                          "gpack.dlg.confirm.title", "gpack.dlg.confirm.body",
+                          "gpack.filetype", "gpack.msg.installed",
+                          "gpack.msg.needs_enable", "gpack.msg.pick_first")
+              if k not in _d]
+    check_(f"{_lang}: minden `.tfg` felirat megvan", not _hiany, str(_hiany))
+
+
 # ── 6. A KERET epsege a teszt UTAN ─────────────────────────────────────
 check_("a beépített kapuk sértetlenek maradtak",
        G.KEYS == ("spread", "tf_align", "market", "momentum", "cost", "volatility"),
