@@ -117,13 +117,46 @@ def simulate(df: pd.DataFrame, idx: np.ndarray, side: np.ndarray,
              max_hold: int = 480, eod_min: int | None = None,
              be_at_r: float = 0.0, trail_r: float = 0.0,
              spread_fallback_pts: float = 0.0,
-             one_at_a_time: bool = True) -> np.ndarray:
+             one_at_a_time: bool = True,
+             pair_cfg: dict | None = None) -> np.ndarray:
     """M1 bar-szintu szimulacio. `idx`: belepo bar indexek (a bar ZARASAN lepunk be).
     `side`: +1 BUY / -1 SELL. `sl_pts`/`tp_pts`: tavolsag PONTBAN (tp<=0 -> nincs TP).
     `eod_min`: ha nem None, a nap ezen perce (UTC perc a nap kezdetetol) utan
     piaci zaras. `be_at_r`: ennyi R-nel a stop belepore. `trail_r`: >0 -> ennyi R
     tavolsagra huzo stop, miutan a BE aktivalt.
     Visszaad: strukturalt tomb.
+
+    ⚠ `pair_cfg`: ha megadod, a JUTALEK es a SWAP is levonodik az `r`-bol
+    (`commission_per_lot`, `swap_long/short_per_lot`, `pv1_point`). NELKULE a
+    labor CSAK a spreadet modellezi — es ez EGYSZER MAR HAMIS LELETET ADOTT:
+
+        a `trend_pullback` long-only, a swap_long -9,89 / lot / ejszaka, es a
+        labor +0,1139 R/kotest mutatott ott, ahol a motor -0,0188-at. A
+        kulonbseg ketharmada a SWAP volt.
+
+    A lot KIESIK az atszamitasbol: a kockazat is `lot x sl_points x pv1_point`,
+    a koltseg is aranyos a lottal — ezert eleg 1,0 lottal szamolni.
+
+    ⚠ ALAPBOL KI (`None`): a meglevo kutato-szkriptek eredmenye BITAZONOS marad,
+    amig valaki tudatosan be nem kapcsolja.
+
+    ⚠⚠ ES A MASIK, AMI MIATT A LABOR ES A MOTOR MAST AD: a `be_at_r`.
+    A motor a `breakeven_pct` (alap 0,5) szerint a TP FELEIG erve a belepore
+    huzza a stopot — es ezt az `off` preset SEM kapcsolja ki (v1.96.0). A labor
+    alapbol NEM csinal semmi ilyet.
+
+    Mérve (`trend_pullback` / UsaTec, UGYANAZON az 1825 belepon):
+
+        be_at_r=0,0 -> labor +0,2006   a motortol +0,0346 elteres
+        be_at_r=1,0 -> labor +0,1660   a motortol  0,0000 elteres  (TP 559 = 559)
+
+    Vagyis a ket program KOZOTTI ELTERES TELJES EGESZEBEN a breakeven volt —
+    nem a spread-modell es nem az intrabar SL/TP sorrend (mindketto
+    `pessimistic`, azaz az SL nyer).
+
+    ⚠ HA A MOTORHOZ AKAROD HASONLITANI, add meg:  `be_at_r = 0,5 * tp_rr_ratio`
+    (es `pair_cfg`-t a koltseghez). Enelkul a labor SZAMA MAGASABB LESZ, es a
+    kulonbseg nem hiba, hanem MAS KERDESRE adott valasz.
     """
     h = df["high"].to_numpy(float)
     l = df["low"].to_numpy(float)
@@ -194,7 +227,22 @@ def simulate(df: pd.DataFrame, idx: np.ndarray, side: np.ndarray,
             xprice = c[j] + (0.0 if d > 0 else sp[j])
             status = 2
         pts = d * (xprice - entry) / point_size
-        out[k] = (i, j, d, entry, xprice, sl, tp, pts / (sl_pts[t]), pts, status)
+        r = pts / (sl_pts[t])
+        # ⚠ JUTALEK + SWAP, ha a hivo kerte. A motor `trade_costs.apply`-jat
+        # hasznaljuk, NEM masolatot: ket keplet ugyanarra a koltsegre kulon
+        # romlana el.
+        if pair_cfg:
+            _pv1 = float(pair_cfg.get("pv1_point", 0) or 0)
+            _kock = float(sl_pts[t]) * _pv1
+            if _kock > 0:
+                from core import trade_costs as _tc
+                _o = df.index[i].timestamp()
+                _c = df.index[j].timestamp()
+                _comm = _tc.commission_usd(1.0, pair_cfg)
+                _swp = _tc.swap_usd(1.0, "BUY" if d > 0 else "SELL", _o, _c,
+                                    pair_cfg)
+                r += (-_comm + _swp) / _kock     # a swap ELOJELES
+        out[k] = (i, j, d, entry, xprice, sl, tp, r, pts, status)
         k += 1
         busy_until = j
     return out[:k]

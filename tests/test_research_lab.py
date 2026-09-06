@@ -111,26 +111,68 @@ check("...es az eredmenye pontosan a spreaddel romlik",
       f"{_s0['r'][0]:+.4f} -> {_s1['r'][0]:+.4f}")
 
 
-# ── 3. ⚠ A SWAP NINCS MODELLEZVE — kimondva, hogy ne higgyuk maskepp ────
-# Ket AZONOS kotes, csak az egyik NAPOKIG all nyitva. Ha lenne swap, a hosszan
-# tartott dragabb lenne. A `lab.simulate` szerint UGYANANNYI.
+# ── 3. A KOLTSEG-MODELLEZES (v3.49.0 ota) ──────────────────────────────
+# ⚠ EDDIG A LABOR NEM MODELLEZTE A SWAPOT, es ez EGYSZER MAR HAMIS LELETET
+# ADOTT: a `trend_pullback` long-only, a swap_long -9,89 / lot / ejszaka, es a
+# labor +0,1139 R/kotest mutatott ott, ahol a motor -0,0188-at. A kulonbseg
+# ketharmada a SWAP volt. Az akkori teszt SZANDEKOSAN rogzitette a hianyt, azzal
+# a megjegyzessel, hogy „ha valaki bevezeti a swapot, nezd at a raepulo
+# leleteket" — most ez tortent.
+#
+# A szerzodes MOSTANTOL: alapbol KI (bitazonos a regivel), `pair_cfg`-vel BE.
 _lassu = 100.0 + np.arange(3000) * (0.002 * PS)     # ~2 nap, alig mozdul
 _a = lab.simulate(_df(_lassu), np.array([0]), np.array([1]),
                   np.array([50.0]), np.array([0.0]), PS, max_hold=100)
 _b = lab.simulate(_df(_lassu), np.array([0]), np.array([1]),
                   np.array([50.0]), np.array([0.0]), PS, max_hold=2500)
-check("a 25x hosszabban tartott kotes NEM fizet tobbet (nincs swap a laborban)",
-      len(_a) and len(_b) and _b["i_close"][0] - _b["i_open"][0]
-      > 20 * (_a["i_close"][0] - _a["i_open"][0]),
-      "⚠ ISMERT HIANY: a long-only leletek ezert FELFELE torzulnak")
 check("...a tartas tenyleg hosszabb volt (a teszt mer valamit)",
       _b["i_close"][0] > _a["i_close"][0],
       f"{_a['i_close'][0]} vs {_b['i_close'][0]}")
-# Forras-szintu or: ha valaki BEVEZETI a swapot, ez a teszt szoljon, hogy a
-# fenti allitasokat (es a raepulo leleteket) at kell nezni.
-_src = (ROOT / "tools" / "research" / "lab.py").read_text(encoding="utf-8")
-check("a labor forrasa tovabbra sem emlit swapot (ha igen: nezd at a leleteket)",
-      "swap" not in _src.lower())
+
+# ⚠ ALAPBOL KI: a `pair_cfg` nelkuli hivas BITAZONOS a regivel — a meglevo
+# kutato-szkriptek eredmenye nem valtozhat egy csendes frissitestol.
+_PC = {"pv1_point": 1.0, "commission_per_lot": 7.0,
+       "swap_long_per_lot": -9.89, "swap_short_per_lot": 2.0}
+_a2 = lab.simulate(_df(_lassu), np.array([0]), np.array([1]),
+                   np.array([50.0]), np.array([0.0]), PS, max_hold=2500)
+check("`pair_cfg` NELKUL a koltseg NEM szamit (bitazonos a regivel)",
+      float(_a2["r"][0]) == float(_b["r"][0]), f"{_a2['r'][0]} vs {_b['r'][0]}")
+
+# ...ES BE, ha keri a hivo. A LONG a swapot FIZETI.
+_b_k = lab.simulate(_df(_lassu), np.array([0]), np.array([1]),
+                    np.array([50.0]), np.array([0.0]), PS, max_hold=2500,
+                    pair_cfg=_PC)
+check("`pair_cfg`-vel a hosszan tartott LONG FIZET a swapert",
+      float(_b_k["r"][0]) < float(_b["r"][0]),
+      f"{_b['r'][0]:+.4f} -> {_b_k['r'][0]:+.4f}")
+
+# ⚠ A SZAM IS STIMMELJEN — a motor sajat fuggvenyevel, nem masolattal.
+from core import trade_costs as _tc      # noqa: E402
+_idx = _df(_lassu).index
+_o = _idx[int(_b_k["i_open"][0])].timestamp()
+_c = _idx[int(_b_k["i_close"][0])].timestamp()
+_vart = (-_tc.commission_usd(1.0, _PC)
+         + _tc.swap_usd(1.0, "BUY", _o, _c, _PC)) / (50.0 * _PC["pv1_point"])
+check("...pontosan a `trade_costs` szerinti osszeggel",
+      abs((_b_k["r"][0] - _b["r"][0]) - _vart) < 1e-9,
+      f"{_b_k['r'][0]-_b['r'][0]:+.6f} vs {_vart:+.6f}")
+
+# A SELL-nel a POZITIV swap JOVAIRAS — nem mindig levonas.
+_s_n = lab.simulate(_df(_lassu), np.array([0]), np.array([-1]),
+                    np.array([50.0]), np.array([0.0]), PS, max_hold=2500)
+_s_k = lab.simulate(_df(_lassu), np.array([0]), np.array([-1]),
+                    np.array([50.0]), np.array([0.0]), PS, max_hold=2500,
+                    pair_cfg=_PC)
+check("SELL + pozitiv swap -> a koltseg JAVIT (jovairas)",
+      float(_s_k["r"][0]) > float(_s_n["r"][0]),
+      f"{_s_n['r'][0]:+.4f} -> {_s_k['r'][0]:+.4f}")
+
+# Hianyzo `pv1_point` -> NEM szamolunk kitalalt koltseget.
+_b_h = lab.simulate(_df(_lassu), np.array([0]), np.array([1]),
+                    np.array([50.0]), np.array([0.0]), PS, max_hold=2500,
+                    pair_cfg={"commission_per_lot": 7.0})
+check("hianyzo pv1_point -> a koltseg KIMARAD (nincs kitalalt szam)",
+      float(_b_h["r"][0]) == float(_b["r"][0]))
 
 
 # ── 4. one_at_a_time: atfedo belepok ───────────────────────────────────

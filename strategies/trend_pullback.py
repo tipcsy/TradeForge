@@ -23,9 +23,27 @@ bruttó (spread nélküli) él a többi US indexen is pozitív, de a költség
 megeszi. Más páron csak saját méréssel élesítsd.
 
 MI NEM EZÉ A MODULÉ (lásd `strategy/base.py`): a breakeven, a trailing és a
-cost-cut a KOCKÁZATCSÖKKENTÉSÉ (`core/risk_reduction.py`). A méréskor talált
-legjobb kilépés — BE a TP 50%-ánál, 3× spread pufferrel, trailing ki,
-cost_cut 24 M15 gyertyánál — a PÁR rr-beállítása, nem a stratégiáé.
+cost-cut a KOCKÁZATCSÖKKENTÉSÉ (`core/risk_reduction.py`), tehát a PÁR
+rr-beállítása, nem a stratégiáé.
+
+⚠ EZ A BEKEZDÉS ELAVULT VOLT (2026-09-06-ig): „cost_cut 24 M15 gyertyánál"-t
+írt, holott az A/B mérés szerint a cost_cut KIKAPCSOLVA a jobb (+0,1058 vs
++0,0937 a cost_cut-tal). A MOSTANI, élesben futó beállítás a mért legjobb —
+nem kell hozzányúlni.
+
+A ténylegesen ható kilépés:
+
+    breakeven   a TP 50%-ánál          <- FUT, és az `off` preset SEM kapcsolja ki
+    trailing    ki
+    cost_cut    ki                     <- ez a mért legjobb
+
+⚠ A BREAKEVEN AKKOR IS FUT, HA A PRESET `off`. Ez nem elírás (v1.96.0 óta így
+van), és nem elhanyagolható: a kutató-labor (`tools/research/lab.py`) alapból
+NEM modellezi, ezért ott +0,0346 R-rel jobb eredmény jön ki ugyanazokon a
+belépőkön. UsaTec-en 1825 kötésen mérve a labor `be_at_r = 0,5 × tp_rr_ratio`
+mellett BITRE a motor eredményét adja (+0,1660, TP 559 = 559). Aki a labor
+számát a motoréhoz hasonlítja, ezt állítsa be — különben más kérdésre kap
+választ.
 """
 
 from __future__ import annotations
