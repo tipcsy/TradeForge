@@ -118,6 +118,76 @@ class IdoTengely(pg.AxisItem):
 
 
 # ── Egy megrajzolt belépő ─────────────────────────────────────────────────
+class Rajz:
+    """Egy KÉZI rajz-elem: trendvonal, vízszintes vagy függőleges vonal.
+
+    ⚠ IDŐBEN ÉS ÁRBAN TÁROLUNK, NEM BAR-INDEXBEN. Ugyanaz a szabály, mint a
+    `Belepo`-nál: idősíkot váltva (M15 → H1) az indexek átszámozódnak, az
+    időpont viszont ugyanaz marad. Egy indexre kötött trendvonal a váltás után
+    máshova mutatna — némán, ami a legrosszabb fajta hiba.
+
+    `fajta`: "trend" (két végpont) | "vizszintes" (ár) | "fuggoleges" (idő)."""
+
+    FAJTAK = ("trend", "vizszintes", "fuggoleges")
+
+    def __init__(self, fajta, ido1=None, ar1=None, ido2=None, ar2=None):
+        self.fajta = fajta
+        self.ido1, self.ar1 = ido1, ar1
+        self.ido2, self.ar2 = ido2, ar2
+        self.elem = None
+
+    def kesz(self) -> bool:
+        """Befejezett-e? A trendvonalhoz KÉT kattintás kell."""
+        if self.fajta == "trend":
+            return self.ido2 is not None
+        return True
+
+    def szotar(self) -> dict:
+        d = {"fajta": self.fajta}
+        if self.fajta != "vizszintes":
+            d["ido"] = str(self.ido1)[:16]
+        if self.fajta != "fuggoleges":
+            d["ar"] = float(self.ar1)
+        if self.fajta == "trend":
+            d["ido2"] = str(self.ido2)[:16]
+            d["ar2"] = float(self.ar2)
+        return d
+
+    @staticmethod
+    def szotarbol(d: dict) -> "Rajz | None":
+        _f = d.get("fajta")
+        if _f not in Rajz.FAJTAK:
+            return None
+        try:
+            _i1 = pd.Timestamp(d["ido"]) if "ido" in d else None
+            _i2 = pd.Timestamp(d["ido2"]) if "ido2" in d else None
+            return Rajz(_f, _i1, d.get("ar"), _i2, d.get("ar2"))
+        except (KeyError, ValueError, TypeError):
+            return None
+
+
+class _Savdoboz(QtWidgets.QGraphicsRectItem):
+    """Kitöltött téglalap ADAT-koordinátákban (x = bar-index, y = ár).
+
+    ⚠ Miért nem `LinearRegionItem`: az vagy vízszintesen, vagy függőlegesen
+    VÉGTELEN — a kockázat-/cél-sáv viszont csak a pozíció élettartamára szól.
+    Egy sima `QGraphicsRectItem` a ViewBox-ban pontosan ezt adja, és a
+    nagyítást/görgetést a ViewBox intézi (nem kell újrarajzolni)."""
+
+    def __init__(self, x1, y1, x2, y2, brush):
+        super().__init__(QtCore.QRectF(min(x1, x2), min(y1, y2),
+                                       abs(x2 - x1), abs(y2 - y1)))
+        self.setBrush(brush)
+        self.setPen(pg.mkPen(None))
+
+    def vege(self, x2: float) -> None:
+        """A jobb szél áthelyezése. ⚠ Lejátszás közben KÖRÖNKÉNT hívódik, ezért
+        csak a geometriát írjuk át — az elem újraépítése (eltávolítás + hozzáadás)
+        a `_belepok_rajz`-ban van, és az másodpercenként több százszor futna."""
+        r = self.rect()
+        self.setRect(QtCore.QRectF(r.x(), r.y(), max(0.0, x2 - r.x()), r.height()))
+
+
 class Belepo:
     """Egy terv-belépő: idő, irány, SL-ár, TP-szorzó — és a hozzá tartozó
     rajz-elemek.
@@ -135,6 +205,8 @@ class Belepo:
         self.tp_vonal = None
         self.kock = None        # kockázat-sáv
         self.cel = None         # cél-sáv
+        self.trail_be = None    # trailing INDULÁS (aktiválás) vonala
+        self.trail_tav = None   # trailing KÖVETÉSI TÁVOLSÁG vonala
 
     def tp_ar(self, be_ar: float) -> float:
         d = 1 if self.irany == "BUY" else -1
@@ -232,6 +304,9 @@ class LabAblak(QtWidgets.QMainWindow):
         self._kurzor = None
         self._elemek = []           # a stratégia rajz-elemei (törléshez)
         self._eredmeny_elemek = []
+        self._nyitott_elemek = []   # a NYITOTT pozíció vonalai (kurzor-függő)
+        self._rajzok = []           # kézi rajz-elemek (trend / vízszintes / függőleges)
+        self._fel_rajz = None       # a félbehagyott trendvonal (1. kattintás megvolt)
 
         self._epit_ui(symbol, strategy, tf_perc, tol, ig)
         self._strat_lista()
@@ -286,7 +361,11 @@ class LabAblak(QtWidgets.QMainWindow):
         self._mod = None
         self._mod_gombok = {}
         for ertek, cimke in (("BUY", "Add BUY"), ("SELL", "Add SELL"),
-                             ("BE", "Add BE")):
+                             ("BE", "Add BE"),
+                             # ⚠ RAJZ-MÓDOK: ugyanaz a mechanizmus, mint a
+                             # belépő-lerakásé — egyszerre egy aktív mód.
+                             ("trend", "╱ Trend"), ("vizszintes", "─ Vízsz."),
+                             ("fuggoleges", "│ Függ.")):
             g = QtWidgets.QPushButton(cimke)
             g.setCheckable(True)
             g.clicked.connect(lambda _c=False, e=ertek: self._mod_valt(e))
@@ -316,7 +395,10 @@ class LabAblak(QtWidgets.QMainWindow):
             s2.addWidget(_e)
             self._rr_mezok[_k] = _e
 
-        for cimke, fn in ((_t("lab.torol"), self.torol), (_t("lab.json_mentes"), self.ment)):
+        for cimke, fn in ((_t("lab.torol"), self.torol),
+                          (_t("lab.rajz_torol"), self.rajz_torol_mind),
+                          (_t("lab.json_mentes"), self.ment),
+                          (_t("lab.json_megnyit"), self.megnyit)):
             g = QtWidgets.QPushButton(cimke)
             g.clicked.connect(fn)
             s2.addWidget(g)
@@ -462,6 +544,10 @@ class LabAblak(QtWidgets.QMainWindow):
     def _mod_valt(self, ertek: str) -> None:
         """Kattintás-mód váltása (egyszerre csak egy aktív)."""
         self._mod = None if self._mod == ertek else ertek
+        # ⚠ Módot váltva a félbehagyott trendvonal ELVÉSZ — különben a
+        # következő kattintás egy másik módban fejezné be, kiszámíthatatlanul.
+        if self._mod != "trend":
+            self._fel_rajz = None
         for k, g in self._mod_gombok.items():
             g.setChecked(k == self._mod)
 
@@ -516,6 +602,7 @@ class LabAblak(QtWidgets.QMainWindow):
         self._vb.autoRange()
         self._kurzor_vissza(_kurzor_t)
         self._belepok_rajz()
+        self._rajzok_rajza()      # ⚠ új idősík = új indexek → újra kell rakni
         self._kurzor_rajz()
         self._allapot.setText(
             _t("lab.status.markers_short", bars=len(chart), drawn=_db["kirajzolt"],
@@ -613,32 +700,64 @@ class LabAblak(QtWidgets.QMainWindow):
     def _be_ar(self, ido) -> "float | None":
         if self._chart is None:
             return None
+        # ⚠ ITT DŐL EL AZ IDŐZÓNA. A megnyitott forgatókönyv NAIV időt hoz (a
+        # JSON úgy tárolja, ahogy a charton látod), a parquet indexe viszont
+        # zóna-tudatos — összehasonlítva `TypeError`. Ez az EGYETLEN pont, ahol
+        # a kettő találkozik, ezért itt igazítunk, nem a hívóknál (ott
+        # felsorolásos hiba lenne: elég egy hívót kifelejteni).
+        ido = self._ido_zonaba(ido)
+        if ido is None:
+            return None
         try:
             poz = self._chart.index.get_indexer([ido], method="nearest")
             return float(self._chart["close"].iloc[int(poz[0])])
         except (IndexError, ValueError, KeyError):
             return None
 
-    def _alap_sl(self, ido, irany: str) -> "float | None":
+    def _atr_ar(self, ido) -> float:
+        """A volatilitás-mérték ÁRBAN az adott gyertyánál — EGY forrásból.
+
+        ⚠ EZ EGY KÖZELÍTÉS (20 gyertya átlagos range-e), NEM a stratégia ATR-je.
+        A motor a kötés `entry_atr`-jét használja, és a `trail_distance_atr`
+        AZZAL szorzódik. Amíg nincs futtatás, csak ez áll rendelkezésre — de
+        futtatás UTÁN a `_trail_atr` a kötés VALÓDI `entry_atr`-jére vált, hogy
+        a charton látott távolság azt mutassa, amit a motor tényleg csinál.
+        (Két külön ATR-számítás pont az a néma eltérés, amiből ebben a
+        projektben már több volt — ezért van egy függvényben.)"""
         ar = self._be_ar(ido)
-        if ar is None:
-            return None
+        if ar is None or self._chart is None:
+            return 0.0
         try:
             poz = int(self._chart.index.get_indexer([ido], method="nearest")[0])
             _h = self._chart["high"].iloc[max(0, poz - 20):poz + 1]
             _l = self._chart["low"].iloc[max(0, poz - 20):poz + 1]
-            _a = float((_h - _l).mean()) or (ar * 0.001)
+            return float((_h - _l).mean()) or (ar * 0.001)
         except (IndexError, ValueError, KeyError):
-            _a = ar * 0.001
+            return ar * 0.001
+
+    def _trail_atr(self, b: "Belepo") -> float:
+        """A trailing-vonalak ATR-e: futtatás után a kötés VALÓDI `entry_atr`-je
+        (amivel a motor számol), előtte a chart-közelítés."""
+        _kt = self._kotes_belepohoz(b)
+        _a = float(getattr(_kt, "entry_atr", 0.0) or 0.0) if _kt is not None else 0.0
+        return _a or self._atr_ar(b.ido)
+
+    def _alap_sl(self, ido, irany: str) -> "float | None":
+        ar = self._be_ar(ido)
+        if ar is None:
+            return None
+        _a = self._atr_ar(ido)
         return ar - _a if irany == "BUY" else ar + _a
 
     def _belepok_rajz(self) -> None:
         """A terv elemeinek (újra)építése."""
         for b in self._belepok:
-            for it in (b.vonal, b.sl_vonal, b.tp_vonal, b.kock, b.cel):
+            for it in (b.vonal, b.sl_vonal, b.tp_vonal, b.kock, b.cel,
+                       b.trail_be, b.trail_tav):
                 if it is not None:
                     self._plot.removeItem(it)
             b.vonal = b.sl_vonal = b.tp_vonal = b.kock = b.cel = None
+            b.trail_be = b.trail_tav = None
         if self._tengely is None:
             return
         for b in self._belepok:
@@ -678,20 +797,330 @@ class LabAblak(QtWidgets.QMainWindow):
                 lambda _l=None, _b=b: self._sl_mozgott(_b))
             b.tp_vonal.sigPositionChanged.connect(
                 lambda _l=None, _b=b: self._tp_mozgott(_b))
-            b.kock = pg.LinearRegionItem(
-                values=(min(_be, b.sl), max(_be, b.sl)),
-                orientation="horizontal", movable=False,
-                brush=pg.mkBrush(220, 0, 0, 38))
-            b.cel = pg.LinearRegionItem(
-                values=(min(_be, b.tp_ar(_be)), max(_be, b.tp_ar(_be))),
-                orientation="horizontal", movable=False,
-                brush=pg.mkBrush(0, 170, 0, 38))
+            # ⚠ A SÁV CSAK A POZÍCIÓ ÉLETTARTAMÁRA. Korábban `LinearRegionItem`
+            # volt, ami KONSTRUKCIÓ SZERINT végigér a képen — így a sáv olyan
+            # gyertyákra is ráfeküdt, ahol a pozíció már/még nem élt, és nem
+            # lehetett ránézésre megmondani, meddig tartott a kötés.
+            _x2 = self._sav_vege(b, x)
+            b.kock = _Savdoboz(x, min(_be, b.sl), _x2, max(_be, b.sl),
+                               pg.mkBrush(220, 0, 0, 38))
+            b.cel = _Savdoboz(x, min(_be, b.tp_ar(_be)), _x2,
+                              max(_be, b.tp_ar(_be)),
+                              pg.mkBrush(0, 170, 0, 38))
             for it in (b.kock, b.cel):
                 it.setZValue(-20)
                 self._plot.addItem(it)
             for it in (b.sl_vonal, b.tp_vonal):
                 self._plot.addItem(it)
+            if _akt:
+                self._trail_vonalak(b, _be)
         self._be_jelolo_rajz()
+
+    def _trail_vonalak(self, b: "Belepo", be_ar: float) -> None:
+        """A trailing két HÚZHATÓ vonala: honnan indul, és mekkora távban követ.
+
+        ⚠ Eddig ez két szövegmező volt ATR-SZORZÓBAN (`trail@`, `táv`) — abból
+        ránézésre nem derült ki, HOL lesz a charton. A két vonal ugyanazt a két
+        számot mutatja árban; húzáskor visszaszámoljuk a szorzót, tehát a mező
+        és a vonal EGY állapot két nézete.
+
+            aktiválás = belépő ± trail_activation_atr · ATR
+            követés   = aktiválás ∓ trail_distance_atr · ATR
+
+        A követési vonal ott mutatja a stopot, ahol a trailing INDULÁSAKOR
+        állna — utána az árral együtt mozogna, de ez a beállító nézet."""
+        _atr = self._trail_atr(b)
+        if _atr <= 0:
+            return
+        _e = self._rr_ertekek()
+        _akt_atr = float(_e.get("trail_activation_atr", 0.0) or 0.0)
+        _tav_atr = float(_e.get("trail_distance_atr", 0.0) or 0.0)
+        if _akt_atr <= 0 and _tav_atr <= 0:
+            return
+        d = 1 if b.irany == "BUY" else -1
+        _akt_ar = be_ar + d * _akt_atr * _atr
+        _tav_ar = _akt_ar - d * _tav_atr * _atr
+        for _nev, _ar, _cim, _szn in (
+                ("trail_be", _akt_ar, f"trail@ {_akt_atr:0.2f} ATR", "yellow"),
+                ("trail_tav", _tav_ar, f"táv {_tav_atr:0.2f} ATR", "orange")):
+            _l = pg.InfiniteLine(
+                pos=_ar, angle=0, movable=True,
+                pen=pg.mkPen(szin(_szn), width=1, style=QtCore.Qt.DashDotLine),
+                hoverPen=pg.mkPen(szin(_szn), width=3), label=_cim,
+                labelOpts={"position": 0.25, "color": szin(_szn)})
+            _l.sigPositionChanged.connect(
+                lambda _x=None, _b=b, _n=_nev: self._trail_mozgott(_b, _n))
+            setattr(b, _nev, _l)
+            self._plot.addItem(_l)
+
+    def _trail_mozgott(self, b: "Belepo", nev: str) -> None:
+        """Húzás → vissza az ATR-szorzóba (a mező és a vonal EGY állapot)."""
+        _be = self._be_ar(b.ido)
+        _atr = self._trail_atr(b)
+        if _be is None or _atr <= 0:
+            return
+        d = 1 if b.irany == "BUY" else -1
+        if nev == "trail_be" and b.trail_be is not None:
+            _uj = max(0.0, d * (float(b.trail_be.value()) - _be) / _atr)
+            self._rr_mezok["trail_activation_atr"].setText(f"{_uj:.2f}")
+        elif nev == "trail_tav" and b.trail_tav is not None:
+            _akt = (float(b.trail_be.value()) if b.trail_be is not None
+                    else _be)
+            _uj = max(0.0, d * (_akt - float(b.trail_tav.value())) / _atr)
+            self._rr_mezok["trail_distance_atr"].setText(f"{_uj:.2f}")
+        # ⚠ A TERV MEGVÁLTOZOTT: a korábbi futtatás eredménye már nem ehhez a
+        # beállításhoz tartozik. Újrarajzolás nélkül a régi kötések maradnának
+        # a képen egy másik trailinggel.
+        self._terv_valtozott()
+
+    def _kotes_belepohoz(self, b: "Belepo"):
+        """A futtatás azon kötése, ami EHHEZ a terv-belépőhöz tartozik.
+
+        A motor a jel-gyertya ZÁRÁSÁN lép be, tehát a kötés nyitó ideje a
+        terv-belépő idejénél nem korábbi, de közel van hozzá — a legelső ilyen
+        kötést vesszük."""
+        res = (self._eredmeny or {}).get("res")
+        _jelolt = None
+        for t in (getattr(res, "trades", None) or []):
+            if t.open_time is None or t.open_time < b.ido:
+                continue
+            if _jelolt is None or t.open_time < _jelolt.open_time:
+                _jelolt = t
+        return _jelolt
+
+    def _sav_vege(self, b: "Belepo", x1: float) -> float:
+        """A kockázat-/cél-sáv JOBB széle bar-indexben.
+
+        Három forrás, ebben a sorrendben:
+          1. a futtatás kötésének ZÁRÁSA — ez a valódi élettartam;
+          2. futtatás előtt a LEJÁTSZÓ KURZORA — így a sáv a pozícióval együtt
+             nő, ahogy lépkedsz (ez mutatja, hogy „még nyitva van");
+          3. ha egyik sincs, a chart vége.
+
+        ⚠ Sosem rövidebb a belépőnél: egy hátrafelé nyúló sáv azt sugallná,
+        hogy a pozíció a nyitása ELŐTT élt."""
+        _kt = self._kotes_belepohoz(b)
+        if _kt is not None and _kt.close_time is not None and self._tengely:
+            _x = self._tengely.hol(int(_kt.close_time.timestamp()))
+            if _x is not None:
+                return max(x1, _x)
+        if self._kurzor is not None:
+            return max(x1, float(self._kurzor) + 0.5)
+        return max(x1, float(len(self._chart) - 1) if self._chart is not None else x1)
+
+    # ── A NYITOTT pozíció vonalai (MT5-konvenció) ────────────────────────
+    # ⚠ MT5-BEN A VONALAK A POZÍCIÓHOZ TARTOZNAK, NEM AZ IDŐVONALHOZ. Ahány
+    # pozíció nyitva van, annyi Entry/SL/TP vonal látszik; ahogy a pozíció
+    # lezárul, ezek ELTŰNNEK, és marad a nyitást a zárással összekötő vonal.
+    # A labor ezt szimulálja: a vonalak a LEJÁTSZÓ KURZORÁNAK pillanatában
+    # érvényes szinteket mutatják, és a belépőtől a kurzorig érnek.
+
+    def _szintek_ekkor(self, t, ido) -> "tuple[float, float] | None":
+        """A kötés SL/TP szintje az `ido` PILLANATÁBAN — `(sl, tp)`.
+
+        A motor eseménynaplójából (`trade.events`) olvassuk: az utolsó olyan
+        SL/TP-írás, ami az adott időpontig MEGTÖRTÉNT. A jövőbeli események
+        szándékosan nem látszanak — különben a lejátszás elárulná, hova fog
+        húzódni a stop."""
+        _sl = float(getattr(t, "sl", 0.0) or 0.0)
+        _tp = float(getattr(t, "tp", 0.0) or 0.0)
+        for e in (getattr(t, "events", None) or []):
+            _ev = list(e) + [None] * 5
+            try:
+                if pd.Timestamp(_ev[1]) > ido:
+                    break
+            except (TypeError, ValueError):
+                continue
+            if _ev[3]:
+                _sl = float(_ev[3])
+            # ⚠ A TP-nél a 0 IS ÉRVÉNYES ÍRÁS (az épített csomagnál a motor
+            # TÖRLI a célárat) — ezért nem `if _ev[4]:`, hanem „van-e mező".
+            if _ev[0] == "TP_MODIFY" or (_ev[4] is not None and _ev[0] == "OPEN"):
+                _tp = float(_ev[4] or 0.0)
+        return _sl, _tp
+
+    def _nyitott_rajz(self) -> None:
+        """A kurzor pillanatában NYITOTT kötések Entry/SL/TP vonalai."""
+        for it in self._nyitott_elemek:
+            self._plot.removeItem(it)
+        self._nyitott_elemek.clear()
+        res = (self._eredmeny or {}).get("res")
+        if res is None or self._tengely is None or self._kurzor is None:
+            return
+        if self._chart is None or not (0 <= int(self._kurzor) < len(self._chart)):
+            return
+        _most = self._chart.index[int(self._kurzor)]
+        _xm = float(self._kurzor) + 0.5
+        for t in (getattr(res, "trades", None) or []):
+            if t.open_time is None or t.open_time > _most:
+                continue
+            # ⚠ A LEZÁRT pozíció vonalai ELTŰNNEK — ez a lényege: a képen csak
+            # az látszik, ami ÉPP ÉL, ahogy a terminálban.
+            if t.close_time is not None and t.close_time <= _most:
+                continue
+            x1 = self._tengely.hol(int(t.open_time.timestamp()))
+            if x1 is None:
+                continue
+            _sl, _tp = self._szintek_ekkor(t, _most)
+            _sorok = [(float(t.open_price), "white", QtCore.Qt.SolidLine, "Entry")]
+            if _sl:
+                _sorok.append((_sl, "red", QtCore.Qt.DashLine, "SL"))
+            if _tp:
+                _sorok.append((_tp, "green", QtCore.Qt.DashLine, "TP"))
+            for _ar, _sz, _stilus, _cim in _sorok:
+                _it = pg.PlotDataItem(
+                    [x1, _xm], [_ar, _ar],
+                    pen=pg.mkPen(szin(_sz), width=2, style=_stilus))
+                self._plot.addItem(_it)
+                self._nyitott_elemek.append(_it)
+                _c = pg.TextItem(_cim, color=szin(_sz), anchor=(0, 0.5))
+                _c.setPos(_xm, _ar)
+                self._plot.addItem(_c)
+                self._nyitott_elemek.append(_c)
+
+    def _trail_lathatosag(self) -> None:
+        """A trailing két beállító vonala ELTŰNIK, ha a trailing MÁR ELINDULT.
+
+        A felhasználó kérése: „a trailing stopnál, ha elindult, a vonalak
+        eltűnhetnek." Igaza van — onnantól a vonalak már nem beállítanak
+        semmit, csak takarják a képet; a tényleges stopot a nyitott pozíció
+        (szaggatott piros) vonala mutatja.
+
+        Az indulás tényét a motor eseménynaplójából olvassuk (`SL_MODIFY` /
+        `TRAIL`), nem az árból: így pontosan akkor tűnnek el, amikor a motor
+        TÉNYLEG húzni kezdett."""
+        if self._chart is None or self._kurzor is None:
+            _lat = True
+        else:
+            _lat = None
+        _most = (self._chart.index[int(self._kurzor)]
+                 if _lat is None and 0 <= int(self._kurzor) < len(self._chart)
+                 else None)
+        for b in self._belepok:
+            if b.trail_be is None and b.trail_tav is None:
+                continue
+            _mutat = True
+            if _most is not None:
+                _kt = self._kotes_belepohoz(b)
+                for e in (getattr(_kt, "events", None) or []):
+                    _ev = list(e) + [None] * 7
+                    if _ev[0] != "SL_MODIFY" or _ev[6] != "TRAIL":
+                        continue
+                    try:
+                        if pd.Timestamp(_ev[1]) <= _most:
+                            _mutat = False
+                            break
+                    except (TypeError, ValueError):
+                        continue
+            for it in (b.trail_be, b.trail_tav):
+                if it is not None:
+                    it.setVisible(_mutat)
+
+    def _sav_frissit(self) -> None:
+        """A kockázat-/cél-sávok jobb szélének követése a lejátszó kurzorával.
+        Futtatás UTÁN a sáv a kötés zárásán áll, azt nem mozgatjuk tovább."""
+        if self._tengely is None:
+            return
+        for b in self._belepok:
+            if b.kock is None and b.cel is None:
+                continue
+            x1 = self._tengely.hol(int(b.ido.timestamp()))
+            if x1 is None:
+                continue
+            _x2 = self._sav_vege(b, x1)
+            for it in (b.kock, b.cel):
+                if it is not None:
+                    it.vege(_x2)
+
+    # ── Kézi rajz-elemek ─────────────────────────────────────────────────
+    def _rajzok_rajza(self) -> None:
+        """A kézi rajzok (újra)építése.
+
+        ⚠ MINDEN ELEM `removable=True` / jobbklikkel törölhető: rajzolni könnyű,
+        törölni kell tudni, különben a chart egy kattintás után szemetes marad.
+        A ROI `sigRemoveRequested`-je a MODELLBŐL is kiveszi — nem csak a
+        képről —, különben mentéskor visszajönne."""
+        for r in self._rajzok:
+            if r.elem is not None:
+                self._plot.removeItem(r.elem)
+                r.elem = None
+        if self._tengely is None:
+            return
+        for r in self._rajzok:
+            _sz = szin("yellow")
+            if r.fajta == "vizszintes":
+                r.elem = pg.InfiniteLine(
+                    pos=float(r.ar1), angle=0, movable=True,
+                    pen=pg.mkPen(_sz, width=1),
+                    hoverPen=pg.mkPen(_sz, width=3))
+            elif r.fajta == "fuggoleges":
+                x = self._tengely.hol(int(r.ido1.timestamp()))
+                if x is None:
+                    continue
+                r.elem = pg.InfiniteLine(
+                    pos=x, angle=90, movable=True,
+                    pen=pg.mkPen(_sz, width=1),
+                    hoverPen=pg.mkPen(_sz, width=3))
+            else:
+                x1 = self._tengely.hol(int(r.ido1.timestamp()))
+                x2 = self._tengely.hol(int(r.ido2.timestamp()))
+                if x1 is None or x2 is None:
+                    continue
+                r.elem = pg.LineSegmentROI(
+                    [[x1, float(r.ar1)], [x2, float(r.ar2)]],
+                    pen=pg.mkPen(_sz, width=2), removable=True)
+                r.elem.sigRegionChangeFinished.connect(
+                    lambda _x=None, _r=r: self._rajz_mozgott(_r))
+                r.elem.sigRemoveRequested.connect(
+                    lambda _x=None, _r=r: self._rajz_torol(_r))
+            if r.elem is None:
+                continue
+            if r.fajta != "trend":
+                r.elem.sigPositionChanged.connect(
+                    lambda _x=None, _r=r: self._rajz_mozgott(_r))
+                # ⚠ Az `InfiniteLine`-nak nincs jobbklikk-menüje; a törlést a
+                # „Rajz törlése" gomb intézi (lásd `rajz_torol_mind`).
+            r.elem.setZValue(-10)
+            self._plot.addItem(r.elem)
+
+    def _rajz_mozgott(self, r: "Rajz") -> None:
+        """Húzás után VISSZAÍRJUK az időt/árat — a modell a mérvadó, nem a kép.
+        Enélkül a mentés a lerakás pillanatának koordinátáit őrizné meg."""
+        if r.elem is None or self._tengely is None:
+            return
+        if r.fajta == "vizszintes":
+            r.ar1 = float(r.elem.value())
+        elif r.fajta == "fuggoleges":
+            _ido = self._ido_x(float(r.elem.value()))
+            if _ido is not None:
+                r.ido1 = _ido
+        else:
+            try:
+                _p = r.elem.getSceneHandlePositions()
+                _pk = [r.elem.mapSceneToParent(h[1]) for h in _p]
+            except Exception:
+                return
+            if len(_pk) < 2:
+                return
+            _t1 = self._ido_x(_pk[0].x())
+            _t2 = self._ido_x(_pk[1].x())
+            if _t1 is None or _t2 is None:
+                return
+            r.ido1, r.ar1 = _t1, float(_pk[0].y())
+            r.ido2, r.ar2 = _t2, float(_pk[1].y())
+
+    def _rajz_torol(self, r: "Rajz") -> None:
+        if r.elem is not None:
+            self._plot.removeItem(r.elem)
+            r.elem = None
+        if r in self._rajzok:
+            self._rajzok.remove(r)
+        self._allapot.setText(_t("lab.rajz.db", n=len(self._rajzok)))
+
+    def rajz_torol_mind(self) -> None:
+        for r in list(self._rajzok):
+            self._rajz_torol(r)
+        self._fel_rajz = None
 
     def _be_jelolo_rajz(self) -> None:
         if getattr(self, "_be_vonal", None) is not None:
@@ -792,6 +1221,25 @@ class LabAblak(QtWidgets.QMainWindow):
         t = self._ido_x(p.x())
         if t is None:
             return
+        if self._mod in Rajz.FAJTAK:
+            # ⚠ A TRENDVONALHOZ KÉT KATTINTÁS KELL. Az elsőt félkészen
+            # eltesszük, és a mód BEKAPCSOLVA MARAD, amíg a második meg nem jön
+            # — különben a fél vonal ott ragadna a képen befejezhetetlenül.
+            if self._mod == "trend" and self._fel_rajz is None:
+                self._fel_rajz = Rajz("trend", t, float(p.y()))
+                self._allapot.setText(_t("lab.rajz.trend_masodik"))
+                return
+            if self._mod == "trend":
+                self._fel_rajz.ido2 = t
+                self._fel_rajz.ar2 = float(p.y())
+                self._rajzok.append(self._fel_rajz)
+                self._fel_rajz = None
+            else:
+                self._rajzok.append(Rajz(self._mod, t, float(p.y())))
+            self._mod_valt(self._mod)
+            self._rajzok_rajza()
+            self._allapot.setText(_t("lab.rajz.db", n=len(self._rajzok)))
+            return
         if self._mod == "BE":
             self._be_ido = t
         else:
@@ -837,6 +1285,11 @@ class LabAblak(QtWidgets.QMainWindow):
             "balance": 1000.0,
             "use_strategy_signals": False,
             "exec_gates": False,
+            # ⚠ A RAJZOK CSAK A KÉPHEZ TARTOZNAK — a `lab_scenario.futtat()` nem
+            # ismeri és nem is kell ismernie őket (a `MINTA`-n kívüli kulcsokat
+            # figyelmen kívül hagyja). Azért kerülnek MÉGIS a fájlba, mert
+            # anélkül a megrajzolt trendvonalak az ablak bezárásakor elvesznének.
+            "drawings": [r.szotar() for r in self._rajzok if r.kesz()],
         }
 
     def ment(self) -> None:
@@ -852,6 +1305,110 @@ class LabAblak(QtWidgets.QMainWindow):
             self._allapot.setText(f"mentve: {ut}")
         except OSError as ex:
             QtWidgets.QMessageBox.critical(self, "Mentés", str(ex))
+
+    def megnyit(self) -> None:
+        """Mentett forgatókönyv visszaolvasása.
+
+        ⚠ EDDIG CSAK MENTÉS VOLT. A felület kiírta a JSON-t, de visszatölteni
+        nem tudta — így a megrajzolt terv és a vonalak az ablak bezárásakor
+        elvesztek. Egy „mentés visszaolvasás nélkül" funkció félkész: úgy
+        viselkedik, mintha megőrizné a munkát, holott nem."""
+        import json
+        ut, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, _t("lab.forgatokonyv_megnyitasa"), "", "JSON (*.json)")
+        if not ut:
+            return
+        try:
+            fk = json.loads(Path(ut).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as ex:
+            QtWidgets.QMessageBox.critical(self, "Megnyitás", str(ex))
+            return
+        if not isinstance(fk, dict):
+            QtWidgets.QMessageBox.critical(self, "Megnyitás",
+                                           _t("lab.hiba.nem_forgatokonyv"))
+            return
+        self.forgatokonyv_betolt(fk)
+        self._allapot.setText(f"megnyitva: {ut}")
+
+    def forgatokonyv_betolt(self, fk: dict) -> None:
+        """Egy forgatókönyv-SZÓTÁR visszatöltése a felületre.
+
+        ⚠ Külön a fájl-párbeszédtől (`megnyit`), hogy TESZTELHETŐ legyen: a
+        `QFileDialog` nélkül is meghívható, tehát a mentés→betöltés kör
+        ellenőrizhető."""
+        # ── Adat-választók: CSAK ha a config ismeri ─────────────────────
+        _sym = fk.get("symbol")
+        if _sym in self._parok:
+            self._sym.setCurrentText(_sym)
+            self._strat_lista()
+        _st = fk.get("strategy") or NINCS_STRAT
+        if self._strat.findText(_st) >= 0:
+            self._strat.setCurrentText(_st)
+        for _mezo, _k in ((self._tol, "from"), (self._ig, "to")):
+            if fk.get(_k):
+                _mezo.setText(str(fk[_k]))
+        # ── Terv ────────────────────────────────────────────────────────
+        self.torol()
+        self.rajz_torol_mind()
+        for e in (fk.get("entries") or []):
+            try:
+                _b = Belepo(pd.Timestamp(e["time"]), e.get("direction", "BUY"),
+                            e.get("sl"), float(e.get("tp_rr", 2.0)))
+            except (KeyError, ValueError, TypeError):
+                continue
+            self._belepok.append(_b)
+        if fk.get("breakeven_at"):
+            try:
+                self._be_ido = pd.Timestamp(fk["breakeven_at"])
+            except ValueError:
+                pass
+        for _k, _e in self._rr_mezok.items():
+            if _k in (fk.get("rr") or {}):
+                _e.setText(str(fk["rr"][_k]))
+        self._epites.setChecked(bool(fk.get("build")))
+        for d in (fk.get("drawings") or []):
+            r = Rajz.szotarbol(d) if isinstance(d, dict) else None
+            if r is not None:
+                self._rajzok.append(r)
+        # ⚠ A `betolt()` ÚJRAOLVASSA a chartot (más pár/időszak lehet), és a
+        # végén kirakja a tervet és a rajzokat is — ezért nem hívunk külön
+        # `_belepok_rajz`-t: az az idő-tengely nélkül még nem tudna hova rakni.
+        self._valasztott = self._belepok[0] if self._belepok else None
+        self._eredmeny = None
+        # ⚠ ELŐBB a chart, AZTÁN az időzóna-igazítás. A JSON NAIV időt tárol
+        # (ahogy a charton látod), a parquet indexe viszont ZÓNA-TUDATOS
+        # (szerver-idő) — a kettő összehasonlítása `TypeError`. Ugyanaz a
+        # csapda, mint a `lab_chart._vag`-ban; azért itt dől el, mert a chart
+        # zónáját csak a betöltés után ismerjük.
+        self._idok_igazit()      # a MODELL a chart zónájába (a mentés is ezt írja)
+        self.betolt()            # …majd a chart + a teljes újrarajzolás
+        self._idok_igazit()      # …és ha a pár váltásával más lett a zóna
+        self._belepok_rajz()
+        self._rajzok_rajza()
+        self._kurzor_rajz()
+        self._listak_frissit()
+
+    def _ido_zonaba(self, ts):
+        """Egy időpont a CHART időzónájába (naiv → lokalizált, eltérő → váltva)."""
+        if ts is None:
+            return None
+        try:
+            ts = pd.Timestamp(ts)
+        except (ValueError, TypeError):
+            return None
+        tz = getattr(getattr(self._chart, "index", None), "tz", None)
+        if tz is None:
+            return ts.tz_localize(None) if ts.tzinfo is not None else ts
+        return ts.tz_localize(tz) if ts.tzinfo is None else ts.tz_convert(tz)
+
+    def _idok_igazit(self) -> None:
+        """A betöltött terv és rajzok időpontjai a chart zónájába."""
+        for b in self._belepok:
+            b.ido = self._ido_zonaba(b.ido)
+        self._be_ido = self._ido_zonaba(self._be_ido)
+        for r in self._rajzok:
+            r.ido1 = self._ido_zonaba(r.ido1)
+            r.ido2 = self._ido_zonaba(r.ido2)
 
     def torol(self) -> None:
         self._belepok.clear()
@@ -887,7 +1444,9 @@ class LabAblak(QtWidgets.QMainWindow):
             self.futtat()
 
     def _eredmeny_rajz(self) -> None:
-        """A motor kötései + a STOP ÚTJA (BE / trailing)."""
+        """A motor LEZÁRT kötései: nyitó pont + a nyitást a zárással összekötő
+        vonal. A nyitott pozíció Entry/SL/TP vonalait a `_nyitott_rajz` teszi
+        ki, mert azok a lejátszó kurzorától függenek (MT5-konvenció)."""
         for it in self._eredmeny_elemek:
             self._plot.removeItem(it)
         self._eredmeny_elemek.clear()
@@ -910,26 +1469,11 @@ class LabAblak(QtWidgets.QMainWindow):
                         pen=pg.mkPen(szin("green" if _ny else "red"), width=2))
                     self._plot.addItem(_it)
                     self._eredmeny_elemek.append(_it)
-            # ── A STOP ÚTJA ──────────────────────────────────────────────
-            _x, _y = [], []
-            for e in (getattr(t, "events", None) or []):
-                _tip, _ido, _ar, _sl = (list(e) + [None] * 4)[:4]
-                if not _sl:
-                    continue
-                _px = self._tengely.hol(int(pd.Timestamp(_ido).timestamp()))
-                if _px is not None:
-                    _x.append(_px)
-                    _y.append(float(_sl))
-            if _x:
-                if t.close_time is not None:
-                    _vx = self._tengely.hol(int(t.close_time.timestamp()))
-                    if _vx is not None:
-                        _x.append(_vx)
-                        _y.append(_y[-1])
-                _it = pg.PlotDataItem(_x, _y, stepMode="right" if False else None,
-                                      pen=pg.mkPen(szin("cyan"), width=2))
-                self._plot.addItem(_it)
-                self._eredmeny_elemek.append(_it)
+            # ⚠ A NYITOTT pozíció Entry/SL/TP vonalai NEM ITT rajzolódnak.
+            # Azok a LEJÁTSZÓ KURZORÁTÓL függnek (`_nyitott_rajz`): amíg a
+            # pozíció él, ott a három vonal, ahogy MT5-ben; záráskor eltűnnek,
+            # és marad az őket összekötő vonal (fent). Egy statikus, teljes
+            # idővonalra kiterített stop-út mást mutatna, mint a terminál.
             if t.close_time is not None:
                 try:
                     _sszeg.append(t.pnl_usd / t.risk_usd if t.risk_usd else 0.0)
@@ -1174,6 +1718,9 @@ class LabAblak(QtWidgets.QMainWindow):
             self._takaro.setRegion((i + 0.5, len(self._chart) + 5))
         self._ido_cimke.setText(
             self._chart.index[i].strftime("%Y-%m-%d %H:%M"))
+        self._sav_frissit()
+        self._nyitott_rajz()
+        self._trail_lathatosag()
         self._cimke_helyre()
 
     def _cimke_helyre(self) -> None:

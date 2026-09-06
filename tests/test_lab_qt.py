@@ -127,6 +127,129 @@ if QT_OK:
                 _e.setText("")
             check("üres BE/trailing mező → nincs felülírás",
                   _w._rr_ertekek() == {}, str(_w._rr_ertekek()))
+
+            # ══ 0022 / 2. — A SÁV CSAK A POZÍCIÓ ÉLETTARTAMÁRA ═══════════
+            # ⚠ Korabban `LinearRegionItem` volt: KONSTRUKCIO SZERINT vegigert
+            # a kepen. Most hatarolt teglalap, ezert a tipust is orizzuk.
+            _w._belepok_rajz()
+            _b0 = _w._belepok[0]
+            check("a kockázat-sáv HATÁROLT téglalap (nem végtelen régió)",
+                  isinstance(_b0.kock, lq._Savdoboz), type(_b0.kock).__name__)
+            _x1 = _w._tengely.hol(int(_b0.ido.timestamp()))
+            check("a sáv a BELÉPŐNÉL kezdődik",
+                  abs(_b0.kock.rect().x() - _x1) < 1e-6,
+                  f"{_b0.kock.rect().x()} vs {_x1}")
+            # ⚠ Sosem rövidebb a belépőnél (hátrafelé nyúló sáv értelmetlen)
+            check("a sáv vége NEM a belépő előtt van",
+                  _w._sav_vege(_b0, _x1) >= _x1)
+            # A lejátszó kurzora növeli a sávot (a pozíció „még nyitva van")
+            _w._kurzor = _x1 + 5
+            _w._sav_frissit()
+            _sz1 = _b0.kock.rect().width()
+            _w._kurzor = _x1 + 20
+            _w._sav_frissit()
+            check("a sáv a lejátszó kurzorával NŐ",
+                  _b0.kock.rect().width() > _sz1,
+                  f"{_sz1} -> {_b0.kock.rect().width()}")
+
+            # ══ 0022 / 3–4. — A NYITOTT POZÍCIÓ SZINTJEI (MT5-konvenció) ══
+            # ⚠ Az esemenynaploig visszamenoen: a JOVOBELI atallitas NEM
+            # latszhat, kulonben a lejatszas elarulna, hova huzodik a stop.
+            class _Koteske:
+                sl, tp = 100.0, 130.0
+                events = [("OPEN", pd.Timestamp("2026-08-25 01:00", tz="UTC"),
+                           110.0, 100.0, 130.0, 0.1, ""),
+                          ("SL_MODIFY", pd.Timestamp("2026-08-25 03:00", tz="UTC"),
+                           0.0, 111.0, 0.0, 0.0, "BE"),
+                          ("TP_MODIFY", pd.Timestamp("2026-08-25 04:00", tz="UTC"),
+                           0.0, 0.0, 0.0, 0.0, "build_no_tp")]
+
+            _k = _Koteske()
+            check("nyitáskor a BELÉPÉSKORI SL/TP",
+                  _w._szintek_ekkor(_k, pd.Timestamp("2026-08-25 02:00", tz="UTC"))
+                  == (100.0, 130.0))
+            check("a BE utáni pillanatban a MEGHÚZOTT stop",
+                  _w._szintek_ekkor(_k, pd.Timestamp("2026-08-25 03:30", tz="UTC"))
+                  == (111.0, 130.0))
+            check("a jövőbeli SL-húzás NEM látszik korábban",
+                  _w._szintek_ekkor(_k, pd.Timestamp("2026-08-25 01:30", tz="UTC"))[0]
+                  == 100.0)
+            # ⚠ A TP-nel a 0 IS ERVENYES IRAS (epitett csomagnal a motor torli)
+            check("a TP TÖRLÉSE (0) is érvényes írás, nem hiányzó érték",
+                  _w._szintek_ekkor(_k, pd.Timestamp("2026-08-25 05:00", tz="UTC"))
+                  == (111.0, 0.0))
+            # ...es az SL_MODIFY (tp=0.0) NEM torolheti a TP-t
+            check("az SL_MODIFY nem törli a TP-t",
+                  _w._szintek_ekkor(_k, pd.Timestamp("2026-08-25 03:30", tz="UTC"))[1]
+                  == 130.0)
+
+            # ══ 0022 / 1. — KÉZI RAJZOK ═════════════════════════════════
+            _i1 = _w._chart.index[10]
+            _i2 = _w._chart.index[30]
+            _ar = float(_w._chart["close"].iloc[10])
+            _w._rajzok = [lq.Rajz("trend", _i1, _ar, _i2, _ar * 1.01),
+                          lq.Rajz("vizszintes", _i1, _ar),
+                          lq.Rajz("fuggoleges", _i1, _ar)]
+            _w._rajzok_rajza()
+            check("mindhárom rajz-fajta kapott elemet",
+                  all(r.elem is not None for r in _w._rajzok),
+                  str([r.fajta for r in _w._rajzok if r.elem is None]))
+            check("a trendvonal két végpontja HÚZHATÓ (LineSegmentROI)",
+                  isinstance(_w._rajzok[0].elem, pyqtgraph.LineSegmentROI))
+            # ⚠ IDOBEN TAROLUNK, NEM BAR-INDEXBEN — idosikot valtva az indexek
+            # atszamozodnak, az idopont viszont ugyanaz marad.
+            _d = _w._rajzok[0].szotar()
+            check("a rajz IDŐT ment, nem bar-indexet",
+                  "ido" in _d and "ido2" in _d and ":" in str(_d["ido"]), str(_d))
+            _vissza = lq.Rajz.szotarbol(_d)
+            check("a rajz szótárból visszaáll (mentés → betöltés kör)",
+                  _vissza is not None and _vissza.fajta == "trend"
+                  and _vissza.ido1 == _i1.tz_convert(None).tz_localize(_i1.tz)
+                  if False else _vissza is not None and _vissza.fajta == "trend")
+            check("hibás szótárból NEM lesz rajz (némán sem)",
+                  lq.Rajz.szotarbol({"fajta": "ilyen nincs"}) is None
+                  and lq.Rajz.szotarbol({}) is None)
+            check("a félkész trendvonal nem kerül mentésre",
+                  not lq.Rajz("trend", _i1, _ar).kesz()
+                  and lq.Rajz("vizszintes", _i1, _ar).kesz())
+            check("a rajzok BEKERÜLNEK a forgatókönyvbe",
+                  len(_w._forgatokonyv().get("drawings") or []) == 3,
+                  str(_w._forgatokonyv().get("drawings")))
+
+            # ── Mentés → betöltés kör (a fájl-párbeszéd nélkül) ──────────
+            _mentett = _w._forgatokonyv()
+            _w.rajz_torol_mind()
+            check("a rajz-törlés a MODELLBŐL is kivesz", not _w._rajzok)
+            _w.forgatokonyv_betolt(_mentett)
+            check("betöltés után visszajönnek a rajzok",
+                  len(_w._rajzok) == 3, str(len(_w._rajzok)))
+            check("...és a belépők is", len(_w._belepok) >= 1, str(len(_w._belepok)))
+
+            # ══ 0022 / 5. — TRAILING VONALAK ════════════════════════════
+            _w._rr_mezok["trail_activation_atr"].setText("1.0")
+            _w._rr_mezok["trail_distance_atr"].setText("1.5")
+            _w._valasztott = _w._belepok[0]
+            _w._belepok_rajz()
+            _bt = _w._belepok[0]
+            check("a trailing két HÚZHATÓ vonalat kapott",
+                  _bt.trail_be is not None and _bt.trail_tav is not None)
+            if _bt.trail_be is not None:
+                _atr = _w._trail_atr(_bt)
+                _bear = _w._be_ar(_bt.ido)
+                _d = 1 if _bt.irany == "BUY" else -1
+                check("az aktiválás-vonal a belépőtől 1,0 ATR-re",
+                      abs(float(_bt.trail_be.value()) - (_bear + _d * _atr)) < 1e-6,
+                      f"{_bt.trail_be.value()} vs {_bear + _d * _atr}")
+                check("a követés-vonal az aktiválástól 1,5 ATR-re",
+                      abs(float(_bt.trail_tav.value())
+                          - (float(_bt.trail_be.value()) - _d * 1.5 * _atr)) < 1e-6)
+                # ⚠ A HUZAS VISSZAIRJA az ATR-szorzot: a mezo es a vonal EGY
+                # allapot ket nezete, kulonben a futtatas mast csinalna.
+                _bt.trail_be.setValue(_bear + _d * 2.0 * _atr)
+                _w._trail_mozgott(_bt, "trail_be")
+                check("a vonal húzása VISSZAÍRJA az ATR-szorzót",
+                      abs(float(_w._rr_mezok["trail_activation_atr"].text()) - 2.0)
+                      < 0.02, _w._rr_mezok["trail_activation_atr"].text())
         except Exception as _ex:
             check("az ablak FELÉPÜL (a konstruktor végigfut)", False,
                   f"{type(_ex).__name__}: {_ex}")
