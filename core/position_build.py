@@ -51,6 +51,11 @@ def default_config() -> dict:
         # ez a v3.49.0 előtti viselkedés). A felhasználó kérése: „legyen egy
         # célár, pl. 20 R", és „első körben a TP célár legyen, ne az SL célár".
         "target_r":    0.0,
+        # A KÚSZÓ közös stop: a csomag célár felé megtett út hányadát rögzítjük
+        # profitban (0 = nincs kúszás → a stop az átlagáron marad, ez a
+        # `target_r` bevezetésekori viselkedés). CSAK `target_r > 0` mellett él:
+        # cél nélkül nincs mihez mérni a haladást.
+        "target_trail_pct": 0.0,
     }
 
 
@@ -191,6 +196,53 @@ def package_target(avg: float, direction: str, risk_total: float,
     pont = (target_r * risk_total) / (lot_total * pv1_point)
     tav = pont * point_size
     return avg + (tav if direction == "BUY" else -tav)
+
+
+def package_trail_stop(avg: float, direction: str, price_now: float,
+                      target: float, trail_pct: float,
+                      current_sl: float = 0.0) -> float:
+    """A csomag KÚSZÓ közös stopja — vagy `0.0`, ha nincs mit mozgatni.
+
+    A felhasználó megfogalmazása: *„az SL húzás úgy történjen, ahogy a dinamikus
+    csúszó SL működik — azaz úgy szűkíti az SL-t pozitívba, ahogy kezdi elérni a
+    célárat."* Tehát a stop nem fix távolságot követ (azt a `trail_distance_atr`
+    csinálja), hanem a CÉLÁR FELÉ MEGTETT ÚT arányában kúszik:
+
+        haladás = (mostani ár − átlagár) / (célár − átlagár)     [0…1-re vágva]
+        stop    = átlagár ± haladás · trail_pct · (célár − átlagár)
+
+    `trail_pct = 0.5` mellett a cél feléig érve a stop a cél-táv negyedénél áll
+    profitban. `trail_pct = 1.0` mellett a stop az árral együtt ér a célba — de
+    odáig a TP úgyis elsül, tehát a gyakorlati tartomány 0 < pct ≤ 1.
+
+    ⚠ CSAK ELŐRE. `current_sl` megadásakor a rosszabb (visszafelé mozgó) stopot
+    `0.0`-val utasítjuk el. Enélkül egy visszahúzódó ár LAZÍTANÁ a stopot —
+    pontosan az ellenkezője annak, amit egy csúszó stop csinál. Ugyanezért nem
+    ütközik az ATR-trailinggel sem: mindkettő csak szorít, tehát a szorosabb nyer.
+
+    ⚠ A HALADÁS 1-re VÁGVA. A célt túllépő ár (rés/csúszás) enélkül a célár FÖLÉ
+    tenné a stopot, ahol a bróker sem fogadná el.
+
+    ⚠ A stop-táv broker-minimumát NEM ez a függvény ismeri (nincs `symbol_info`
+    függése) — azt a hívó vágja, mint a `package_stop`-nál."""
+    try:
+        avg = float(avg); price_now = float(price_now); target = float(target)
+        trail_pct = float(trail_pct); current_sl = float(current_sl or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+    if not (avg > 0 and price_now > 0 and target > 0 and trail_pct > 0):
+        return 0.0
+    tav = (target - avg) if direction == "BUY" else (avg - target)
+    elore = (price_now - avg) if direction == "BUY" else (avg - price_now)
+    if tav <= 0 or elore <= 0:
+        return 0.0                      # rossz oldalon álló cél / még nincs haladás
+    halad = min(1.0, elore / tav)
+    zar = halad * trail_pct * tav
+    uj = avg + zar if direction == "BUY" else avg - zar
+    if current_sl:
+        if (uj <= current_sl) if direction == "BUY" else (uj >= current_sl):
+            return 0.0                  # nem szorít → nem mozgatunk
+    return uj
 
 
 def package_stop(avg: float, direction: str, price_now: float,

@@ -303,12 +303,14 @@ class BacktestDialog:
         rstep = _num(self._build_rstep_var.get())
         rshrink = _num(self._build_rshrink_var.get())
         _tr = _num(self._build_target_var.get())
+        _tt = _num(self._build_ttrail_var.get())
         return {"mode": mode, "size_factor": sf if sf and sf > 0 else 0.7,
                 "trigger": trig,
                 "r_step": rstep if rstep and rstep > 0 else 1.0,
                 "r_shrink": rshrink if rshrink and 0 < rshrink < 1 else 0.5,
                 # A csomag celara R-ben; 0 = nincs cel (ERVENYES ertek).
-                "target_r": _tr if _tr and _tr > 0 else 0.0}
+                "target_r": _tr if _tr and _tr > 0 else 0.0,
+                "target_trail_pct": min(1.0, max(0.0, _tt)) if _tt else 0.0}
 
     # ── UI ──────────────────────────────────────────────────────────────────
     def _build(self):
@@ -660,6 +662,17 @@ class BacktestDialog:
                  relief="flat", insertbackground=FG_WHITE).pack(side="left",
                                                                 padx=(2, 0))
         _attach_tooltip(self._build_target_frame, _t("idlg.build_target_tip"))
+        # Kúszó csomag-stop (0…1) — a célár felé megtett út zárolt hányada.
+        self._build_ttrail_frame = tk.Frame(brow, bg=BG)
+        tk.Label(self._build_ttrail_frame, text=_t("bt.target_trail"), bg=BG,
+                 fg=FG_GRAY, font=self._sf).pack(side="left")
+        self._build_ttrail_var = tk.StringVar(
+            value=str(self._init_build.get("target_trail_pct", 0.0)))
+        tk.Entry(self._build_ttrail_frame, textvariable=self._build_ttrail_var,
+                 width=5, bg=BG_HEADER, fg=FG_WHITE, font=self._sf,
+                 relief="flat", insertbackground=FG_WHITE).pack(side="left",
+                                                                padx=(2, 0))
+        _attach_tooltip(self._build_ttrail_frame, _t("idlg.build_ttrail_tip"))
 
         self._update_rr_visibility()
 
@@ -914,7 +927,7 @@ class BacktestDialog:
         # Építés-vezérlők (sorrend-tartó)
         for f in (self._build_faktor_frame, self._build_trig_frame,
                   self._build_rstep_frame, self._build_rshrink_frame,
-                  self._build_target_frame):
+                  self._build_target_frame, self._build_ttrail_frame):
             f.pack_forget()
         build_on = self._build_mode_name.get() != _bst.NAME[_bst.MODE_OFF]
         trig = {v: k for k, v in _pb.TRIGGER_NAME.items()}.get(
@@ -927,6 +940,14 @@ class BacktestDialog:
             if trig == _pb.TRIGGER_R_CONVERGE:
                 self._build_rshrink_frame.pack(side="left", padx=(8, 0))
             self._build_target_frame.pack(side="left", padx=(10, 0))
+            # A kúszó stop CSAK célárral értelmes (lásd az instrumentum-ablakot).
+            try:
+                _tr_on = float((self._build_target_var.get() or "0")
+                               .replace(",", ".")) > 0
+            except ValueError:
+                _tr_on = False
+            if _tr_on:
+                self._build_ttrail_frame.pack(side="left", padx=(8, 0))
         self._refit_width()
 
     def _refit_width(self):

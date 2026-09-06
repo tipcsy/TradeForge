@@ -489,6 +489,9 @@ def _check_build_target_idle(cfg: dict, out: list) -> None:
     célt, majd később kikapcsolja az építést, annak a fájlban ott marad egy
     szám, ami SEMMIT nem csinál: a cél CSAK ráépítéskor kerül a lábakra.
 
+    Ugyanez a kúszó csomag-stopra (`target_trail_pct`): az a CÉLÁR felé
+    megtett utat méri, tehát cél nélkül szintén némán tétlen.
+
     Ez ugyanaz a hibaosztály, mint a `optimizer_skip` bennragadt terve: a
     config csak az ELTÉRÉST rögzíti, tehát egy kész funkció NÉMÁN tétlen
     maradhat, és a felület mégis mutatja a beállított értéket."""
@@ -498,11 +501,21 @@ def _check_build_target_idle(cfg: dict, out: list) -> None:
         if not isinstance(sym, str):
             continue
         bc = _bs.get_config(sym) or {}
-        if float(bc.get("target_r", 0.0) or 0.0) > 0 and bc.get("mode") == _pb.MODE_OFF:
+        _t_r = float(bc.get("target_r", 0.0) or 0.0)
+        _pct = float(bc.get("target_trail_pct", 0.0) or 0.0)
+        if _t_r > 0 and bc.get("mode") == _pb.MODE_OFF:
             out.append(_finding(
                 INFO, "build_target_idle",
                 _t("cfgchk.build_target_idle", symbol=sym,
                    target_r=bc.get("target_r")), symbol=sym))
+        # ⚠ A kúszó stop a CÉLÁR felé megtett utat méri — cél nélkül nincs
+        # mihez mérnie, tehát némán tétlen. A felület a mezőt el is rejti
+        # ilyenkor, de a fájlban ott maradhat egy korábban beírt érték.
+        if _pct > 0 and _t_r <= 0:
+            out.append(_finding(
+                INFO, "build_trail_without_target",
+                _t("cfgchk.build_trail_without_target", symbol=sym,
+                   pct=_pct), symbol=sym))
 
 
 _CHECKS = (

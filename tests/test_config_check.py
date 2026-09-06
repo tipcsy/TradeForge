@@ -529,6 +529,17 @@ try:
     _bs_t.get_config = lambda s: {**_pb_t.default_config(), "mode": _pb_t.MODE_OFF}
     check_("nincs cel + kikapcsolt epites -> nincs lelet",
            not [x for x in cc.check(_cfg_bt) if x["code"] == "build_target_idle"])
+
+    # ⚠ Kuszo stop CELAR NELKUL: a kuszas a cel fele megtett utat meri, tehat
+    # cel nelkul nema es tetlen.
+    _bs_t.get_config = lambda s: {**_pb_t.default_config(), "mode": _pb_t.MODE_AUTO,
+                                  "target_trail_pct": 0.5}
+    _f2 = [x for x in cc.check(_cfg_bt) if x["code"] == "build_trail_without_target"]
+    check_("kuszo stop CEL NELKUL -> lelet", len(_f2) == 1)
+    _bs_t.get_config = lambda s: {**_pb_t.default_config(), "mode": _pb_t.MODE_AUTO,
+                                  "target_r": 20.0, "target_trail_pct": 0.5}
+    check_("kuszo stop CELLAL -> nincs lelet",
+           not [x for x in cc.check(_cfg_bt) if x["code"] == "build_trail_without_target"])
 finally:
     _bs_t.get_config = _bs_orig
 

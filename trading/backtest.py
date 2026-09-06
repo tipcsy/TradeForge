@@ -2037,6 +2037,27 @@ def run_pair(
                                                  "build_pkg_tp" if trade.pkg_tp > 0
                                                  else "build_no_tp"))
 
+            # ── A csomag KÚSZÓ közös stopja (`target_trail_pct`, alap 0) ──────
+            # A célár felé megtett út arányában szorítunk. A KILÉPÉSI oldal
+            # kedvező szélsőértékét nézzük (BUY→bid csúcs), mint az ATR-trailing.
+            # ⚠ CSAK SZORÍT: a `package_trail_stop` a mostani stophoz méri magát,
+            # tehát az `_manage_position` BE/trailingjével nem verseng — a
+            # szorosabb nyer, és a stop sosem lazul.
+            if (not closed and _build_cfg is not None and trade.built
+                    and trade.pkg_tp > 0):
+                _pt_uj = _posbuild.package_trail_stop(
+                    _posbuild.average_price(trade.legs), trade.direction,
+                    bid_hi if trade.direction == "BUY" else ask_lo,
+                    trade.pkg_tp,
+                    float(_build_cfg.get("target_trail_pct", 0.0) or 0.0),
+                    current_sl=trade.sl)
+                if _pt_uj > 0:
+                    trade.sl = round(_pt_uj, 6)
+                    if record_events:
+                        trade.events.append(("SL_MODIFY", m1_time, 0.0,
+                                             round(trade.sl, 6), 0.0, 0.0,
+                                             "pkg_trail"))
+
             if closed:
                 # A részleges zárás(ok)ból már realizált P&L hozzáadása a runner
                 # (maradék lot) záró P&L-jéhez → teljes trade P&L.
@@ -2829,6 +2850,18 @@ def run_portfolio_backtest(
                             float(_bcfg.get("target_r", 0.0) or 0.0),
                             trade.lot, trade.pv1_point, point_size), 6)
                         trade.build_ref = _bc_cl
+
+            # A csomag kúszó közös stopja (mint a run_pair-ben / élesben)
+            if (not closed and _bcfg is not None and trade.built
+                    and trade.pkg_tp > 0):
+                _pt_uj = _pb.package_trail_stop(
+                    _pb.average_price(trade.legs), trade.direction,
+                    float(row["high"]) if trade.direction == "BUY" else _lo_x,
+                    trade.pkg_tp,
+                    float(_bcfg.get("target_trail_pct", 0.0) or 0.0),
+                    current_sl=trade.sl)
+                if _pt_uj > 0:
+                    trade.sl = round(_pt_uj, 6)
 
             if closed:
                 trade.pnl_usd += trade.booked_pnl   # a részleges zárás(ok) realizált P&L-je

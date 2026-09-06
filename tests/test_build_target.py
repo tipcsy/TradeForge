@@ -89,6 +89,56 @@ check("EPITETT csomag cel NELKUL -> 0.0 (TP nelkul fut, mint eddig)",
 check("EPITETT csomag CELLAL -> a KOZOS celar (nem az elso lab TP-je)",
       _tr([(1.1, 0.1), (1.11, 0.07)], pkg_tp=1.5).tp_eff == 1.5)
 
+# ══ 3b. package_trail_stop — a KUSZO kozos stop (0001 / 2. kor) ════════════
+# A felhasznalo megfogalmazasa: „ugy szukiti az SL-t pozitivba, ahogy kezdi
+# elerni a celarat". Alap: atlagar 1,10 · cel 1,14 (span 0,04) · trail 0,5.
+_A, _C = 1.10, 1.14
+ptr = pb.package_trail_stop
+
+check("meg nincs halados -> nincs mozgatas (0.0)", ptr(_A, "BUY", 1.09, _C, 0.5) == 0.0)
+check("pont az atlagaron -> nincs mozgatas", ptr(_A, "BUY", _A, _C, 0.5) == 0.0)
+check("a cel negyedenel -> a cel-tav 1/8-a profitban",
+      abs(ptr(_A, "BUY", 1.11, _C, 0.5) - 1.105) < 1e-9,
+      f"{ptr(_A, 'BUY', 1.11, _C, 0.5):.5f}")
+check("a cel felenel -> a cel-tav negyedenel",
+      abs(ptr(_A, "BUY", 1.12, _C, 0.5) - 1.11) < 1e-9)
+check("a celnal -> a cel-tav felenel (trail_pct = 0,5)",
+      abs(ptr(_A, "BUY", _C, _C, 0.5) - 1.12) < 1e-9)
+# ⚠ A CELT TULLEPO ar (res/csuszas) nem viheti a stopot a cel FOLE
+check("a celt tullepve is legfeljebb a trail_pct-ig (1-re vagott halados)",
+      abs(ptr(_A, "BUY", 1.20, _C, 0.5) - 1.12) < 1e-9,
+      f"{ptr(_A, 'BUY', 1.20, _C, 0.5):.5f}")
+check("trail_pct = 1,0 -> a stop az arral egyutt er a celba",
+      abs(ptr(_A, "BUY", _C, _C, 1.0) - _C) < 1e-9)
+
+# ⚠ CSAK ELORE: visszahuzodo arnal NEM lazitunk
+check("szorosabb stop -> mozgatunk", ptr(_A, "BUY", 1.12, _C, 0.5, current_sl=1.105) > 0)
+check("azonos stop -> nem mozgatunk", ptr(_A, "BUY", 1.12, _C, 0.5, current_sl=1.11) == 0.0)
+check("LAZABB stop -> nem mozgatunk (a csuszo stop nem huzodik vissza)",
+      ptr(_A, "BUY", 1.11, _C, 0.5, current_sl=1.11) == 0.0)
+
+# SELL tukorkep
+check("SELL: a cel felenel a cel-tav negyedenel",
+      abs(ptr(1.10, "SELL", 1.08, 1.06, 0.5) - 1.09) < 1e-9)
+check("SELL: csak elore (kisebb stop a jobb)",
+      ptr(1.10, "SELL", 1.08, 1.06, 0.5, current_sl=1.09) == 0.0)
+
+for nev, args in (("nincs kuszas (pct=0)", (_A, "BUY", 1.12, _C, 0.0)),
+                  ("nincs cel",            (_A, "BUY", 1.12, 0.0, 0.5)),
+                  ("rossz oldali cel",     (_A, "BUY", 1.12, 1.05, 0.5)),
+                  ("szemet bemenet",       (_A, "BUY", "x", _C, 0.5))):
+    check(f"{nev} -> 0.0", ptr(*args) == 0.0)
+
+check("default_config: target_trail_pct = 0 (nincs kuszas)",
+      pb.default_config()["target_trail_pct"] == 0.0)
+check("build_state _KEYS: a target_trail_pct mentheto",
+      "target_trail_pct" in bst._KEYS)
+check("build_state: 1 folott 1,0-ra vagva",
+      bst._norm({"mode": "auto", "target_trail_pct": 5}).get("target_trail_pct") == 1.0)
+check("build_state: negativ -> 0,0",
+      bst._norm({"mode": "auto", "target_trail_pct": -1}).get("target_trail_pct") == 0.0)
+
+
 # ══ 4. AZ EL: a cel MINDEN lab TP-jere ugyanugy kerul ══════════════════════
 MAGIC = 100
 SYM = "EURUSD"
@@ -206,6 +256,69 @@ check("CELLAL: a TP a KOZOS celar (atlagar + ossz-kockazat)",
 h = epits(20.0, {1: 20.0})          # a 999-nek nincs bejegyzese
 check("hianyzo belepo-kockazat -> TP nelkul fut (nem alultervezett cel)",
       len(h) == 2 and all(c[2] == 0.0 for c in h), str(h))
+
+# ══ 5. AZ EL: a KUSZO kozos stop (`package_trail`) ═════════════════════════
+class TickPx:
+    def __init__(self, bid, ask):
+        self.bid, self.ask = bid, ask
+
+
+def kuszas(target_r, pct, ar, sl_most, riskek=None, labak=2):
+    """Egy `package_trail` hivas -> a `modify_sl` hivasok [(ticket, sl)]."""
+    riskek = riskek if riskek is not None else {1: 20.0, 999: 10.0}
+    pos = [P(1, 1.1000, 0.10, sl_most), P(999, 1.1051, 0.07, sl_most)][:labak]
+    lt.mt5 = FakeMT5(pos, pos)
+    lt._magic_to_strategy.clear()
+    lt._magic_to_strategy[MAGIC] = "A"
+    lt.get_strategy_by_name = lambda n: Strat()
+    lt.adopted.strategy_of = lambda t: None
+    lt.adopted.tickets_for = lambda n: set()
+    lt.position_meta.risk_of = lambda t: riskek.get(t)
+    lt._bstate = type("B", (), {"get_config": staticmethod(
+        lambda s: {**pb.default_config(), "target_r": target_r,
+                   "target_trail_pct": pct})})()
+    hiv = []
+    lt.modify_sl = lambda t, sl: (hiv.append((t, round(sl, 5))) or True)
+    lt.package_trail(SYM, "A", {"point_size": PS, "pv1_point": PV1},
+                     TickPx(ar, ar + PS), Info())
+    return hiv
+
+
+_orig_msl = lt.modify_sl
+
+# A csomag: 0,10@1,1000 + 0,07@1,1051 -> atlagar ~1,1021, ossz-kockazat 30,
+# ossz-lot 0,17 -> a 20 R-es cel ~1,1374 (a 4b pont mar leellenorizte).
+_avg2 = pb.average_price([(1.1000, 0.10), (1.1051, 0.07)])
+_cel2 = pb.package_target(_avg2, "BUY", 30.0, 20.0, 0.17, PV1, PS)
+
+h = kuszas(20.0, 0.0, 1.12, _avg2)
+check("KUSZAS KI (pct=0): nincs SL-modositas", h == [], str(h))
+h = kuszas(0.0, 0.5, 1.12, _avg2)
+check("nincs CELAR: nincs kuszas (nincs mihez merni)", h == [], str(h))
+h = kuszas(20.0, 0.5, _avg2 - 0.001, _avg2)
+check("az ar meg az atlagar ALATT: nincs kuszas", h == [], str(h))
+
+h = kuszas(20.0, 0.5, 1.12, _avg2)
+_var2 = pb.package_trail_stop(_avg2, "BUY", 1.12, _cel2, 0.5, current_sl=_avg2)
+check("KUSZAS: MINDKET lab UGYANAZT a stopot kapja",
+      len(h) == 2 and h[0][1] == h[1][1], str(h))
+check("KUSZAS: a stop a szamolt kuszo ertek",
+      h and abs(h[0][1] - round(_var2, 5)) < 1e-5, f"{h[0][1] if h else '-'} vs {_var2:.5f}")
+check("KUSZAS: a stop az atlagar FOLOTT (profitban)", h and h[0][1] > _avg2)
+
+# ⚠ Ha a mostani stop mar szorosabb, NEM lazitunk vissza.
+h = kuszas(20.0, 0.5, 1.12, _var2 + 0.002)
+check("mar szorosabb stop -> NEM lazitunk vissza", h == [], str(h))
+
+# ⚠ Hianyzo belepo-kockazat -> nincs kuszas (mint a celarnal)
+h = kuszas(20.0, 0.5, 1.12, _avg2, riskek={1: 20.0})
+check("hianyzo belepo-kockazat -> nincs kuszas", h == [], str(h))
+
+# ⚠ EGYLEGES pozicio: a kuszas NEM nyul hozza (ott a BE/trailing a gazda)
+h = kuszas(20.0, 0.5, 1.12, _avg2, labak=1)
+check("egyleges pozicio -> a csomag-kuszas nem nyul hozza", h == [], str(h))
+
+lt.modify_sl = _orig_msl
 
 (lt.mt5, lt.open_position, lt.mt5_connector.modify_position_sltp,
  lt.get_strategy_by_name, lt.adopted.strategy_of, lt.adopted.tickets_for,

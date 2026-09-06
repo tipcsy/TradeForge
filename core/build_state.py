@@ -27,7 +27,7 @@ _lock = threading.Lock()
 _state: dict[str, dict] = {}
 
 _KEYS = ("mode", "size_factor", "trigger", "r_step", "r_shrink",
-         "target_r")
+         "target_r", "target_trail_pct")
 
 
 def _norm(v) -> dict:
@@ -48,6 +48,11 @@ def _norm(v) -> dict:
         # a cél nélküli futás.
         if isinstance(v.get("target_r"), (int, float)):
             d["target_r"] = max(0.0, float(v["target_r"]))
+        # A kúszó stop HÁNYAD (0…1). Az 1 fölötti érték a stopot a CÉLÁR FÖLÉ
+        # tenné, a negatív a rossz oldalra — mindkettőt a tartományra vágjuk,
+        # nem dobjuk el: a mező visszaírja a ténylegesen hatót.
+        if isinstance(v.get("target_trail_pct"), (int, float)):
+            d["target_trail_pct"] = min(1.0, max(0.0, float(v["target_trail_pct"])))
     else:
         d["mode"] = MODE_OFF
     return d

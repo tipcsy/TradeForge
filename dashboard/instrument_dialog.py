@@ -932,6 +932,19 @@ class InstrumentParamsDialog:
         _te.bind("<FocusOut>", self._on_build_target_save)
         _te.bind("<Return>",   self._on_build_target_save)
         _attach_tooltip(self._build_target_frame, _t("idlg.build_target_tip"))
+        # Kúszó csomag-stop — csak ha VAN célár (cél nélkül nincs mihez mérni).
+        self._build_ttrail_frame = tk.Frame(brow, bg=BG)
+        tk.Label(self._build_ttrail_frame, text=_t("bt.target_trail"), bg=BG,
+                 fg=FG_GRAY, font=self._sf).pack(side="left")
+        self._build_ttrail_var = tk.StringVar(
+            value=str(_bc0.get("target_trail_pct", 0.0)))
+        _tte = tk.Entry(self._build_ttrail_frame, textvariable=self._build_ttrail_var,
+                        width=5, bg=BG_HEADER, fg=FG_WHITE, font=self._sf,
+                        relief="flat", insertbackground=FG_WHITE)
+        _tte.pack(side="left", padx=(2, 0))
+        _tte.bind("<FocusOut>", self._on_build_ttrail_save)
+        _tte.bind("<Return>",   self._on_build_ttrail_save)
+        _attach_tooltip(self._build_ttrail_frame, _t("idlg.build_ttrail_tip"))
 
         self._update_rr_visibility()
 
@@ -1547,7 +1560,10 @@ class InstrumentParamsDialog:
                 # mast mutatna, mint amit lemer — pontosan az a hibaosztaly,
                 # ami miatt a config-koherencia-ellenorzo egyaltalan letezik.
                 # `lo=None`: a 0 ERVENYES ertek (nincs cel), nem hibas bemenet.
-                "target_r": max(0.0, _f(self._build_target_var, 0.0))}
+                "target_r": max(0.0, _f(self._build_target_var, 0.0)),
+                # A kúszó stop is a feltáró configba: enélkül a backteszt cél
+                # felé kúszó stop NÉLKÜL futna, miközben az él kúsztatna.
+                "target_trail_pct": min(1.0, max(0.0, _f(self._build_ttrail_var, 0.0)))}
 
     def _export_trades(self, rows):
         """A MEGJELENÍTETT (szűrt) kötések CSV-be — a magyar Excel formátumában.
@@ -3853,6 +3869,25 @@ class InstrumentParamsDialog:
                 str(self._bst.get_config(self.symbol).get("target_r", 0.0)))
             return
         self._bst.set_config(self.symbol, target_r=v)
+        self._update_rr_visibility()   # a kúszó mező a céltól függ
+
+    def _on_build_ttrail_save(self, _event=None):
+        """A kúszó csomag-stop hányada (0…1; 0 = nincs kúszás).
+
+        ⚠ A TARTOMÁNYRA VÁGUNK, és VISSZAÍRJUK: 1 fölött a stop a célár fölé
+        kerülne, negatívnál a rossz oldalra. A mező sosem mutathat mást, mint
+        amivel a motor dolgozik."""
+        try:
+            v = float(self._build_ttrail_var.get().strip().replace(",", "."))
+        except ValueError:
+            v = None
+        if v is None:
+            self._build_ttrail_var.set(
+                str(self._bst.get_config(self.symbol).get("target_trail_pct", 0.0)))
+            return
+        v = min(1.0, max(0.0, v))
+        self._bst.set_config(self.symbol, target_trail_pct=v)
+        self._build_ttrail_var.set(str(v))
 
     def _on_build_rshrink_save(self, _event=None):
         try:
@@ -3894,7 +3929,7 @@ class InstrumentParamsDialog:
         # ── Építés-vezérlők (sorrend-tartó: mind elrejt, majd a látókat sorban pack) ──
         for f in (self._build_faktor_frame, self._build_trig_frame,
                   self._build_rstep_frame, self._build_rshrink_frame,
-                  self._build_target_frame):
+                  self._build_target_frame, self._build_ttrail_frame):
             f.pack_forget()
         build_on = self._build_mode_name.get() != self._bst.NAME[self._bst.MODE_OFF]
         trig = {v: k for k, v in self._pb.TRIGGER_NAME.items()}.get(
@@ -3907,6 +3942,16 @@ class InstrumentParamsDialog:
             if trig == self._pb.TRIGGER_R_CONVERGE:
                 self._build_rshrink_frame.pack(side="left", padx=(8, 0))
             self._build_target_frame.pack(side="left", padx=(10, 0))
+            # A kúszó stop CSAK célárral értelmes — cél nélkül nincs mihez mérni
+            # a haladást, tehát a mező sem jelenhet meg (különben beállítható
+            # lenne egy néma, hatástalan érték).
+            try:
+                _tr_on = float((self._build_target_var.get() or "0")
+                               .replace(",", ".")) > 0
+            except ValueError:
+                _tr_on = False
+            if _tr_on:
+                self._build_ttrail_frame.pack(side="left", padx=(8, 0))
         self._refit_width()
         self._rr_summary_changed()
 

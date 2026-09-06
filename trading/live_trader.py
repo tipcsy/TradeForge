@@ -2152,6 +2152,19 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
     # STRATÉGIA-hatókörű óra-kapu: a stratégia saját `{symbol}_hours.json`-ja (ha
     # van), különben a régi config.json szimbólum-szintű trade_hours (legacy).
     _sn = state.strategy.name if state.strategy else None
+
+    # ── A CSOMAG KÚSZÓ KÖZÖS STOPJA (`target_trail_pct`, alap 0 = nincs) ────
+    # ⚠ AZ ÓRA-KAPU ELŐTT, tehát a no-trade (szürke) órákban IS fut — ugyanaz az
+    # elv, mint a BE/trailingnél: új belépőt nem nyitunk, de a MÁR NYITOTT
+    # csomagot tovább kezeljük. Egy szünetre befagyott csomag-stop pont a
+    # nyereséget adná vissza, amit a kúszás védeni hivatott.
+    try:
+        with MT5_LOCK:
+            _si_trail = mt5.symbol_info(symbol)
+        package_trail(symbol, _sn, pair_cfg, _tick, _si_trail)
+    except Exception:
+        log.debug("%s — csomag-stop kúsztatás kimaradt", symbol, exc_info=True)
+
     trade_hours = resolve_trade_hours(symbol, _sn, pair_cfg.get("trade_hours"))
     if trade_hours is not None:
         _allowed = {int(h) for h in trade_hours}
@@ -3290,6 +3303,92 @@ def _resolve_build_strategy(symbol: str, strategy_name: "str | None") -> "str | 
                 "csomagjára (%d épít éppen). Add meg a stratégiát.",
                 symbol, len(keys))
     return None
+
+
+def package_trail(symbol: str, strategy_name: "str | None", pair_cfg: dict,
+                  tick, sym_info) -> bool:
+    """A CSOMAG közös stopjának KÚSZTATÁSA a célár felé. True = mozgattunk.
+
+    A felhasználó kérése (0001, 2. kör): *„az SL húzás úgy szűkítsen pozitívba,
+    ahogy kezdi elérni a célárat."* A `target_r` cél nélkül ennek nincs értelme
+    (nincs mihez mérni a haladást), ezért a kettő EGYÜTT kapcsol.
+
+    ⚠ MINDEN LÁB UGYANAZT a stopot kapja — ugyanaz az elv, mint a célárnál: a
+    csomag EGYBEN fut, tehát nem szakadhat szét azon, hogy az egyik láb stopja
+    hamarabb sül el.
+
+    ⚠ CSAK ÉPÍTETT (≥2 lábú) csomagra. Egyleges pozíciónál a kockázatcsökkentés
+    BE/trailingje a gazda (`_apply_be_and_trailing`); két gazda egy stopon
+    egymást írná felül.
+
+    ⚠ Nem ütközik az ATR-trailinggel: MINDKETTŐ csak szorít (a `package_trail_stop`
+    a `current_sl`-hez méri magát, az ATR-ág a `new_sl > pos.sl`-hez), tehát a
+    szorosabb nyer, és a stop sosem lazul."""
+    try:
+        _bc = _bstate.get_config(symbol) or {}
+        _t_r = float(_bc.get("target_r", 0.0) or 0.0)
+        _pct = float(_bc.get("target_trail_pct", 0.0) or 0.0)
+        if not (_t_r > 0 and _pct > 0):
+            return False
+        positions = strategy_positions(symbol, strategy_name)
+        if len(positions) < 2:
+            return False                      # nincs épített csomag
+        direction = "BUY" if positions[0].type == mt5.ORDER_TYPE_BUY else "SELL"
+        # ⚠ Az össz-kockázat a BELÉPÉSKORI, és ha BÁRMELYIK láb bejegyzése
+        # hiányzik, nincs kúszás — ugyanaz a szabály, mint a célárnál. Fél
+        # adatból számolt stop rosszabb, mint a nem mozdított stop.
+        _riskek = [position_meta.risk_of(p.ticket) for p in positions]
+        if any(r is None or float(r) <= 0 for r in _riskek):
+            return False
+        avg = _position_build.average_price(
+            [(p.price_open, p.volume) for p in positions])
+        _cel = _position_build.package_target(
+            avg, direction, sum(float(r) for r in _riskek), _t_r,
+            sum(float(p.volume or 0.0) for p in positions),
+            float(pair_cfg.get("pv1_point", 0.0) or 0.0),
+            float(pair_cfg.get("point_size", 0.0) or 0.0))
+        if _cel <= 0:
+            return False
+        # A KILÉPÉSI oldal ára (BUY→bid, SELL→ask): a stop ezen a soron sül el.
+        _ar = (tick.bid if direction == "BUY" else tick.ask) if tick else 0.0
+        # A csomag mostani közös stopja: a legkonzervatívabb láb-stop.
+        _sls = [float(p.sl) for p in positions if p.sl]
+        _most = (min(_sls) if direction == "BUY" else max(_sls)) if _sls else 0.0
+        _uj = _position_build.package_trail_stop(avg, direction, _ar, _cel,
+                                                 _pct, current_sl=_most)
+        if _uj <= 0:
+            return False
+        # ⚠ A BRÓKER MINIMUM STOP-TÁVOLSÁGA. A cél közelében a kúszó stop az
+        # árhoz tapadna, és a módosítást `10016 Invalid stops`-szal utasítanák
+        # el — NÉMÁN, mert a hívó csak False-t látna. Inkább a legszorosabb
+        # ENGEDÉLYEZETT stopot adjuk, és ha az rosszabb a mostaninál, nem
+        # mozdulunk.
+        _gap = order_exec.min_stop_price(sym_info)
+        _pt = (getattr(sym_info, "point", 0.0) or 0.0)
+        if _gap > 0 and _ar > 0:
+            _cap = (_ar - _gap - _pt) if direction == "BUY" else (_ar + _gap + _pt)
+            _uj = min(_uj, _cap) if direction == "BUY" else max(_uj, _cap)
+            if _most and ((_uj <= _most) if direction == "BUY" else (_uj >= _most)):
+                return False
+        _uj = order_exec.normalize_price(_uj, sym_info)
+        _digits = int(getattr(sym_info, "digits", 5) or 5)
+        _ok = [p.ticket for p in positions if modify_sl(p.ticket, _uj)]
+        if not _ok:
+            return False
+        log.info("↗ %s — csomag-stop kúszás → %.*f (átlagár %.*f, cél %.*f, "
+                 "%.0f%% zárolva, %d láb)", symbol, _digits, _uj, _digits, avg,
+                 _digits, _cel, _pct * 100, len(_ok))
+        if len(_ok) != len(positions):
+            # ⚠ RÉSZLEGES SIKER: a csomag SZÉTHASADT — az egyik láb a régi
+            # stoppal fut. Ez pont az a helyzet, amit a közös stop elkerülni
+            # hivatott, tehát hangosan szól.
+            log.warning("↗ %s — a csomag-stop csak %d/%d lábra állt be; a "
+                        "többi a KORÁBBI stoppal fut — ELLENŐRIZD KÉZZEL!",
+                        symbol, len(_ok), len(positions))
+        return True
+    except Exception:
+        log.exception("↗ %s — a csomag-stop kúsztatása HIBÁRA futott", symbol)
+        return False
 
 
 def manual_build(symbol: str, strategy_name: "str | None" = None) -> bool:
