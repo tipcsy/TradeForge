@@ -2024,7 +2024,11 @@ class PositionRow:
         dir_s   = 1 if t == "BUY" else -1   # a profit iránya
 
         sl, tp = pos["sl"], pos["tp"]
-        orig = pstate.get("original_sl", sl) if pstate else sl
+        # ⚠ KÖZÖS olvasó: a felület UGYANAZT az 1 R-t mutassa, amivel a motor
+        # dolgozik. (Az `original_sl` mostantól `None` is lehet = nem tudható; a
+        # `.get(kulcs, sl)` alak ilyenkor `None`-t adna vissza ÁRKÉNT.)
+        from core import pstate as _pst
+        orig = _pst.original_sl(pstate, sl)
         # A kezdeti kockázat árban (1R): |belépő − EREDETI SL|. Ehhez mérünk minden
         # R-értéket (SL P&L, TP cél, folyó R) — így egységes az egész sor.
         _risk_price = abs(entry - orig) if orig else 0.0
@@ -5792,9 +5796,10 @@ class DashboardWindow:
             # Költség-tudatos BE (spread + jutalék + swap fedezve). Ha az ár még
             # nincs elég messze a nettó ≥ 0-hoz, a hívás False-t ad → NEM BE-zünk.
             if mt5_connector.move_to_breakeven(ticket):
-                st = position_state.setdefault(
-                    ticket, {"original_sl": orig_sl, "trailing_enabled": True,
-                             "be_done": False, "trail_points": None, "trail_moved": False})
+                from core import pstate as _pst
+                # A BE ELŐTTI stop a nyitáskori kockázat — de csak akkor írjuk be,
+                # ha a motor még nem ismeri (az `ensure` dönt róla).
+                st = _pst.ensure(position_state, ticket, original_sl=orig_sl)
                 st["be_done"] = True
                 _log.info("✦ #%d — kézi költség-tudatos breakeven beállítva", ticket)
             else:
@@ -5846,18 +5851,24 @@ class DashboardWindow:
         except Exception:
             pass
 
-    _DEFAULT_PSTATE = {"original_sl": 0.0, "trailing_enabled": True,
-                       "be_done": False, "trail_points": None, "trail_moved": False}
+    # ⚠ NINCS TÖBBÉ SAJÁT `_DEFAULT_PSTATE` (2026-09-08). A felületnek volt egy
+    # ötödik, ELTÉRŐ alakja — `entry_atr` nélkül és `original_sl = 0.0`-val —, és
+    # mivel `setdefault`-tal került be, a motor utána MÁR NEM javította: egy
+    # STOPPED páron nyitva maradt pozíciónál elég volt a trailing-kapcsolót
+    # megnyomni, és az a pozíció élete végéig hibás 1 R-rel futott. A felület
+    # MÓDOSÍTSA a rekordot, ne TALÁLJA KI: az alak a `core.pstate`-é.
 
     def _pos_trail(self, ticket: int):
         from trading.live_trader import position_state
-        st = position_state.setdefault(ticket, dict(self._DEFAULT_PSTATE))
+        from core import pstate as _pst
+        st = _pst.ensure(position_state, ticket)
         st["trailing_enabled"] = not st.get("trailing_enabled", True)
 
     def _pos_trail_dist(self, ticket: int, points: int):
         """Kézi trail-távolság beállítása egy ticketre PONTBAN (Pozíciók fül)."""
         from trading.live_trader import position_state
-        st = position_state.setdefault(ticket, dict(self._DEFAULT_PSTATE))
+        from core import pstate as _pst
+        st = _pst.ensure(position_state, ticket)
         st["trail_points"] = points
 
     def _pos_params(self, symbol: str) -> dict:

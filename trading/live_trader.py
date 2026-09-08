@@ -33,6 +33,7 @@ sys.path.insert(0, str(ROOT))
 
 from core import mt5_connector
 from core import mt5_visual
+from core import pstate as _pst
 from core import risky_mode
 from core import correlation
 from core.i18n import t as _t
@@ -253,7 +254,12 @@ optimizer_status: dict[str, str] = {}
 # van, hogy a 10 mp-es kör ne írja tele a naplót ugyanazzal a sorral.
 _opt_paused: dict[tuple, bool] = {}
 
-# Per-ticket pozíció-állapot (GUI ↔ motor megosztott):
+# Per-ticket pozíció-állapot (GUI ↔ motor megosztott). ⚠ A REKORD ALAKJA a
+# `core.pstate` modulé — ott van az EGYETLEN konstruktor (`ensure`) és a két
+# olvasó (`original_sl`, `one_r_price`). Korábban ÖT különböző alakban jött
+# létre (kettő a felületen), és mivel mind `setdefault` volt, aki előbb ért oda,
+# az nyert — a felület `original_sl = 0.0`-ja tehát ki tudta zárni a motor
+# valódi stop-adatát. Lásd a `core/pstate.py` fejlécét.
 #   {ticket: {"original_sl": float, "trailing_enabled": bool, "be_done": bool,
 #            "entry_atr": float}}   — az entry_atr a trailing ATR-szorzójához
 # A motor tölti/karbantartja; a Pozíciók fül ebből olvas és ezt billenti
@@ -1890,21 +1896,11 @@ def _refresh_position(ticket: int):
 def _one_r_price(pos, pstate) -> float:
     """1 R ÁRBAN: a NYITÁSKORI stop-távolság — vagy 0.0, ha nem tudható.
 
-    ⚠ MIÉRT NEM `abs(price_open - pstate.get("original_sl", pos.sl))` (2026-09-08).
-    Az MT5 a stop NÉLKÜLI pozíciónak `sl = 0.0`-t ad, nem `None`-t. A régi alak
-    ilyenkor `|nyitóár − 0| = nyitóár`-t adott, azaz egy MAGÁVAL AZ ÁRRAL egyenlő
-    „1 R"-t — a `breakeven_r=1` küszöb a nyitóár KÉTSZERESÉRE került volna. Nem
-    hiba, nem kivétel: egy csendben soha el nem sülő breakeven.
-
-    Ilyen pozíció létezik: kézzel örökbefogadott (`core/adopted.py`), vagy olyan,
-    amiről a stop lekerült. A helyes válasz a 0.0 — a hívó
-    (`risk_reduction.breakeven_trigger`) ebből tudja, hogy az R-alapú küszöb NEM
-    számolható, és hangosan `None`-t ad.
+    Vékony burkolat a `core.pstate.one_r_price` köré: a KÉPLET ott él, hogy a
+    felület ugyanazt az 1 R-t mutassa, amivel a motor dolgozik. (A `pos` MT5-
+    objektum, a tiszta függvény csak számokat lát — ezért kell a burkolat.)
     """
-    _osl = pstate.get("original_sl") or pos.sl
-    if not _osl or _osl <= 0:
-        return 0.0
-    return abs(pos.price_open - float(_osl))
+    return _pst.one_r_price(pos.price_open, pstate, pos.sl)
 
 
 def _apply_be_and_trailing(symbol, pos, ticket, pstate, is_rf, risky,
@@ -2198,11 +2194,9 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
                 for _p in get_open_positions(magic, _sn):
                     if _p.symbol != symbol:
                         continue
-                    _ps = position_state.setdefault(_p.ticket, {
-                        "original_sl": _p.sl, "trailing_enabled": True,
-                        "be_done": slot_mgr.is_risk_free(_p.ticket),
-                        "trail_points": None, "trail_moved": False,
-                        "entry_atr": 0.0})
+                    _ps = _pst.ensure(position_state, _p.ticket,
+                                      original_sl=_p.sl,
+                                      be_done=slot_mgr.is_risk_free(_p.ticket))
                     _apply_be_and_trailing(
                         symbol, _p, _p.ticket, _ps, slot_mgr.is_risk_free(_p.ticket),
                         risky, _spec, point_size, _sinfo, slot_mgr)
@@ -2419,9 +2413,11 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
         # Megosztott pozíció-állapot (GUI ↔ motor): eredeti SL, trailing toggle, BE,
         # trail_points (None = az optimalizált paramétert használjuk; egész = kézi
         # felülírás PONTBAN a Pozíciók fülről), trail_moved (a trailing már húzott-e).
-        pstate = position_state.setdefault(ticket, {
-            "original_sl": pos.sl, "trailing_enabled": True, "be_done": is_rf,
-            "trail_points": None, "trail_moved": False, "entry_atr": 0.0})
+        # ⚠ `ensure`, nem `setdefault`: ha a rekordot már a FELÜLET hozta létre
+        # (STOPPED páron a Pozíciók fül kapcsolója), az `original_sl` ismeretlen —
+        # és ez az egyetlen hely, ahol a valódi nyitáskori stop pótolható.
+        pstate = _pst.ensure(position_state, ticket,
+                             original_sl=pos.sl, be_done=is_rf)
         # A trailing a BELÉPÉSKORI ATR szorzójával dolgozik. Ha még nincs eltéve
         # (frissen nyitott pozíció, vagy újraindítás utáni helyreállítás), az AKTUÁLIS
         # ATR-rel töltjük fel — újraindításnál ez a legjobb elérhető közelítés, és
@@ -3550,7 +3546,10 @@ def manual_build(symbol: str, strategy_name: "str | None" = None) -> bool:
         # CSAK a ténylegesen beállt, nulla-kockázatú stop után jelölünk. Vágott
         # stopnál a csomag kis mínuszban zárna → se BE, se felszabaduló slot.
         if not _clamped:
-            position_state.setdefault(p.ticket, {})["be_done"] = True
+            # ⚠ Itt az `original_sl`-t SZÁNDÉKOSAN nem adjuk meg: a láb stopja
+            # ekkor már a csomag-stop, nem a nyitáskori kockázat. Marad
+            # ismeretlen, és a `process_pair` következő köre pótolja.
+            _pst.ensure(position_state, p.ticket)["be_done"] = True
             if _run_slot_mgr is not None:
                 _run_slot_mgr.set_risk_free(p.ticket)
 
