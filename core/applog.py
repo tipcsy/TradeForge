@@ -236,3 +236,71 @@ def reset_error_stats() -> None:
     with _ERR_LOCK:
         _ERR["count"] = 0
         _ERR["last"] = ""
+
+
+# ---------------------------------------------------------------------------
+# ISMÉTLŐDŐ hiba: hangosan EGYSZER, utána halkan — és a gyógyulás is látszik
+# ---------------------------------------------------------------------------
+# ⚠ MIÉRT KELL (2026-09-08). A motor ciklusai másodpercenként (viz-szál) vagy
+# 10 másodpercenként (kereskedési kör) futnak. Egy tartós hiba naplózása
+# önmagában használhatatlan: vagy elárasztja a fájlt (percenként 60 azonos sor),
+# vagy — és eddig ez volt — `log.debug`-ba megy, és SOHA nem látszik. A második
+# rosszabb: a 2026-08-08-i néma szál-halálnál pontosan ez történt, a viz-írás
+# hetekig hallgatott, a tünetre (üres sávok a charton) csak véletlenül
+# figyeltünk fel.
+#
+# A helyes viselkedés hármas:
+#   1. az ELSŐ hiba HANGOS (WARNING/ERROR — a hibaszámláló is ebből dolgozik),
+#   2. az ismétlődő azonos hiba DEBUG (nem árasztja el a naplót), de SZÁMOLÓDIK,
+#   3. a GYÓGYULÁS is egy sor — a darabszámmal, hogy meddig tartott.
+#
+# A `key` szabadon választott azonosító (pl. "viz:Ger40"): AZONOS kulcsú hibák
+# számítanak ugyanannak.
+
+_FLAP_LOCK = threading.Lock()
+_FLAP: dict = {}          # key -> {"n": int, "msg": str}
+
+
+def report_error(log, key: str, msg: str, *args,
+                 level: int = logging.WARNING) -> None:
+    """Ismétlődő hiba: elsőre HANGOS, utána DEBUG + számlálás."""
+    with _FLAP_LOCK:
+        e = _FLAP.get(key)
+        if e is None:
+            _FLAP[key] = {"n": 1}
+            first = True
+        else:
+            e["n"] += 1
+            first = False
+    if first:
+        log.log(level, msg, *args)
+    else:
+        log.debug(msg, *args)
+
+
+def report_ok(log, key: str, msg: "str | None" = None, *args) -> None:
+    """A `key` hibája MEGSZŰNT. Ha volt hiba, egy INFO sor a darabszámmal.
+
+    Nem csinál semmit, ha nem volt hiba — ezért hívható feltétel nélkül a
+    sikeres ág végén (ez a lényeg: nem kell külön nyilvántartani, volt-e baj)."""
+    with _FLAP_LOCK:
+        e = _FLAP.pop(key, None)
+    if e is None:
+        return
+    if msg:
+        log.info(msg + " (%d sikertelen próbálkozás után)", *args, e["n"])
+    else:
+        log.info("%s: helyreállt (%d sikertelen próbálkozás után)", key, e["n"])
+
+
+def error_repeat_count(key: str) -> int:
+    """Hányszor bukott ez a `key` a legutóbbi gyógyulás óta (0 = nincs hiba)."""
+    with _FLAP_LOCK:
+        e = _FLAP.get(key)
+        return e["n"] if e else 0
+
+
+def reset_repeat_stats() -> None:
+    """Teszthez: a hiba-nyilvántartás ürítése."""
+    with _FLAP_LOCK:
+        _FLAP.clear()

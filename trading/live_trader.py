@@ -33,6 +33,7 @@ sys.path.insert(0, str(ROOT))
 
 from core import mt5_connector
 from core import mt5_visual
+from core import applog
 from core import pstate as _pst
 from core import risky_mode
 from core import correlation
@@ -989,7 +990,12 @@ def apply_market_state(objects: list, df15, pair_cfg: dict = None) -> list:
             if isinstance(o, viz.BarState):
                 o.market_state = code_by_epoch.get(int(o.t), 0)
     except Exception as e:
-        log.debug("piac-állapot overlay hiba: %s", e)
+        applog.report_error(log, f"overlay:market:{name}",
+                            "%s — a piac-állapot overlay HIBA: %s (a chart "
+                            "sávja hiányos lesz)", name, e)
+    else:
+        applog.report_ok(log, f"overlay:market:{name}",
+                         "%s — a piac-állapot overlay helyreállt", name)
     return objects
 
 
@@ -1124,7 +1130,11 @@ def apply_gate_state(objects: list, bars: dict, symbol: str, strategy_name: str,
                 code = _g_code("volatility")
             o.gate = code
     except Exception as e:
-        log.debug("kapu-overlay hiba: %s", e)
+        applog.report_error(log, "overlay:gate",
+                            "A kapu-overlay HIBA: %s (a jelölők kapu-színe "
+                            "hiányos lesz)", e)
+    else:
+        applog.report_ok(log, "overlay:gate", "A kapu-overlay helyreállt")
     return objects
 
 
@@ -1856,9 +1866,22 @@ def _viz_worker():
                 try:
                     _write_symbol_viz(symbol, pair_cfg, strats, params_by_strat)
                 except Exception as e:
-                    log.debug("%s — viz hiba: %s", symbol, e)
+                    # ⚠ EDDIG `log.debug` VOLT, azaz SOHA nem látszott. A viz
+                    # megszakadása pont az a tünet, ami 2026-08-08-án hetekig
+                    # rejtve maradt (üres sávok a charton). Most az ELSŐ hiba
+                    # hangos, az ismétlődő halk, a helyreállás pedig egy sor.
+                    applog.report_error(log, f"viz:{symbol}",
+                                        "%s — viz-írás HIBA: %s (a chart sávjai "
+                                        "nem frissülnek)", symbol, e)
+                else:
+                    applog.report_ok(log, f"viz:{symbol}",
+                                     "%s — a viz-írás helyreállt", symbol)
         except Exception as e:
-            log.debug("viz-szál hiba: %s", e)
+            applog.report_error(log, "viz:worker",
+                                "A viz-szál köre HIBÁRA futott: %s", e,
+                                level=logging.ERROR)
+        else:
+            applog.report_ok(log, "viz:worker", "A viz-szál köre helyreállt")
         time.sleep(VIZ_POLL_SEC)
 
 
@@ -2201,7 +2224,21 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
                         symbol, _p, _p.ticket, _ps, slot_mgr.is_risk_free(_p.ticket),
                         risky, _spec, point_size, _sinfo, slot_mgr)
             except Exception as _e:
-                log.debug("%s — no-trade pozíció-kezelés hiba: %s", symbol, _e)
+                # ⚠ ITT NYELŐDÖTT EL a 2026-09-08-án talált `NameError` (a
+                # trailing ikerpárjának hatóköri hibája). A `for` cikluson BELÜL
+                # vagyunk, tehát egy kivétel nem csak a trailinget, hanem az
+                # adott körben a TÖBBI pozíció breakevenjét is elviszi — ez
+                # PÉNZÜGYI hatás, ezért ERROR (a felület hibaszámlálója ebből
+                # tud szólni), nem debug.
+                applog.report_error(
+                    log, f"notrade:{symbol}",
+                    "%s — a szünet-órai pozíció-kezelés HIBÁRA futott (%s) — a "
+                    "breakeven és a trailing KIMARADT ebben a körben.",
+                    symbol, _e, level=logging.ERROR)
+            else:
+                applog.report_ok(log, f"notrade:{symbol}",
+                                 "%s — a szünet-órai pozíció-kezelés helyreállt",
+                                 symbol)
         # Ha a stratégia be van kapcsolva rá (`no_trade_resets_signal`), a szünet
         # RESETELJE az M15 jelzést — a következő tradeable ciklusban az on_bar_close
         # MÉLY, hour-aware újra-bemelegítést végez (signal_warmed=False), így a szünet
