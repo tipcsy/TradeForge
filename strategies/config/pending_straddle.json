@@ -1,0 +1,241 @@
+{
+  "_comment": "A pending_straddle (Függő megbízás) stratégia SAJÁT beállításai. A WPR(14) M1-en TRIGGERT ad (időzítés), az irányt a ±spread-távolságra kihelyezett straddle dönti el. ⚠ A keretben NINCS valódi függő megbízás: a straddle VIRTUÁLIS, a belépő az M1 gyertya zárásán történik (részletek a modul fejlécében és a docs/pending_straddle.md-ben).",
+  "quality": {
+    "_comment": "Minősítési küszöbök — a wpr_sma-val AZONOSAK, szándékosan: a min_trades=50 mért érték (bootstrap a Ger40 998 kötéséből), nem stratégia-függő. Ez a stratégia sok kötést ad (M1 trigger), tehát a küszöb bőven teljesíthető — annál fontosabb, hogy ne lazuljon.",
+    "min_trades": 50,
+    "maxdd_mid": 0.18,
+    "maxdd_weak": 0.25,
+    "maxdd_bad": 0.35,
+    "pf_mid": 1.4,
+    "pf_weak": 1.2,
+    "pf_bad": 1.0,
+    "winrate_weak": 0.35,
+    "winrate_good": 0.45
+  },
+  "indicators": {
+    "_comment": "WPR(14) az M1-en + a straddle geometriája. A szintek a wpr_sma konvencióját követik: extrém zóna (felfegyverzés) és trigger (tüzelés).",
+    "_comment_tf": "signal_tf_min: melyik gyertyán számol a WPR és születik a TRIGGER (1/5/15/30/60 perc; alap 5 = M5). A BETÖLTÉST (a függő szintek érintését) MINDIG az M1 figyeli — egy valódi stop-megbízás intrabar töltődne be, tehát a finom figyelés a hűség feltétele. ⚠ NEM optimalizáljuk: az idősík szerkezeti döntés, nem hangolási tengely — különben minden trial MÁS stratégiát mérne.",
+    "signal_tf_min": 1,
+    "wpr_period": 14,
+    "wpr_sell_extreme": -20,
+    "wpr_buy_extreme": -80,
+    "wpr_sell_trigger": -50,
+    "wpr_buy_trigger": -50,
+    "_comment_straddle": "straddle_spread_mult: a két függő szint távolsága a trigger-gyertya záróárától, SPREADBEN (a felhasználó specifikációja: 2). straddle_ttl_bars: hány M1 gyertyáig él a függő pár, mielőtt lejár. max_chase_spread: mennyivel eshet az M1 zárás a függő szinttől, mielőtt a belépőt eldobjuk — 0 = NINCS korlát.",
+    "_comment_chase": "⚠ MÉRVE (2026-09-07, 6 pár, 19 371 betöltés): a szinten való betöltés előnye az M1 záráshoz képest ÁTLAGBAN NULLA (−0,032 … +0,020 R, medián ~0, az esetek ~50%-ában pozitív). Vagyis az M1 zárás TORZÍTATLAN közelítése a függő szintnek — a chase-korlát tehát nem vesz meg semmilyen hitelességet, viszont a betöltések 3–44%-át eldobná. Ezért az alap 0 (nincs korlát). Az optimalizáló hangolhatja, ha egy páron mégis számít.",
+    "_comment_scale": "straddle_mode: MIBEN mérjük a függő szintek távolságát. 'atr' (alap) = straddle_atr_mult × M1 ATR — a tényleges mozgástérhez kötve; 'spread' = straddle_spread_mult × spread (az eredeti változat, a régi mérések ezzel reprodukálhatók). ⚠ MIÉRT LETT AZ ATR AZ ALAP: spread-léptékkel a stop a piaci ZAJON BELÜL ült (a 6 spreades SL a belépéskori M15 ATR 26-29%-a, egy MEDIÁN M1 gyertya range-e pedig 1,0-5,1 spread) — a kötések 61%-a az EREDETI stopon halt meg, mielőtt a stop egyáltalán megmozdult volna.",
+    "straddle_mode": "atr",
+    "straddle_atr_mult": 1.0,
+    "straddle_atr_period": 14,
+    "straddle_spread_mult": 2.0,
+    "straddle_ttl_bars": 15,
+    "max_chase_spread": 0
+  },
+  "sltp": {
+    "_comment": "sl_mode: 'atr_m1' (alap) = sl_atr_m1_mult × M1 ATR — ugyanazon a léptéken, mint az ATR-alapú straddle; a klasszikus 'ellenoldali láb a stop' beállítás itt sl_atr_m1_mult = 2 × straddle_atr_mult. 'straddle' = sl_spread_mult × spread (az eredeti, spread-léptékű változat). 'atr' = a kódbázis szokásos M15 ATR-stopja (sl_atr_mult). A tp_rr_ratio MINDHÁROM módban él. ⚠ A STOPOT EGYÜTT KELL MOZGATNI A SZINTEKKEL: ATR-léptékű szintek mellett spread-léptékű stop még mélyebben ülne a zajban, és a mérés egy elrontott arányt mérne, nem az ötletet. ⚠ A nem használt módok szorzói NEM hatnak (ezért csak az aktív mód szorzóját optimalizáljuk).",
+    "sl_mode": "atr_m1",
+    "sl_atr_m1_mult": 2.0,
+    "sl_spread_mult": 6.0,
+    "sl_atr_mult": 1.5,
+    "tp_rr_ratio": 2.0
+  },
+  "position_mgmt": {
+    "_comment": "A stratégia CSAK beszállási jelző. A BE→BE+spread mozgatás, a trailing és a részleges zárás a KOCKÁZATCSÖKKENTŐ modulé (core/risk_reduction.py + data/risk_mode.json, per pár), a méretezés a core/risk_manager.py-é, a spread/TF/piac kapuk pedig a közös végrehajtási configé. Lásd strategy/base.py.",
+    "viz_trade_lookback_days": 14
+  },
+  "param_meta": {
+    "_comment": "A Paraméterek ablak csoportosítása + megjegyzései. A 'categories' a megjelenítési SORREND.",
+    "categories": [
+      "timeframe",
+      "entry",
+      "straddle",
+      "sltp",
+      "market_filter",
+      "other"
+    ],
+    "params": {
+      "signal_tf_min": {
+        "recompute": "signal",
+        "category": "timeframe",
+        "comment": "A JEL-idősík percben (1/5/15/30/60) — ezen számol a WPR és születik a trigger. A betöltést mindig az M1 figyeli. ⚠ Idősík-váltás után ÚJRAOPTIMALIZÁLÁS kell."
+      },
+      "wpr_period": {
+        "recompute": "signal",
+        "category": "entry",
+        "comment": "WPR periódus a JEL-idősíkon (a specifikáció szerint 14)"
+      },
+      "wpr_sell_extreme": {
+        "recompute": "signal",
+        "category": "entry",
+        "comment": "Felső extrém — e FÖLÖTT járva fegyverkezik fel a lefelé irányuló áttörés"
+      },
+      "wpr_buy_extreme": {
+        "recompute": "signal",
+        "category": "entry",
+        "comment": "Alsó extrém — e ALATT járva fegyverkezik fel a felfelé irányuló áttörés"
+      },
+      "wpr_sell_trigger": {
+        "recompute": "signal",
+        "category": "entry",
+        "comment": "Trigger a felső extrémből: e szint LEFELÉ áttörése helyezi ki a straddle-t"
+      },
+      "wpr_buy_trigger": {
+        "recompute": "signal",
+        "category": "entry",
+        "comment": "Trigger az alsó extrémből: e szint FELFELÉ áttörése helyezi ki a straddle-t"
+      },
+      "straddle_spread_mult": {
+        "recompute": "signal",
+        "category": "straddle",
+        "comment": "A két függő szint távolsága a trigger záróárától, SPREADBEN (spec: 2)"
+      },
+      "straddle_mode": {
+        "recompute": "signal",
+        "category": "straddle",
+        "comment": "A szintek LÉPTÉKE: 'atr' = M1 ATR-hez kötve (alap), 'spread' = a bróker árréséhez"
+      },
+      "straddle_atr_mult": {
+        "recompute": "signal",
+        "category": "straddle",
+        "comment": "A két függő szint távolsága a jel-gyertya záróárától, M1 ATR-ben (straddle_mode='atr')"
+      },
+      "straddle_atr_period": {
+        "recompute": "signal",
+        "category": "straddle",
+        "comment": "Az M1 ATR periódusa a straddle léptékéhez (nem azonos a végrehajtási atr_period-dal)"
+      },
+      "straddle_ttl_bars": {
+        "recompute": "signal",
+        "category": "straddle",
+        "comment": "Lejárat: hány M1 gyertyáig él a függő pár, ha egyik sem indul el"
+      },
+      "max_chase_spread": {
+        "recompute": "signal",
+        "category": "straddle",
+        "comment": "Max. eltérés az M1 zárás és a függő szint közt SPREADBEN — fölötte a belépő kimarad (0 = nincs korlát, ez az alap). ⚠ MÉRVE: a szint-betöltés előnye átlagban NULLA, tehát a korlát csak kötéseket vesz el, hitelességet nem ad."
+      },
+      "sl_mode": {
+        "recompute": "execution",
+        "category": "sltp",
+        "comment": "'straddle' = SL spreadben (sl_spread_mult), 'atr' = SL ATR-ből (sl_atr_mult)"
+      },
+      "sl_atr_m1_mult": {
+        "recompute": "execution",
+        "category": "sltp",
+        "comment": "SL = ez × M1 ATR (sl_mode='atr_m1'). Az 'ellenoldali láb a stop' = 2 × straddle_atr_mult"
+      },
+      "sl_spread_mult": {
+        "recompute": "execution",
+        "category": "sltp",
+        "comment": "SL = ez × spread. A klasszikus 'ellenoldali láb mint stop' érték = 2 × straddle_spread_mult. ⚠ Kis érték = a belépés spreadje az R nagy hányada (wpr-m1-only-sub-spread-edge)."
+      },
+      "sl_atr_mult": {
+        "recompute": "execution",
+        "category": "sltp",
+        "comment": "SL = ATR × ez — CSAK sl_mode='atr' mellett hat"
+      },
+      "tp_rr_ratio": {
+        "recompute": "execution",
+        "category": "sltp",
+        "comment": "TP = SL × ez (kockázat/hozam arány). ⚠ A célár és a kockázatcsökkentő preset EGYÜTT mozog (tp-preset-coupling) — ne állítsd külön."
+      },
+      "viz_trade_lookback_days": {
+        "recompute": "signal",
+        "category": "other",
+        "comment": "A chart-rajz visszatekintése napokban (M1 ablak) — nagyobb érték zsúfoltabb és lassabb"
+      },
+      "atr_min_pct": {
+        "recompute": "execution",
+        "category": "market_filter",
+        "comment": "Min. ATR — túl csendes piac kizárása (a VOLATILITÁS-KAPU méri)"
+      },
+      "atr_max_pct": {
+        "recompute": "execution",
+        "category": "market_filter",
+        "comment": "Max. ATR — kaotikus piac kizárása (a VOLATILITÁS-KAPU méri)"
+      },
+      "atr_baseline_bars": {
+        "recompute": "signal",
+        "category": "market_filter",
+        "comment": "A min/max ATR MÉRCÉJE: 0 = a mentett atr_avg_ref (befagyasztott), >0 = gördülő ablak ennyi M15 gyertyára. | ⚠ JEL-osztály: a bt_indicators SZÁMOLJA belőle az atr_avg oszlopot."
+      }
+    }
+  },
+  "optimizer": {
+    "_comment": "AI paraméter optimalizálás tartományai. ⚠ CSAK AZ AKTÍV MÓD szorzói szerepelnek: a straddle_mode='atr' + sl_mode='atr_m1' alapbeállításnál a spread-léptékű szorzók (straddle_spread_mult, sl_spread_mult) és az sl_atr_mult NEM hatnak — hangolásuk elpazarolt tengely lenne (mint egykor a max_open_slots). Módváltáskor ezt a listát is át kell írni.",
+    "wpr_period": {
+      "min": 5,
+      "max": 30,
+      "step": 1
+    },
+    "wpr_sell_extreme": {
+      "min": -35,
+      "max": -5,
+      "step": 5
+    },
+    "wpr_buy_extreme": {
+      "min": -95,
+      "max": -65,
+      "step": 5
+    },
+    "wpr_sell_trigger": {
+      "min": -70,
+      "max": -30,
+      "step": 5,
+      "gt": "wpr_buy_extreme",
+      "lt": "wpr_sell_extreme"
+    },
+    "wpr_buy_trigger": {
+      "min": -70,
+      "max": -30,
+      "step": 5,
+      "gt": "wpr_buy_extreme",
+      "lt": "wpr_sell_extreme"
+    },
+    "_comment_straddle": "A straddle geometriája. A straddle_spread_mult az ELSŐ mérendő tengely: ez dönti el, mennyire kell elmozdulnia az árnak a belépőig.",
+    "straddle_ttl_bars": {
+      "min": 3,
+      "max": 60,
+      "step": 1
+    },
+    "max_chase_spread": {
+      "min": 0.0,
+      "max": 10.0,
+      "step": 0.5
+    },
+    "_comment_sl": "Az sl_spread_mult a MÁSODIK kulcstengely: szűk stopnál a belépés spreadje az R nagy hányadát viszi el, tág stopnál viszont a straddle előnye (a szűk beszállás) vész el.",
+    "tp_rr_ratio": {
+      "min": 0.5,
+      "max": 3.0,
+      "step": 0.2
+    },
+    "_comment_market": "Piaci minőség szűrők — az Optuna instrumentumonként optimalizálja",
+    "atr_min_pct": {
+      "min": 0.2,
+      "max": 1.0,
+      "step": 0.1
+    },
+    "atr_max_pct": {
+      "min": 1.2,
+      "max": 4.0,
+      "step": 0.2
+    },
+    "_comment_constraints": "Paraméter-érvényességi kényszerek (WPR szint-sorrend). Az optimizer ezzel szűr, ÉS a fenti gt/lt metaadatból a suggeszt-tartományt eleve leszűkíti (érvénytelen kombó elő sem áll). A constraints_ok is EZT értékeli.",
+    "constraints": [
+      "wpr_buy_extreme < wpr_buy_trigger",
+      "wpr_buy_trigger < wpr_sell_extreme",
+      "wpr_buy_extreme < wpr_sell_trigger",
+      "wpr_sell_trigger < wpr_sell_extreme"
+    ],
+    "straddle_atr_mult": {
+      "min": 0.25,
+      "max": 3.0,
+      "step": 0.25
+    },
+    "sl_atr_m1_mult": {
+      "min": 0.5,
+      "max": 8.0,
+      "step": 0.5
+    }
+  }
+}
