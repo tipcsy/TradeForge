@@ -60,34 +60,143 @@ MAX_KEP_MP = 60.0
 
 
 # ── Gyertyák: EGY rajzolt objektum ────────────────────────────────────────
+# A rajzolt oszlopok FELSŐ korlátja. E fölött a gyertyák összevonódnak (LOD):
+# a képernyő úgyis kevesebb pixel széles, tehát egy gyertya sub-pixel lenne.
+MAX_OSZLOP = 2500
+
+# A látható tartományon TÚL ennyivel rajzolunk (a tartomány arányában). Enélkül
+# minden apró görgetés újraépítést kérne, és a chart villogna.
+LATHATO_MARGO = 0.35
+
+
 class Gyertyak(pg.GraphicsObject):
-    """⚠ A rajzot EGYSZER „kiégetjük" egy `QPicture`-be; a nagyítás és a
-    görgetés utána a megjelenítő dolga. Ez a pyqtgraph mintája, és ez adja a
-    fenti sebesség-különbséget."""
+    """Gyertyák — CSAK a látható szakasz, szükség esetén összevonva.
+
+    ⚠ A LELET (2026-09-09, mérve). A régi változat a TELJES adatsort egyszer
+    „kiégette" egy `QPicture`-be, és a `paint()` azt játszotta vissza. A
+    kiégetés valóban egyszeri — de a VISSZAJÁTSZÁS nem: a `drawPicture` minden
+    újrarajzoláskor végigfut az összes rajzoló-műveleten (gyertyánként kettő),
+    és újrarajzolás MINDEN görgetésnél és nagyításnál van:
+
+        gyertya   újrarajzolás   kép/mp
+          6 000        13,8 ms       73   sima
+         12 000        27,9 ms       36   észrevehető
+         25 000        60,0 ms       17   AKAD
+         50 000       120,3 ms        8   használhatatlan
+
+    Egy heti M1 egy 24/7-es instrumentumon ~10 000 gyertya, egy hónap ~43 000 —
+    pont a szakadó tartomány. (A kurzor-lejátszás közben ez nem látszik, mert ott
+    nincs nézet-változás; a HÚZÁSNÁL viszont igen. Ezért volt a panasz „a chart
+    akad", miközben a lejátszás mérése simának mutatta.)
+
+    ⚠ ÉS AMIÉRT NEM MÁS NYELV A VÁLASZ: a költség Qt-rajzoló művelet, nem
+    számítás. 50 000 gyertyából a képernyőn legfeljebb pár ezer PIXELOSZLOP van —
+    a munka 95%-a olyasmire ment el, ami nem is látszik. A megoldás tehát nem
+    gyorsabb nyelv, hanem KEVESEBB MUNKA:
+
+      1. VÁGÁS: csak a látható tartomány (+ margó) rajzolódik;
+      2. ÖSSZEVONÁS (LOD): ha a látható szakasz `MAX_OSZLOP`-nál több gyertyát
+         tartalmaz, vödrökbe vonjuk (nyitó = az első nyitó, záró = az utolsó
+         záró, csúcs/alj = a vödör szélsőértékei). Ez az, amit a kereskedői
+         platformok is csinálnak: teljesen kizoomolva egy gyertya sub-pixel.
+
+    A `boundingRect` továbbra is a TELJES adatsort adja vissza — különben az
+    `autoRange()` a pillanatnyilag rajzolt szakaszra nagyítana.
+    """
 
     def __init__(self, df):
         super().__init__()
-        self._kep = QtGui.QPicture()
-        p = QtGui.QPainter(self._kep)
-        o = df["open"].to_numpy(float)
-        h = df["high"].to_numpy(float)
-        l = df["low"].to_numpy(float)
-        c = df["close"].to_numpy(float)
+        self._o = df["open"].to_numpy(float)
+        self._h = df["high"].to_numpy(float)
+        self._l = df["low"].to_numpy(float)
+        self._c = df["close"].to_numpy(float)
+        self._n = len(self._o)
+        self._kep = None
+        self._tart = None            # (i0, i1, lepes) — amit a kép tartalmaz
+        if self._n:
+            _lo, _hi = float(np.min(self._l)), float(np.max(self._h))
+        else:
+            _lo = _hi = 0.0
+        _mag = (_hi - _lo) or 1.0
+        self._teljes = QtCore.QRectF(-1.0, _lo, self._n + 2.0, _mag)
+
+    # ── a rajzolandó szakasz meghatározása ────────────────────────────────
+    def _szakasz(self):
+        """`(v0, v1, i0, i1, lepes)` — a LÁTHATÓ és a MARGÓS tartomány + LOD-lépés.
+
+        ⚠ A kettő KÜLÖN kell. A margó azért van, hogy a kis görgetés ne kérjen
+        újraépítést — de ha a gyorsítótárat a MARGÓS tartománnyal hasonlítanánk
+        össze, az minden mozdulatnál kilógna belőle, és a margó nem érne semmit
+        (ez a hiba az első változatban benne volt). Az érvényesség kérdése:
+        benne van-e a LÁTHATÓ szakasz abban, amit már megrajzoltunk.
+        """
+        if not self._n:
+            return 0, 0, 0, 0, 1
+        try:
+            r = self.viewRect()
+        except Exception:
+            r = None
+        if r is None or r.width() <= 0:
+            v0 = i0 = 0
+            v1 = i1 = self._n
+        else:
+            szel = r.width()
+            v0 = max(0, min(self._n, int(np.floor(r.left()))))
+            v1 = max(v0, min(self._n, int(np.ceil(r.right()))))
+            i0 = max(0, min(self._n, int(np.floor(r.left() - szel * LATHATO_MARGO))))
+            i1 = max(i0, min(self._n, int(np.ceil(r.right() + szel * LATHATO_MARGO))))
+        lepes = max(1, int(np.ceil((i1 - i0) / MAX_OSZLOP)))
+        return v0, v1, i0, i1, lepes
+
+    def _epit(self, i0, i1, lepes) -> None:
+        kep = QtGui.QPicture()
+        p = QtGui.QPainter(kep)
         _zp, _pp = pg.mkPen(szin("green")), pg.mkPen(szin("red"))
         _zb, _pb = pg.mkBrush(szin("green")), pg.mkBrush(szin("red"))
-        for i in range(len(df)):
-            fel = c[i] >= o[i]
+        o, h, l, c = self._o, self._h, self._l, self._c
+        # A test szélessége a LÉPÉSHEZ igazodik: összevonáskor a vödör szélessége.
+        _fel_szel = 0.32 * lepes
+        for i in range(i0, i1, lepes):
+            j = min(i + lepes, i1)
+            if lepes == 1:
+                _o, _c = o[i], c[i]
+                _h, _l = h[i], l[i]
+                _kozep = float(i)
+            else:
+                _o, _c = o[i], c[j - 1]
+                _h, _l = float(np.max(h[i:j])), float(np.min(l[i:j]))
+                _kozep = i + (j - i - 1) / 2.0
+            fel = _c >= _o
             p.setPen(_zp if fel else _pp)
-            p.drawLine(QtCore.QPointF(i, l[i]), QtCore.QPointF(i, h[i]))
+            p.drawLine(QtCore.QPointF(_kozep, _l), QtCore.QPointF(_kozep, _h))
             p.setBrush(_zb if fel else _pb)
-            p.drawRect(QtCore.QRectF(i - 0.32, o[i], 0.64, c[i] - o[i]))
+            p.drawRect(QtCore.QRectF(_kozep - _fel_szel, _o,
+                                     2 * _fel_szel, _c - _o))
         p.end()
+        self._kep = kep
+        self._tart = (i0, i1, lepes)
+
+    def _frissit(self) -> None:
+        v0, v1, i0, i1, lepes = self._szakasz()
+        t = self._tart
+        # Újraépítés csak akkor, ha a LÁTHATÓ szakasz kilóg a már megrajzoltból,
+        # vagy a felbontás (LOD-lépés) változott. A margó miatt a legtöbb
+        # görgetés a meglévő képen belül marad.
+        if t is not None and t[2] == lepes and t[0] <= v0 and v1 <= t[1]:
+            return
+        self._epit(i0, i1, lepes)
+
+    def viewRangeChanged(self):        # a pyqtgraph hívja nézet-változáskor
+        self._frissit()
+        self.update()
 
     def paint(self, p, *args):
-        p.drawPicture(0, 0, self._kep)
+        self._frissit()
+        if self._kep is not None:
+            p.drawPicture(0, 0, self._kep)
 
     def boundingRect(self):
-        return QtCore.QRectF(self._kep.boundingRect())
+        return self._teljes
 
 
 class IdoTengely(pg.AxisItem):
@@ -1515,13 +1624,31 @@ class LabAblak(QtWidgets.QMainWindow):
 
     # ── Listák ───────────────────────────────────────────────────────────
     def _szamla_gorbe(self):
-        """`(realizált, equity, kezdő)` — a vékony burok a tiszta számítás körül."""
+        """`(realizált, equity, kezdő)` — a vékony burok a tiszta számítás körül.
+
+        ⚠ MOST MÁR VAN GYORSÍTÓTÁR (2026-09-09). A `szamla_gorbe` fejlécében az
+        állt, hogy a gyorsítótár hiánya MÉRT döntés — és az is volt, az akkori
+        kötésszámoknál (300 kötés → 4,5 ms). Ez a mérés viszont NEM
+        általánosított: a görbe a KURZORTÓL FÜGGETLEN (csak a chart, a kötések és
+        a kezdő egyenleg határozza meg), a `_szamla_frissit` mégis minden
+        lejátszás-képen újraszámolta. 1000 kötésnél ez 18 ms/kép — a 60 kép/mp
+        keretének a harmada, egyetlen olyan számításra, aminek az eredménye
+        képről képre BITAZONOS.
+
+        Az érvénytelenítés AZONOSSÁG szerint megy (`is`), nem érték szerint: a
+        gyorsítótár megtartja a hivatkozásokat, tehát nincs `id()`-újrafelhasználás.
+        """
         res = (self._eredmeny or {}).get("res")
         if res is None or self._chart is None or len(self._chart) < 2:
             return None
-        return szamla_gorbe(self._chart,
-                            getattr(res, "trades", None) or [],
-                            float((self._eredmeny or {}).get("balance") or 0.0))
+        kezdo = float((self._eredmeny or {}).get("balance") or 0.0)
+        c = getattr(self, "_gorbe_cache", None)
+        if (c is not None and c[0] is res and c[1] is self._chart
+                and c[2] == kezdo):
+            return c[3]
+        ki = szamla_gorbe(self._chart, getattr(res, "trades", None) or [], kezdo)
+        self._gorbe_cache = (res, self._chart, kezdo, ki)
+        return ki
 
     def _egyenleg_rajz(self) -> None:
         for it in self._egyenleg_elemek:
@@ -1566,12 +1693,43 @@ class LabAblak(QtWidgets.QMainWindow):
             equity=f"{eq[i]:.2f}", open=_nyitott, dd=f"{_dd:.2f}"))
 
     def _listak_frissit(self) -> None:
-        for t in self._tablak.values():
-            t.setRowCount(0)
+        """A két kötés-tábla frissítése a kurzor állásához.
+
+        ⚠ EZ A LEJÁTSZÁS SZŰK KERESZTMETSZETE (2026-09-09, mérve). A `_utem()`
+        másodpercenként akár 60-szor hívja, és a régi változat MINDEN képen
+        letarolta a táblákat (`setRowCount(0)`), majd **új
+        `QTableWidgetItem`-et allokált minden cellára, minden kötéshez**:
+
+            kötés     tábla/kép     kép/mp
+                0       0,07 ms      6131
+              100       8,99 ms       110
+              250      22,82 ms        44   ← már észrevehető
+              500      47,15 ms        21   ← akad
+             1000     115,78 ms         9   ← használhatatlan
+
+        A RAJZ közben KONSTANS 0,58 ms/kép — 395 és 20 325 gyertyánál is
+        ugyanannyi (a pyqtgraph a gyertyákat egyszer rajzolja). Vagyis az
+        akadást SOSEM a gyertyaszám okozta, hanem a kötésszám, a tábla-újraépítésen
+        keresztül. Ezért nem segítene rajta más nyelv sem: a költség Qt-widget-
+        allokáció, nem számítás.
+
+        A JAVÍTÁS: a cellák ÚJRAHASZNOSULNAK (`_tabla_ir`), és csak a
+        ténylegesen megváltozott szöveg íródik ki. A `setRowCount` csak akkor
+        fut, ha a sorok SZÁMA változott.
+        """
         res = (self._eredmeny or {}).get("res")
+        # ⚠ A lezárt-sor gyorsítótár a RES-hez tartozik: új futtatás → új kötés-
+        # objektumok → ürítés. (A `_c[0] is not tr` őr ezt külön is elkapja, de a
+        # szótár így nem nő korlátlanul egy hosszú laboratóriumi ülés alatt.)
+        if getattr(self, "_lezart_cache_res", None) is not res:
+            self._lezart_cache = {}
+            self._lezart_cache_res = res
         if res is None:
+            self._tabla_ir(self._tablak["nyitott"], [])
+            self._tabla_ir(self._tablak["lezart"], [])
             return
         _kt = self._kurzor_ido()
+        _nyitott_sorok, _lezart_sorok = [], []
         for tr in (getattr(res, "trades", None) or []):
             if _kt is not None:
                 if tr.open_time > _kt:
@@ -1591,7 +1749,7 @@ class LabAblak(QtWidgets.QMainWindow):
                         _pnl = _r * float(tr.risk_usd or 0.0)
                     except (TypeError, ValueError):
                         _pnl = float("nan")
-                self._sor(self._tablak["nyitott"], [
+                _nyitott_sorok.append([
                     str(tr.open_time)[5:16], tr.direction,
                     self._ar(tr.open_price),
                     self._ar(_most) if _most is not None else "—",
@@ -1600,25 +1758,48 @@ class LabAblak(QtWidgets.QMainWindow):
                     self._ar(_sl0), self._ar(tr.tp),
                     "—" if _perc is None else f"{_perc:.0f}"])
             else:
-                try:
-                    _r = (tr.pnl_usd / tr.risk_usd) if tr.risk_usd else 0.0
-                except (TypeError, ZeroDivisionError):
-                    _r = 0.0
-                self._sor(self._tablak["lezart"], [
-                    str(tr.open_time)[5:16], tr.direction,
-                    self._ar(tr.open_price), str(tr.close_time)[5:16],
-                    f"{tr.pnl_usd:+.2f}", f"{_r:+.2f}", tr.status])
+                # ⚠ A LEZÁRT sor a kurzortól FÜGGETLEN (nyitó/záró ár és idő,
+                # realizált P&L) — egyszer kiszámoljuk, utána csak elővesszük.
+                # A nyitott sor viszont képről képre változik (mozog az ár),
+                # azt nem lehet gyorsítótárazni.
+                _c = self._lezart_cache.get(id(tr))
+                if _c is None or _c[0] is not tr:
+                    try:
+                        _r = (tr.pnl_usd / tr.risk_usd) if tr.risk_usd else 0.0
+                    except (TypeError, ZeroDivisionError):
+                        _r = 0.0
+                    _c = (tr, [
+                        str(tr.open_time)[5:16], tr.direction,
+                        self._ar(tr.open_price), str(tr.close_time)[5:16],
+                        f"{tr.pnl_usd:+.2f}", f"{_r:+.2f}", tr.status])
+                    self._lezart_cache[id(tr)] = _c
+                _lezart_sorok.append(_c[1])
+        self._tabla_ir(self._tablak["nyitott"], _nyitott_sorok)
+        self._tabla_ir(self._tablak["lezart"], _lezart_sorok)
         # A kurzor mozgásakor az IDŐPILLANAT-nézet is frissül.
         self._szamla_frissit()
 
     @staticmethod
-    def _sor(tabla, ertekek) -> None:
-        r = tabla.rowCount()
-        tabla.insertRow(r)
-        for c, v in enumerate(ertekek):
-            it = QtWidgets.QTableWidgetItem(str(v))
-            it.setTextAlignment(QtCore.Qt.AlignCenter)
-            tabla.setItem(r, c, it)
+    def _tabla_ir(tabla, sorok) -> None:
+        """A táblát a `sorok`-ra állítja — a cellák ÚJRAHASZNOSÍTÁSÁVAL.
+
+        A régi út (`setRowCount(0)` + `insertRow` + új `QTableWidgetItem`
+        cellánként) másodpercenként több ezer widget-allokációt jelentett a
+        lejátszás alatt. Itt csak akkor keletkezik új cella, ha a tábla NŐTT, és
+        csak akkor íródik szöveg, ha ténylegesen megváltozott.
+        """
+        if tabla.rowCount() != len(sorok):
+            tabla.setRowCount(len(sorok))
+        for r, ertekek in enumerate(sorok):
+            for c, v in enumerate(ertekek):
+                sz = str(v)
+                it = tabla.item(r, c)
+                if it is None:
+                    it = QtWidgets.QTableWidgetItem(sz)
+                    it.setTextAlignment(QtCore.Qt.AlignCenter)
+                    tabla.setItem(r, c, it)
+                elif it.text() != sz:
+                    it.setText(sz)
 
     def _ar(self, ar) -> str:
         """Ár a pár tizedeseivel. ⚠ `%.5g` NEM: nagy szinten exponenciálisra
