@@ -168,7 +168,14 @@ check("a load_execution_params MAR NEM adja vissza oket",
 # estek volna vissza a par hangolt erteke helyett — es a hangolas mas vilagban
 # tortent volna, mint az el.
 rrs.load()
-_cal = rrs.get_calibration("Ger40")
+# ⚠ A SZUKITES A BE/TRAIL KULCSOKRA (2026-09-08). Korabban a felteter `if _cal:`
+# volt — barmilyen kalibracios kulcs eleg volt hozza. Amikor a `breakeven_r`
+# bekerult a `_CALIB_KEYS`-be (de SZANDEKOSAN nem a `BE_TRAIL_KEYS`-be), egy olyan
+# par, aminek CSAK `breakeven_r`-je van, belefutott az agba — es ott a ket
+# ellenorzes URES halmazon futott: `all([])` atment, `any([])` bukott. A teszt
+# szandeka valtozatlan: HA a parnak van BE/trail kalibracioja, azt kell kapnia.
+_cal = {k: v for k, v in (rrs.get_calibration("Ger40") or {}).items()
+        if k in rr.BE_TRAIL_KEYS}
 if _cal:
     spec = bt._rr_spec(None, False, "Ger40")
     check("az rr=None ut a PAR sajat BE/trail erteket kapja",

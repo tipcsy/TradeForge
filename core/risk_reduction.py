@@ -21,8 +21,11 @@ from __future__ import annotations
 
 from core.i18n import t as _t
 
+import logging
 import math
 from dataclasses import dataclass
+
+log = logging.getLogger(__name__)
 
 # ── Presetek (2a tengely fő értékei + a Risky mint kombináció) ──────────────
 #
@@ -131,6 +134,20 @@ def default_config() -> dict:
         # a nyitó FÖLÉ (BUY) / ALÁ (SELL) teszi, hogy tényleg 0 vagy kicsit
         # pozitív legyen. 0.0 = a régi viselkedés, bitazonosan.
         "be_buffer_points":     0.0,
+        # ⚠ A BE KÜSZÖBE R-BEN — ha > 0, FELÜLÍRJA a `breakeven_pct`-et.
+        #
+        # MIÉRT KELL (mérve 2026-09-08). A `breakeven_pct` a CÉLÁR százaléka:
+        # `be_trigger = open + (tp − open) × breakeven_pct`. Amíg a célár 2–3 R
+        # volt, ez rendben működött. A célár-tartomány felnyitása után viszont az
+        # optimalizáló 16/16 páron HOSSZÚ célárat választott (9,5–15,0 R), és a
+        # 0,5-ös szorzóval a BE 7,25 R-re került — amit gyakorlatilag egy kötés
+        # sem ér el. A trailing pedig a `risk_free`-hez van kötve, tehát AZ IS
+        # meghalt. Vagyis a hosszú célár NÉMÁN kikapcsolta a kimenet-kezelést.
+        # Mérve, 14 pár, OOS: BE ~7 R → −0,3198 R/kötés; BE 1 R → −0,2234.
+        # A csatolás ára +0,166 R/kötés.
+        #
+        # `0.0` (alap) = a régi viselkedés BITAZONOSAN — a `breakeven_pct` dönt.
+        "breakeven_r":          0.0,
         "trail_activation_atr": 0.5,        # ennyi ATR profit UTÁN indul a trailing
         "trail_distance_atr":   0.4,        # ennyi ATR-rel követ
         "trigger_R":        1.0,            # hány R-nél lép életbe a részleges zárás
@@ -163,6 +180,171 @@ def default_config() -> dict:
         "cost_cut":         False,
         "cost_cut_bars":    12,
     }
+
+
+# ⚠ A `breakeven_trigger` SZOROS CIKLUSBAN fut (a backteszt minden gyertyán,
+# minden nyitott kötésre), ezért a diagnosztika futásonként EGYSZER szólal meg
+# okonként. A függvény egyébként tiszta marad: a naplózás nem változtat
+# viselkedést, csak láthatóvá teszi a `None`-t — enélkül a „nincs breakeven"
+# ugyanúgy néma volna, mint a hiba, amit javít.
+_warned: set = set()
+
+
+def _warn_once(key: str, msg: str, *args) -> None:
+    if key in _warned:
+        return
+    _warned.add(key)
+    log.warning(msg, *args)
+
+
+def breakeven_trigger(open_price: float, tp: float, sl_dist: float, is_buy: bool,
+                      be_pct: float, be_r: float, risky: bool = False):
+    """A BREAKEVEN-küszöb ÁRA, vagy `None`, ha nincs breakeven.
+
+    EGY forrás mindhárom hívónak: `trading.backtest._update_stops`,
+    `live_trader._apply_be_and_trailing` és a `live_trader.process_pair`
+    off/risky ága. A háromból kettő IKERPÁRKÉNT volt jelölve („HA ITT
+    VÁLTOZTATSZ, azt is módosítsd") — pontosan az a szerkezet, amiből néma
+    él↔backteszt eltérés lesz. Ez a függvény tiszta: se MT5, se Trade, csak
+    számok, tehát egy sorban tesztelhető, és MINDHÁROM út ugyanazt kapja.
+
+    `sl_dist`: az EREDETI stop-távolság ÁRBAN (1 R). A backtestben
+    `trade.sl_points × point_size`, élőben `|nyitóár − original_sl|`.
+
+    A SORREND (szándékosan): `risky` → `be_r` → `be_pct`.
+      * `risky`   — azonnali BE a nyitóáron (a live óvatos módja),
+      * `be_r>0`  — a küszöb R-BEN (a célártól FÜGGETLEN),
+      * különben  — a régi, célár-arányos `be_pct` (bitazonos viselkedés).
+
+    ⚠ A `none` presetet NEM itt kapuzzuk: a hívó adjon `be_pct=0, be_r=0`-t.
+    Így a preset-logika ott marad, ahol eddig volt, és ez a függvény nem tud a
+    presetekről — egy dolgot csinál, azt egy helyen.
+
+    ⚠ NINCS NÉMA MÓDVÁLTÁS (2026-09-08, független code review). Két ág korábban
+    csendben MÁS SZEMANTIKÁRA váltott:
+
+      1. `be_r > 0`, de a stop-távolság ismeretlen (0) → visszaesett a
+         `be_pct`-re. Aki R-ben kérte a küszöböt, célár-arányosat kapott —
+         épp az a csatolás, aminek a felszámolására a `be_r` készült.
+      2. `tp` hiányzik vagy 0 → a `be_pct` képlet ÉRTELMETLEN, de nem szólt:
+         BUY-nál `open + (0 − open) × 0.5 = open/2`, azaz a küszöb a belépő
+         FELE — ami alatta van az árnak, tehát **azonnal elsül**. Nem
+         elmaradó BE: HAMIS, azonnali BE. És ez nem elméleti: a ráépített
+         lábakat a motor `tp=0.0`-val nyitja (a csomag egyben fut).
+
+    Mindkettő most `None` (nincs breakeven) + EGYSZERI naplóbejegyzés. A `None`
+    a biztonságos válasz: a stop marad, ahol van — a pozíció nem lesz
+    kockázatmentes, de hamis küszöbtől sem sül el.
+    """
+    if risky:
+        return open_price
+    try:
+        be_r = float(be_r or 0.0)
+    except (TypeError, ValueError):
+        be_r = 0.0
+    if be_r > 0:
+        try:
+            _d = float(sl_dist or 0.0)
+        except (TypeError, ValueError):
+            _d = 0.0
+        if _d > 0:
+            d = be_r * _d
+            return open_price + d if is_buy else open_price - d
+        # ⚠ NEM esünk vissza a be_pct-re (lásd a docstringet): az R-ben kért
+        # küszöböt nem tudjuk kiszámolni, tehát nincs breakeven.
+        _warn_once("be_r_no_sl_dist",
+                   "breakeven_r be van állítva (%.2f R), de a stop-távolság "
+                   "ISMERETLEN → NINCS breakeven. A pozíció nem lesz "
+                   "kockázatmentes; a régi, célár-arányos küszöbre NEM esünk "
+                   "vissza (az más szemantika volna).", be_r)
+        return None
+    try:
+        be_pct = float(be_pct or 0.0)
+    except (TypeError, ValueError):
+        be_pct = 0.0
+    if be_pct <= 0:
+        return None
+    # ⚠ Célár nélkül a `be_pct` képlet nem hibázik, hanem HAZUDIK: `tp=0`-nál a
+    # küszöb a belépő fele (BUY), ami már az induláskor teljesül.
+    if not tp:
+        _warn_once("be_pct_no_tp",
+                   "breakeven_pct van beállítva (%.2f), de a pozíciónak NINCS "
+                   "célára → NINCS breakeven. (Célár-arányos küszöb célár "
+                   "nélkül azonnal elsülne.) Használj `breakeven_r`-t.", be_pct)
+        return None
+    return (open_price + (tp - open_price) * be_pct if is_buy
+            else open_price - (open_price - tp) * be_pct)
+
+
+def trailing_new_sl(is_buy: bool, price_open: float, price_current: float,
+                    current_sl: float, *, entry_atr: float,
+                    trail_distance_atr: float, trail_activation_atr: float,
+                    point: float, digits: int, override_points=None,
+                    risky: bool = False, stops_level: float = 0.0,
+                    be_floor=None):
+    """Az ÚJ trailing stop ÁRA + a követési távolság, vagy `None`, ha nincs húzás.
+
+    Visszatérés: `(new_sl, eff_price)` — a hívó dolga a broker-hívás és a napló.
+
+    EGY forrás a KÉT ÉLŐ ÁGNAK — ugyanaz a szerep, mint a `breakeven_trigger`-é.
+    A kódban „IKERPÁR"-ként voltak megjelölve („HA ITT VÁLTOZTATSZ, azt is
+    módosítsd"), és ez a szerkezet meg is termelte a maga hibáját:
+
+    ⚠ A `_apply_be_and_trailing` (a no-trade órák ága) az `_atr`-t CSAK az
+    ATR-es ágban vette fel, az `act_price` viszont mindig hivatkozott rá.
+    KÉZI követés-felülírás (`trail_points`, a Pozíciók fülről) + nem-risky
+    pozíció → **`NameError`** — amit a hívó `except`-je `log.debug`-ba nyelt,
+    tehát a szünetben nem csak a trailing, hanem az adott körben a többi
+    pozíció BE-je is elmaradt volna, némán. A fő ág ugyanezt helyesen csinálta.
+
+    A SZEMANTIKA a FŐ ÁGÉ (az fut minden kereskedhető órában):
+      * `override_points` (kézi, PONTBAN) → pontos táv, a risky NEM felezi;
+      * különben `entry_atr × trail_distance_atr`, risky felezi;
+      * `entry_atr` ismeretlen ÉS nincs override → nincs trailing (`None`);
+      * az AKTIVÁLÁS `entry_atr × trail_activation_atr` (risky: azonnal). Kézi
+        felülírásnál ismeretlen ATR-rel ez 0 — azaz azonnal aktív: a felhasználó
+        kifejezetten megadta a követést, nincs mihez késleltetni.
+
+    A bróker MINIMUM stop-távolsága (`stops_level`, PONTBAN) alá nem megyünk +1
+    ponttal: enélkül a modify csendben elutasításra kerül, és a trailing sosem
+    kötne le profitot.
+
+    `be_floor`: ha a BE már megtörtént, a stop SOSEM lehet a belépőnél rosszabb
+    (elavult pillanatkép mellett is) — a 2026-07-28-i eset invariánsa.
+    """
+    try:
+        entry_atr = float(entry_atr or 0.0)
+    except (TypeError, ValueError):
+        entry_atr = 0.0
+
+    if override_points is not None:
+        dist_price = float(override_points) * point
+    elif entry_atr > 0:
+        dist_price = (float(trail_distance_atr) * entry_atr
+                      * (0.5 if risky else 1.0))
+    else:
+        return None                      # ismeretlen ATR, nincs kézi táv
+
+    eff_price = max(dist_price, float(stops_level) * point + point)
+    act_price = 0.0 if risky else float(trail_activation_atr) * entry_atr
+
+    if is_buy:
+        if price_current < price_open + act_price:
+            return None
+        new_sl = round(price_current - eff_price, digits)
+        if new_sl <= current_sl:
+            return None
+        if be_floor is not None and new_sl < be_floor:
+            return None
+    else:
+        if price_current > price_open - act_price:
+            return None
+        new_sl = round(price_current + eff_price, digits)
+        if new_sl >= current_sl:
+            return None
+        if be_floor is not None and new_sl > be_floor:
+            return None
+    return new_sl, eff_price
 
 
 def wants_cautious_size(preset: str) -> bool:

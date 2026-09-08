@@ -11,6 +11,15 @@ trades.csv
 config*másolata*.json
 config*copy*.json
 config.local.json
+# ⚠ A KÉZI MENTÉSEK IS: `config.json.mentes-*`, `.bak`, `.old` — ezek TELJES
+# másolatok, tehát a `broker.password` is bennük van. A fenti `config.json`
+# sor NEM fedi őket (pontos névre illeszkedik), így 9 ilyen fájl állt
+# követetlenül a munkakönyvtárban: EGY `git add -A` felrakta volna a
+# jelszót a repóba. A `config.example.json` nem illeszkedik (más a neve).
+config.json.*
+# ...és a `*.mentes-*` konvenció BÁRHOL (a stratégia-configok mentései is
+# így készülnek). Ha egy mentést mégis fel akarsz tenni: `git add -f`.
+*.mentes-*
 
 # A repoban TAROLT leforditott MQL binarisok (verziozva, jegyzekkel).
 # Ezek SZANDEKOSAN a repoban vannak — lasd core/mt_deploy.py.

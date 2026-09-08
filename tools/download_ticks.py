@@ -127,6 +127,14 @@ def to_frame(ticks, point: float) -> pd.DataFrame:
     ⚠ A sor akkor is KELL, ha csak az ask érvénytelen: a gyertya BID-ből épül,
     tehát a tick a volumenbe és az OHLC-be beleszámít — csak a spreadbe nem.
     Ilyenkor `ask_pt = 0` a jelölés (a build ezt NaN spreadnek veszi)."""
+    # ⚠ A tickeket PONTBAN tároljuk (int64), tehát a `point` a mértékegység. 0
+    # esetén nem „pontatlan" lenne az eredmény, hanem `ZeroDivisionError` a
+    # letöltés közepén, több órányi munka után — ezért ELŐRE megállunk.
+    if not point or point <= 0:
+        raise ValueError(
+            f"point_size hiányzik vagy 0 (kapott: {point!r}) — a tickeket nem "
+            f"lehet pontra váltani. Töltsd fel a pár configját: "
+            f"`python tools/refresh_point_values.py --write`.")
     names = ticks.dtype.names or ()
     tms = (ticks["time_msc"].astype("int64") if "time_msc" in names
            else ticks["time"].astype("int64") * 1000)

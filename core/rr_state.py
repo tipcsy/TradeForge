@@ -13,6 +13,7 @@ egyesíti — ha itt 'off' de a risky_mode be van kapcsolva → 'risky'.
 """
 
 import json
+import logging
 import threading
 from pathlib import Path
 
@@ -25,6 +26,8 @@ from core.risk_reduction import (
 )
 from core import exit_signal
 from core.i18n import LabelMap as _LabelMap
+
+log = logging.getLogger(__name__)
 
 PATH = Path(__file__).resolve().parents[1] / "data" / "risk_mode.json"
 
@@ -57,7 +60,14 @@ _CALIB_KEYS = ("trigger_R", "halving_fraction", "shield_fraction",
                "big_move_atr_mult",
                # v1.96.0: a BE + trailing IDE költözött a közös végrehajtási
                # configból — ezek is a kimenet-menedzsment paraméterei.
-               *BE_TRAIL_KEYS)
+               *BE_TRAIL_KEYS,
+               # ⚠ A `breakeven_r` SZÁNDÉKOSAN nincs a `BE_TRAIL_KEYS`-ben, csak
+               # itt. Az a sorozat rögzített szerződés (az optimalizáló
+               # rr-keresési tere és három teszt EGYENLŐSÉGET vár rá, pl.
+               # `MIGRATED_KEYS == set(BE_TRAIL_KEYS)`) — bővítve némán elbukna
+               # olyasmi, aminek semmi köze ehhez. Per-pár menthetőnek viszont
+               # kell lennie, ezért a kalibrációs kulcsok közt a helye.
+               "breakeven_r")
 
 
 def _norm(v) -> dict:
@@ -94,8 +104,20 @@ def load() -> dict:
                 if isinstance(data, dict):
                     _state.clear()
                     _state.update({str(k): _norm(v) for k, v in data.items()})
-        except Exception:
-            pass
+        except Exception as ex:
+            # ⚠ EZ A MODUL LEGVESZÉLYESEBB NÉMA HIBÁJA. A fájl nem csak a
+            # presetet hordozza, hanem a per-pár KALIBRÁCIÓT is (`_CALIB_KEYS`:
+            # breakeven_pct, breakeven_r, trailing, trigger_R, frakciók). Ha
+            # sérült vagy zárolt, MINDEN pár a modul alapértékére esik vissza —
+            # `breakeven_r = 0`, azaz pontosan az a célár-arányos BE, aminek a
+            # kikapcsolása egy egész napi hibakeresésbe került (lásd
+            # `test_breakeven_r.py`). Kívülről ez semmiben nem különbözik a
+            # „még nincs beállítás" állapottól, ezért ERROR (a felület a
+            # `applog` hibaszámlálójából szól), nem warning.
+            log.error("%s: a kockázatcsökkentő állapot NEM OLVASHATÓ (%s) — "
+                      "minden pár az ALAPÉRTELMEZETT presetre és kalibrációra "
+                      "esik vissza (BE/trailing is). A mentett beállítások NEM "
+                      "érvényesülnek.", PATH.name, ex)
         return dict(_state)
 
 
@@ -270,5 +292,10 @@ def _save_locked():
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(_state, f, indent=2, ensure_ascii=False)
         tmp.replace(PATH)
-    except Exception:
-        pass
+    except Exception as ex:
+        # ⚠ A memóriában megvan, a lemezen nincs: a felületen beállított preset
+        # (vagy a hangolás kiírta kalibráció) MŰKÖDIK — egészen a következő
+        # indításig, amikor nyomtalanul eltűnik.
+        log.error("%s: a kockázatcsökkentő állapot MENTÉSE nem sikerült (%s). "
+                  "A beállítás csak a memóriában él — újraindítás után elveszik.",
+                  PATH.name, ex)

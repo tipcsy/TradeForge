@@ -11,9 +11,12 @@ a felület gombja a mérvadó, látható igazság legyen — nem egy elfeledett 
 """
 
 import json
+import logging
 import threading
 from pathlib import Path
 from typing import Optional
+
+log = logging.getLogger(__name__)
 
 PATH = Path(__file__).resolve().parents[1] / "data" / "correlation_mode.json"
 
@@ -63,8 +66,9 @@ def load() -> str:
                 m = _LEGACY_MODE.get(m, m)     # régi, magyar feliratú mentés
                 if m in MODES:
                     _mode = m
-        except Exception:
-            pass
+        except Exception as ex:
+            log.error("%s: a korrelációs mód NEM OLVASHATÓ (%s) — az "
+                      "alapértelmezett mód marad érvényben.", PATH.name, ex)
         return _mode
 
 
@@ -99,8 +103,10 @@ def _save_locked():
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump({"mode": _mode}, f, indent=2, ensure_ascii=False)
         tmp.replace(PATH)
-    except Exception:
-        pass
+    except Exception as ex:
+        log.error("%s: a korrelációs mód MENTÉSE nem sikerült (%s). A beállítás "
+                  "csak a memóriában él — újraindítás után elveszik.",
+                  PATH.name, ex)
 
 
 # ---------------------------------------------------------------------------

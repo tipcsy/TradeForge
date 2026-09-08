@@ -87,8 +87,15 @@ check("szimbolum NELKUL -> off (visszafele kompatibilis)",
 # ── 3. Az IKERPAR: a `none` kapu MINDKET agban ott legyen ────────────────────
 SRC = (ROOT / "trading" / "live_trader.py").read_text(encoding="utf-8")
 
+# /!\ NEM FIX KARAKTER-ABLAK (2026-09-08). Eddig `SRC[twin_pos:twin_pos+4000]`
+# volt. A 4000 az akkori fuggvenyhosszhoz igazodott — amint a trailing kikerult
+# kozos fuggvenybe (es a docstring nott), az ablak elvagta a trailing-kaput, es
+# a teszt KET allitasa megbukott, holott a kod helyes volt. Egy ilyen teszt nem
+# a szandekot orzi, hanem egy meretet. Most a KOVETKEZO modul-szintu `def`-ig
+# tart az ag — barmilyen hosszan.
 twin_pos = SRC.index("def _apply_be_and_trailing(")
-twin = SRC[twin_pos:twin_pos + 4000]
+_twin_veg = SRC.index("\ndef ", twin_pos + 10)
+twin = SRC[twin_pos:_twin_veg]
 check("az ikerparban van `none` kapu a breakeven elott",
       "_is_none" in twin and "0.0 if _is_none else" in twin)
 check("az ikerparban a TRAILING is kapuzva van `none`-ra",
@@ -102,7 +109,7 @@ check("a breakeven-kapu MINDKET agban ott van (>=2 elofordulas)",
 check("a trailing-kapu MINDKET agban ott van (>=2 elofordulas)",
       SRC.count("not _is_none") >= 2, f"{SRC.count('not _is_none')} db")
 
-main = SRC[twin_pos + 4000:]
+main = SRC[_twin_veg:]
 check("a fo ag (process_pair) valtozatlanul kapuzza a breakeven-t",
       "0.0 if _is_none else" in main)
 check("a fo ag valtozatlanul kapuzza a trailinget",

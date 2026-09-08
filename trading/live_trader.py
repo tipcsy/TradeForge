@@ -1887,6 +1887,26 @@ def _refresh_position(ticket: int):
         return None
 
 
+def _one_r_price(pos, pstate) -> float:
+    """1 R ÁRBAN: a NYITÁSKORI stop-távolság — vagy 0.0, ha nem tudható.
+
+    ⚠ MIÉRT NEM `abs(price_open - pstate.get("original_sl", pos.sl))` (2026-09-08).
+    Az MT5 a stop NÉLKÜLI pozíciónak `sl = 0.0`-t ad, nem `None`-t. A régi alak
+    ilyenkor `|nyitóár − 0| = nyitóár`-t adott, azaz egy MAGÁVAL AZ ÁRRAL egyenlő
+    „1 R"-t — a `breakeven_r=1` küszöb a nyitóár KÉTSZERESÉRE került volna. Nem
+    hiba, nem kivétel: egy csendben soha el nem sülő breakeven.
+
+    Ilyen pozíció létezik: kézzel örökbefogadott (`core/adopted.py`), vagy olyan,
+    amiről a stop lekerült. A helyes válasz a 0.0 — a hívó
+    (`risk_reduction.breakeven_trigger`) ebből tudja, hogy az R-alapú küszöb NEM
+    számolható, és hangosan `None`-t ad.
+    """
+    _osl = pstate.get("original_sl") or pos.sl
+    if not _osl or _osl <= 0:
+        return 0.0
+    return abs(pos.price_open - float(_osl))
+
+
 def _apply_be_and_trailing(symbol, pos, ticket, pstate, is_rf, risky,
                            rr, point_size, sym_info, slot_mgr):
     """Egy nyitott (off/risky) pozíció költség-tudatos BREAKEVEN + TRAILING kezelése —
@@ -1900,8 +1920,20 @@ def _apply_be_and_trailing(symbol, pos, ticket, pstate, is_rf, risky,
     `params`-ából — a BE/trailing a kockázatcsökkentés része. Lásd
     `core/risk_reduction.BE_TRAIL_KEYS`.
 
-    ⚠ IKERPÁR: a `process_pair` off/risky ágában ugyanez a logika fut (ott a
-    preset-elágazás részeként). HA ITT VÁLTOZTATSZ, azt is módosítsd."""
+    ⚠ IKERPÁR — de MÁR CSAK A KERET (v3.56.0). A `process_pair` off/risky ága
+    ugyanezt a folyamatot futtatja (ott a preset-elágazás részeként), és a kettő
+    SZÁNDÉKOSAN külön marad: az összevonás a preset-diszpécser átszervezését
+    jelentené a legkritikusabb úton.
+
+    A SZÁMOLÁS viszont már NEM duplikált — mindkét ág ugyanazt a két tiszta
+    függvényt hívja: `risk_reduction.breakeven_trigger` és
+    `risk_reduction.trailing_new_sl`. Ez nem kozmetika volt: amíg a trailing
+    kézzel élt itt is, ez a példány `NameError`-t dobott kézi követés-
+    felülírásnál (az `_atr` csak az ATR-es ágban vett fel értéket), és a hívó
+    `except`-je `log.debug`-ba nyelte.
+
+    HA ITT VÁLTOZTATSZ, nézd meg a másik ágat is — de a KÉPLETET egyik helyen
+    se írd újra: az a két közös függvényé."""
     # Kézi/külső SL-húzás felismerése (mint a fő ágban): ha az SL már a költség-
     # tudatos BE-n van, „BE kész" → slot fel, trailing indulhat (szünet-órákban is).
     # Olcsó elő-szűrő: csak ha az SL a profit oldalon van (különben nincs connector-hívás).
@@ -1924,15 +1956,17 @@ def _apply_be_and_trailing(symbol, pos, ticket, pstate, is_rf, risky,
     from core import risk_reduction as _rr_mod
     _is_none = rr.get("preset") == _rr_mod.PRESET_NONE
     be_pct = 0.0 if _is_none else rr.get("breakeven_pct", 0.5)
-    if (risky or be_pct > 0) and not is_rf:
-        if pos.type == mt5.ORDER_TYPE_BUY:
-            be_price = (pos.price_open if risky
-                        else pos.price_open + (pos.tp - pos.price_open) * be_pct)
-            trigger = pos.price_current >= be_price
-        else:
-            be_price = (pos.price_open if risky
-                        else pos.price_open - (pos.price_open - pos.tp) * be_pct)
-            trigger = pos.price_current <= be_price
+    be_r   = 0.0 if _is_none else rr.get("breakeven_r", 0.0)
+    if not is_rf:
+        # 1 R ÁRBAN = az EREDETI stop-távolság. A `pstate["original_sl"]` a
+        # nyitáskori stop; a `pos.sl` már elmozdulhatott (kézi húzás, korábbi BE).
+        _sl_dist = _one_r_price(pos, pstate)
+        be_price = _rr_mod.breakeven_trigger(
+            pos.price_open, pos.tp, _sl_dist,
+            pos.type == mt5.ORDER_TYPE_BUY, be_pct, be_r, risky)
+        trigger = be_price is not None and (
+            pos.price_current >= be_price if pos.type == mt5.ORDER_TYPE_BUY
+            else pos.price_current <= be_price)
         if trigger and mt5_connector.move_to_breakeven(ticket):
             slot_mgr.set_risk_free(ticket)
             pstate["be_done"] = True
@@ -1946,46 +1980,23 @@ def _apply_be_and_trailing(symbol, pos, ticket, pstate, is_rf, risky,
     if is_rf and not _is_none and pstate.get("trailing_enabled", True):
         point  = sym_info.point if (sym_info and sym_info.point > 0) else point_size
         digits = sym_info.digits if sym_info else 5
-        override_points = pstate.get("trail_points")
-        if override_points is not None:
-            dist_price = override_points * point
-        else:
-            # ATR-szorzó a BELÉPÉSKORI ATR-re (pstate["entry_atr"]). Abszolút
-            # távolság helyett azért, mert az instrumentum-függő lenne — így a
-            # puffer a pár és a pillanat zajszintjéhez igazodik.
-            _atr = float(pstate.get("entry_atr") or 0.0)
-            if _atr <= 0:
-                return                     # ismeretlen ATR → nincs trailing (a BE
-                                           # ekkor MÁR lefutott feljebb ebben a
-                                           # függvényben — azt nem hagyjuk ki)
-            dist_price = (rr.get("trail_distance_atr", 0.4) * _atr
-                          * (0.5 if risky else 1.0))
-        min_stop_price = (sym_info.trade_stops_level * point) if sym_info else 0.0
-        eff_price = max(dist_price, min_stop_price + point)
-        act_price = (0.0 if risky
-                     else rr.get("trail_activation_atr", 0.5) * _atr)
-        # INVARIÁNS (mint a fő ágban): BE után a stop sosem lehet a belépőnél rosszabb.
-        _be_floor = pos.price_open if pstate.get("be_done") else None
-        if pos.type == mt5.ORDER_TYPE_BUY:
-            if pos.price_current >= pos.price_open + act_price:
-                new_sl = round(pos.price_current - eff_price, digits)
-                if (new_sl > pos.sl
-                        and (_be_floor is None or new_sl >= _be_floor)
-                        and modify_sl(ticket, new_sl)):
-                    pstate["trail_moved"] = True
-                    log.info("↗ %s #%d trailing SL → %.*f (%d pont követés%s)",
-                             symbol, ticket, digits, new_sl,
-                             round(eff_price / point), ", risky" if risky else "")
-        else:
-            if pos.price_current <= pos.price_open - act_price:
-                new_sl = round(pos.price_current + eff_price, digits)
-                if (new_sl < pos.sl
-                        and (_be_floor is None or new_sl <= _be_floor)
-                        and modify_sl(ticket, new_sl)):
-                    pstate["trail_moved"] = True
-                    log.info("↘ %s #%d trailing SL → %.*f (%d pont követés%s)",
-                             symbol, ticket, digits, new_sl,
-                             round(eff_price / point), ", risky" if risky else "")
+        # A számolás a KÖZÖS `risk_reduction.trailing_new_sl`-ből (ugyanaz a
+        # képlet, mint a fő ágban) — itt már csak a bróker-hívás és a napló van.
+        _tr = _rr_mod.trailing_new_sl(
+            pos.type == mt5.ORDER_TYPE_BUY, pos.price_open, pos.price_current,
+            pos.sl, entry_atr=pstate.get("entry_atr"),
+            trail_distance_atr=rr.get("trail_distance_atr", 0.4),
+            trail_activation_atr=rr.get("trail_activation_atr", 0.5),
+            point=point, digits=digits,
+            override_points=pstate.get("trail_points"), risky=risky,
+            stops_level=(sym_info.trade_stops_level if sym_info else 0.0),
+            be_floor=(pos.price_open if pstate.get("be_done") else None))
+        if _tr and modify_sl(ticket, _tr[0]):
+            pstate["trail_moved"] = True
+            log.info("%s %s #%d trailing SL → %.*f (%d pont követés%s)",
+                     "↗" if pos.type == mt5.ORDER_TYPE_BUY else "↘",
+                     symbol, ticket, digits, _tr[0],
+                     round(_tr[1] / point), ", risky" if risky else "")
 
 
 # ---------------------------------------------------------------------------
@@ -2513,7 +2524,7 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
             _minlot  = pair_cfg.get("min_lot", 0.01)
             _lotstep = pair_cfg.get("lot_step", 0.01)
             if not pstate.get("rr_reduced") and not is_rf:
-                one_r = abs(pos.price_open - pstate.get("original_sl", pos.sl))
+                one_r = _one_r_price(pos, pstate)
                 reached = (pos.price_current >= pos.price_open + one_r
                            if pos.type == mt5.ORDER_TYPE_BUY
                            else pos.price_current <= pos.price_open - one_r)
@@ -2593,7 +2604,7 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
             _ratio = float(params.get("tp_rr_ratio", 0) or 0)
             _risk  = (abs(pos.tp - pos.price_open) / _ratio
                       if (pos.tp and _ratio > 0)
-                      else abs(pos.price_open - pstate.get("original_sl", pos.sl)))
+                      else _one_r_price(pos, pstate))
             if _risk > 0:
                 _is_buy = pos.type == mt5.ORDER_TYPE_BUY
                 _trig, _stop1, _stop2 = _rr.thirds_levels(
@@ -2627,23 +2638,29 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
             # A tényleges SL nem pontos BE, hanem BE + spread puffer (lásd
             # mt5_connector.move_to_breakeven): spread×2 → ×1 → pontos BE fallback.
             #
-            # ⚠ IKERPÁR: ugyanez a logika él a `_apply_be_and_trailing`-ben is (azt a
-            # no-trade órák ága hívja, ahol nincs bar). A kettő SZÁNDÉKOSAN külön: itt
-            # a preset-elágazás része, ott önálló, bar-független függvény — az
-            # összevonás a preset-diszpécser átszervezését jelentené a legkritikusabb
-            # úton. HA ITT VÁLTOZTATSZ, a `_apply_be_and_trailing`-et is módosítsd.
+            # ⚠ IKERPÁR: ugyanez a FOLYAMAT él a `_apply_be_and_trailing`-ben is
+            # (azt a no-trade órák ága hívja, ahol nincs bar). A kettő SZÁNDÉKOSAN
+            # külön: itt a preset-elágazás része, ott önálló, bar-független
+            # függvény — az összevonás a preset-diszpécser átszervezését jelentené
+            # a legkritikusabb úton. A KÉPLETEK viszont közösek
+            # (`risk_reduction.breakeven_trigger` + `trailing_new_sl`), tehát
+            # ITT SOSE ÍRD ÚJRA a számolást — csak a keretet módosítsd, és nézd
+            # meg a másik ágat is.
             # A kulcsok az rr SPECBŐL (v1.96.0) — a BE/trailing a kockázatcsökkentés
             # paramétere, nem a stratégiáé.
             be_pct = 0.0 if _is_none else _spec.get("breakeven_pct", 0.5)
-            if (risky or be_pct > 0) and not is_rf:
-                if pos.type == mt5.ORDER_TYPE_BUY:
-                    be_price = (pos.price_open if risky
-                                else pos.price_open + (pos.tp - pos.price_open) * be_pct)
-                    trigger = pos.price_current >= be_price
-                else:
-                    be_price = (pos.price_open if risky
-                                else pos.price_open - (pos.price_open - pos.tp) * be_pct)
-                    trigger = pos.price_current <= be_price
+            be_r   = 0.0 if _is_none else _spec.get("breakeven_r", 0.0)
+            if not is_rf:
+                # A küszöb ÁRA a KÖZÖS `risk_reduction.breakeven_trigger`-ből —
+                # ugyanaz a képlet, mint a backtestben és az ikerpárban.
+                _sl_dist = _one_r_price(pos, pstate)
+                be_price = _rr.breakeven_trigger(
+                    pos.price_open, pos.tp, _sl_dist,
+                    pos.type == mt5.ORDER_TYPE_BUY, be_pct, be_r, risky)
+                trigger = be_price is not None and (
+                    pos.price_current >= be_price
+                    if pos.type == mt5.ORDER_TYPE_BUY
+                    else pos.price_current <= be_price)
                 if trigger and mt5_connector.move_to_breakeven(ticket):
                     slot_mgr.set_risk_free(ticket)
                     pstate["be_done"] = True
@@ -2669,60 +2686,26 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
             point  = sym_info.point if (sym_info and sym_info.point > 0) else point_size
             digits = sym_info.digits if sym_info else 5
 
-            # Követési távolság ÁR-ban:
-            #   • kézi felülírás (Pozíciók fül) PONTBAN → pontos érték, risky NEM felezi
-            #   • egyébként a BELÉPÉSKORI ATR szorzója (trail_distance_atr), risky felezi
-            override_points = pstate.get("trail_points")
-            _atr = float(pstate.get("entry_atr") or 0.0)
-            if override_points is not None:
-                dist_price = override_points * point
-            elif _atr > 0:
-                dist_price = (_spec.get("trail_distance_atr", 0.4) * _atr
-                              * (0.5 if risky else 1.0))
-            else:
-                dist_price = None          # ismeretlen ATR → nem trailelünk
-
-            # A bróker MINIMUM stop-távolsága: ha az új SL ennél közelebb esne az
-            # árhoz, a modify csendben elutasításra kerül → a trailing sosem fog
-            # profitot. Ezért az effektív követés a min. stop-távolság + 1 pont alá
-            # NEM mehet — így a legkorábbi (kb. 1 pontnyi) profitot is lekötjük.
-            min_stop_price = (sym_info.trade_stops_level * point) if sym_info else 0.0
-            eff_price = (max(dist_price, min_stop_price + point)
-                         if dist_price is not None else None)
-
-            # Risky mód: a trailing AZONNAL induljon (nem várunk aktiválási profitra).
-            act_price = (0.0 if risky
-                         else _spec.get("trail_activation_atr", 0.5) * _atr)
-
-            # ── INVARIÁNS: kockázatmentesből sosem lehet kockázatos ──────
-            # Ha a BE már megtörtént, a trailing SOSEM tehet a belépőnél rosszabb
-            # stopot — akkor sem, ha bármilyen okból elavult SL-hez hasonlítana.
-            # (Ez fogta volna meg a 2026-07-28-i esetet: a BE utáni körben a
-            # trailing a régi pillanatkép alapján a belépő ALÁ húzta a stopot,
-            # miközben a slot már felszabadult.)
-            _be_floor = pos.price_open if pstate.get("be_done") else None
-            if eff_price is None:
-                pass                       # ATR ismeretlen (pl. újraindítás után)
-            elif pos.type == mt5.ORDER_TYPE_BUY:
-                if pos.price_current >= pos.price_open + act_price:
-                    new_sl = round(pos.price_current - eff_price, digits)
-                    if (new_sl > pos.sl
-                            and (_be_floor is None or new_sl >= _be_floor)
-                            and modify_sl(ticket, new_sl)):
-                        pstate["trail_moved"] = True
-                        log.info("↗ %s #%d trailing SL → %.*f (%d pont követés%s)",
-                                 symbol, ticket, digits, new_sl,
-                                 round(eff_price / point), ", risky" if risky else "")
-            else:
-                if pos.price_current <= pos.price_open - act_price:
-                    new_sl = round(pos.price_current + eff_price, digits)
-                    if (new_sl < pos.sl
-                            and (_be_floor is None or new_sl <= _be_floor)
-                            and modify_sl(ticket, new_sl)):
-                        pstate["trail_moved"] = True
-                        log.info("↘ %s #%d trailing SL → %.*f (%d pont követés%s)",
-                                 symbol, ticket, digits, new_sl,
-                                 round(eff_price / point), ", risky" if risky else "")
+            # A TELJES számolás a KÖZÖS `risk_reduction.trailing_new_sl`-ben:
+            # követési távolság (kézi PONT vagy belépéskori ATR × szorzó, risky
+            # felezi), a bróker minimum stop-távolsága, az aktiválási küszöb, és
+            # a BE-padló invariánsa. Ugyanaz a képlet fut a no-trade órák ágán is
+            # — a kettő korábban külön élt, és el is tért (lásd a függvényt).
+            _tr = _rr.trailing_new_sl(
+                pos.type == mt5.ORDER_TYPE_BUY, pos.price_open, pos.price_current,
+                pos.sl, entry_atr=pstate.get("entry_atr"),
+                trail_distance_atr=_spec.get("trail_distance_atr", 0.4),
+                trail_activation_atr=_spec.get("trail_activation_atr", 0.5),
+                point=point, digits=digits,
+                override_points=pstate.get("trail_points"), risky=risky,
+                stops_level=(sym_info.trade_stops_level if sym_info else 0.0),
+                be_floor=(pos.price_open if pstate.get("be_done") else None))
+            if _tr and modify_sl(ticket, _tr[0]):
+                pstate["trail_moved"] = True
+                log.info("%s %s #%d trailing SL → %.*f (%d pont követés%s)",
+                         "↗" if pos.type == mt5.ORDER_TYPE_BUY else "↘",
+                         symbol, ticket, digits, _tr[0],
+                         round(_tr[1] / point), ", risky" if risky else "")
 
         # Dashboard P&L frissítés
         ds.position_pnl = pnl
@@ -2752,8 +2735,7 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
         # átlagárra húzza). n_add = a KÖVETKEZŐ adalék sorszáma (= a nyitott lábak száma).
         _init  = min(symbol_positions, key=lambda p: p.time)
         _init_entry = float(_init.price_open)
-        _init_osl   = position_state.get(_init.ticket, {}).get("original_sl", _init.sl)
-        _r_price = abs(_init_entry - float(_init_osl)) if _init_osl else 0.0
+        _r_price = _one_r_price(_init, position_state.get(_init.ticket, {}))
         _n_add   = len(symbol_positions)
         _trig    = _bcfg.get("trigger", _pb.TRIGGER_CANDLE)
         # A KÖVETKEZŐ trigger árszintje (a viz + a „mehet-e tovább" ehhez mér):

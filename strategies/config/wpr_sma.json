@@ -206,9 +206,9 @@
       "step": 0.25
     },
     "tp_rr_ratio": {
-      "min": 0.5,
-      "max": 3.0,
-      "step": 0.2
+      "min": 2.0,
+      "max": 15.0,
+      "step": 0.5
     },
     "_comment_market": "Piaci minőség szűrők — az Optuna instrumentumonként optimalizálja",
     "atr_min_pct": {
@@ -231,6 +231,7 @@
       "wpr_m1_buy_trigger < wpr_m1_sell_extreme",
       "wpr_m1_buy_extreme < wpr_m1_sell_trigger",
       "wpr_m1_sell_trigger < wpr_m1_sell_extreme"
-    ]
+    ],
+    "_comment_tp_rr_ratio": "A celar tartomanya FELFELE nyitva (2026-09-07). Mert lelet: a celar elhagyasa +0,0124 R (teljes ablak) es +0,0244 R (mintan kivul) a wpr_sma 14 hangolt paran, 11/14 par javult MINDKET ablakon; ugyanez a pending_straddle-on +0,014, a korabbi 14 eves donchian-meresen +0,031. A felso hatar (15,0) a gyakorlatban 'nincs celar'. ⚠ Az also hatar 2,0, mert a config_check.tp_preset_conflict a TP_SHORT=1,5 alatti celart trailinges preset mellett ellentmondasnak jelzi (a trailing levagna a nyertest). Ezert kell minden erintett paron trailinges preset."
   }
 }

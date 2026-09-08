@@ -67,7 +67,13 @@ def read_migrated(symbol: str) -> dict:
     try:
         with open(p, encoding="utf-8") as f:
             params = (json.load(f).get("params") or {})
-    except Exception:
+    except Exception as ex:
+        # ⚠ A fájl LÉTEZIK (fentebb ellenőrizve), tehát ez sérülés — és a néma
+        # üres dict itt azt jelenti, hogy a régi BE/trailing értékek NEM
+        # költöznek át: a pár a modul alapértékével fut tovább, hangolás nélkül.
+        log.warning("%s: a migrálandó végrehajtási paraméterek nem olvashatók "
+                    "(%s) — a régi BE/trailing értékek NEM költöznek át.",
+                    p.name, ex)
         return {}
     return {k: float(params[k]) for k in MIGRATED_KEYS
             if isinstance(params.get(k), (int, float))}

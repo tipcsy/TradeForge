@@ -58,8 +58,19 @@ def load_cfg() -> dict:
     try:
         from core import config_check
         config_check.log_findings(cfg)
-    except Exception:
-        pass
+    except Exception as ex:
+        # ⚠ AZ ŐR SAJÁT HIBÁJA NEM TŰNHET EL. A `pass` itt azt jelentette, hogy ha
+        # maga az ellenőrzés száll el (új lelet-típus, hiányzó nyelvi kulcs,
+        # váratlan config-alak), akkor a kimenet PONTOSAN ugyanaz, mint amikor
+        # nincs egyetlen lelet sem: néma indulás. Onnantól a leletek — hiányzó
+        # `point_size`, hangolatlan pár, inkoherens célár/preset — csendben
+        # kimaradnak, és a felhasználó abban a hitben marad, hogy tiszta a config.
+        # A `try` MARAD (egy ellenőrző hibája nem akadályozhatja a kereskedést),
+        # de az okot ki KELL írni.
+        import logging
+        logging.getLogger(__name__).error(
+            "A config-koherencia ellenőrzés HIBÁRA futott (%s) — a leletek "
+            "ELMARADNAK. A program elindul, de a config nincs átvizsgálva.", ex)
     return cfg
 
 

@@ -329,11 +329,22 @@ def _update_stops(trade: "Trade", high: float, low: float, rr: dict,
     # MÍNUSZT garantál. 0.0 (alap) → a régi viselkedés bitazonosan.
     _be_buf = float(rr.get("be_buffer_points", 0.0) or 0.0) * point_size
 
+    # A BE-küszöb ÁRA — a közös `risk_reduction.breakeven_trigger`-ből, hogy a
+    # backteszt és MINDKÉT élő ág ugyanazt a képletet használja. `breakeven_r`
+    # (ha > 0) a küszöböt R-ben adja, tehát a HOSSZÚ célár nem kapcsolja ki.
+    from core import risk_reduction as _rrbe
+    be_r = rr.get("breakeven_r", 0.0)
+    # ⚠ `getattr`, nem `trade.sl_points`: ezt a függvényt teszt-stubok is hívják
+    # (`test_rr_owns_be_trail`), és egy hiányzó mező itt AttributeError-t dobna a
+    # legkritikusabb úton. Ismeretlen stop-táv → a helper visszaesik a be_pct-re.
+    _sl_dist = (float(getattr(trade, "sl_points", 0) or 0.0)
+                * float(getattr(trade, "point_size", 0) or 0.0))
+
     if trade.direction == "BUY":
-        if (risky or be_pct > 0) and not trade.risk_free:
-            be_trigger = (trade.open_price if risky
-                          else trade.open_price + (trade.tp - trade.open_price) * be_pct)
-            if high >= be_trigger:
+        if not trade.risk_free:
+            be_trigger = _rrbe.breakeven_trigger(
+                trade.open_price, trade.tp, _sl_dist, True, be_pct, be_r, risky)
+            if be_trigger is not None and high >= be_trigger:
                 trade.sl = trade.open_price + _be_buf
                 trade.risk_free = True
         if trade.risk_free and _trail_ok:
@@ -343,10 +354,10 @@ def _update_stops(trade: "Trade", high: float, low: float, rr: dict,
                 if new_sl > trade.sl:
                     trade.sl = new_sl
     else:  # SELL
-        if (risky or be_pct > 0) and not trade.risk_free:
-            be_trigger = (trade.open_price if risky
-                          else trade.open_price - (trade.open_price - trade.tp) * be_pct)
-            if low <= be_trigger:
+        if not trade.risk_free:
+            be_trigger = _rrbe.breakeven_trigger(
+                trade.open_price, trade.tp, _sl_dist, False, be_pct, be_r, risky)
+            if be_trigger is not None and low <= be_trigger:
                 trade.sl = trade.open_price - _be_buf
                 trade.risk_free = True
         if trade.risk_free and _trail_ok:
@@ -518,6 +529,15 @@ def _rr_spec(rr: "dict | None", risky: bool, symbol: str = "") -> dict:
 
     A régi viselkedés bármikor visszakérhető: adj át EXPLICIT `rr` specet."""
     if rr:
+        # ⚠ TÍPUS-ŐR (2026-09-08). Az `rr` innentől szótárként utazik tovább, és
+        # a `.get(...)` HÍVÁSAI a motor mélyén vannak — egy lista vagy string
+        # `AttributeError`-t dobna ott, több száz sorral a hiba forrása után,
+        # a hívó megnevezése nélkül. A hibát ott jelezzük, ahol keletkezett.
+        if not isinstance(rr, dict):
+            raise TypeError(
+                f"_rr_spec: az `rr` kockázatcsökkentő SPEC szótár kell legyen, "
+                f"kapott: {type(rr).__name__}. (A `None` az érvényes 'használd a "
+                f"pár éles specjét' jelzés.)")
         return rr
     from core import risk_reduction as _rrm
     if risky:
@@ -1017,6 +1037,13 @@ def _signal_fingerprint(strategy_name: str, params: dict) -> dict:
 
 
 def _prepare_params(symbol: str, params: dict, pair_cfg: dict) -> dict:
+    # ⚠ A `point_size` ELLENŐRZÉSE ITT, EGY HELYEN. A backtestben ~20 osztás
+    # megy a `point_size`-zal (P&L, pnl_points, spread-pont, swing-SL, R-szintek);
+    # mindegyikhez külön őrt tenni értelmetlen zaj lenne — és egy kimaradó őr
+    # csendben rossz számot adna. A motor bemenetén viszont EGYSZER kell
+    # ellenőrizni, és onnantól az egész futás során garantált.
+    from core.risk_manager import require_point_size
+    require_point_size(pair_cfg, f"{symbol} pair_cfg")
     params = {**params, "symbol": symbol, "point_size": pair_cfg["point_size"]}
     params.setdefault("sess_start", pair_cfg.get("sess_start", 0))
     params.setdefault("sess_end",   pair_cfg.get("sess_end", 24))
@@ -1720,6 +1747,22 @@ def run_pair(
         _nat_indok = "kézi események"
     elif str(rr_spec.get("preset", "")) not in _NATV_PRESETEK:
         _nat_indok = f"preset={rr_spec.get('preset')!r}"
+    elif float(rr_spec.get("breakeven_r", 0.0) or 0.0) > 0:
+        # ⚠ A NATÍV ABI NEM ISMERI a `breakeven_r`-t (`core.native.EXEC_FIELDS`:
+        # van `be_pct`, de nincs `be_r`). A Rust mag tehát a RÉGI, célár-arányos
+        # BE-t számolná, miközben a Python az R-alapút — és hosszú célárnál a
+        # kettő GYÖKERESEN mást ad.
+        #
+        # Mérve, ahogy kiderült (Ger40, 2025 H1, azonos jelölt-lista):
+        #   jelölt-lista + NATÍV  →  87 kötés
+        #   jelölt-lista + PYTHON → 166 kötés
+        # A natív mag a BE-t 7,25 R-re tette (0,5 × 14,5 R célár), a Python 1
+        # R-re — más pozíciókezelés, más kötés-populáció.
+        #
+        # Amíg a Rust oldal nem tudja (`rust/tfbt/src/exec.rs` + ABI-emelés),
+        # itt KIMARADUNK. Ez a modul saját szabálya: „egy »majdnem jó« natív út
+        # rosszabb, mint a semmi: némán MÁS backtestet adna."
+        _nat_indok = "breakeven_r (a natív ABI nem ismeri)"
     elif trading_cfg.get("max_open_slots") != sizing_cfg.get("max_open_slots"):
         _nat_indok = "eltérő max_open_slots"
 

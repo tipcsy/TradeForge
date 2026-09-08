@@ -26,6 +26,13 @@ def check_(name, ok, detail=""):
 
 import json
 
+from core import applog
+
+# ⚠ A bukas LEGYEN OLVASHATO: a leletek uzenetei ekezetesek es `→`-t is
+# tartalmaznak, a Windows-konzol viszont cp1250. Enelkul egy bukott
+# allitas UnicodeEncodeError-ba fordult, es a NEVE sem latszott.
+applog.harden_console()
+
 from core import config_check as cc
 
 # Teljes koltseg-kulcskeszlet: kulonben MINDEN teszt-par kapna egy missing_costs
@@ -295,8 +302,21 @@ nsrc = (ROOT / "main.py").read_text(encoding="utf-8")
 _load = nsrc.split("def load_cfg")[1].split("\ndef ")[0]
 check_("main.py: a load_cfg futtatja az ellenorzest (kozos seam)",
        "config_check.log_findings(cfg)" in _load)
+# ⚠ AZ ALAK NEM A SZANDEK (2026-09-08). Ez a sor a `"except Exception:"` LITERALT
+# kereste, es akkor bukott meg, amikor az ag megkapta a `as ex`-et, hogy vegre
+# NAPLOZZON. A szandek valtozatlan: a `try` MARAD (egy ellenorzo hibaja nem
+# akadalyozhatja a kereskedest) — de az ok ki kell irodjon. Mindketto orizve:
 check_("main.py: az ellenorzes NEM gatolhatja az indulast",
-       "except Exception:" in _load)
+       "except Exception" in _load)
+# ⚠ A KOMMENTEKET KI KELL SZURNI: az `except` ag magyarazata maga is leirja a
+# `pass` szot (epp azt magyarazza, miert nem az van ott) — a naiv keresest ez
+# megfogta. Ugyanaz a csapda, mint a `test_state_load_errors.py`-ban.
+_exc_kod = [ln.strip() for ln
+            in _load.split("except Exception")[1].split("return cfg")[0].splitlines()
+            if ln.strip() and not ln.strip().startswith("#")]
+check_("main.py: ...de a hibaja NEM tunhet el nemaan",
+       "pass" not in _exc_kod and any("log" in ln for ln in _exc_kod),
+       str(_exc_kod[:2]))
 
 # A naplozas tenylegesen kiir (es a szintet is megkulonbozteti)
 import logging

@@ -6,6 +6,7 @@ A GUI a módot körbe-váltja (Ki → Kézi → Auto), és a live/GUI ez alapjá
 """
 
 import json
+import logging
 import threading
 from pathlib import Path
 
@@ -14,6 +15,8 @@ from core.i18n import LabelMap as _LabelMap
 from core.position_build import (
     default_config, MODES, MODE_OFF, MODE_MANUAL, MODE_AUTO, TRIGGERS, TRIGGER_CANDLE,
 )
+
+log = logging.getLogger(__name__)
 
 PATH = Path(__file__).resolve().parents[1] / "data" / "build_mode.json"
 
@@ -67,8 +70,13 @@ def load() -> dict:
                 if isinstance(data, dict):
                     _state.clear()
                     _state.update({str(k): _norm(v) for k, v in data.items()})
-        except Exception:
-            pass
+        except Exception as ex:
+            # ⚠ Némán üresen indulni itt azt jelenti, hogy MINDEN pár `off`-ra
+            # esik — a ráépítés (és a csomag-célár) csendben nem működik. Ez
+            # kívülről ugyanúgy néz ki, mint egy pár, amin épp nincs jel.
+            log.error("%s: az építés-állapot NEM OLVASHATÓ (%s) — minden pár "
+                      "'Ki' módra esik vissza, a pozícióépítés nem indul.",
+                      PATH.name, ex)
         return dict(_state)
 
 
@@ -94,8 +102,10 @@ def _save_locked():
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(_state, f, indent=2, ensure_ascii=False)
         tmp.replace(PATH)
-    except Exception:
-        pass
+    except Exception as ex:
+        log.error("%s: az építés-állapot MENTÉSE nem sikerült (%s). A beállítás "
+                  "csak a memóriában él — újraindítás után elveszik.",
+                  PATH.name, ex)
 
 
 def _set(symbol: str, **kw):

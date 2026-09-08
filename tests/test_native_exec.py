@@ -163,7 +163,17 @@ if native.available() and os.environ.get("TFBT_NATIVE", "1") != "0":
                  "pnl_usd", "commission_usd", "swap_usd", "pnl_points",
                  "status", "risk_free")
 
-        def _fut(sym, nativ):
+        # /!\ EZ A BLOKK KORABBAN URESEN MENT AT (javitva 2026-09-08).
+        # A `run_pair`-t `signal_series` NELKUL hivta, a nativ ut viszont pont
+        # akkor marad ki ("nincs elore epitett jelolt-lista") — tehat MINDKET
+        # kar a Python-uton futott, es a "BITRE egyeznek" allitas onmagat
+        # hasonlitotta ossze. Ugyanaz a vakuum-teszt osztaly, mint a labor
+        # 0-vs-0 paritasa. Emiatt NEM fogta meg a `breakeven_r` ABI-rest sem.
+        # Most: (1) jelolt-listat adunk, (2) MEGKOVETELJUK, hogy a nativ ut
+        # tenylegesen lefusson, (3) es kulon ellenorizzuk a kimaradast.
+        TOL, IG = "2026-05-01", "2026-08-01"
+
+        def _adat(sym):
             pf = ROOT / "data" / "optimized_params" / "wpr_sma" / f"{sym}.json"
             prm = json.loads(pf.read_text(encoding="utf-8")).get("params") or {}
             prm = {**prm, **load_execution_params(sym, cfg)}
@@ -171,31 +181,63 @@ if native.available() and os.environ.get("TFBT_NATIVE", "1") != "0":
                            (cfg.get("pairs") or {}).get(sym, {}).get("point_size"))
             m15 = pd.read_parquet(ROOT / "data" / "m15" / f"{sym}.parquet")
             m1 = pd.read_parquet(ROOT / "data" / "m1" / f"{sym}.parquet")
-            # A visszaeses kikenyszeritese: a Python-ut ugyanaz a run_pair,
-            # csak a natív blokk nelkul.
+            return prm, m15, m1
+
+        def _fut(sym, nativ, rr_spec):
+            """`(kotesek, futott_e_a_nativ)`."""
+            prm, m15, m1 = _adat(sym)
+            ser = bt.build_signal_series(
+                sym, m15, m1, prm, (cfg.get("pairs") or {}).get(sym) or {},
+                strategy=st, test_start=TOL, test_end=IG)
             _ment = bt._natv_exec
-            if not nativ:
-                bt._natv_exec = lambda *a, **k: None
+            _hivas = {"n": 0}
+
+            def _spy(*a, **k):
+                out = _ment(*a, **k)
+                if out is not None:
+                    _hivas["n"] += 1
+                return out
+
+            bt._natv_exec = (lambda *a, **k: None) if not nativ else _spy
             try:
                 r = bt.run_pair(sym, m15, m1, prm,
                                 (cfg.get("pairs") or {}).get(sym) or {},
                                 cfg["trading"],
                                 float(cfg["trading"].get("initial_balance", 1000.0)),
-                                test_start="2026-05-01", test_end="2026-08-01",
-                                strategy=st, cfg=cfg, exec_gates=True)
+                                test_start=TOL, test_end=IG,
+                                strategy=st, cfg=cfg, exec_gates=True,
+                                rr=rr_spec, signal_series=ser)
             finally:
                 bt._natv_exec = _ment
-            return [[str(getattr(t, m)) for m in MEZOK] for t in r.trades]
+            return ([[str(getattr(t, m)) for m in MEZOK] for t in r.trades],
+                    _hivas["n"] > 0)
+
+        from core import risk_reduction as _rrx
+        _RR_NATV = {**_rrx.default_config(), "preset": _rrx.PRESET_OFF,
+                    "breakeven_r": 0.0}
+        _RR_BE_R = {**_RR_NATV, "breakeven_r": 1.0}
 
         for sym in ("Ger40", "GOLD"):
             if not (ROOT / "data" / "m1" / f"{sym}.parquet").exists():
                 continue
-            _py, _rs = _fut(sym, False), _fut(sym, True)
+            _py, _ = _fut(sym, False, _RR_NATV)
+            _rs, _ran = _fut(sym, True, _RR_NATV)
             _futott = True
+            check(f"{sym}: /!\ a natív ut TENYLEG lefutott (nem ures paritas)",
+                  _ran, "a nativ blokk nem hivodott meg")
             check(f"{sym}: a natív es a Python kotesei BITRE egyeznek",
                   _py == _rs, f"{len(_py)} vs {len(_rs)} kotes")
             check(f"{sym}: ...es volt mit osszevetni", len(_py) > 0,
                   f"{len(_py)} kotes")
+            # /!\ A `breakeven_r`-t a natív ABI NEM ismeri (`EXEC_FIELDS`:
+            # van `be_pct`, nincs `be_r`). Merve: azonos jelolt-listan 87 vs
+            # 166 kotes. Amig a Rust oldal nem tudja, KI KELL MARADNIA.
+            _br, _ran_br = _fut(sym, True, _RR_BE_R)
+            check(f"{sym}: /!\ breakeven_r mellett a natív ut KIMARAD",
+                  not _ran_br, "a nativ ut lefutott, pedig nem ismeri a be_r-t")
+            _br_py, _ = _fut(sym, False, _RR_BE_R)
+            check(f"{sym}: ...es igy a ket ut TOVABBRA is egyezik",
+                  _br == _br_py, f"{len(_br)} vs {len(_br_py)} kotes")
     except Exception as e:      # adat/config hianya nem teszthiba
         print(f"SKIP  eles paritas — {type(e).__name__}: {e}")
 

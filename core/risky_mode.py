@@ -12,8 +12,11 @@ Fájlformátum:  {"XAUUSD": true, "GBPAUD": false, ...}
 """
 
 import json
+import logging
 import threading
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 PATH = Path(__file__).resolve().parents[1] / "data" / "risky_mode.json"
 
@@ -32,8 +35,12 @@ def load() -> dict:
                 if isinstance(data, dict):
                     _state.clear()
                     _state.update({str(k): bool(v) for k, v in data.items()})
-        except Exception:
-            pass
+        except Exception as ex:
+            # ⚠ A risky KOCKÁZATI mód: némán üresen indulni azt jelenti, hogy
+            # minden pár normál méretre és normál BE-re vált — a felhasználó
+            # által bekapcsolt óvatosság csendben megszűnik.
+            log.error("%s: a risky-állapot NEM OLVASHATÓ (%s) — minden pár "
+                      "NORMÁL módra esik vissza.", PATH.name, ex)
         return dict(_state)
 
 
@@ -70,5 +77,7 @@ def _save_locked():
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(_state, f, indent=2, ensure_ascii=False)
         tmp.replace(PATH)
-    except Exception:
-        pass
+    except Exception as ex:
+        log.error("%s: a risky-állapot MENTÉSE nem sikerült (%s). A kapcsoló "
+                  "csak a memóriában él — újraindítás után elveszik.",
+                  PATH.name, ex)

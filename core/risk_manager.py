@@ -53,9 +53,39 @@ import math
 _EPS = 1e-9
 
 
+def require_point_size(params: dict, ctx: str = "") -> float:
+    """A `point_size` ÉRVÉNYES értéke, vagy beszédes `ValueError`.
+
+    ⚠ MIÉRT NEM ELÉG a `params.get("point_size", 0.0001)` (2026-09-08). Az
+    alapérték CSAK akkor lép be, ha a kulcs HIÁNYZIK. Ha jelen van `0`-val (üres
+    mező a configban, félig feltöltött új instrumentum), a `.get` a 0-t adja
+    vissza, és a következő sor `ZeroDivisionError`-t dob — egy olyan üzenettel,
+    amiből semmi nem derül ki: sem a pár neve, sem a javítás módja.
+
+    A `0` nem alapértelmezhető: a `point_size` a pár TÉNYADATA, nincs értelmes
+    helyettesítő értéke. Rossz `point_size`-zal a lot, az SL-táv, a P&L és az R
+    MIND hibás lenne — csendben, mert egyik szám sem nézne ki lehetetlennek.
+    Ezért itt megállunk, és MEGMONDJUK, mit kell javítani.
+
+    Lásd `core.config_check.missing_sizing_keys`: ugyanez a lelet INDULÁS ELŐTT
+    is megjelenik, és a motor a hibás párt kihagyja (`live_trader` bekötés).
+    """
+    try:
+        ps = float(params.get("point_size") or 0.0)
+    except (TypeError, ValueError):
+        ps = 0.0
+    if ps <= 0:
+        raise ValueError(
+            f"point_size hiányzik vagy 0{f' ({ctx})' if ctx else ''} — enélkül "
+            f"nincs lot-, SL- és P&L-számítás. Töltsd fel a pár configját: "
+            f"`python tools/refresh_point_values.py --write`.")
+    return ps
+
+
 def calc_sl_tp_points(atr_value: float, params: dict) -> tuple[float, float]:
     """SL és TP mérete PONTBAN, ATR alapján."""
-    sl_points = atr_value / params.get("point_size", 0.0001) * params["sl_atr_mult"]
+    sl_points = atr_value / require_point_size(params, "calc_sl_tp_points") \
+        * params["sl_atr_mult"]
     tp_points = sl_points * params["tp_rr_ratio"]
     return sl_points, tp_points
 
