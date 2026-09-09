@@ -41,6 +41,7 @@ from core import applog
 applog.harden_console()
 
 import argparse
+import json
 import logging
 
 import numpy as np
@@ -2308,6 +2309,92 @@ class LabAblak(QtWidgets.QMainWindow):
             pass
 
 
+# ══ AZ ELRENDEZÉS MEGJEGYZÉSE KÉT INDÍTÁS KÖZT ═══════════════════════════
+
+ELRENDEZES_PATH = ROOT / "data" / "lab_elrendezes.json"
+ELRENDEZES_VERZIO = 1
+
+
+def _b64(qba) -> str:
+    return bytes(qba.toBase64()).decode("ascii")
+
+
+def _qba(szoveg: str):
+    return QtCore.QByteArray.fromBase64(
+        QtCore.QByteArray(str(szoveg).encode("ascii")))
+
+
+def elrendezes_leiro(mt) -> dict:
+    """A munkaterület állapota SZÓTÁRKÉNT (menthető alak).
+
+    ⚠ A geometriát és a dokk-elrendezést a Qt maga szerializálja
+    (`saveGeometry`/`saveState`) — ezeket base64-ben tesszük el. A CHARTOKAT
+    viszont nem: azokat névvel írjuk le (pár, stratégia, idősík, időszak), mert
+    egy Qt-blob nem mondaná meg, MIT kell újra betölteni."""
+    chartok = []
+    for sw in mt._mdi.subWindowList():
+        w = sw.widget()
+        if not isinstance(w, LabAblak):
+            continue
+        r = sw.geometry()
+        chartok.append({
+            "symbol": w._sym.currentText(),
+            "strategy": w._strat_nev(),
+            "tf": int(w._tf.currentData() or 15),
+            "tol": w._tol.text() or None,
+            "ig": w._ig.text() or None,
+            "geo": [r.x(), r.y(), r.width(), r.height()],
+            "max": bool(sw.isMaximized()),
+            "kotesek": bool(w._kotesek.isChecked()),
+            "kapcsolt": bool(w._kapcs.isChecked()),
+        })
+    return {
+        "verzio": ELRENDEZES_VERZIO,
+        "ablak_geometria": _b64(mt.saveGeometry()),
+        "ablak_allapot": _b64(mt.saveState()),
+        "tabos": bool(mt._tabos.isChecked()),
+        "chartok": chartok,
+    }
+
+
+def elrendezes_ment(mt) -> bool:
+    """Az elrendezés kiírása. `False`, ha nem sikerült (és NAPLÓZ)."""
+    try:
+        ELRENDEZES_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = ELRENDEZES_PATH.with_suffix(".tmp")
+        tmp.write_text(json.dumps(elrendezes_leiro(mt), ensure_ascii=False,
+                                  indent=2), encoding="utf-8")
+        tmp.replace(ELRENDEZES_PATH)
+        return True
+    except Exception as ex:
+        # ⚠ NEM NÉMA. A mentés elmaradása csak a KÖVETKEZŐ indításkor derülne
+        # ki („miért nem emlékszik?"), és akkor sem tudnánk, miért.
+        log.warning("%s: a labor-elrendezés MENTÉSE nem sikerült (%s) — a "
+                    "következő indítás az alapelrendezéssel jön.",
+                    ELRENDEZES_PATH.name, ex)
+        return False
+
+
+def elrendezes_olvas() -> dict:
+    """A mentett elrendezés, vagy üres dict.
+
+    ⚠ A HIÁNYZÓ fájl (első indítás) NORMÁLIS → csend. A SÉRÜLT fájl elveszett
+    beállítás → naplózunk. A kettő összemosása a projekt visszatérő hibája."""
+    try:
+        d = json.loads(ELRENDEZES_PATH.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except Exception as ex:
+        log.warning("%s: a mentett labor-elrendezés nem olvasható (%s) — az "
+                    "alapelrendezéssel indulunk.", ELRENDEZES_PATH.name, ex)
+        return {}
+    if not isinstance(d, dict) or int(d.get("verzio") or 0) != ELRENDEZES_VERZIO:
+        log.info("%s: eltérő verziójú elrendezés — kihagyva.",
+                 ELRENDEZES_PATH.name)
+        return {}
+    return d
+
+
 class Munkaterulet(QtWidgets.QMainWindow):
     """A labor MUNKATERÜLETE: több chart EGY területen (MT5-szerű).
 
@@ -2380,8 +2467,91 @@ class Munkaterulet(QtWidgets.QMainWindow):
         m.addSeparator()
         m.addAction(self._szamla_dokk.toggleViewAction())
 
-        self.uj_chart(symbol=symbol, strategy=strategy, tf_perc=tf_perc,
-                      tol=tol, ig=ig)
+        self._tett(m, _t("lab.menu_elrendezes_felejt"), self._elrendezes_felejt)
+
+        # ⚠ A PARANCSSOR NYER A MENTETT ELRENDEZÉS FÖLÖTT. Ha a felhasználó
+        # `--symbol`-lal indít, azt akarja látni — nem azt, amit két hete
+        # bezárt. Mentett elrendezést csak ARGUMENTUM NÉLKÜLI indításnál
+        # töltünk vissza; a keret (ablakméret, dokkok) viszont mindig.
+        _ment = elrendezes_olvas()
+        if _ment.get("ablak_geometria"):
+            self.restoreGeometry(_qba(_ment["ablak_geometria"]))
+        if _ment.get("ablak_allapot"):
+            self.restoreState(_qba(_ment["ablak_allapot"]))
+        _visszaall = bool(_ment.get("chartok")) and symbol is None
+        if _visszaall:
+            self._chartok_vissza(_ment)
+        else:
+            self.uj_chart(symbol=symbol, strategy=strategy, tf_perc=tf_perc,
+                          tol=tol, ig=ig)
+        if _ment.get("tabos"):
+            self._tabos.setChecked(True)
+            self._tabos_valt(True)
+
+    def _chartok_vissza(self, ment: dict) -> None:
+        """A mentett chartok újranyitása.
+
+        ⚠ A KIHAGYOTT CHART NEM NÉMÁN VÉSZ EL: ha a pár azóta kikerült a
+        configból, megmondjuk, melyik és miért — különben a felhasználó csak
+        annyit látna, hogy „egy ablakom eltűnt"."""
+        _parok = set((self.cfg_parok() or []))
+        _elso = True
+        for c in ment.get("chartok") or []:
+            _sym = c.get("symbol")
+            if _parok and _sym not in _parok:
+                log.warning("A mentett labor-elrendezésből KIMARAD a(z) %s: "
+                            "nincs (már) a config `pairs` blokkjában.", _sym)
+                continue
+            try:
+                w = self.uj_chart(symbol=_sym, strategy=c.get("strategy") or None,
+                                  tf_perc=c.get("tf") or 15,
+                                  tol=c.get("tol"), ig=c.get("ig"))
+            except Exception as ex:
+                log.warning("A mentett labor-chart (%s) nem nyitható meg: %s",
+                            _sym, ex)
+                continue
+            w._kotesek.setChecked(bool(c.get("kotesek", _elso)))
+            if c.get("kapcsolt"):
+                w._kapcs.setChecked(True)
+            _g = c.get("geo") or []
+            _sw = w.parent()
+            if len(_g) == 4 and isinstance(_sw, QtWidgets.QMdiSubWindow):
+                if c.get("max"):
+                    _sw.showMaximized()
+                else:
+                    _sw.setGeometry(int(_g[0]), int(_g[1]),
+                                    max(120, int(_g[2])), max(80, int(_g[3])))
+            _elso = False
+        if not self.chartok():          # minden chart kimaradt → legyen egy
+            self.uj_chart()
+
+    def cfg_parok(self) -> list:
+        """A configban létező párok (a mentett elrendezés szűréséhez)."""
+        ch = self.chartok()
+        if ch:
+            return list(ch[0]._parok)
+        try:
+            from strategy.settings import load_config
+            cfg = load_config(ROOT / "config.json")
+            return sorted(k for k, v in (cfg.get("pairs") or {}).items()
+                          if isinstance(v, dict))
+        except Exception:
+            return []
+
+    def _elrendezes_felejt(self) -> None:
+        """A mentett elrendezés eldobása (a következő indítás alapból jön)."""
+        try:
+            ELRENDEZES_PATH.unlink(missing_ok=True)
+            self.statusBar().showMessage(_t("lab.elrendezes_elfelejtve"), 5000)
+        except Exception as ex:
+            log.warning("%s: az elrendezés nem törölhető (%s)",
+                        ELRENDEZES_PATH.name, ex)
+
+    def closeEvent(self, ev):
+        """⚠ A BEZÁRÁS az egyetlen biztos pont: a felhasználó nem fog külön
+        „elrendezés mentése" gombot nyomogatni."""
+        elrendezes_ment(self)
+        super().closeEvent(ev)
 
     def _tett(self, menu, cim, fn, gyorsbillentyu=None):
         a = QtGui.QAction(cim, self)
