@@ -648,6 +648,24 @@ class LabAblak(QtWidgets.QMainWindow):
 
         self._epit_ui(symbol, strategy, tf_perc, tol, ig)
         self._strat_lista()
+        # ⚠ A `strategy=` PARAMÉTERT EDDIG NÉMÁN ELDOBTUK. A `_strat_lista()`
+        # csak a KORÁBBI választást őrizte meg — ami a frissen épült combóban
+        # üres, tehát „— nincs —"-re esett. Következmény: a
+        # `main.py lab --strategy wpr_sma` stratégia NÉLKÜL indult, a
+        # munkaterület `uj_chart(strategy=…)`-ja ugyanígy, és a mentett
+        # elrendezésből visszaállított chartok is elvesztették a stratégiát —
+        # mindezt hibaüzenet nélkül, csak a jelölők maradtak el a charton.
+        if strategy:
+            _lehet = [self._strat.itemText(i)
+                      for i in range(self._strat.count())]
+            if strategy in _lehet:
+                self._strat.setCurrentText(strategy)
+            else:
+                log.warning("A kért stratégia (%r) nem elérhető ezen a páron "
+                            "(%s) — a chart stratégia nélkül indul. Elérhető: %s",
+                            strategy, self._sym.currentText(),
+                            ", ".join(x for x in _lehet if x != NINCS_STRAT)
+                            or "(egy sem)")
         self.betolt()
 
     # ── Felület ──────────────────────────────────────────────────────────
@@ -792,6 +810,27 @@ class LabAblak(QtWidgets.QMainWindow):
         g.clicked.connect(self.kurzor_le)
         s3.addWidget(g)
         # ── Több ablak közös ideje ──────────────────────────────────────
+        # ⚠ GÖRGETÉS: a kurzor a helyén marad, a CHART mozog alatta. Enélkül a
+        # lejátszás kifut a képből, és kézzel kell utána húzni.
+        # ⚠ ÁLLAPOT-SÁV (2026-09-10, felhasználói jelzés: „nem tudom, hogy ez
+        # az alsó táblázat mit takar… pláne nem minden chartra", majd: „ha
+        # nincs stratégia kiválasztva, nem kell").
+        #
+        # A zavaró rész NEM a csík volt, hanem hogy ÜRESEN IS LÁTSZOTT:
+        # stratégia nélkül nincs miből állapotot számolni, mégis helyet vitt és
+        # nem mondta meg, mi lenne benne. Ezért a helyes alapállapot ADAT-
+        # VEZÉRELT: van mit mutatni → látszik, nincs → eltűnik. A jelölő ezen
+        # felül kézzel is kikapcsolhatóvá teszi (a munkaterületen a második
+        # charttól alapból ki — ott háromszor vinné a helyet).
+        self._savok = QtWidgets.QCheckBox(_t("lab.savok"))
+        self._savok.setToolTip(_t("lab.savok_tipp"))
+        self._savok.setChecked(True)
+        self._savok.stateChanged.connect(lambda *_: self._sav_rajz())
+        s3.addWidget(self._savok)
+        self._gorget = QtWidgets.QCheckBox(_t("lab.gorgetes"))
+        self._gorget.setToolTip(_t("lab.gorgetes_tipp"))
+        self._gorget.stateChanged.connect(self._gorgetes_valt)
+        s3.addWidget(self._gorget)
         self._kotesek = QtWidgets.QCheckBox(_t("lab.kotesek"))
         self._kotesek.setToolTip(_t("lab.kotesek_tipp"))
         self._kotesek.setChecked(True)
@@ -979,6 +1018,30 @@ class LabAblak(QtWidgets.QMainWindow):
         self._allapot.setText(
             _t("lab.status.markers_short", bars=len(chart), drawn=_db["kirajzolt"],
                outside=_db["idon_kivul"]))
+        self._cim_frissit()
+
+    def cim(self) -> str:
+        """A chart neve: `PÁR · IDŐSÍK`."""
+        _tf = dict(IDOSIKOK).get(int(self._tf.currentData() or 0),
+                                 self._tf.currentText())
+        return f"{self._sym.currentText()} · {_tf}"
+
+    def _cim_frissit(self) -> None:
+        """A befoglaló al-ablak felirata a BETÖLTÉS UTÁN.
+
+        ⚠ EDDIG CSAK MEGNYITÁSKOR ÁLLT BE. Ha a felhasználó átváltotta az
+        idősíkot vagy az instrumentumot, a cím a RÉGIT mutatta — három
+        kapcsolt ablaknál (M1+M5+M15) épp az a felirat hazudott, amiből meg
+        lehetne különböztetni őket."""
+        _sw = self.parent()
+        if isinstance(_sw, QtWidgets.QMdiSubWindow):
+            _sw.setWindowTitle(self.cim())
+        else:
+            from version import APP_NAME
+            self.setWindowTitle(f"{APP_NAME} — {self.cim()}")
+        _mt = getattr(self, "_munkaterulet", None)
+        if _mt is not None:
+            _mt.cim_valtozott(self)
 
     def _objektumok_rajza(self) -> dict:
         """A stratégia rajz-objektumai. Ugyanaz a forrás, mint az MT5-charton."""
@@ -1037,9 +1100,14 @@ class LabAblak(QtWidgets.QMainWindow):
 
     def _sav_rajz(self) -> None:
         """A per-gyertya sáv-állapot (no-trade / irány / ablak / piac)."""
+        # ⚠ A JELÖLŐ AZ ELSŐDLEGES: ha ki van kapcsolva, a csík EL IS TŰNIK —
+        # nem csak üresen ott marad. (A képernyőn épp az üres, de látható csík
+        # volt zavaró: helyet vitt, és nem mondta meg, mi lenne benne.)
         allapotok = [o for o in self._objs if isinstance(o, viz.BarState)]
-        self._sav.setVisible(bool(allapotok))
-        if not allapotok:
+        _kell = bool(allapotok) and getattr(self, "_savok", None) is not None             and self._savok.isChecked()
+        self._sav.setVisible(_kell)
+        if not _kell:
+            self._sav.clear()
             return
         _sorok = {0: ([], "gray"), 1: ([], "green"), 2: ([], "blue"),
                   3: ([], "orange")}
@@ -2329,6 +2397,54 @@ class LabAblak(QtWidgets.QMainWindow):
             _ABLAKOK.remove(self)
         super().closeEvent(ev)
 
+    # ── GÖRGETÉS lejátszás közben ────────────────────────────────────────
+    GORGETES_ALAP = 0.75          # a kurzor helye a képen, ha nem látszik
+
+    def _gorgetes_valt(self, *_a) -> None:
+        """Bekapcsoláskor MEGJEGYEZZÜK, HOL áll most a kurzor a képen.
+
+        ⚠ A felhasználó kérése: „a play vonalat OTT tartja". Egy fix arány
+        (mondjuk mindig 75%) bekapcsoláskor ELRÁNTANÁ a képet — a helyes
+        viselkedés az, hogy ott marad, ahová a felhasználó tette."""
+        if not self._gorget.isChecked():
+            return
+        self._gorget_arany = self._kurzor_kepaeranya()
+        self._gorgetes_kovet()
+
+    def _kurzor_kepaeranya(self):
+        """A kurzor helye a látható tartományon belül (0..1), vagy az alapérték."""
+        if self._kurzor is None:
+            return self.GORGETES_ALAP
+        try:
+            (x0, x1), _ = self._vb.viewRange()
+        except Exception:
+            return self.GORGETES_ALAP
+        if not (x1 > x0):
+            return self.GORGETES_ALAP
+        a = (float(self._kurzor) - x0) / (x1 - x0)
+        return a if 0.02 <= a <= 0.98 else self.GORGETES_ALAP
+
+    def _gorgetes_kovet(self) -> None:
+        """A nézet eltolása úgy, hogy a kurzor a megjegyzett arányon maradjon.
+
+        ⚠ CSAK VÍZSZINTESEN és CSAK az X-tartományt tolja el — a SZÉLESSÉGET
+        (nagyítást) és az Y-t nem bántja. Enélkül a görgetés visszanagyítana
+        minden képen, és a felhasználó nem tudna belezoomolni futás közben."""
+        if not self._gorget.isChecked() or self._kurzor is None:
+            return
+        try:
+            (x0, x1), _ = self._vb.viewRange()
+        except Exception:
+            return
+        _szel = x1 - x0
+        if not (_szel > 0):
+            return
+        _a = getattr(self, "_gorget_arany", self.GORGETES_ALAP)
+        _uj0 = float(self._kurzor) - _a * _szel
+        if abs(_uj0 - x0) < 1e-9:
+            return
+        self._vb.setXRange(_uj0, _uj0 + _szel, padding=0)
+
     def _kotes_panel(self, *_a) -> None:
         """A kötés-táblák mutatása/rejtése."""
         self._kotes_panel_lathato = bool(self._kotesek.isChecked())
@@ -2353,6 +2469,7 @@ class LabAblak(QtWidgets.QMainWindow):
         self._kurzor = int(poz[0]) if len(poz) and poz[0] >= 0 else None
 
     def _kurzor_rajz(self, vonal: bool = True) -> None:
+        self._gorgetes_kovet()
         van = self._kurzor is not None and self._chart is not None
         self._kurzor_vonal.setVisible(van)
         for _l in (self._bid, self._ask):
@@ -2723,12 +2840,17 @@ class Munkaterulet(QtWidgets.QMainWindow):
         # ami semmit nem kapcsol, rosszabb, mint ha ott sem volna.
         w._kotesek.setChecked(False)
         w._kotesek.setVisible(False)
+        if _meglevo:
+            # A második charttól az állapot-sáv is ki: háromszor vinné a helyet.
+            w._savok.setChecked(False)
         # A chart ESZKÖZSORAI a közös dokkokba költöznek (lapként).
         for _dk, _st, _mezo in self._eszkoz_dokkok.values():
             _st.addWidget(getattr(w, _mezo))
         sw = self._mdi.addSubWindow(w)
         sw.setWindowTitle(f"{symbol or '?'} · "
                           f"{dict(IDOSIKOK).get(int(tf_perc), tf_perc)}")
+        # A cím a betöltés után a chart SAJÁT állapotából frissül (idősík- és
+        # instrumentum-váltás is átírja) — lásd `LabAblak._cim_frissit`.
         sw.resize(1000, 700)
         sw.show()
         w.betolt()
@@ -2805,6 +2927,12 @@ class Munkaterulet(QtWidgets.QMainWindow):
                                  chart._tf.currentData())
         self._szamla.setText(f"[{chart._sym.currentText()} · {_tf}]  "
                              f"{szoveg or '—'}")
+
+    def cim_valtozott(self, chart) -> None:
+        """Egy chart átnevezte magát (idősík/instrumentum) — ha ő az aktív, a
+        közös számla-sor felirata is kövesse."""
+        if chart is self._aktiv_chart():
+            self._szamla_kiir(chart, chart._szamla.text())
 
     def _aktiv_valtozott(self, *_a) -> None:
         """Chart-váltás: a közös panel AZONNAL a másik chartét mutassa.

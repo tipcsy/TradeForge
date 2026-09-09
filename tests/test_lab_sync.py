@@ -311,6 +311,117 @@ else:
     w_a.close()
 
 
+# ══ 6b. GÖRGETÉS: a kurzor marad, a chart mozog alatta ══════════════════
+# A kérés: „amikor megy a play, lehessen a play vonalat ott tartani, ellenben a
+# chartot mozgatni alatta (persze legyen kikapcsolható)".
+if QT_OK:
+    w_g = LabAblak(symbol=_PAR, tf_perc=5, tol="2026-08-25", ig="2026-08-26")
+    w_g.betolt()
+    if w_g._chart is None or len(w_g._chart) < 300:
+        print("KIHAGYVA (görgetés): nincs elég gyertya")
+    else:
+        _n = len(w_g._chart)
+        w_g._kurzor = _n // 2
+        w_g._vb.setXRange(w_g._kurzor - 100, w_g._kurzor + 100, padding=0)
+        app.processEvents()
+        _x0, _x1 = w_g._vb.viewRange()[0]
+
+        # KI: a nézet nem mozdul.
+        w_g._kurzor += 50
+        w_g._kurzor_rajz()
+        app.processEvents()
+        check("⚠ kikapcsolva a nézet NEM mozdul (a mai viselkedés)",
+              abs(w_g._vb.viewRange()[0][0] - _x0) < 1e-6,
+              str([round(v, 1) for v in w_g._vb.viewRange()[0]]))
+
+        # BE: megjegyzi, HOL áll a kurzor — nem ránt a képen.
+        _elotte = list(w_g._vb.viewRange()[0])
+        w_g._gorget.setChecked(True)
+        app.processEvents()
+        check("⚠ bekapcsoláskor NEM rántja el a képet (ott folytatja)",
+              abs(w_g._vb.viewRange()[0][0] - _elotte[0]) < 1e-6,
+              f"{_elotte} → {[round(v,1) for v in w_g._vb.viewRange()[0]]}")
+        _arany = w_g._gorget_arany
+        check("...és megjegyezte a kurzor képarányát",
+              0.0 < _arany < 1.0, f"{_arany:.2f}")
+
+        _b0, _b1 = w_g._vb.viewRange()[0]
+        _szel = _b1 - _b0
+        w_g._kurzor += 60
+        w_g._kurzor_rajz()
+        app.processEvents()
+        _u0, _u1 = w_g._vb.viewRange()[0]
+        check("⚠ a chart PONTOSAN a kurzorral együtt tolódik",
+              abs((_u0 - _b0) - 60) < 1e-6, f"{_u0 - _b0:+.1f} (várt +60)")
+        check("⚠ …és a NAGYÍTÁS változatlan (nem zoomol vissza)",
+              abs((_u1 - _u0) - _szel) < 1e-6, f"{_u1-_u0:.1f} vs {_szel:.1f}")
+        check("⚠ …a kurzor a MEGJEGYZETT arányon marad",
+              abs((w_g._kurzor - _u0) / (_u1 - _u0) - _arany) < 1e-6,
+              f"{(w_g._kurzor - _u0)/(_u1-_u0):.3f} vs {_arany:.3f}")
+
+        # Kikapcsolva megint áll.
+        w_g._gorget.setChecked(False)
+        _k0 = w_g._vb.viewRange()[0][0]
+        w_g._kurzor += 40
+        w_g._kurzor_rajz()
+        app.processEvents()
+        check("visszakapcsolható KI-re (a nézet újra áll)",
+              abs(w_g._vb.viewRange()[0][0] - _k0) < 1e-6)
+    w_g.close()
+
+
+# ══ 6c. ÁLLAPOT-SÁV: alapból KI, és kikapcsolva EL IS TŰNIK ═════════════
+# ⚠ A felhasználó: „nem tudom, hogy ez az alsó táblázat mit takar, de szerintem
+# nem fog kelleni (pláne nem minden chartra)". Diagnosztikai csík (no-trade óra
+# / irány / jel-ablak / piac-besorolás), ami három kapcsolt ablaknál háromszor
+# viszi a helyet. A korábbi viselkedés azért volt zavaró, mert ÜRESEN IS
+# LÁTSZOTT: helyet vitt, és nem mondta meg, mi lenne benne.
+if QT_OK:
+    # ⚠ `show()` KELL: egy meg nem jelenített ablak MINDEN gyereke
+    # `isVisible() == False`, tehát a láthatóság-mérés nélküle mindig „rejtve"
+    # volna — a teszt a saját műtermékét mérné. (Kétszer futottam bele ma.)
+    w_s = LabAblak(symbol=_PAR, tf_perc=15, tol="2026-08-25", ig="2026-08-26")
+    w_s.show()
+    app.processEvents()
+    # ⚠ STRATÉGIA NÉLKÜL NINCS MIT MUTATNI (a `LabAblak` fent stratégia nélkül
+    # jött létre): a csík akkor sem látszhat, ha a jelölő be van kapcsolva.
+    _van_allapot = any(_o.__class__.__name__ == "BarState" for _o in w_s._objs)
+    check("stratégia nélkül nincs állapot-adat", not _van_allapot)
+    check("⚠ a jelölő ALAPBÓL be van kapcsolva (adat-vezérelt viselkedés)",
+          w_s._savok.isChecked())
+    check("⚠ …de stratégia nélkül a csík MÉGSEM látszik (ez volt a panasz)",
+          not w_s._sav.isVisible())
+    check("a tooltip MEGMONDJA, mit mutat (a felhasználó nem tudta)",
+          len(w_s._savok.toolTip()) > 40 and "no-trade" in w_s._savok.toolTip())
+    w_s._savok.setChecked(False)
+    app.processEvents()
+    check("kézzel kikapcsolva sem látszik", not w_s._sav.isVisible())
+
+    # STRATÉGIÁVAL viszont van adat — és akkor a jelölő dönt.
+    w_s2 = LabAblak(symbol=_PAR, strategy="wpr_sma", tf_perc=15,
+                    tol="2026-08-25", ig="2026-08-26")
+    w_s2.show()
+    app.processEvents()
+    # ⚠ EZ A SOR EGY VALÓDI HIBÁT FOGOTT MEG: a `strategy=` paramétert a
+    # konstruktor NÉMÁN ELDOBTA (a `_strat_lista` csak a korábbi választást
+    # őrizte, ami frissen épült combóban üres). Következmény: a
+    # `main.py lab --strategy …`, a munkaterület `uj_chart(strategy=…)`-ja és
+    # a mentett elrendezésből visszaállított chartok MIND stratégia nélkül
+    # indultak — hibaüzenet nélkül, csak a jelölők maradtak el a charton.
+    check("⚠ a `strategy=` paraméter TÉNYLEG beáll (nem néma eldobás)",
+          w_s2._strat_nev() == "wpr_sma", repr(w_s2._strat_nev()))
+    _van2 = any(_o.__class__.__name__ == "BarState" for _o in w_s2._objs)
+    if _van2:
+        check("⚠ stratégiával VAN adat → a csík látszik", w_s2._sav.isVisible())
+        w_s2._savok.setChecked(False)
+        app.processEvents()
+        check("⚠ …és kézzel kikapcsolható", not w_s2._sav.isVisible())
+    else:
+        print("KIHAGYVA: a stratégia sem adott állapot-objektumot")
+    w_s2.close()
+    w_s.close()
+
+
 # ══ 7. A HATÁR: a szinkron nem hoz be második végrehajtási utat ══════════
 _src = (ROOT / "tools" / "lab_qt.py").read_text(encoding="utf-8")
 _i = _src.index("class Szinkron(")

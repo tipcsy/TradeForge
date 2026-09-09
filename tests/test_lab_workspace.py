@@ -353,6 +353,26 @@ check("⚠ mentett forgatókönyv EXPLICIT rr-je felülírja a pár kalibráció
       str(_c[0]._rr_ertekek()))
 
 
+# ══ 5e. A CÍM KÖVETI az idősíkot/instrumentumot ═════════════════════════
+# ⚠ EDDIG CSAK MEGNYITÁSKOR ÁLLT BE (felhasználói jelzés): idősík-váltás után a
+# felirat a RÉGIT mutatta. Három kapcsolt ablaknál (M1+M5+M15) épp az a felirat
+# hazudott, amiből meg lehetne különböztetni őket.
+_cx = mt.chartok()[0]
+_swx = _cx.parent()
+_cim0 = _swx.windowTitle()
+_tfk_all = [_cx._tf.itemData(i) for i in range(_cx._tf.count())]
+_uj_tf = next(t for t in _tfk_all if int(t) != int(_cx._tf.currentData()))
+_cx._tf.setCurrentIndex(_tfk_all.index(_uj_tf))
+_cx.betolt()
+app.processEvents()
+check("⚠ idősík-váltás után a CÍM is átáll",
+      _swx.windowTitle() != _cim0
+      and dict(IDOSIKOK)[int(_uj_tf)] in _swx.windowTitle(),
+      f"{_cim0} → {_swx.windowTitle()}")
+check("...és a pár neve is benne van",
+      _cx._sym.currentText() in _swx.windowTitle(), _swx.windowTitle())
+
+
 # ══ 6. A HATÁR: a LabAblak önállóan is megáll ═══════════════════════════
 # ⚠ Ez a 2. verzió (kiszakítás külön ablakba) előfeltétele — és a `--egy`
 # parancssori kapcsolóé is. Ha a chart csak munkaterületen belül működne, a
