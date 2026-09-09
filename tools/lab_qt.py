@@ -69,6 +69,179 @@ MAX_OSZLOP = 2500
 LATHATO_MARGO = 0.35
 
 
+# ══ TÖBB ABLAK KÖZÖS IDEJE ═══════════════════════════════════════════════
+#
+# ⚠ A LEJÁTSZÁS EGYSÉGE IDŐ, NEM GYERTYA — ez az egész szinkron alapja. A
+# sebesség-csúszka „gyertya/mp"-ben áll, ami IDŐSÍK-FÜGGŐ: 8 gyertya/mp az
+# M15-ön két óra chart-időt jelent másodpercenként, az M1-en nyolc percet. Ha a
+# közös állapot gyertya-INDEX volna, egy M15↔M1 páros tizenötszörös ugrással
+# csúszna szét (ugyanaz a csapda, amit a `_kurzor_vissza` már kivéd az
+# idősík-váltásnál).
+#
+# Időben számolva viszont minden ablak UGYANANNYIT halad — és az „eltérő
+# sebesség", amit a felhasználó lát, magától kijön: az M1-es ablak 15 gyertyát
+# lép, miközben az M15-ös egyet.
+
+
+def lepes_ido(sebesseg: float, tf_perc: int, kep_mp: float = MAX_KEP_MP):
+    """Egy KÉPRE jutó chart-idő (`pd.Timedelta`) a lejátszás sebességéből."""
+    perc = (max(0.0, float(sebesseg)) * max(1, int(tf_perc))
+            / max(1e-9, float(kep_mp)))
+    return pd.Timedelta(minutes=perc)
+
+
+def kovetkezo_ido(most, lepes, veg):
+    """A következő közös idő, vagy `None`, ha MÁR a végén vagyunk.
+
+    A végét nem lépjük túl: az utolsó lépés pontosan `veg`-re áll. Enélkül a
+    leggyorsabb ablak a saját chartja végén túlfutna, és a lassabbak sosem
+    érnék el az utolsó gyertyát."""
+    if most is None or veg is None:
+        return None
+    if most >= veg:
+        return None
+    uj = most + lepes
+    return veg if uj > veg else uj
+
+
+class Szinkron(QtCore.QObject):
+    """Több labor-ablak KÖZÖS ideje, play/pause-a és tempója.
+
+    ⚠ EGY ÓRA, NEM HÁROM. Ha minden ablak a saját `QTimer`-ét pörgetné, a
+    nézetek néhány másodperc alatt szétcsúsznának (más képfrissítés, más
+    gyertyaszám, más rajz-költség). Lejátszás közben ezért EGYETLEN időzítő
+    fut — a szinkroné —, és az tolja a közös időt minden tagnak.
+
+    ⚠ AMI NEM KÖZÖS: a forgatókönyv és a backteszt-eredmény. Minden ablak a
+    SAJÁTJÁT futtatja; a megosztás kizárólag az IDŐRE, a play/pause-ra és a
+    tempóra terjed ki. Két végrehajtási út a projekt visszatérő kárforrása —
+    a Qt-s labor is épp azért nem kapott sajátot (lásd a modul fejlécét).
+
+    ⚠ A TEMPÓT A VEZÉR ADJA: az az ablak, amelyikben a Play-t megnyomták. Az ő
+    sebesség-csúszkája és idősíkja határozza meg a chart-idő/másodpercet, a
+    többi ezt követi. Így a „melyik ablak sebessége számít?" kérdésnek egy
+    válasza van, nem három.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self._tagok = []
+        self._vezer = None
+        # ⚠ A KÖZÖS ÓRÁT A SZINKRON TARTJA, nem a vezér kurzorából olvassuk
+        # vissza. Az első változat minden képen a vezér `kurzor_ido()`-jét
+        # kérdezte — az viszont a vezér GYERTYÁJÁRA KVANTÁLT idő. Ha a lépés
+        # kisebb a vezér gyertyájánál (M15 + 8 gyertya/mp = 2 perc/kép), a
+        # kerekítés minden körben visszaejtette ugyanarra a gyertyára: a
+        # lejátszás BEFAGYOTT az első lépés után (mérve: M15 +0, M1 +2 gyertya
+        # húsz kép alatt). A saját, folytonos idő ezt kizárja.
+        self._ido = None
+        self._zito = QtCore.QTimer(self)
+        self._zito.timeout.connect(self._utem)
+
+    # ── tagság ───────────────────────────────────────────────────────────
+    def belep(self, ablak) -> None:
+        if ablak not in self._tagok:
+            self._tagok.append(ablak)
+
+    def kilep(self, ablak) -> None:
+        if ablak in self._tagok:
+            self._tagok.remove(ablak)
+        if self._vezer is ablak:
+            self.szunet()
+        if len(self._tagok) < 2:
+            self.szunet()
+
+    def tagok(self) -> list:
+        return list(self._tagok)
+
+    def jatszik(self) -> bool:
+        return self._zito.isActive()
+
+    # ── az idő ───────────────────────────────────────────────────────────
+    def allit(self, ido, forras=None) -> None:
+        """A közös idő beállítása; a `forras` ablakot nem írjuk vissza."""
+        self._ido = ido
+        for a in list(self._tagok):
+            if a is forras:
+                continue
+            try:
+                a.szinkron_ido(ido)
+            except Exception:                 # egy bezárt ablak ne állítsa meg
+                self.kilep(a)
+
+    def ido(self):
+        """A közös óra állása. Ha még nem járt, a tagok kurzorából indul."""
+        if self._ido is not None:
+            return self._ido
+        for a in ([self._vezer] if self._vezer else []) + self._tagok:
+            if a is None:
+                continue
+            try:
+                t = a.kurzor_ido()
+            except Exception:
+                continue
+            if t is not None:
+                return t
+        return None
+
+    # ── lejátszás ────────────────────────────────────────────────────────
+    def play(self, vezer) -> None:
+        self._vezer = vezer
+        self.belep(vezer)
+        # A közös óra a vezér AKTUÁLIS állásáról indul (vagy a chart elejéről).
+        try:
+            _most, _veg, _s, _tf = vezer.szinkron_tempo()
+        except Exception:
+            _most = None
+        self._ido = _most if _most is not None else self._ido
+        self._zito.start(int(1000 / MAX_KEP_MP))
+        for a in self._tagok:
+            a.play_felirat(True)
+
+    def szunet(self) -> None:
+        self._zito.stop()
+        for a in list(self._tagok):
+            try:
+                a.play_felirat(False)
+            except Exception:
+                self._tagok.remove(a)
+
+    def _utem(self) -> None:
+        v = self._vezer
+        if v is None or v not in self._tagok:
+            self.szunet()
+            return
+        try:
+            most, veg, seb, tf = v.szinkron_tempo()
+        except Exception:
+            self.szunet()
+            return
+        # ⚠ A SAJÁT óránkról lépünk, nem a vezér kvantált kurzoráról (lásd a
+        # `_ido` mezőt). A vezértől csak a TEMPÓ és a VÉGE kell.
+        uj = kovetkezo_ido(self._ido if self._ido is not None else most,
+                           lepes_ido(seb, tf), veg)
+        if uj is None:
+            self.szunet()
+            return
+        self.allit(uj, forras=None)
+
+
+# ⚠ A megnyitott ablakok hivatkozásai. Enélkül a `_uj_ablak`-ban létrehozott
+# `QMainWindow`-t a szemétgyűjtő azonnal elvinné (a Qt-oldali objektum a Python
+# hivatkozással együtt megy), és az ablak felvillanás után eltűnne.
+_ABLAKOK: list = []
+
+_SZINKRON = None
+
+
+def szinkron() -> "Szinkron":
+    """A folyamat KÖZÖS szinkronja (lustán jön létre)."""
+    global _SZINKRON
+    if _SZINKRON is None:
+        _SZINKRON = Szinkron()
+    return _SZINKRON
+
+
 class Gyertyak(pg.GraphicsObject):
     """Gyertyák — CSAK a látható szakasz, szükség esetén összevonva.
 
@@ -418,6 +591,12 @@ class LabAblak(QtWidgets.QMainWindow):
         self._chart = None
         self._objs = []
         self._tengely = None
+        # ⚠ SZINKRON: `None` = önálló ablak (a mai viselkedés, változatlanul).
+        # A `_szinkron_alatt` a VISSZACSATOLÁST zárja ki: amikor a szinkron
+        # állítja az időnket, nem toljuk vissza rá — különben két kapcsolt
+        # ablak vég nélkül pingpongozna egy kurzor-mozdulaton.
+        self._szinkron = None
+        self._szinkron_alatt = False
         self._belepok = []
         self._be_ido = None
         self._eredmeny = None
@@ -557,6 +736,16 @@ class LabAblak(QtWidgets.QMainWindow):
         s3.addWidget(self._bidask)
         g = QtWidgets.QPushButton(_t("lab.lejatszas_vege"))
         g.clicked.connect(self.kurzor_le)
+        s3.addWidget(g)
+        # ── Több ablak közös ideje ──────────────────────────────────────
+        self._kapcs = QtWidgets.QCheckBox(_t("lab.kapcsolt"))
+        self._kapcs.setToolTip(_t("lab.kapcsolt_tipp"))
+        self._kapcs.stateChanged.connect(
+            lambda *_: self._kapcsol(self._kapcs.isChecked()))
+        s3.addWidget(self._kapcs)
+        g = QtWidgets.QPushButton(_t("lab.uj_ablak"))
+        g.setToolTip(_t("lab.uj_ablak_tipp"))
+        g.clicked.connect(self._uj_ablak)
         s3.addWidget(g)
         s3.addStretch(1)
 
@@ -1830,12 +2019,20 @@ class LabAblak(QtWidgets.QMainWindow):
         if self._chart is None or len(self._chart) < 2:
             return
         self._biztos_eredmeny()
+        if self._szinkron is not None and self._szinkron.jatszik():
+            self._szinkron.szunet()
+            return
         if self._ido_zito.isActive():
             self._ido_zito.stop()
             self._play.setText("▶ Play")
             return
         if self._kurzor is None:
             self._kurzor = 0
+        # KAPCSOLT ablak: a közös óra vezet, a sajátunk NEM indul el (két
+        # időzítő két ablakon néhány másodperc alatt szétcsúszna).
+        if self._szinkron is not None:
+            self._szinkron.play(self)
+            return
         self._play.setText("⏸ Pause")
         self._utem_indit()
 
@@ -1868,13 +2065,17 @@ class LabAblak(QtWidgets.QMainWindow):
         self._kurzor = max(0, min(len(self._chart) - 1, alap + int(n)))
         self._kurzor_rajz()
         self._listak_frissit()
+        self._kozzetesz()
 
     def kurzor_le(self) -> None:
+        if self._szinkron is not None and self._szinkron.jatszik():
+            self._szinkron.szunet()
         self._ido_zito.stop()
         self._play.setText("▶ Play")
         self._kurzor = None
         self._kurzor_rajz()
         self._listak_frissit()
+        self._kozzetesz()
 
     def _kurzor_huzva(self) -> None:
         if self._chart is None:
@@ -1886,6 +2087,108 @@ class LabAblak(QtWidgets.QMainWindow):
                                   int(round(self._kurzor_vonal.value()))))
         self._kurzor_rajz(vonal=False)
         self._listak_frissit()
+        # ⚠ A HÚZÁS IS SZINKRON: lejátszás nélkül is ez a leggyakoribb mozdulat
+        # („mit csinált ekkor a másik idősík?").
+        self._kozzetesz()
+
+    # ══ A SZINKRON FELÜLETE ══════════════════════════════════════════════
+    # A `Szinkron` KIZÁRÓLAG ezt a négy metódust hívja az ablakon. Szűk felület
+    # → az ablak belseje szabadon változhat anélkül, hogy a szinkron eltörne.
+
+    def kurzor_ido(self):
+        """A kurzor ideje (a szinkron ebből olvas)."""
+        return self._kurzor_ido()
+
+    def play_felirat(self, jatszik: bool) -> None:
+        """A Play/Pause felirat — a szinkron állítja MINDEN tagon egyszerre."""
+        self._play.setText("⏸ Pause" if jatszik else "▶ Play")
+
+    def szinkron_tempo(self):
+        """`(most, veg, sebesseg, tf_perc)` — a VEZÉR tempó-adatai.
+
+        A `most` a kurzor ideje; ha még nincs kurzor, a chart ELEJE (a Play
+        onnan indul). A `veg` a saját chartunk utolsó gyertyája — a közös óra
+        eddig megy."""
+        if self._chart is None or not len(self._chart):
+            return None, None, 1.0, 1
+        most = self._kurzor_ido()
+        if most is None:
+            most = self._chart.index[0]
+        return (most, self._chart.index[-1],
+                float(self._sebesseg.value()), int(self._tf.currentData()))
+
+    def szinkron_ido(self, t) -> None:
+        """A szinkron ÁLLÍTJA az időnket. Nem toljuk vissza (végtelen kör)."""
+        self._szinkron_alatt = True
+        try:
+            self._biztos_eredmeny()
+            self._kurzor_vissza(t)
+            self._kurzor_rajz()
+            self._listak_frissit()
+        finally:
+            self._szinkron_alatt = False
+
+    def _kozzetesz(self) -> None:
+        """A saját kurzor-időnket kitoljuk a többi kapcsolt ablakra."""
+        if self._szinkron is None or self._szinkron_alatt:
+            return
+        self._szinkron.allit(self._kurzor_ido(), forras=self)
+
+    def _kapcsol(self, be: bool) -> None:
+        """Be/kilépés a közös időbe.
+
+        ⚠ BELÉPÉSKOR A MÁR BENT LÉVŐK IDEJE NYER. Fordítva az újonnan
+        bekapcsolt ablak elrántaná a többit oda, ahol épp a saját kurzora áll —
+        ami pont az ellenkezője annak, amit a kapcsoló ígér."""
+        if not be:
+            if self._szinkron is not None:
+                self._szinkron.kilep(self)
+            self._szinkron = None
+            return
+        sz = szinkron()
+        t = sz.ido()                 # a MÁR bent lévőké (én még nem vagyok tag)
+        self._szinkron = sz
+        sz.belep(self)
+        if t is not None:
+            self.szinkron_ido(t)
+        else:
+            self._kozzetesz()
+
+    def _uj_ablak(self) -> None:
+        """Új labor-ablak UGYANARRA az instrumentumra, a KÖVETKEZŐ idősíkon.
+
+        ⚠ A hivatkozást MEG KELL TARTANI (`_ABLAKOK`): egy helyi változóban
+        tartott `QMainWindow`-t a szemétgyűjtő bezárja, amint a metódus véget
+        ér — az ablak felvillanna és eltűnne."""
+        _tfk = [perc for perc, _ in IDOSIKOK]
+        try:
+            _i = _tfk.index(int(self._tf.currentData()))
+        except (ValueError, TypeError):
+            _i = 0
+        w = LabAblak(symbol=self._sym.currentText(),
+                     strategy=self._strat_nev(),
+                     tf_perc=_tfk[(_i + 1) % len(_tfk)],
+                     tol=self._tol.text() or None, ig=self._ig.text() or None)
+        _ABLAKOK.append(w)
+        w.show()
+        w.betolt()
+        # Az ÚJ ablakot csak úgy van értelme megnyitni, ha van mihez kötni:
+        # mindkettőt bekapcsoljuk (a sajátunkat előbb, hogy a közös idő a
+        # MIÉNK legyen, és az új ablak igazodjon hozzá).
+        self._kapcs.setChecked(True)
+        w._kapcs.setChecked(True)
+
+    def closeEvent(self, ev):
+        """⚠ Bezáráskor KI KELL lépni: különben a szinkron egy halott ablakot
+        próbálna rajzoltatni, és a lejátszás minden képen kivételt dobna."""
+        try:
+            if self._szinkron is not None:
+                self._szinkron.kilep(self)
+        finally:
+            self._szinkron = None
+        if self in _ABLAKOK:
+            _ABLAKOK.remove(self)
+        super().closeEvent(ev)
 
     def _kurzor_ido(self):
         if self._kurzor is None or self._chart is None:
