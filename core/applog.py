@@ -103,6 +103,34 @@ def setup(level: int = logging.INFO) -> "Path | None":
     return LOG_PATH
 
 
+# ---------------------------------------------------------------------------
+# A FELHASZNÁLÓI MEGSZAKÍTÁS NEM HIBA
+# ---------------------------------------------------------------------------
+# ⚠ A LELET (2026-09-09). A `tradeforge.log` 179 ERROR/CRITICAL sorából 7 azért
+# keletkezett, mert a felhasználó Ctrl+C-vel kilépett — és a hook ezt „⛔ A
+# főszál ELKAPATLAN KIVÉTELLEL ÁLLT LE" felirattal, teljes tracebackkel írta be.
+#
+# Ez két sebből vérzik:
+#   1. HAZUDIK: a Ctrl+C egy konzolos program NORMÁLIS befejezése, nem összeomlás;
+#   2. és — ami rosszabb — a `install_error_counter` az ERROR+ rekordokat SZÁMOLJA,
+#      abból lesz a felületen a „⚠ N hiba a naplóban". Ha a szabályos kilépés is
+#      hibának számít, a számláló FARKAST KIÁLT, és a valódi hibák elvesznek a
+#      zajban. Pontosan ez történt: a felhasználó jelezte, hogy „a program hibát
+#      írt a naplóba", és a 179-ből 132 vagy már javított, vagy nem is hiba volt.
+#
+# A megszakítás továbbra is NAPLÓZÓDIK (tudni akarjuk, hogy leállt) — csak INFO
+# szinten, traceback nélkül, és a hibaszámlálót nem mozdítja.
+
+_MEGSZAKITAS = (KeyboardInterrupt, SystemExit)
+
+
+def _felhasznaloi_megszakitas(exc_type) -> bool:
+    try:
+        return issubclass(exc_type, _MEGSZAKITAS)
+    except TypeError:
+        return isinstance(exc_type, _MEGSZAKITAS)
+
+
 def install_thread_excepthook() -> None:
     """Elkapott NÉLKÜLI szál-kivétel → a NAPLÓBA is, ne csak a konzolra.
 
@@ -120,11 +148,17 @@ def install_thread_excepthook() -> None:
 
     def _hook(args):
         try:
-            logging.getLogger("thread").critical(
-                "⛔ A(z) %r szál ELHALT elkapatlan kivétellel — az általa végzett "
-                "munka MEGÁLLT. A program látszólag fut tovább.",
-                getattr(args.thread, "name", "?"),
-                exc_info=(args.exc_type, args.exc_value, args.exc_traceback))
+            _nev = getattr(args.thread, "name", "?")
+            if _felhasznaloi_megszakitas(args.exc_type):
+                logging.getLogger("thread").info(
+                    "A(z) %r szál megszakításra állt le (%s).", _nev,
+                    getattr(args.exc_type, "__name__", args.exc_type))
+            else:
+                logging.getLogger("thread").critical(
+                    "⛔ A(z) %r szál ELHALT elkapatlan kivétellel — az általa "
+                    "végzett munka MEGÁLLT. A program látszólag fut tovább.",
+                    _nev,
+                    exc_info=(args.exc_type, args.exc_value, args.exc_traceback))
         except Exception:
             pass
         _prev(args)                        # a konzolos traceback maradjon meg
@@ -161,10 +195,16 @@ def install_tk_excepthook() -> None:
 
     def _hook(self, exc, val, tb):
         try:
-            logging.getLogger("gui").error(
-                "⛔ Kezeletlen hiba egy felület-visszahívásban (%s) — a művelet "
-                "NEM futott le, a felület viszont ugyanúgy néz ki, mint máskor.",
-                getattr(exc, "__name__", exc), exc_info=(exc, val, tb))
+            if _felhasznaloi_megszakitas(exc):
+                logging.getLogger("gui").info(
+                    "A felület megszakításra állt le (%s).",
+                    getattr(exc, "__name__", exc))
+            else:
+                logging.getLogger("gui").error(
+                    "⛔ Kezeletlen hiba egy felület-visszahívásban (%s) — a "
+                    "művelet NEM futott le, a felület viszont ugyanúgy néz ki, "
+                    "mint máskor.",
+                    getattr(exc, "__name__", exc), exc_info=(exc, val, tb))
         except Exception:
             pass
         try:
@@ -184,9 +224,17 @@ def install_sys_excepthook() -> None:
 
     def _hook(exc_type, exc, tb):
         try:
-            logging.getLogger("main").critical(
-                "⛔ A főszál elkapatlan kivétellel állt le.",
-                exc_info=(exc_type, exc, tb))
+            if _felhasznaloi_megszakitas(exc_type):
+                # ⚠ Ctrl+C: NORMÁLIS kilépés. Naplózzuk (tudni akarjuk, hogy és
+                # mikor állt le), de INFO-val és traceback nélkül — a
+                # hibaszámláló ne mozduljon rá.
+                logging.getLogger("main").info(
+                    "A program megszakításra állt le (%s).",
+                    getattr(exc_type, "__name__", exc_type))
+            else:
+                logging.getLogger("main").critical(
+                    "⛔ A főszál elkapatlan kivétellel állt le.",
+                    exc_info=(exc_type, exc, tb))
         except Exception:
             pass
         _prev(exc_type, exc, tb)
