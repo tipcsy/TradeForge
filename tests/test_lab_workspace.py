@@ -68,7 +68,20 @@ from PySide6 import QtWidgets as QW
 
 app = QW.QApplication.instance() or QW.QApplication([])
 
+import tempfile
+
+from tools import lab_qt
 from tools.lab_qt import IDOSIKOK, LabAblak, Munkaterulet
+
+# ⚠ A TESZT SOHA NE ÍRJA A FELHASZNÁLÓ ÁLLAPOTÁT. A `Munkaterulet.closeEvent`
+# MENTI az elrendezést — e nélkül a sor az ÉLES `data/lab_elrendezes.json`-t
+# írná, és a KÖVETKEZŐ futás abból indulna (elsőre pont ez történt: a „dokk
+# alul ül" állítás azért bukott, mert egy korábbi teszt-futás mentése a jobb
+# oldalra tette). Lásd `tests-must-never-write-real-config`.
+lab_qt.ELRENDEZES_PATH = (Path(tempfile.mkdtemp(prefix="tf_ws_"))
+                          / "elrendezes.json")
+_ELES_ELR = ROOT / "data" / "lab_elrendezes.json"
+_ELES_ELR_VOLT = _ELES_ELR.exists()
 
 PAR, TOL, IG = "UsaTec", "2026-08-25", "2026-08-26"
 mt = Munkaterulet(symbol=PAR, strategy="wpr_sma", tf_perc=15, tol=TOL, ig=IG)
@@ -96,10 +109,23 @@ check("⚠ minden chart MÁS idősíkon (nincs duplikátum)",
 check("...és mind a szabad idősíkokból való",
       all(t in dict(IDOSIKOK).values() for t in _tfk), str(_tfk))
 
-check("a második charttól a kötés-tábla ALAPBÓL rejtve (a chart kapja a helyet)",
-      [c._kotesek.isChecked() for c in mt.chartok()] == [True, False, False])
+# ⚠ A SZÁMLA ÁLLAPOTA = a sor ÉS a nyitott/lezárt LISTÁK — mindkettő a KÖZÖS
+# dokkba került. Egy chart egy NÉZET ugyanarra a kísérletre; a pozíciók viszont
+# a kísérlethez tartoznak, nem a nézethez. Korábban kapcsolt ablakoknál ugyanaz
+# a lista jelent meg háromszor, és a chart helyét vitte.
+check("⚠ a chartok SAJÁT kötés-panelje rejtve (a dokk mutatja)",
+      all(not c._fulek.isVisible() for c in mt.chartok()))
+check("⚠ …és a jelölője sincs ott (egy kapcsoló, ami semmit nem kapcsol)",
+      all(not c._kotesek.isVisible() for c in mt.chartok()))
 check("⚠ a chartok SAJÁT számla-sora rejtve (a területen egy van belőle)",
       all(not c._szamla.isVisible() for c in mt.chartok()))
+check("a dokkban ott a NYITOTT és a LEZÁRT tábla",
+      sorted(mt._dokk_tablak) == ["lezart", "nyitott"])
+check("⚠ a dokk és a chart oszlopai EGY forrásból valók",
+      mt._dokk_tablak["nyitott"].columnCount()
+      == mt.chartok()[0]._tablak["nyitott"].columnCount()
+      and mt._dokk_tablak["lezart"].columnCount()
+      == mt.chartok()[0]._tablak["lezart"].columnCount())
 check("az új chartok automatikusan KAPCSOLTAK (közös idő)",
       all(c._szinkron is not None for c in mt.chartok()))
 
@@ -214,6 +240,50 @@ mt._szamla_kiir(None, "")
 check("chart nélkül üres a sor", mt._szamla.text() == "")
 
 
+# ══ 5b. A KÖTÉS-LISTÁK a közös dokkba jutnak ════════════════════════════
+# ⚠ A TELJES LÁNC, nem csak a végpont: a chart frissül → értesíti a
+# munkaterületet → az kiírja a dokkba. Ha csak a `_kotesek_kiir`-t hívnám
+# közvetlenül, a lánc közepe (az értesítés) méretlen maradna.
+class _Res:
+    def __init__(self, trades):
+        self.trades = trades
+
+
+class _Tr:
+    """Egy LEZÁRT kötés — annyi mezővel, amennyit a sor-építő olvas."""
+    def __init__(self, t0, t1):
+        import pandas as _pd
+        self.open_time, self.close_time = t0, t1
+        self.direction, self.open_price, self.close_price = "BUY", 100.0, 102.0
+        self.sl_points, self.point_size, self.tp = 100.0, 0.01, 102.0
+        self.pnl_usd, self.risk_usd, self.status = 20.0, 10.0, "TP"
+        self.risk_free = False
+
+
+_akt = mt._aktiv_chart()
+_idx = _akt._chart.index
+_akt._eredmeny = {"res": _Res([_Tr(_idx[1], _idx[5])]), "balance": 1000.0}
+_akt._kurzor = len(_idx) - 1
+_akt._listak_frissit()
+app.processEvents()
+check("⚠ a chart kiszámolta a sorokat (rejtett saját panel MELLETT is)",
+      len(_akt._kotet_sorok[1] if hasattr(_akt, "_kotet_sorok")
+          else _akt._kotes_sorok[1]) == 1,
+      str(_akt._kotes_sorok))
+check("⚠ …és a KÖZÖS DOKK megkapta (a teljes lánc)",
+      mt._dokk_tablak["lezart"].rowCount() == 1,
+      f"{mt._dokk_tablak['lezart'].rowCount()} sor")
+
+# Chart-váltásnál AZONNAL a másiké látszik (nem várunk a kurzorára).
+_masik = [c for c in mt.chartok() if c is not _akt][0]
+mt._mdi.setActiveSubWindow(
+    {sw.widget(): sw for sw in mt._mdi.subWindowList()}[_masik])
+app.processEvents()
+check("⚠ chart-váltáskor a dokk AZONNAL a másik chartét mutatja",
+      mt._dokk_tablak["lezart"].rowCount() == 0,
+      f"{mt._dokk_tablak['lezart'].rowCount()} sor (a másiknak nincs kötése)")
+
+
 # ══ 6. A HATÁR: a LabAblak önállóan is megáll ═══════════════════════════
 # ⚠ Ez a 2. verzió (kiszakítás külön ablakba) előfeltétele — és a `--egy`
 # parancssori kapcsolóé is. Ha a chart csak munkaterületen belül működne, a
@@ -232,6 +302,11 @@ check("a belépési pont a MUNKATERÜLETET nyitja", "oszt = LabAblak if a.egy el
 check("...de a régi, egy-ablakos mód megmarad (`--egy`)", '"--egy"' in _src)
 
 mt.close()
+
+check("⚠ a teszt NEM hozta létre az éles data/lab_elrendezes.json-t",
+      _ELES_ELR.exists() == _ELES_ELR_VOLT,
+      f"volt={_ELES_ELR_VOLT} van={_ELES_ELR.exists()}")
+
 print()
 n, m = sum(results), len(results)
 print(f"{n}/{m} teszt PASS")

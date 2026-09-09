@@ -243,6 +243,39 @@ def szinkron() -> "Szinkron":
     return _SZINKRON
 
 
+def kotes_oszlopok() -> dict:
+    """A kötés-táblák oszlopnevei — EGY forrásból.
+
+    ⚠ FÜGGVÉNY, NEM KONSTANS: a feliratok `_t()`-vel jönnek, egy modul-szintű
+    tuple befagyasztaná a betöltéskori nyelvet, és a nyelvváltás után a chart
+    meg a dokk MÁS fejlécet mutatna (a projekt visszatérő `LabelMap`-leckéje)."""
+    return {
+        "nyitott": (_t("lab.ido"), "ir", _t("lab.belepo"), "most", "P&L", "R",
+                    "SL", "TP", "perc"),
+        "lezart": (_t("lab.ido"), "ir", _t("lab.belepo"), _t("lab.kilepo"),
+                   "P&L", "R", _t("lab.vege")),
+    }
+
+
+def kotes_tablak(szulo=None) -> tuple:
+    """`(QTabWidget, {kulcs: QTableWidget})` — a Nyitott/Lezárt fülpár.
+
+    Ugyanaz a felépítés kell a chart saját paneljébe ÉS a munkaterület közös
+    dokkjába; két külön kódmásolat előbb-utóbb elcsúszna."""
+    fulek = QtWidgets.QTabWidget(szulo)
+    tablak = {}
+    _cim = {"nyitott": "Nyitott", "lezart": _t("lab.lezart")}
+    for kulcs, oszlopok in kotes_oszlopok().items():
+        t = QtWidgets.QTableWidget(0, len(oszlopok))
+        t.setHorizontalHeaderLabels(oszlopok)
+        t.horizontalHeader().setSectionResizeMode(
+            QtWidgets.QHeaderView.Stretch)
+        t.verticalHeader().setVisible(False)
+        fulek.addTab(t, _cim[kulcs])
+        tablak[kulcs] = t
+    return fulek, tablak
+
+
 class Gyertyak(pg.GraphicsObject):
     """Gyertyák — CSAK a látható szakasz, szükség esetén összevonva.
 
@@ -601,6 +634,7 @@ class LabAblak(QtWidgets.QMainWindow):
         # A munkaterület (ha van) ide iratkozik fel a számla-állapotra.
         self._szamla_figyelo = None
         self._munkaterulet = None
+        self._kotes_sorok = ([], [])
         self._belepok = []
         self._be_ido = None
         self._eredmeny = None
@@ -803,22 +837,8 @@ class LabAblak(QtWidgets.QMainWindow):
         fo.addWidget(self._szamla)
 
         # ── Listák ───────────────────────────────────────────────────────
-        self._fulek = QtWidgets.QTabWidget()
+        self._fulek, self._tablak = kotes_tablak()
         self._fulek.setMaximumHeight(170)
-        self._tablak = {}
-        for kulcs, cim, oszlopok in (
-            ("nyitott", "Nyitott",
-             (_t("lab.ido"), "ir", _t("lab.belepo"), "most", "P&L", "R", "SL", "TP", "perc")),
-            ("lezart", _t("lab.lezart"),
-             (_t("lab.ido"), "ir", _t("lab.belepo"), _t("lab.kilepo"), "P&L", "R", _t("lab.vege"))),
-        ):
-            t = QtWidgets.QTableWidget(0, len(oszlopok))
-            t.setHorizontalHeaderLabels(oszlopok)
-            t.horizontalHeader().setSectionResizeMode(
-                QtWidgets.QHeaderView.Stretch)
-            t.verticalHeader().setVisible(False)
-            self._fulek.addTab(t, cim)
-            self._tablak[kulcs] = t
         fo.addWidget(self._fulek)
         # A kötés-táblák ELREJTHETŐK. Kapcsolt ablakoknál (M1+M5+M15 ugyanarra
         # az instrumentumra) ugyanaz a kötéslista jelenne meg háromszor —
@@ -1948,13 +1968,16 @@ class LabAblak(QtWidgets.QMainWindow):
         ténylegesen megváltozott szöveg íródik ki. A `setRowCount` csak akkor
         fut, ha a sorok SZÁMA változott.
         """
-        # ⚠ REJTETT PANEL → NINCS MUNKA. A táblák építése a lejátszás legdrágább
-        # része (mérve: 1000 kötésnél 5 ms/kép a gyorsítótárak UTÁN is); ha nem
-        # látszanak, kár érte. A számla-állapot sem frissül, mert az is rejtve
-        # van vele együtt.
-        if not getattr(self, "_kotes_panel_lathato", True):
+        # ⚠ REJTETT PANEL → NINCS MUNKA — DE CSAK HA SENKI NEM NÉZI. A táblák
+        # építése a lejátszás legdrágább része (mérve: 1000 kötésnél 5 ms/kép a
+        # gyorsítótárak UTÁN is). A munkaterületen viszont a KÖZÖS dokk mutatja
+        # ugyanezeket a sorokat, tehát ott akkor is kellenek, ha a chart saját
+        # panelje rejtve van.
+        _figyelo = getattr(self, "_szamla_figyelo", None)
+        if not getattr(self, "_kotes_panel_lathato", True) and _figyelo is None:
             return
         res = (self._eredmeny or {}).get("res")
+        self._kotes_sorok = ([], [])
         # ⚠ A lezárt-sor gyorsítótár a RES-hez tartozik: új futtatás → új kötés-
         # objektumok → ürítés. (A `_c[0] is not tr` őr ezt külön is elkapja, de a
         # szótár így nem nő korlátlanul egy hosszú laboratóriumi ülés alatt.)
@@ -1964,6 +1987,7 @@ class LabAblak(QtWidgets.QMainWindow):
         if res is None:
             self._tabla_ir(self._tablak["nyitott"], [])
             self._tabla_ir(self._tablak["lezart"], [])
+            self._szamla_frissit()
             return
         _kt = self._kurzor_ido()
         _nyitott_sorok, _lezart_sorok = [], []
@@ -2011,8 +2035,12 @@ class LabAblak(QtWidgets.QMainWindow):
                         f"{tr.pnl_usd:+.2f}", f"{_r:+.2f}", tr.status])
                     self._lezart_cache[id(tr)] = _c
                 _lezart_sorok.append(_c[1])
-        self._tabla_ir(self._tablak["nyitott"], _nyitott_sorok)
-        self._tabla_ir(self._tablak["lezart"], _lezart_sorok)
+        # ⚠ A SOROKAT ELTESSZÜK: a munkaterület közös dokkja innen veszi őket
+        # (a `_szamla_figyelo`-n keresztül értesül, hogy van új).
+        self._kotes_sorok = (_nyitott_sorok, _lezart_sorok)
+        if getattr(self, "_kotes_panel_lathato", True):
+            self._tabla_ir(self._tablak["nyitott"], _nyitott_sorok)
+            self._tabla_ir(self._tablak["lezart"], _lezart_sorok)
         # A kurzor mozgásakor az IDŐPILLANAT-nézet is frissül.
         self._szamla_frissit()
 
@@ -2451,13 +2479,25 @@ class Munkaterulet(QtWidgets.QMainWindow):
         # bármelyikére, LEBEGŐVÉ tehető (kiszakítható külön ablakba), és
         # bezárható. A chartok ugyanígy szabadon mozognak az MDI-területen —
         # így a felület minden darabja a felhasználóé.
+        # ⚠ A SZÁMLA ÁLLAPOTA = a sor ÉS a nyitott/lezárt LISTÁK. A listák
+        # korábban chartonként külön voltak; kapcsolt ablakoknál (M1+M5+M15
+        # ugyanarra a párra) ugyanaz jelent meg háromszor, ráadásul a chart
+        # helyét vitte. Egy chart = egy NÉZET ugyanarra a kísérletre; a
+        # POZÍCIÓK viszont a kísérlethez tartoznak, nem a nézethez.
         self._szamla = QtWidgets.QLabel("")
         self._szamla.setStyleSheet("color:#9fb4c8; padding:6px;")
         self._szamla.setWordWrap(True)
         self._szamla.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+        self._dokk_fulek, self._dokk_tablak = kotes_tablak()
+        _doboz = QtWidgets.QWidget()
+        _el = QtWidgets.QVBoxLayout(_doboz)
+        _el.setContentsMargins(0, 0, 0, 0)
+        _el.setSpacing(2)
+        _el.addWidget(self._szamla)
+        _el.addWidget(self._dokk_fulek, 1)
         self._szamla_dokk = QtWidgets.QDockWidget(_t("lab.dokk_szamla"), self)
         self._szamla_dokk.setObjectName("szamla_dokk")
-        self._szamla_dokk.setWidget(self._szamla)
+        self._szamla_dokk.setWidget(_doboz)
         self._szamla_dokk.setAllowedAreas(QtCore.Qt.AllDockWidgetAreas)
         self._szamla_dokk.setFeatures(
             QtWidgets.QDockWidget.DockWidgetMovable
@@ -2597,8 +2637,11 @@ class Munkaterulet(QtWidgets.QMainWindow):
         w._szamla_figyelo = self._szamla_jott
         # A chart SAJÁT számla-sora elrejtve: a munkaterületen egy van belőle.
         w._szamla.setVisible(False)
-        if _meglevo:
-            w._kotesek.setChecked(False)     # a másodiktól a chart kapja a helyet
+        # ⚠ A chart SAJÁT kötés-panelje a munkaterületen belül nem kell: a
+        # közös dokk mutatja ugyanezt. A jelölőt is elrejtjük — egy kapcsoló,
+        # ami semmit nem kapcsol, rosszabb, mint ha ott sem volna.
+        w._kotesek.setChecked(False)
+        w._kotesek.setVisible(False)
         sw = self._mdi.addSubWindow(w)
         sw.setWindowTitle(f"{symbol or '?'} · "
                           f"{dict(IDOSIKOK).get(int(tf_perc), tf_perc)}")
@@ -2647,6 +2690,14 @@ class Munkaterulet(QtWidgets.QMainWindow):
         """Egy chart frissítette az állapotát — csak az AKTÍV érdekel."""
         if chart is self._aktiv_chart():
             self._szamla_kiir(chart, szoveg)
+            self._kotesek_kiir(chart)
+
+    def _kotesek_kiir(self, chart) -> None:
+        """Az AKTÍV chart nyitott/lezárt sorai a közös dokkba."""
+        _ny, _le = (getattr(chart, "_kotes_sorok", None) or ([], [])) \
+            if chart is not None else ([], [])
+        LabAblak._tabla_ir(self._dokk_tablak["nyitott"], _ny)
+        LabAblak._tabla_ir(self._dokk_tablak["lezart"], _le)
 
     def _aktiv_chart(self):
         sw = self._mdi.activeSubWindow()
@@ -2672,11 +2723,18 @@ class Munkaterulet(QtWidgets.QMainWindow):
                              f"{szoveg or '—'}")
 
     def _aktiv_valtozott(self, *_a) -> None:
+        """Chart-váltás: a közös panel AZONNAL a másik chartét mutassa.
+
+        ⚠ Nem várhatunk a chart következő frissítésére: az csak akkor jön, ha
+        mozdul a kurzora. Addig a panel a RÉGI chart pozícióit mutatná az ÚJ
+        chart neve alatt."""
         w = self._aktiv_chart()
         if w is None:
             self._szamla.setText("")
+            self._kotesek_kiir(None)
             return
         self._szamla_kiir(w, w._szamla.text())
+        self._kotesek_kiir(w)
 
 
 def main(argv=None) -> int:
