@@ -250,7 +250,68 @@ else:
     w1.close()
     w15.close()
 
-# ══ 6. A HATÁR: a szinkron nem hoz be második végrehajtási utat ══════════
+# ══ 6. AZ „A" GOMB: az automatikus nagyítás KONVERGÁLJON ════════════════
+# ⚠ A LELET (2026-09-09, felhasználói jelzés): „ha rákattintok az A gombra,
+# elindul egy teljes kicsinyítés és nem is hagyja abba, csak ha kilépek".
+#
+# A hurok: nézet változik → `sigRangeChanged` → `_cimke_helyre()` a NÉZETBŐL
+# számolja az időcímke helyét → a címke határai kitolódnak → az automatikus
+# nagyítás befogadja őket → a nézet ismét változik → …
+# Mérve: körönként ~5% (35 335 → 44 907 hat kör alatt), megállás nélkül, és a
+# gyertyák egy hajszálvékony csíkba préselődtek a nézet tetején.
+#
+# ⚠ NEM a v3.58.0 gyertya-átalakítás regressziója: a RÉGI `boundingRect`-tel
+# ugyanígy divergált (35 334,8 → 44 907,2). Régebbi hiba, most derült ki.
+#
+# A javítás: a DÍSZÍTŐK (kurzorvonal, BID/ASK, jövőt takaró sáv, időcímke)
+# `ignoreBounds=True`-val kerülnek be — nem hordoznak ár-információt. A
+# felhasználó belépői és a stratégia jelölői bent maradnak.
+w_a = LabAblak(symbol=_PAR, tf_perc=5, tol="2026-08-25", ig="2026-08-26")
+w_a.betolt()
+if w_a._chart is None or len(w_a._chart) < 20:
+    print("KIHAGYVA (autoRange): nincs adat")
+else:
+    _vb = w_a._vb
+    _m = []
+    for _ in range(6):
+        _vb.autoRange()
+        app.processEvents()
+        (_x0, _x1), (_y0, _y1) = _vb.viewRange()
+        _m.append(_y1 - _y0)
+    check("⚠ az ismételt automatikus nagyítás KONVERGÁL (nem fut el)",
+          abs(_m[-1] - _m[0]) < 0.01 * _m[0],
+          f"{_m[0]:.1f} → {_m[-1]:.1f}")
+    _br = w_a._gyertyak.boundingRect()
+    (_x0, _x1), (_y0, _y1) = _vb.viewRange()
+    check("⚠ …és a GYERTYÁKRA illeszt (nem a díszítőkre)",
+          _y0 < _br.top() and _y1 > _br.bottom()
+          and (_y1 - _y0) < 3 * _br.height(),
+          f"nézet {_y0:.0f}..{_y1:.0f} vs gyertyák {_br.top():.0f}..{_br.bottom():.0f}")
+    _src0 = (ROOT / "tools" / "lab_qt.py").read_text(encoding="utf-8")
+    check("a díszítők `ignoreBounds=True`-val kerülnek be",
+          _src0.count("ignoreBounds=True") >= 4,
+          f"{_src0.count('ignoreBounds=True')} db")
+
+    # ── A kötés-táblák kapcsolója ────────────────────────────────────────
+    w_a.show()
+    app.processEvents()
+    check("az ELSŐ ablakban a kötés-tábla LÁTSZIK",
+          w_a._kotesek.isChecked() and w_a._fulek.isVisible())
+    w_a._kotesek.setChecked(False)
+    app.processEvents()
+    check("⚠ kikapcsolva eltűnik (a számla-sorral együtt)",
+          not w_a._fulek.isVisible() and not w_a._szamla.isVisible())
+    # …és rejtve NEM is dolgozunk vele (a lejátszás legdrágább része).
+    w_a._eredmeny = None
+    w_a._listak_frissit()          # nem szabad elszállnia rejtett panellel
+    check("rejtett panelnél a frissítés kimarad (nem száll el)", True)
+    w_a._kotesek.setChecked(True)
+    app.processEvents()
+    check("visszakapcsolható", w_a._fulek.isVisible())
+    w_a.close()
+
+
+# ══ 7. A HATÁR: a szinkron nem hoz be második végrehajtási utat ══════════
 _src = (ROOT / "tools" / "lab_qt.py").read_text(encoding="utf-8")
 _i = _src.index("class Szinkron(")
 _szin = _src[_i:_src.index("\nclass ", _i + 10)] if "\nclass " in _src[_i + 10:] else _src[_i:]

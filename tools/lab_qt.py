@@ -738,6 +738,11 @@ class LabAblak(QtWidgets.QMainWindow):
         g.clicked.connect(self.kurzor_le)
         s3.addWidget(g)
         # ── Több ablak közös ideje ──────────────────────────────────────
+        self._kotesek = QtWidgets.QCheckBox(_t("lab.kotesek"))
+        self._kotesek.setToolTip(_t("lab.kotesek_tipp"))
+        self._kotesek.setChecked(True)
+        self._kotesek.stateChanged.connect(self._kotes_panel)
+        s3.addWidget(self._kotesek)
         self._kapcs = QtWidgets.QCheckBox(_t("lab.kapcsolt"))
         self._kapcs.setToolTip(_t("lab.kapcsolt_tipp"))
         self._kapcs.stateChanged.connect(
@@ -811,6 +816,10 @@ class LabAblak(QtWidgets.QMainWindow):
             self._fulek.addTab(t, cim)
             self._tablak[kulcs] = t
         fo.addWidget(self._fulek)
+        # A kötés-táblák ELREJTHETŐK. Kapcsolt ablakoknál (M1+M5+M15 ugyanarra
+        # az instrumentumra) ugyanaz a kötéslista jelenne meg háromszor —
+        # helyet visz a charttól, és képenként újra is épül.
+        self._kotes_panel_lathato = True
 
         # ── Lejátszás-időzítő ────────────────────────────────────────────
         # ⚠ QTimer, nem `sleep`: a `sleep` befagyasztaná az ablakot.
@@ -823,7 +832,20 @@ class LabAblak(QtWidgets.QMainWindow):
             hoverPen=pg.mkPen("#ffff99", width=3))
         self._kurzor_vonal.sigPositionChanged.connect(self._kurzor_huzva)
         self._kurzor_vonal.setVisible(False)
-        self._plot.addItem(self._kurzor_vonal)
+        # ⚠ `ignoreBounds=True` MINDEN DÍSZÍTŐ ELEMRE — különben az „A"
+        # (automatikus nagyítás) gomb VÉGTELEN CIKLUSBA fut. A hurok:
+        #
+        #     nézet változik → `sigRangeChanged` → `_cimke_helyre()` a NÉZETBŐL
+        #     számolja az időcímke helyét → a címke határai kitolódnak → az
+        #     automatikus nagyítás befogadja őket → a nézet ismét változik → …
+        #
+        # Mérve: körönként ~5% növekedés, megállás nélkül (35 335 → 44 907 hat
+        # kör alatt), és a gyertyák egy hajszálvékony csíkba préselődnek a
+        # nézet tetején. A díszítők (kurzorvonal, BID/ASK, jövőt takaró sáv,
+        # időcímke) nem hordoznak ÁR-információt, tehát semmi keresnivalójuk a
+        # nagyítás határai közt. A felhasználó belépői és a stratégia jelölői
+        # IGEN — azok bent maradnak.
+        self._plot.addItem(self._kurzor_vonal, ignoreBounds=True)
         self._bid = pg.InfiniteLine(angle=0, movable=False,
                                     pen=pg.mkPen(szin("blue"), width=1,
                                                  style=QtCore.Qt.DashLine),
@@ -838,17 +860,17 @@ class LabAblak(QtWidgets.QMainWindow):
                                                "color": szin("orange")})
         for _l in (self._bid, self._ask):
             _l.setVisible(False)
-            self._plot.addItem(_l)
+            self._plot.addItem(_l, ignoreBounds=True)
         # a jövőt takaró sáv
         self._takaro = pg.LinearRegionItem(
             orientation="vertical", movable=False,
             brush=pg.mkBrush(16, 20, 24, 235))
         self._takaro.setZValue(50)
         self._takaro.setVisible(False)
-        self._plot.addItem(self._takaro)
+        self._plot.addItem(self._takaro, ignoreBounds=True)
         self._ido_cimke = pg.TextItem(anchor=(1, 1), color=szin("yellow"))
         self._ido_cimke.setZValue(60)
-        self._plot.addItem(self._ido_cimke)
+        self._plot.addItem(self._ido_cimke, ignoreBounds=True)
         self._vb.sigRangeChanged.connect(lambda *_: self._cimke_helyre())
 
     def _mod_valt(self, ertek: str) -> None:
@@ -1906,6 +1928,12 @@ class LabAblak(QtWidgets.QMainWindow):
         ténylegesen megváltozott szöveg íródik ki. A `setRowCount` csak akkor
         fut, ha a sorok SZÁMA változott.
         """
+        # ⚠ REJTETT PANEL → NINCS MUNKA. A táblák építése a lejátszás legdrágább
+        # része (mérve: 1000 kötésnél 5 ms/kép a gyorsítótárak UTÁN is); ha nem
+        # látszanak, kár érte. A számla-állapot sem frissül, mert az is rejtve
+        # van vele együtt.
+        if not getattr(self, "_kotes_panel_lathato", True):
+            return
         res = (self._eredmeny or {}).get("res")
         # ⚠ A lezárt-sor gyorsítótár a RES-hez tartozik: új futtatás → új kötés-
         # objektumok → ürítés. (A `_c[0] is not tr` őr ezt külön is elkapja, de a
@@ -2170,6 +2198,10 @@ class LabAblak(QtWidgets.QMainWindow):
                      tf_perc=_tfk[(_i + 1) % len(_tfk)],
                      tol=self._tol.text() or None, ig=self._ig.text() or None)
         _ABLAKOK.append(w)
+        # ⚠ A MÁSODIK ablakban a kötés-tábla felesleges: ugyanazt mutatná, mint
+        # az első. A chart kapja a helyet — ezért a „＋ Új ablak" alapból
+        # elrejti (a jelölővel bármikor visszakapcsolható).
+        w._kotesek.setChecked(False)
         w.show()
         w.betolt()
         # Az ÚJ ablakot csak úgy van értelme megnyitni, ha van mihez kötni:
@@ -2189,6 +2221,14 @@ class LabAblak(QtWidgets.QMainWindow):
         if self in _ABLAKOK:
             _ABLAKOK.remove(self)
         super().closeEvent(ev)
+
+    def _kotes_panel(self, *_a) -> None:
+        """A kötés-táblák mutatása/rejtése."""
+        self._kotes_panel_lathato = bool(self._kotesek.isChecked())
+        self._fulek.setVisible(self._kotes_panel_lathato)
+        self._szamla.setVisible(self._kotes_panel_lathato)
+        if self._kotes_panel_lathato:
+            self._listak_frissit()
 
     def _kurzor_ido(self):
         if self._kurzor is None or self._chart is None:
