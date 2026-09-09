@@ -4,9 +4,20 @@
 naplóba". A `tradeforge.log` 179 ERROR/CRITICAL sorát átnézve kiderült, hogy a
 többségük vagy MÁR JAVÍTOTT hiba régi bejegyzése, vagy nem is hiba:
 
-    127x  AttributeError: 'LabAblak' object has no attribute '_chart'
-            → 2026-09-03, EGYETLEN 30 másodperces összeomlás-hurok a labor
-              fejlesztése közben; a `_chart` azóta az `__init__`-ben áll be.
+    124x  AttributeError: '_Savdoboz' object has no attribute 'setRegion'
+            → 2026-09-06; a `9e676d7` (v3.52.1, UGYANAZNAP) javította: a hívás
+              `sav()`-ra cserélődött, ami a `LinearRegionItem.setRegion` párja.
+      3x  AttributeError: 'LabAblak' object has no attribute '_chart'
+            → 2026-09-03, összeomlás-hurok a labor fejlesztése közben; a
+              `_chart` azóta az `__init__`-ben áll be.
+
+    ⚠ AZ ELSŐ OSZTÁLYOZÁSOM HIBÁS VOLT, és érdemes tudni, miért. A szkript a
+    traceback ELSŐ nem-behúzott sorát vette a kivételnek — láncolt (`During
+    handling…`) és többkeretes tracebackeknél viszont az nem a végső kivétel.
+    Így 124 `setRegion`-hiba `_chart`-ként összegződött: **jó ítélet (mindkettő
+    javított), rossz szám és rossz hiba**. A traceback UTOLSÓ nem-behúzott sora
+    a helyes forrás. Egy összesítő akkor is félrevezet, ha a végkövetkeztetése
+    történetesen igaz.
      43x  UsaInd — pozíció nyitás hiba: retcode=10019 No money
             → 2026-09-02; az ismétlés-szűrő MÁSNAP került be (v3.25.0).
       2x  TypeError: cmd_pack_gate() takes from 0 to 1 positional arguments
@@ -180,6 +191,10 @@ _i_attr = _lab.find("self._chart = None")
 _i_hiv = _lab.find("self.betolt()")
 check("⚠ 127x-es lelet: a `_chart` a betolt() ELŐTT áll be",
       0 < _i_attr < _i_hiv, f"_chart@{_i_attr} < betolt@{_i_hiv}")
+
+_qt = (ROOT / "tools" / "lab_qt.py").read_text(encoding="utf-8")
+check("⚠ 124x-es lelet: a `kock` sávot a `sav()` állítja, nem a setRegion",
+      "kock.setRegion(" not in _qt and "b.kock.sav(" in _qt)
 
 _main = (ROOT / "main.py").read_text(encoding="utf-8")
 check("⚠ 2x-es lelet: a `pack-gate` arg_spec-je 'argv'",
