@@ -597,6 +597,9 @@ class LabAblak(QtWidgets.QMainWindow):
         # ablak vég nélkül pingpongozna egy kurzor-mozdulaton.
         self._szinkron = None
         self._szinkron_alatt = False
+        # A munkaterület (ha van) ide iratkozik fel a számla-állapotra.
+        self._szamla_figyelo = None
+        self._munkaterulet = None
         self._belepok = []
         self._be_ido = None
         self._eredmeny = None
@@ -1886,7 +1889,7 @@ class LabAblak(QtWidgets.QMainWindow):
         """Az IDŐPILLANAT-nézet: a számla állapota a kurzornál (vagy a végén)."""
         g = self._szamla_gorbe()
         if g is None:
-            self._szamla.setText("")
+            self._szamla_kiir("")
             return
         real, eq, kezdo = g
         i = self._kurzor if self._kurzor is not None else len(real) - 1
@@ -1897,11 +1900,27 @@ class LabAblak(QtWidgets.QMainWindow):
                        if tr.open_time <= _t_kurzor
                        and (tr.close_time is None or tr.close_time > _t_kurzor))
         _dd = float(np.min(eq[:i + 1] - np.maximum.accumulate(eq[:i + 1])))
-        self._szamla.setText(_t(
+        self._szamla_kiir(_t(
             "lab.status.account",
             time=str(_t_kurzor)[:16],
             balance=f"{real[i]:.2f}", floating=f"{eq[i] - real[i]:+.2f}",
             equity=f"{eq[i]:.2f}", open=_nyitott, dd=f"{_dd:.2f}"))
+
+    def _szamla_kiir(self, szoveg: str) -> None:
+        """A számla-állapot kiírása — a saját sorba ÉS a munkaterületnek.
+
+        ⚠ CHARTBÓL TÖBB VAN, SZÁMLA-SORBÓL EGY. A munkaterületen a sor az AKTÍV
+        charté; a szöveg elé odaírjuk, melyikről van szó, mert minden chartnak
+        SAJÁT forgatókönyve és eredménye van (a szinkron csak az időt osztja
+        meg). Egy közös, jelöletlen sor azt sugallná, hogy egy számláról szól —
+        holott három külön kísérlet három külön állapota."""
+        self._szamla.setText(szoveg)
+        _f = getattr(self, "_szamla_figyelo", None)
+        if _f is not None:
+            try:
+                _f(self, szoveg)
+            except Exception:
+                self._szamla_figyelo = None
 
     def _listak_frissit(self) -> None:
         """A két kötés-tábla frissítése a kurzor állásához.
@@ -2193,6 +2212,14 @@ class LabAblak(QtWidgets.QMainWindow):
             _i = _tfk.index(int(self._tf.currentData()))
         except (ValueError, TypeError):
             _i = 0
+        if self._munkaterulet is not None:
+            # A munkaterületen BELÜL nyílik, nem külön lebegő ablakként.
+            self._munkaterulet.uj_chart(
+                symbol=self._sym.currentText(), strategy=self._strat_nev(),
+                tf_perc=None,           # a munkaterület a SZABAD idősíkot adja
+                tol=self._tol.text() or None, ig=self._ig.text() or None,
+                kapcsol_hozza=self)
+            return
         w = LabAblak(symbol=self._sym.currentText(),
                      strategy=self._strat_nev(),
                      tf_perc=_tfk[(_i + 1) % len(_tfk)],
@@ -2281,6 +2308,207 @@ class LabAblak(QtWidgets.QMainWindow):
             pass
 
 
+class Munkaterulet(QtWidgets.QMainWindow):
+    """A labor MUNKATERÜLETE: több chart EGY területen (MT5-szerű).
+
+    ⚠ MIÉRT KELL. A több-ablakos szinkron (v3.59.0) külön TOP-LEVEL ablakokat
+    nyitott. Használatban azonnal kiderült, hogy ez nem elrendezhető: az
+    ablakok egymásra csúsznak, a tálcán szétszóródnak, és a KÖZÖS elemek
+    (számla-állapot) ablakonként duplázódnak.
+
+    Itt a chartok egy `QMdiArea`-ban laknak: szabadon mozgathatók és
+    átméretezhetők a területen belül, vagy egy gombbal mozaikba/lépcsőbe/
+    sorokba/oszlopokba rendezhetők — és teljes méretben TABULÁTOROS nézetre
+    válthatók, ahogy az MT5 is mutatja a chartjait.
+
+    ⚠ CHARTBÓL TÖBB, SZÁMLA-SORBÓL EGY. Az állapotsor mindig az AKTÍV charté,
+    és ki is írja, melyiké — minden chartnak SAJÁT forgatókönyve és
+    backteszt-eredménye van (a szinkron csak az IDŐT osztja meg). Egy közös,
+    jelöletlen sor azt sugallná, hogy egy számláról szól.
+
+    ⚠ AMI A 2. VERZIÓRA MARAD (a felhasználó kérése szerint): a chart
+    KIVÉTELE külön, lebegő ablakba. A `QMdiArea` ezt nem adja készen; a
+    `LabAblak` viszont ma is megáll önállóan (a `main()` `--egy` kapcsolója
+    így indítja), tehát a kiszakítás nem szerkezeti akadály, csak munka.
+    """
+
+    def __init__(self, symbol=None, strategy=None, tf_perc=15, tol=None, ig=None):
+        super().__init__()
+        from version import APP_NAME, APP_VERSION
+        self.setWindowTitle(_t("lab.window_title", app=APP_NAME,
+                               version=APP_VERSION))
+        self.resize(1600, 1000)
+        self._mdi = QtWidgets.QMdiArea()
+        self._mdi.setViewMode(QtWidgets.QMdiArea.SubWindowView)
+        self._mdi.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+        self._mdi.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+        self._mdi.subWindowActivated.connect(self._aktiv_valtozott)
+        self.setCentralWidget(self._mdi)
+
+        m = self.menuBar().addMenu(_t("lab.menu_ablak"))
+        self._tett(m, _t("lab.menu_uj_chart"), self.uj_chart)
+        m.addSeparator()
+        self._tett(m, _t("lab.menu_mozaik"), self._mdi.tileSubWindows, "Alt+R")
+        self._tett(m, _t("lab.menu_lepcsos"), self._mdi.cascadeSubWindows)
+        self._tett(m, _t("lab.menu_vizszintes"), lambda: self._rendez(True))
+        self._tett(m, _t("lab.menu_fuggoleges"), lambda: self._rendez(False))
+        m.addSeparator()
+        self._tabos = QtGui.QAction(_t("lab.menu_tabos"), self)
+        self._tabos.setCheckable(True)
+        self._tabos.triggered.connect(self._tabos_valt)
+        m.addAction(self._tabos)
+
+        # ── EGY számla-sor, az AKTÍV chartról — DOKKOLHATÓ panelben ──────
+        # ⚠ FOGD ÉS VIDD. Az állapotsor (`statusBar`) oda van szögezve az ablak
+        # aljára; a `QDockWidget` viszont megfogható, áthúzható a négy oldal
+        # bármelyikére, LEBEGŐVÉ tehető (kiszakítható külön ablakba), és
+        # bezárható. A chartok ugyanígy szabadon mozognak az MDI-területen —
+        # így a felület minden darabja a felhasználóé.
+        self._szamla = QtWidgets.QLabel("")
+        self._szamla.setStyleSheet("color:#9fb4c8; padding:6px;")
+        self._szamla.setWordWrap(True)
+        self._szamla.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+        self._szamla_dokk = QtWidgets.QDockWidget(_t("lab.dokk_szamla"), self)
+        self._szamla_dokk.setObjectName("szamla_dokk")
+        self._szamla_dokk.setWidget(self._szamla)
+        self._szamla_dokk.setAllowedAreas(QtCore.Qt.AllDockWidgetAreas)
+        self._szamla_dokk.setFeatures(
+            QtWidgets.QDockWidget.DockWidgetMovable
+            | QtWidgets.QDockWidget.DockWidgetFloatable
+            | QtWidgets.QDockWidget.DockWidgetClosable)
+        self.addDockWidget(QtCore.Qt.BottomDockWidgetArea, self._szamla_dokk)
+        m.addSeparator()
+        m.addAction(self._szamla_dokk.toggleViewAction())
+
+        self.uj_chart(symbol=symbol, strategy=strategy, tf_perc=tf_perc,
+                      tol=tol, ig=ig)
+
+    def _tett(self, menu, cim, fn, gyorsbillentyu=None):
+        a = QtGui.QAction(cim, self)
+        if gyorsbillentyu:
+            a.setShortcut(gyorsbillentyu)
+        a.triggered.connect(lambda *_: fn())
+        menu.addAction(a)
+        return a
+
+    # ── chartok ──────────────────────────────────────────────────────────
+    def chartok(self) -> list:
+        ki = []
+        for sw in self._mdi.subWindowList():
+            w = sw.widget()
+            if isinstance(w, LabAblak):
+                ki.append(w)
+        return ki
+
+    def _szabad_tf(self, symbol) -> int:
+        """A KÖVETKEZŐ, ezen a páron még nem nyitott idősík.
+
+        ⚠ Enélkül két „Új chart" ugyanazt az idősíkot nyitná meg kétszer (mérve:
+        M15-ből kétszer H1 lett), mert a „következő" a HÍVÓ chart idősíkjából
+        számolódott, nem a már meglévőkből."""
+        _van = {int(c._tf.currentData() or 0) for c in self.chartok()
+                if c._sym.currentText() == symbol}
+        for perc, _ in IDOSIKOK:
+            if perc not in _van:
+                return perc
+        return IDOSIKOK[0][0]
+
+    def uj_chart(self, symbol=None, strategy=None, tf_perc=None, tol=None,
+                 ig=None, kapcsol_hozza=None) -> "LabAblak":
+        """Új chart a munkaterületen belül."""
+        _meglevo = self.chartok()
+        if symbol is None and _meglevo:
+            symbol = _meglevo[-1]._sym.currentText()
+        if tf_perc is None:
+            tf_perc = self._szabad_tf(symbol)
+        w = LabAblak(symbol=symbol, strategy=strategy, tf_perc=int(tf_perc),
+                     tol=tol, ig=ig)
+        w._munkaterulet = self
+        w._szamla_figyelo = self._szamla_jott
+        # A chart SAJÁT számla-sora elrejtve: a munkaterületen egy van belőle.
+        w._szamla.setVisible(False)
+        if _meglevo:
+            w._kotesek.setChecked(False)     # a másodiktól a chart kapja a helyet
+        sw = self._mdi.addSubWindow(w)
+        sw.setWindowTitle(f"{symbol or '?'} · "
+                          f"{dict(IDOSIKOK).get(int(tf_perc), tf_perc)}")
+        sw.resize(1000, 700)
+        sw.show()
+        w.betolt()
+        if kapcsol_hozza is not None:
+            kapcsol_hozza._kapcs.setChecked(True)
+            w._kapcs.setChecked(True)
+        return w
+
+    # ── elrendezés ───────────────────────────────────────────────────────
+    def _rendez(self, vizszintes: bool) -> None:
+        """Sorokba (vízszintes) vagy oszlopokba (függőleges) rendezés.
+
+        ⚠ A `QMdiArea` csak mozaikot és lépcsőt tud; a sor/oszlop az MT5
+        „Vízszintes/Függőleges elrendezés" párja, azt kézzel számoljuk."""
+        ablakok = [sw for sw in self._mdi.subWindowList() if not sw.isHidden()]
+        if not ablakok:
+            return
+        if self._mdi.viewMode() != QtWidgets.QMdiArea.SubWindowView:
+            self._tabos.setChecked(False)
+            self._tabos_valt(False)
+        ter = self._mdi.viewport().rect()
+        n = len(ablakok)
+        for i, sw in enumerate(ablakok):
+            if sw.isMaximized():
+                sw.showNormal()
+            if vizszintes:
+                h = max(80, ter.height() // n)
+                sw.setGeometry(0, i * h, ter.width(), h)
+            else:
+                w_ = max(120, ter.width() // n)
+                sw.setGeometry(i * w_, 0, w_, ter.height())
+
+    def _tabos_valt(self, be: bool) -> None:
+        self._mdi.setViewMode(QtWidgets.QMdiArea.TabbedView if be
+                              else QtWidgets.QMdiArea.SubWindowView)
+        if be:
+            self._mdi.setTabsClosable(True)
+            self._mdi.setTabsMovable(True)
+            self._mdi.setTabPosition(QtWidgets.QTabWidget.South)
+
+    # ── a KÖZÖS számla-sor ───────────────────────────────────────────────
+    def _szamla_jott(self, chart, szoveg: str) -> None:
+        """Egy chart frissítette az állapotát — csak az AKTÍV érdekel."""
+        if chart is self._aktiv_chart():
+            self._szamla_kiir(chart, szoveg)
+
+    def _aktiv_chart(self):
+        sw = self._mdi.activeSubWindow()
+        w = sw.widget() if sw is not None else None
+        if isinstance(w, LabAblak):
+            return w
+        ch = self.chartok()
+        return ch[0] if ch else None
+
+    def _szamla_kiir(self, chart, szoveg: str) -> None:
+        """A közös sor kiírása — MINDIG a chart nevével.
+
+        ⚠ A NÉV AKKOR IS KELL, HA NINCS ÁLLAPOT. Egy chart, amin még nem futott
+        forgatókönyv, üres állapotot ad; ha ilyenkor a sor teljesen kiürülne, a
+        felhasználó nem tudná, hogy „nincs mit mutatni EZEN a charton", vagy
+        hogy a sor épp nem frissül. A név + gondolatjel egyértelmű."""
+        if chart is None:
+            self._szamla.setText("")
+            return
+        _tf = dict(IDOSIKOK).get(int(chart._tf.currentData() or 0),
+                                 chart._tf.currentData())
+        self._szamla.setText(f"[{chart._sym.currentText()} · {_tf}]  "
+                             f"{szoveg or '—'}")
+
+    def _aktiv_valtozott(self, *_a) -> None:
+        w = self._aktiv_chart()
+        if w is None:
+            self._szamla.setText("")
+            return
+        self._szamla_kiir(w, w._szamla.text())
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--symbol")
@@ -2288,10 +2516,13 @@ def main(argv=None) -> int:
     ap.add_argument("--tf", type=int, default=15)
     ap.add_argument("--from", dest="tol")
     ap.add_argument("--to", dest="ig")
+    ap.add_argument("--egy", action="store_true",
+                    help="EGYETLEN chart-ablak, munkaterület nélkül (a régi mód)")
     a = ap.parse_args(argv)
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
-    w = LabAblak(symbol=a.symbol, strategy=a.strategy, tf_perc=a.tf,
-                 tol=a.tol, ig=a.ig)
+    oszt = LabAblak if a.egy else Munkaterulet
+    w = oszt(symbol=a.symbol, strategy=a.strategy, tf_perc=a.tf,
+             tol=a.tol, ig=a.ig)
     w.show()
     return app.exec()
 
