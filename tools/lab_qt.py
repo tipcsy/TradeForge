@@ -658,9 +658,21 @@ class LabAblak(QtWidgets.QMainWindow):
         fo.setContentsMargins(6, 6, 6, 6)
         fo.setSpacing(4)
 
+        # ── A HÁROM ESZKÖZSOR ÖNÁLLÓ WIDGET ─────────────────────────────
+        # ⚠ MIÉRT NEM CSAK LAYOUT. A munkaterületen ezek a sorok DOKKBA
+        # kerülnek (egy betöltő, egy rajzoló, egy lejátszó — nem chartonként
+        # három). Egy `QLayout` nem tehető dokkba; egy `QWidget` igen, és
+        # ráadásul ÁTHELYEZHETŐ oda-vissza. Így nincs szükség proxy-vezérlőkre:
+        # a dokkban MAGA az aktív chart sora ül, tehát garantáltan azt
+        # állítja, amit mutat.
+        self._sor_betolto = QtWidgets.QWidget()
+        self._sor_rajz = QtWidgets.QWidget()
+        self._sor_lejatszo = QtWidgets.QWidget()
+
         # 1. sor: adat-választók
-        s1 = QtWidgets.QHBoxLayout()
-        fo.addLayout(s1)
+        s1 = QtWidgets.QHBoxLayout(self._sor_betolto)
+        s1.setContentsMargins(2, 2, 2, 2)
+        fo.addWidget(self._sor_betolto)
         s1.addWidget(QtWidgets.QLabel("Instrumentum"))
         self._sym = QtWidgets.QComboBox()
         self._sym.addItems(self._parok)
@@ -693,8 +705,9 @@ class LabAblak(QtWidgets.QMainWindow):
         s1.addStretch(1)
 
         # 2. sor: terv-eszközök
-        s2 = QtWidgets.QHBoxLayout()
-        fo.addLayout(s2)
+        s2 = QtWidgets.QHBoxLayout(self._sor_rajz)
+        s2.setContentsMargins(2, 2, 2, 2)
+        fo.addWidget(self._sor_rajz)
         s2.addWidget(QtWidgets.QLabel(_t("lab.kattintas")))
         self._mod = None
         self._mod_gombok = {}
@@ -719,19 +732,21 @@ class LabAblak(QtWidgets.QMainWindow):
         self._epites = QtWidgets.QCheckBox(_t("lab.start_epites"))
         s2.addWidget(self._epites)
 
-        # BE / trailing
-        from core import risk_reduction as _rrm0
-        _alap = _rrm0.default_config()
+        # ⚠ A BE / TRAILING MEZŐK LEKERÜLTEK (2026-09-09, felhasználói kérés:
+        # „teljesen hibásan működik, nem tudom értelmezni").
+        #
+        # És a panasz mögött VALÓDI ok volt: ezek a mezők a modul
+        # ALAPÉRTELMEZETT `breakeven_pct`-jével indultak, tehát a labor a
+        # CÉLÁR-ARÁNYOS BE-t szimulálta — azt, amit a v3.56.0 óta a motor MÁR
+        # NEM használ (a párok `breakeven_r = 1` R-alapú küszöbön futnak). A
+        # laborban látott stop-viselkedés így nem is EGYEZHETETT az élessel.
+        #
+        # A javítás nem a mezők visszatétele, hanem a forrás: a labor mostantól
+        # a PÁR SAJÁT, mentett kockázatcsökkentő kalibrációját használja —
+        # ugyanazt, amiből a motor és a backteszt dolgozik (`rr_state`). A
+        # `_rr_mezok` üres marad, hogy a mentett forgatókönyvek betöltése
+        # (`forgatokonyv_betolt`) továbbra is működjön.
         self._rr_mezok = {}
-        for _k, _cim in (("breakeven_pct", "BE"),
-                         ("trail_activation_atr", "trail@"),
-                         ("trail_distance_atr", _t("lab.tav"))):
-            s2.addWidget(QtWidgets.QLabel(f" {_cim}:"))
-            _e = QtWidgets.QLineEdit(str(_alap.get(_k, "")))
-            _e.setFixedWidth(48)
-            _e.editingFinished.connect(self._terv_valtozott)
-            s2.addWidget(_e)
-            self._rr_mezok[_k] = _e
 
         for cimke, fn in ((_t("lab.torol"), self.torol),
                           (_t("lab.rajz_torol"), self.rajz_torol_mind),
@@ -743,8 +758,9 @@ class LabAblak(QtWidgets.QMainWindow):
         s2.addStretch(1)
 
         # 3. sor: lejátszó
-        s3 = QtWidgets.QHBoxLayout()
-        fo.addLayout(s3)
+        s3 = QtWidgets.QHBoxLayout(self._sor_lejatszo)
+        s3.setContentsMargins(2, 2, 2, 2)
+        fo.addWidget(self._sor_lejatszo)
         self._play = QtWidgets.QPushButton("▶ Play")
         self._play.clicked.connect(self.play_szunet)
         s3.addWidget(self._play)
@@ -1199,15 +1215,21 @@ class LabAblak(QtWidgets.QMainWindow):
         for _nev, _ar, _cim, _szn in (
                 ("trail_be", _akt_ar, f"trail@ {_akt_atr:0.2f} ATR", "yellow"),
                 ("trail_tav", _tav_ar, f"táv {_tav_atr:0.2f} ATR", "orange")):
+            # ⚠ MÁR NEM HÚZHATÓ (2026-09-09). A vonalak eddig a kézi
+            # BE/trailing mezőkbe írtak vissza; azok lekerültek a felületről
+            # (hibásan működtek: a modul alapértékéből indultak, tehát a
+            # célár-arányos BE-t szimulálták, nem az élesben futó R-alapút).
+            # A vonalak MEGMARADNAK, mert hasznosak — de innentől azt MUTATJÁK,
+            # amit a pár mentett kockázatcsökkentése tényleg csinálni fog. Egy
+            # húzható vonal, ami nem ír sehova, rosszabb volna a hiányánál: úgy
+            # néz ki, mint egy működő vezérlő.
             _l = pg.InfiniteLine(
-                pos=_ar, angle=0, movable=True,
+                pos=_ar, angle=0, movable=False,
                 pen=pg.mkPen(szin(_szn), width=1, style=QtCore.Qt.DashDotLine),
-                hoverPen=pg.mkPen(szin(_szn), width=3), label=_cim,
+                label=_cim,
                 labelOpts={"position": 0.25, "color": szin(_szn)})
-            _l.sigPositionChanged.connect(
-                lambda _x=None, _b=b, _n=_nev: self._trail_mozgott(_b, _n))
             setattr(b, _nev, _l)
-            self._plot.addItem(_l)
+            self._plot.addItem(_l, ignoreBounds=True)
 
     def _trail_mozgott(self, b: "Belepo", nev: str) -> None:
         """Húzás → vissza az ATR-szorzóba (a mező és a vonal EGY állapot)."""
@@ -1218,12 +1240,14 @@ class LabAblak(QtWidgets.QMainWindow):
         d = 1 if b.irany == "BUY" else -1
         if nev == "trail_be" and b.trail_be is not None:
             _uj = max(0.0, d * (float(b.trail_be.value()) - _be) / _atr)
-            self._rr_mezok["trail_activation_atr"].setText(f"{_uj:.2f}")
+            if "trail_activation_atr" in self._rr_mezok:
+                self._rr_mezok["trail_activation_atr"].setText(f"{_uj:.2f}")
         elif nev == "trail_tav" and b.trail_tav is not None:
             _akt = (float(b.trail_be.value()) if b.trail_be is not None
                     else _be)
             _uj = max(0.0, d * (_akt - float(b.trail_tav.value())) / _atr)
-            self._rr_mezok["trail_distance_atr"].setText(f"{_uj:.2f}")
+            if "trail_distance_atr" in self._rr_mezok:
+                self._rr_mezok["trail_distance_atr"].setText(f"{_uj:.2f}")
         # ⚠ A TERV MEGVÁLTOZOTT: a korábbi futtatás eredménye már nem ehhez a
         # beállításhoz tartozik. Újrarajzolás nélkül a régi kötések maradnának
         # a képen egy másik trailinggel.
@@ -1623,8 +1647,20 @@ class LabAblak(QtWidgets.QMainWindow):
 
     # ── Forgatókönyv és futtatás ─────────────────────────────────────────
     def _rr_ertekek(self) -> dict:
+        """A forgatókönyv kockázatcsökkentő értékei — a PÁR SAJÁT kalibrációja.
+
+        ⚠ EDDIG A KÉZI MEZŐKBŐL JÖTT, a modul alapértékeivel feltöltve. Ez azt
+        jelentette, hogy a labor a CÉLÁR-ARÁNYOS `breakeven_pct`-t szimulálta,
+        miközben a motor v3.56.0 óta R-alapú `breakeven_r`-rel fut — a laborban
+        látott stop-viselkedés tehát nem is EGYEZHETETT az élessel. (A
+        felhasználó jelzése: „teljesen hibásan működik".)
+
+        Most ugyanabból a forrásból dolgozunk, mint a motor és a backteszt: a
+        pár mentett kalibrációjából (`core.rr_state`). Amit a mentett
+        forgatókönyv EXPLICIT megad, az továbbra is nyer — a `_rr_mezok` azért
+        maradt (üresen), hogy a `forgatokonyv_betolt` változatlanul működjön."""
         ki = {}
-        for k, e in self._rr_mezok.items():
+        for k, e in self._rr_mezok.items():          # mentett forgatókönyvből
             _sz = (e.text() or "").strip().replace(",", ".")
             if not _sz:
                 continue
@@ -1632,7 +1668,15 @@ class LabAblak(QtWidgets.QMainWindow):
                 ki[k] = float(_sz)
             except ValueError:
                 continue
-        return ki
+        if ki:
+            return ki
+        try:
+            from core import rr_state as _rrs
+            _rrs.ensure_loaded()
+            return dict(_rrs.get_calibration(self._sym.currentText()) or {})
+        except Exception as ex:
+            log.debug("a pár rr-kalibrációja nem olvasható: %s", ex)
+            return {}
 
     def _forgatokonyv(self) -> dict:
         _f = self._tol.text() or (str(self._chart.index[0])[:16]
@@ -1732,9 +1776,16 @@ class LabAblak(QtWidgets.QMainWindow):
                 self._be_ido = pd.Timestamp(fk["breakeven_at"])
             except ValueError:
                 pass
-        for _k, _e in self._rr_mezok.items():
-            if _k in (fk.get("rr") or {}):
-                _e.setText(str(fk["rr"][_k]))
+        # ⚠ A mentett forgatókönyv rr-értékei: a mezők ma már nincsenek a
+        # felületen, de a BETÖLTÉS nem veszhet el — rejtett tárolóba tesszük,
+        # és a `_rr_ertekek` onnan olvassa (az EXPLICIT érték nyer a pár
+        # kalibrációja fölött).
+        for _k, _v in (fk.get("rr") or {}).items():
+            if _k not in self._rr_mezok:
+                _me = QtWidgets.QLineEdit(self)
+                _me.setVisible(False)
+                self._rr_mezok[_k] = _me
+            self._rr_mezok[_k].setText(str(_v))
         self._epites.setChecked(bool(fk.get("build")))
         for d in (fk.get("drawings") or []):
             r = Rajz.szotarbol(d) if isinstance(d, dict) else None
@@ -2504,7 +2555,36 @@ class Munkaterulet(QtWidgets.QMainWindow):
             | QtWidgets.QDockWidget.DockWidgetFloatable
             | QtWidgets.QDockWidget.DockWidgetClosable)
         self.addDockWidget(QtCore.Qt.BottomDockWidgetArea, self._szamla_dokk)
+
+        # ── ESZKÖZ-DOKKOK: betöltő / rajzoló / lejátszó ─────────────────
+        # ⚠ EGY BETÖLTŐ SOR, NEM CHARTONKÉNT HÁROM. Minden dokk egy
+        # `QStackedWidget`, amiben MINDEN chart saját sora ott van lapként; a
+        # chart-váltás csak lapot vált. Így a dokkban MAGA az aktív chart
+        # vezérlője ül — nem egy másolat, amit szinkronban kellene tartani. Egy
+        # proxy-vezérlő előbb-utóbb elcsúszna attól, amit vezérel; ez a
+        # projekt visszatérő kárforrása.
+        self._eszkoz_dokkok = {}
+        for _kulcs, _cim, _mezo, _terulet in (
+                ("betolto", _t("lab.dokk_betolto"), "_sor_betolto",
+                 QtCore.Qt.TopDockWidgetArea),
+                ("rajz", _t("lab.dokk_rajz"), "_sor_rajz",
+                 QtCore.Qt.TopDockWidgetArea),
+                ("lejatszo", _t("lab.dokk_lejatszo"), "_sor_lejatszo",
+                 QtCore.Qt.BottomDockWidgetArea)):
+            _dk = QtWidgets.QDockWidget(_cim, self)
+            _dk.setObjectName(f"{_kulcs}_dokk")
+            _dk.setAllowedAreas(QtCore.Qt.AllDockWidgetAreas)
+            _dk.setFeatures(QtWidgets.QDockWidget.DockWidgetMovable
+                            | QtWidgets.QDockWidget.DockWidgetFloatable
+                            | QtWidgets.QDockWidget.DockWidgetClosable)
+            _st = QtWidgets.QStackedWidget()
+            _dk.setWidget(_st)
+            self.addDockWidget(_terulet, _dk)
+            self._eszkoz_dokkok[_kulcs] = (_dk, _st, _mezo)
+
         m.addSeparator()
+        for _kulcs in ("betolto", "rajz", "lejatszo"):
+            m.addAction(self._eszkoz_dokkok[_kulcs][0].toggleViewAction())
         m.addAction(self._szamla_dokk.toggleViewAction())
 
         self._tett(m, _t("lab.menu_elrendezes_felejt"), self._elrendezes_felejt)
@@ -2527,6 +2607,7 @@ class Munkaterulet(QtWidgets.QMainWindow):
         if _ment.get("tabos"):
             self._tabos.setChecked(True)
             self._tabos_valt(True)
+        self._aktiv_valtozott()
 
     def _chartok_vissza(self, ment: dict) -> None:
         """A mentett chartok újranyitása.
@@ -2642,6 +2723,9 @@ class Munkaterulet(QtWidgets.QMainWindow):
         # ami semmit nem kapcsol, rosszabb, mint ha ott sem volna.
         w._kotesek.setChecked(False)
         w._kotesek.setVisible(False)
+        # A chart ESZKÖZSORAI a közös dokkokba költöznek (lapként).
+        for _dk, _st, _mezo in self._eszkoz_dokkok.values():
+            _st.addWidget(getattr(w, _mezo))
         sw = self._mdi.addSubWindow(w)
         sw.setWindowTitle(f"{symbol or '?'} · "
                           f"{dict(IDOSIKOK).get(int(tf_perc), tf_perc)}")
@@ -2735,6 +2819,14 @@ class Munkaterulet(QtWidgets.QMainWindow):
             return
         self._szamla_kiir(w, w._szamla.text())
         self._kotesek_kiir(w)
+        self._eszkozok_valt(w)
+
+    def _eszkozok_valt(self, chart) -> None:
+        """Az eszköz-dokkok az AKTÍV chart sorait mutassák."""
+        for _dk, _st, _mezo in self._eszkoz_dokkok.values():
+            _sor = getattr(chart, _mezo, None)
+            if _sor is not None and _st.indexOf(_sor) >= 0:
+                _st.setCurrentWidget(_sor)
 
 
 def main(argv=None) -> int:

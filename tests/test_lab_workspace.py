@@ -284,6 +284,75 @@ check("⚠ chart-váltáskor a dokk AZONNAL a másik chartét mutatja",
       f"{mt._dokk_tablak['lezart'].rowCount()} sor (a másiknak nincs kötése)")
 
 
+# ══ 5c. ESZKÖZ-DOKKOK: egy betöltő, egy rajzoló, egy lejátszó ═══════════
+# A kérés: „az instrumentum betöltő sorból is csak egynek kellene lennie…
+# amelyik ablak az aktív, annak az idősíkját és instrumentumát választjuk ki",
+# és külön ablakba a lejátszó, illetve a rajzoló ikonok.
+#
+# ⚠ A DOKKBAN MAGA AZ AKTÍV CHART SORA ÜL — nem egy másolat. Minden dokk egy
+# `QStackedWidget`, amiben minden chart saját sora lapként ott van; a
+# chart-váltás lapot vált. Egy proxy-vezérlő előbb-utóbb elcsúszna attól, amit
+# vezérel (a projekt visszatérő kárforrása).
+check("három eszköz-dokk van", sorted(mt._eszkoz_dokkok)
+      == ["betolto", "lejatszo", "rajz"])
+for _k, (_dk, _st, _mezo) in mt._eszkoz_dokkok.items():
+    check(f"{_k}: fogd-és-vidd (mozgatható + lebegtethető)",
+          bool(_dk.features() & QW.QDockWidget.DockWidgetMovable)
+          and bool(_dk.features() & QW.QDockWidget.DockWidgetFloatable))
+    check(f"{_k}: MINDEN chartnak van lapja", _st.count() == len(mt.chartok()),
+          f"{_st.count()} lap / {len(mt.chartok())} chart")
+
+_c = mt.chartok()
+_swm = {sw.widget(): sw for sw in mt._mdi.subWindowList()}
+mt._mdi.setActiveSubWindow(_swm[_c[0]])
+app.processEvents()
+check("⚠ a dokkok az AKTÍV chart sorát mutatják",
+      all(st.currentWidget() is getattr(_c[0], mezo)
+          for _dk, st, mezo in mt._eszkoz_dokkok.values()))
+mt._mdi.setActiveSubWindow(_swm[_c[1]])
+app.processEvents()
+check("⚠ chart-váltásra MIND A HÁROM átvált",
+      all(st.currentWidget() is getattr(_c[1], mezo)
+          for _dk, st, mezo in mt._eszkoz_dokkok.values()))
+check("⚠ tehát az idősík-választó AZ AKTÍV charté (nem egy másolat)",
+      mt._eszkoz_dokkok["betolto"][1].currentWidget()
+      is _c[1]._sor_betolto)
+
+
+# ══ 5d. A BE/TRAILING mezők LE, és a labor a PÁR kalibrációját használja ══
+# A felhasználó: „vegyük le a BE meg trailinget, mert az teljesen hibásan
+# működik". ⚠ A panasz mögött VALÓDI ok volt: a mezők a modul alapértékeivel
+# indultak, tehát a labor a CÉLÁR-ARÁNYOS `breakeven_pct`-t szimulálta —
+# miközben a motor v3.56.0 óta R-alapú `breakeven_r`-rel fut. A laborban látott
+# stop-viselkedés nem is EGYEZHETETT az élessel.
+check("⚠ nincsenek BE/trailing beviteli mezők a rajz-soron",
+      len(_c[0]._rr_mezok) == 0, str(list(_c[0]._rr_mezok)))
+_src1 = (ROOT / "tools" / "lab_qt.py").read_text(encoding="utf-8")
+check("...és a felépítésük is eltűnt a kódból",
+      'self._rr_mezok[_k] = _e' not in _src1)
+
+_rr = _c[0]._rr_ertekek()
+check("⚠ a forgatókönyv rr-értékei a PÁR kalibrációjából jönnek",
+      isinstance(_rr, dict) and len(_rr) > 0, str(_rr))
+from core import rr_state as _rrs_t
+_rrs_t.ensure_loaded()
+_var = dict(_rrs_t.get_calibration(_c[0]._sym.currentText()) or {})
+check("⚠ …pontosan azok, amikből a motor is dolgozik", _rr == _var,
+      f"{_rr} vs {_var}")
+if "breakeven_r" in _var:
+    check("⚠ …tehát a laborban is az R-alapú BE fut (mint élesben)",
+          _rr.get("breakeven_r") == _var["breakeven_r"],
+          str(_rr.get("breakeven_r")))
+
+# A MENTETT forgatókönyv EXPLICIT értéke viszont továbbra is nyer.
+_c[0].forgatokonyv_betolt({"symbol": _c[0]._sym.currentText(),
+                           "from": TOL, "to": IG, "entries": [],
+                           "rr": {"breakeven_pct": 0.77}})
+check("⚠ mentett forgatókönyv EXPLICIT rr-je felülírja a pár kalibrációját",
+      _c[0]._rr_ertekek().get("breakeven_pct") == 0.77,
+      str(_c[0]._rr_ertekek()))
+
+
 # ══ 6. A HATÁR: a LabAblak önállóan is megáll ═══════════════════════════
 # ⚠ Ez a 2. verzió (kiszakítás külön ablakba) előfeltétele — és a `--egy`
 # parancssori kapcsolóé is. Ha a chart csak munkaterületen belül működne, a

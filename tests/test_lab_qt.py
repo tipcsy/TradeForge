@@ -122,11 +122,23 @@ if QT_OK:
             check("a belépő SL és TP-szorzó is átmegy",
                   _fk["entries"] and "sl" in _fk["entries"][0]
                   and "tp_rr" in _fk["entries"][0], str(_fk["entries"][:1]))
-            # ⚠ Az üres BE/trailing mező NEM 0, hanem „maradjon a mentett".
+            # ⚠ A SZERZŐDÉS MEGVÁLTOZOTT (v3.63.0). A kézi BE/trailing mezők
+            # lekerültek a felületről: a modul ALAPÉRTÉKÉBŐL indultak, tehát a
+            # labor a célár-arányos `breakeven_pct`-t szimulálta, miközben a
+            # motor v3.56.0 óta R-alapú `breakeven_r`-rel fut — a laborban
+            # látott stop-viselkedés nem is egyezhetett az élessel. Explicit
+            # érték híján most a PÁR MENTETT kalibrációja jön (ugyanaz, amiből
+            # a motor dolgozik).
             for _e in _w._rr_mezok.values():
                 _e.setText("")
-            check("üres BE/trailing mező → nincs felülírás",
-                  _w._rr_ertekek() == {}, str(_w._rr_ertekek()))
+            _rrp = _w._rr_ertekek()
+            from core import rr_state as _rrs_q
+            _rrs_q.ensure_loaded()
+            check("mező nélkül a PÁR kalibrációja jön (mint a motorban)",
+                  _rrp == dict(_rrs_q.get_calibration(_par) or {}), str(_rrp))
+            check("üres BE/trailing mező → nincs KÉZI felülírás",
+                  not any(_e.text().strip() for _e in _w._rr_mezok.values()),
+                  str({k: e.text() for k, e in _w._rr_mezok.items()}))
 
             # ══ 0022 / 2. — A SÁV CSAK A POZÍCIÓ ÉLETTARTAMÁRA ═══════════
             # ⚠ Korabban `LinearRegionItem` volt: KONSTRUKCIO SZERINT vegigert
@@ -255,8 +267,11 @@ if QT_OK:
             check("...és a belépők is", len(_w._belepok) >= 1, str(len(_w._belepok)))
 
             # ══ 0022 / 5. — TRAILING VONALAK ════════════════════════════
-            _w._rr_mezok["trail_activation_atr"].setText("1.0")
-            _w._rr_mezok["trail_distance_atr"].setText("1.5")
+            # ⚠ A kézi mezők lekerültek (v3.63.0); a forgatókönyv-betöltés
+            # ugyanazt az utat használja, tehát az explicit értéket ÍGY adjuk.
+            _w.forgatokonyv_betolt({**_mentett,
+                                    "rr": {"trail_activation_atr": 1.0,
+                                           "trail_distance_atr": 1.5}})
             _w._valasztott = _w._belepok[0]
             _w._belepok_rajz()
             _bt = _w._belepok[0]
@@ -274,11 +289,13 @@ if QT_OK:
                           - (float(_bt.trail_be.value()) - _d * 1.5 * _atr)) < 1e-6)
                 # ⚠ A HUZAS VISSZAIRJA az ATR-szorzot: a mezo es a vonal EGY
                 # allapot ket nezete, kulonben a futtatas mast csinalna.
-                _bt.trail_be.setValue(_bear + _d * 2.0 * _atr)
-                _w._trail_mozgott(_bt, "trail_be")
-                check("a vonal húzása VISSZAÍRJA az ATR-szorzót",
-                      abs(float(_w._rr_mezok["trail_activation_atr"].text()) - 2.0)
-                      < 0.02, _w._rr_mezok["trail_activation_atr"].text())
+                # ⚠ A VONAL MÁR NEM HÚZHATÓ. Eddig a kézi mezőbe írt vissza;
+                # azok lekerültek, és egy húzható vonal, ami nem ír sehova,
+                # rosszabb a hiányánál — úgy néz ki, mint egy működő vezérlő.
+                # A vonal MEGMARADT, mert azt MUTATJA, amit a pár mentett
+                # kockázatcsökkentése tényleg csinálni fog.
+                check("a trailing-vonal CSAK KIJELZÉS (nem húzható)",
+                      not _bt.trail_be.movable)
         except Exception as _ex:
             check("az ablak FELÉPÜL (a konstruktor végigfut)", False,
                   f"{type(_ex).__name__}: {_ex}")
