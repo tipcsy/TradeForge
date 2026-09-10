@@ -276,6 +276,118 @@ def kotes_tablak(szulo=None) -> tuple:
     return fulek, tablak
 
 
+# ══ KONTROLLPONTOK — a gyertya kibontakozása lejátszás közben ════════════
+#
+# ⚠ A MODELL AZ MT4 „Control points"-JÁÉ. Az MT4 tesztere egy gyertyán belüli
+# árutat NEM tickekből, hanem a KÖVETKEZŐ KISEBB IDŐSÍK OHLC-jéből épít: minden
+# al-gyertya négy pontot ad — nyitó, majd az alj és a csúcs (abban a
+# sorrendben, ahogy az al-gyertya záró/nyitó viszonya sugallja), végül a záró.
+# Az MT5-ben ugyanez „1 minute OHLC" néven él tovább.
+#
+# Nálunk a chart gyertyái M1-ből (M5/M15) vagy M15-ből (H1/H4) épülnek, tehát a
+# finomabb idősík ADOTT: a bar alá eső M1 gyertyák.
+#
+# ⚠ EZ CSAK MEGJELENÍTÉS. A motort NEM érinti — és ezt MÉRÉS támasztja alá: az
+# intrabar SL/TP sorrend (pesszimista vs optimista) 6 páron, 2759 kötésen
+# 0,0000 R különbséget adott, 0 eltérően zárt kötéssel. A hangolt célárak
+# 7–15 R-re vannak, egyetlen M1 gyertya sem fog át ekkora távot, tehát a
+# finomabb végrehajtás a motorban bizonyítottan nem érne semmit.
+
+
+def kontroll_pontok(al_barok, szazalek: float = 100.0):
+    """A gyertyán BELÜLI árút kontrollpontjai a finomabb idősík OHLC-jéből.
+
+    `al_barok`: a bar alá eső finomabb gyertyák (`open/high/low/close`).
+    `szazalek`: milyen finoman — 100 = MINDEN al-gyertya, kevesebb = ritkítva.
+
+    ⚠ A RITKÍTÁS NEM VÁGHAT LE CSÚCSOT. Bármilyen alacsony a százalék, a
+    kiválasztott al-gyertyák közt MINDIG ott van az, amelyik a bar CSÚCSÁT adja,
+    és az is, amelyik az ALJÁT — plusz az első és az utolsó (a nyitó és a záró
+    miatt). Enélkül a ritkított lejátszás MÁS gyertyát rajzolna, mint a kész
+    chart: ugyanaz a hibafajta, mint amikor a tick-deduplikáció levágta a
+    high/low-t, vagy amikor a gyertya-összevonás (LOD) elvesztette a tüskét.
+    """
+    import numpy as _np
+    if al_barok is None or len(al_barok) == 0:
+        return _np.empty(0, dtype=float)
+    o = _np.asarray(al_barok["open"], dtype=float)
+    h = _np.asarray(al_barok["high"], dtype=float)
+    l = _np.asarray(al_barok["low"], dtype=float)
+    c = _np.asarray(al_barok["close"], dtype=float)
+    n = len(o)
+
+    try:
+        pct = float(szazalek)
+    except (TypeError, ValueError):
+        pct = 100.0
+    pct = min(100.0, max(1.0, pct))
+    if pct >= 100.0:
+        valasztott = list(range(n))
+    else:
+        _kell = max(1, int(round(n * pct / 100.0)))
+        _lepes = max(1, int(round(n / _kell)))
+        valasztott = list(range(0, n, _lepes))
+        # A SZÉLSŐÉRTÉKEK és a két vég MINDIG kellenek.
+        valasztott += [0, n - 1, int(_np.argmax(h)), int(_np.argmin(l))]
+        valasztott = sorted(set(valasztott))
+
+    ut = []
+    for i in valasztott:
+        # A sorrend az al-gyertya irányából: emelkedőnél O→L→H→C, esőnél O→H→L→C.
+        # (Ez az MT4/MT5 közelítése; tick nélkül ennél többet nem lehet tudni.)
+        ut.append(o[i])
+        if c[i] >= o[i]:
+            ut.extend((l[i], h[i]))
+        else:
+            ut.extend((h[i], l[i]))
+        ut.append(c[i])
+    return _np.asarray(ut, dtype=float)
+
+
+def reszgyertya(pontok, n: int):
+    """A FORMÁLÓDÓ gyertya `(open, high, low, close)`-a az `n`-edik pontig.
+
+    A nyitó az első pont, a záró az AKTUÁLIS pont, a csúcs/alj az eddig
+    bejártak szélsőértéke — pontosan úgy, ahogy egy élő gyertya alakul."""
+    import numpy as _np
+    if pontok is None or len(pontok) == 0:
+        return None
+    i = max(0, min(len(pontok) - 1, int(n)))
+    _eddig = _np.asarray(pontok[:i + 1], dtype=float)
+    return (float(_eddig[0]), float(_eddig.max()), float(_eddig.min()),
+            float(_eddig[-1]))
+
+
+class Formalodo(pg.GraphicsObject):
+    """A KIBONTAKOZÓ gyertya — egyetlen, folyamatosan újrarajzolt gyertya."""
+
+    def __init__(self):
+        super().__init__()
+        self._x = 0.0
+        self._ohlc = None
+
+    def allit(self, x: float, ohlc) -> None:
+        self.prepareGeometryChange()
+        self._x, self._ohlc = float(x), ohlc
+        self.update()
+
+    def paint(self, p, *args):
+        if not self._ohlc:
+            return
+        o, h, l, c = self._ohlc
+        fel = c >= o
+        p.setPen(pg.mkPen(szin("green" if fel else "red")))
+        p.drawLine(QtCore.QPointF(self._x, l), QtCore.QPointF(self._x, h))
+        p.setBrush(pg.mkBrush(szin("green" if fel else "red")))
+        p.drawRect(QtCore.QRectF(self._x - 0.32, o, 0.64, (c - o) or 1e-9))
+
+    def boundingRect(self):
+        if not self._ohlc:
+            return QtCore.QRectF()
+        o, h, l, c = self._ohlc
+        return QtCore.QRectF(self._x - 0.5, l, 1.0, (h - l) or 1e-9)
+
+
 class Gyertyak(pg.GraphicsObject):
     """Gyertyák — CSAK a látható szakasz, szükség esetén összevonva.
 
@@ -635,6 +747,11 @@ class LabAblak(QtWidgets.QMainWindow):
         self._szamla_figyelo = None
         self._munkaterulet = None
         self._kotes_sorok = ([], [])
+        # KONTROLLPONTOK: a formálódó gyertya állapota.
+        self._kp_pontok = None      # az AKTUÁLIS bar árútja
+        self._kp_bar = None         # melyik barhoz tartozik
+        self._kp_idx = 0            # hányadik ponton állunk
+        self._m1_finom = None       # a finomabb (M1) gyertyák — lustán
         self._belepok = []
         self._be_ido = None
         self._eredmeny = None
@@ -822,6 +939,18 @@ class LabAblak(QtWidgets.QMainWindow):
         # VEZÉRELT: van mit mutatni → látszik, nincs → eltűnik. A jelölő ezen
         # felül kézzel is kikapcsolhatóvá teszi (a munkaterületen a második
         # charttól alapból ki — ott háromszor vinné a helyet).
+        self._kp = QtWidgets.QCheckBox(_t("lab.kp"))
+        self._kp.setToolTip(_t("lab.kp_tipp"))
+        self._kp.stateChanged.connect(self._kp_valt)
+        s3.addWidget(self._kp)
+        self._kp_pct = QtWidgets.QSpinBox()
+        self._kp_pct.setRange(1, 100)
+        self._kp_pct.setValue(100)
+        self._kp_pct.setSuffix("%")
+        self._kp_pct.setFixedWidth(64)
+        self._kp_pct.setToolTip(_t("lab.kp_pct_tipp"))
+        self._kp_pct.valueChanged.connect(lambda *_: self._kp_ujraszamol())
+        s3.addWidget(self._kp_pct)
         self._savok = QtWidgets.QCheckBox(_t("lab.savok"))
         self._savok.setToolTip(_t("lab.savok_tipp"))
         self._savok.setChecked(True)
@@ -1008,6 +1137,12 @@ class LabAblak(QtWidgets.QMainWindow):
         self._gyertyak = Gyertyak(chart)
         self._plot.addItem(self._gyertyak)
         self._elemek.append(self._gyertyak)
+        self._formalodo = Formalodo()
+        self._formalodo.setZValue(45)
+        self._formalodo.setVisible(False)
+        self._plot.addItem(self._formalodo, ignoreBounds=True)
+        self._elemek.append(self._formalodo)
+        self._kp_pontok = self._kp_bar = None
         _db = self._objektumok_rajza()
         self._sav_rajz()
         self._vb.autoRange()
@@ -2244,8 +2379,17 @@ class LabAblak(QtWidgets.QMainWindow):
             self._ido_zito.stop()
             self._play.setText("▶ Play")
             return
+        # ⚠ ELŐBB A GYERTYÁN BELÜL. Ha a kontrollpontok be vannak kapcsolva, a
+        # lépés a bar ÁRÚTJÁN halad; csak ha az elfogyott, megyünk a következő
+        # gyertyára. Így látszik, HOGYAN alakult ki a gyertya.
+        if self._kp_lep():
+            self._kurzor_rajz()
+            self._listak_frissit()
+            self._utem_indit()
+            return
         self._kurzor = min(len(self._chart) - 1,
                            self._kurzor + getattr(self, "_lepes", 1))
+        self._kp_idx = 0
         self._kurzor_rajz()
         self._listak_frissit()
         self._utem_indit()
@@ -2318,6 +2462,11 @@ class LabAblak(QtWidgets.QMainWindow):
         try:
             self._biztos_eredmeny()
             self._kurzor_vissza(t)
+            # ⚠ A KÖZÖS ÓRA GYERTYÁT AD, NEM KONTROLLPONTOT. Kapcsolt ablakban
+            # a bar KÉSZEN érkezik (a szinkron ideje a gyertyára képződik le),
+            # ezért a formálódó gyertyát a végállapotára állítjuk — különben a
+            # három ablak félkész gyertyákat mutatna, össze nem hangolva.
+            self._kp_idx = 10 ** 9
             self._kurzor_rajz()
             self._listak_frissit()
         finally:
@@ -2445,6 +2594,97 @@ class LabAblak(QtWidgets.QMainWindow):
             return
         self._vb.setXRange(_uj0, _uj0 + _szel, padding=0)
 
+    # ── KONTROLLPONTOK ───────────────────────────────────────────────────
+    def _finom_barok(self):
+        """A finomabb idősík gyertyái (M1) — LUSTÁN, és csak ha tényleg kell.
+
+        ⚠ Egy M1-parquet 50–120 MB; annak, aki nem kapcsolja be a
+        kontrollpontokat, semmi köze hozzá. Ezért csak az első bekapcsoláskor
+        olvassuk be, és utána a párra megjegyezzük."""
+        _sym = self._sym.currentText()
+        if self._m1_finom is not None and self._m1_finom[0] == _sym:
+            return self._m1_finom[1]
+        try:
+            from trading import backtest as _bt
+            _, _m1 = _bt.load_data(_sym)
+        except Exception as ex:
+            log.warning("%s — a finom (M1) adat nem olvasható: %s", _sym, ex)
+            _m1 = None
+        self._m1_finom = (_sym, _m1)
+        return _m1
+
+    def _kp_aktiv(self) -> bool:
+        """Van-e ÉRTELME kontrollpontnak? M1 charton nincs finomabb adat."""
+        return (self._kp.isChecked() and self._chart is not None
+                and int(self._tf.currentData() or 0) > 1)
+
+    def _kp_valt(self, *_a) -> None:
+        if self._kp.isChecked() and int(self._tf.currentData() or 0) <= 1:
+            # ⚠ NEM CSENDBEN: az M1 a legfinomabb gyertyánk. Tick-alapú
+            # kontrollpont más adatút volna (a tick-tár 19 GB), és a mérés
+            # szerint a motorban úgysem érne semmit.
+            self._allapot.setText(_t("lab.kp_m1_nincs"))
+            self._kp.blockSignals(True)
+            self._kp.setChecked(False)
+            self._kp.blockSignals(False)
+            return
+        self._kp_ujraszamol()
+
+    def _kp_ujraszamol(self) -> None:
+        """Az aktuális bar kontrollpontjainak eldobása → újraszámolás."""
+        self._kp_pontok = self._kp_bar = None
+        self._kp_idx = 0
+        self._kurzor_rajz()
+
+    def _kp_bar_pontjai(self, i: int):
+        """Az `i`-edik chart-gyertya árútja (gyorsítótárazva a barra)."""
+        if self._kp_bar == i and self._kp_pontok is not None:
+            return self._kp_pontok
+        _m1 = self._finom_barok()
+        self._kp_bar, self._kp_pontok = i, None
+        if _m1 is None or self._chart is None:
+            return None
+        try:
+            _t0 = self._chart.index[i]
+            _tf = int(self._tf.currentData() or 1)
+            _t1 = _t0 + pd.Timedelta(minutes=_tf)
+            _alk = _m1.loc[(_m1.index >= _t0) & (_m1.index < _t1)]
+        except Exception as ex:
+            log.debug("kontrollpont-szeletelés hiba: %s", ex)
+            return None
+        if len(_alk) < 2:
+            return None            # nincs mit finomítani (hézag vagy M1-chart)
+        self._kp_pontok = kontroll_pontok(_alk, float(self._kp_pct.value()))
+        return self._kp_pontok
+
+    def _kp_lep(self) -> bool:
+        """Egy KONTROLLPONTNYIT lép. `True`, ha maradt a baron belül."""
+        if not self._kp_aktiv() or self._kurzor is None:
+            return False
+        _p = self._kp_bar_pontjai(int(self._kurzor))
+        if _p is None or len(_p) == 0:
+            return False
+        if self._kp_idx + 1 < len(_p):
+            self._kp_idx += 1
+            return True
+        return False               # a bar kész → jöhet a következő
+
+    def _formalodo_rajz(self) -> None:
+        """A kibontakozó gyertya kirajzolása (vagy elrejtése)."""
+        _f = getattr(self, "_formalodo", None)
+        if _f is None:
+            return
+        if not self._kp_aktiv() or self._kurzor is None:
+            _f.setVisible(False)
+            return
+        _p = self._kp_bar_pontjai(int(self._kurzor))
+        _oh = reszgyertya(_p, self._kp_idx) if _p is not None else None
+        if _oh is None:
+            _f.setVisible(False)
+            return
+        _f.allit(float(self._kurzor), _oh)
+        _f.setVisible(True)
+
     def _kotes_panel(self, *_a) -> None:
         """A kötés-táblák mutatása/rejtése."""
         self._kotes_panel_lathato = bool(self._kotesek.isChecked())
@@ -2489,7 +2729,12 @@ class LabAblak(QtWidgets.QMainWindow):
             self._bid.setValue(bid)
             self._ask.setValue(bid + float(sor.get("avg_spread", 0.0) or 0.0))
         if self._csak_eddig.isChecked():
-            self._takaro.setRegion((i + 0.5, len(self._chart) + 5))
+            # ⚠ KONTROLLPONTOKNÁL A KURZOR GYERTYÁJÁT IS TAKARJUK: helyette a
+            # FORMÁLÓDÓ gyertyát rajzoljuk. Enélkül a kész gyertya látszana a
+            # félkész alatt — épp azt árulná el előre, amit meg akarunk mutatni.
+            _tol = (i - 0.5) if self._kp_aktiv() else (i + 0.5)
+            self._takaro.setRegion((_tol, len(self._chart) + 5))
+        self._formalodo_rajz()
         self._ido_cimke.setText(
             self._chart.index[i].strftime("%Y-%m-%d %H:%M"))
         self._sav_frissit()
