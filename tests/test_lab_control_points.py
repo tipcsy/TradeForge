@@ -206,6 +206,86 @@ else:
 w.close()
 
 
+# ══ 3b. KAPCSOLT ablakok: UGYANAZ A PILLANAT, más felbontáson ═══════════
+# ⚠ A felhasználó jelezte: „nem nagyon látom, hogy működne a H1-en vagy az
+# M5-ön". Az ok az volt, hogy kapcsolt ablakban a formálódó gyertyát a
+# VÉGÁLLAPOTÁRA ugrasztottuk („a közös óra gyertyát ad") — így a kontrollpontok
+# kapcsolt módban HALOTTAK voltak. Pedig a szinkron ideje NEM gyertya, hanem
+# folytonos időpont: a bar kezdetétől mért hányadból pontosan megmondható,
+# hányadik kontrollponton járunk.
+import tempfile
+
+from tools.lab_qt import Munkaterulet
+
+lab_qt.ELRENDEZES_PATH = Path(tempfile.mkdtemp(prefix="tf_kp_")) / "e.json"
+mt = Munkaterulet(symbol=PAR, tf_perc=60, tol=TOL, ig=IG)
+mt.show()
+app.processEvents()
+_c60 = mt.chartok()[0]
+if _c60._chart is None or len(_c60._chart) < 10:
+    print("KIHAGYVA (kapcsolt): nincs elég H1 gyertya")
+else:
+    _c5 = mt.uj_chart(symbol=PAR, tf_perc=5)
+    app.processEvents()
+    for _c in (_c60, _c5):
+        _c._kp.setChecked(True)
+    _c60._kapcs.setChecked(True)
+    _c5._kapcs.setChecked(True)
+    app.processEvents()
+    _sz = _c60._szinkron
+    _bar = _c60._chart.index[len(_c60._chart) // 2]
+    _meres = []
+    for _r in (0.0, 0.25, 0.5, 0.75, 0.9):
+        _sz.allit(_bar + pd.Timedelta(minutes=60 * _r), forras=None)
+        app.processEvents()
+        _pp = _c60._kp_bar_pontjai(int(_c60._kurzor))
+        _meres.append(_c60._kp_idx / max(1, len(_pp) - 1))
+    check("⚠ KAPCSOLT ablakban a H1 gyertya ARÁNYOSAN bontakozik ki",
+          all(abs(_m - _r) < 0.03
+              for _m, _r in zip(_meres, (0.0, 0.25, 0.5, 0.75, 0.9))),
+          str([round(x, 3) for x in _meres]))
+    check("⚠ …és a formálódó gyertya LÁTSZIK is", _c60._formalodo.isVisible())
+    check("⚠ a finomabb ablak közben a SAJÁT gyertyáin lép",
+          _c5._kurzor is not None and _c5._chart is not None)
+
+    # ⚠ A `nearest` kerekítés miatt a bar FELÉNÉL a kurzor a KÖVETKEZŐ
+    # gyertyára ugrott, és a kibontakozás visszaesett nullára. Lejátszásnál a
+    # TARTALMAZÓ gyertya kell.
+    _c60._kurzor_vissza(_bar + pd.Timedelta(minutes=50), tartalmazo=True)
+    check("⚠ lejátszásnál a TARTALMAZÓ gyertya (nem a legközelebbi)",
+          _c60._chart.index[int(_c60._kurzor)] == _bar,
+          f"{_c60._chart.index[int(_c60._kurzor)]} vs {_bar}")
+    _c60._kurzor_vissza(_bar + pd.Timedelta(minutes=50))
+    check("...idősík-váltásnál viszont marad a LEGKÖZELEBBI",
+          _c60._chart.index[int(_c60._kurzor)] != _bar)
+
+    # ── A szeletelés O(log n), nem teljes pásztázás ──────────────────────
+    # ⚠ A boolean maszk 3,4 millió M1 soron 20,5 ms-ot vitt MINDEN ÚJ BARON —
+    # H1-en (240 kontrollpont/bar) ez volt a „stopra nem áll meg, homokórázik".
+    import time as _time
+
+    _c60._kp_bar = None
+    _t0 = _time.perf_counter()
+    for _ in range(10):
+        _c60._kp_bar = None
+        _c60._kp_bar_pontjai(int(_c60._kurzor))
+    _ms = (_time.perf_counter() - _t0) / 10 * 1000
+    check("⚠ a bar-szeletelés GYORS (bináris keresés, nem teljes pásztázás)",
+          _ms < 5.0, f"{_ms:.2f} ms/bar (a maszkos alak 20,5 volt)")
+    _lq0 = (ROOT / "tools" / "lab_qt.py").read_text(encoding="utf-8")
+    check("...és a kódban is `searchsorted` van",
+          "_m1.index.searchsorted(_t0" in _lq0)
+mt.close()
+
+
+# ══ 3c. A JÖVŐ takarása TELJESEN átlátszatlan ═══════════════════════════
+# ⚠ 235/255 alfánál a jövő gyertyái halványan ÁTÜTÖTTEK — lejátszás közben épp
+# azt árulták el, aminek rejtve kell maradnia.
+_lq = (ROOT / "tools" / "lab_qt.py").read_text(encoding="utf-8")
+check("⚠ a jövőt takaró sáv TELJESEN átlátszatlan",
+      "pg.mkBrush(16, 20, 24, 255)" in _lq)
+
+
 # ══ 4. A HATÁR: a MOTOR érintetlen ══════════════════════════════════════
 # ⚠ A kontrollpont KIZÁRÓLAG megjelenítés. Ha valaha a motorba kerülne, az
 # minden eddigi mérést összehasonlíthatatlanná tenne — és a mérés szerint nem

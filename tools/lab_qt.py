@@ -1113,9 +1113,14 @@ class LabAblak(QtWidgets.QMainWindow):
             _l.setVisible(False)
             self._plot.addItem(_l, ignoreBounds=True)
         # a jövőt takaró sáv
+        # ⚠ TELJESEN ÁTLÁTSZATLAN (2026-09-10, felhasználói kérés: „lehessen
+        # teljesen láthatatlanná tenni"). Eddig 235/255 alfával a jövő gyertyái
+        # halványan ÁTÜTÖTTEK — lejátszás közben pont azt árulták el, aminek
+        # rejtve kellene maradnia. Az ÜRES TERÜLET megmarad: a pozíció-nyitáshoz
+        # kell, csak nem látszik benne a jövő.
         self._takaro = pg.LinearRegionItem(
             orientation="vertical", movable=False,
-            brush=pg.mkBrush(16, 20, 24, 235))
+            brush=pg.mkBrush(16, 20, 24, 255))
         self._takaro.setZValue(50)
         self._takaro.setVisible(False)
         self._plot.addItem(self._takaro, ignoreBounds=True)
@@ -2509,12 +2514,33 @@ class LabAblak(QtWidgets.QMainWindow):
         self._szinkron_alatt = True
         try:
             self._biztos_eredmeny()
-            self._kurzor_vissza(t)
-            # ⚠ A KÖZÖS ÓRA GYERTYÁT AD, NEM KONTROLLPONTOT. Kapcsolt ablakban
-            # a bar KÉSZEN érkezik (a szinkron ideje a gyertyára képződik le),
-            # ezért a formálódó gyertyát a végállapotára állítjuk — különben a
-            # három ablak félkész gyertyákat mutatna, össze nem hangolva.
+            # ⚠ LEJÁTSZÁSNÁL a TARTALMAZÓ gyertya kell (lásd `_kurzor_vissza`).
+            self._kurzor_vissza(t, tartalmazo=True)
+            # ⚠ A KÖZÖS ÓRA FOLYTONOS IDŐT AD — ezt HASZNÁLJUK IS.
+            #
+            # Az első változat itt a formálódó gyertyát a végállapotára
+            # ugrasztotta („kapcsolt ablakban a bar készen érkezik"), és ezzel
+            # a kontrollpontok KAPCSOLT ablakban HALOTTAK voltak — a
+            # felhasználó pontosan ezt jelezte: „nem nagyon látom, hogy
+            # működne a H1-en vagy az M5-ön".
+            #
+            # Pedig a szinkron ideje NEM gyertya, hanem folytonos időpont: a
+            # bar KEZDETÉTŐL mért eltelt hányadból pontosan megmondható,
+            # hányadik kontrollponton járunk. Így mindhárom ablak UGYANAZT A
+            # PILLANATOT mutatja, mindegyik a saját felbontásán — az M1 kész
+            # gyertyákkal, az M5 negyedig kibontva, a H1 alig elkezdve.
             self._kp_idx = 10 ** 9
+            if self._kp_aktiv() and self._kurzor is not None and t is not None:
+                _pp = self._kp_bar_pontjai(int(self._kurzor))
+                if _pp is not None and len(_pp) > 1:
+                    try:
+                        _bt = self._chart.index[int(self._kurzor)]
+                        _tfp = int(self._tf.currentData() or 1)
+                        _h = (t - _bt).total_seconds() / (_tfp * 60.0)
+                        self._kp_idx = int(max(0, min(
+                            len(_pp) - 1, round(_h * (len(_pp) - 1)))))
+                    except Exception as ex:
+                        log.debug("kontrollpont-arány hiba: %s", ex)
             self._kurzor_rajz()
             self._listak_frissit()
         finally:
@@ -2824,7 +2850,14 @@ class LabAblak(QtWidgets.QMainWindow):
             _t0 = self._chart.index[i]
             _tf = int(self._tf.currentData() or 1)
             _t1 = _t0 + pd.Timedelta(minutes=_tf)
-            _alk = _m1.loc[(_m1.index >= _t0) & (_m1.index < _t1)]
+            # ⚠ `searchsorted`, NEM boolean maszk. A maszkos alak
+            # (`(idx >= t0) & (idx < t1)`) VÉGIGPÁSZTÁZZA a teljes M1-et és két
+            # 3,4 millió elemű tömböt allokál — mérve 20,5 ms MINDEN ÚJ BARON.
+            # H1-en (240 kontrollpont/bar) ez volt a „stopra nem áll meg, hanem
+            # homokórázik" oka. Rendezett indexen a bináris keresés O(log n).
+            _i0 = int(_m1.index.searchsorted(_t0, side="left"))
+            _i1 = int(_m1.index.searchsorted(_t1, side="left"))
+            _alk = _m1.iloc[_i0:_i1]
         except Exception as ex:
             log.debug("kontrollpont-szeletelés hiba: %s", ex)
             return None
@@ -2883,11 +2916,24 @@ class LabAblak(QtWidgets.QMainWindow):
         i = max(0, min(len(self._chart) - 1, int(self._kurzor)))
         return self._chart.index[i]
 
-    def _kurzor_vissza(self, t) -> None:
+    def _kurzor_vissza(self, t, tartalmazo: bool = False) -> None:
         """Idősík-váltás után a kurzor UGYANARRA az időre. ⚠ Bar-indexben
-        őrizve M15→M1 tizenötszörös ugrás lenne."""
+        őrizve M15→M1 tizenötszörös ugrás lenne.
+
+        `tartalmazo=True`: az a gyertya, amelyik az időt TARTALMAZZA (nem a
+        legközelebbi).
+
+        ⚠ MIÉRT KELL A KETTŐ. Idősík-váltásnál a LEGKÖZELEBBI a jó: a kurzort
+        oda tesszük, ahol a felhasználó szeme járt. LEJÁTSZÁSNÁL viszont a
+        TARTALMAZÓ — egy H1 bar felénél a `nearest` már a KÖVETKEZŐ gyertyát
+        adja, és a kibontakozó gyertya minden bar felénél visszaugrott a
+        nullára. (Mérve: a bar 25%-ánál még 25%, 50%-ánál viszont már 0%.)"""
         if t is None or self._chart is None:
             self._kurzor = None
+            return
+        if tartalmazo:
+            _i = int(self._chart.index.searchsorted(t, side="right")) - 1
+            self._kurzor = max(0, min(len(self._chart) - 1, _i))
             return
         poz = self._chart.index.get_indexer([t], method="nearest")
         self._kurzor = int(poz[0]) if len(poz) and poz[0] >= 0 else None
