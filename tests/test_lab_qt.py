@@ -232,11 +232,19 @@ if QT_OK:
                           lq.Rajz("vizszintes", _i1, _ar),
                           lq.Rajz("fuggoleges", _i1, _ar)]
             _w._rajzok_rajza()
+            # ⚠ AZ ELEM MÁR NEM A RAJZBAN ÜL (v3.67.0): ha egy rajz TÖBB
+            # ablakban látszik (közös rajzok), több Qt-elem tartozik hozzá —
+            # egy mezőbe ez nem fér, a második ablak némán felülírta volna az
+            # elsőét. A `Rajz` tiszta MODELL (idő + ár), az elemeket az ablak
+            # tartja nyilván (`_rajz_elem`, `id(Rajz)` szerint).
             check("mindhárom rajz-fajta kapott elemet",
-                  all(r.elem is not None for r in _w._rajzok),
-                  str([r.fajta for r in _w._rajzok if r.elem is None]))
+                  all(_w._rajz_elem.get(id(r)) is not None
+                      for r in _w._rajzok),
+                  str([r.fajta for r in _w._rajzok
+                       if _w._rajz_elem.get(id(r)) is None]))
             check("a trendvonal két végpontja HÚZHATÓ (LineSegmentROI)",
-                  isinstance(_w._rajzok[0].elem, pyqtgraph.LineSegmentROI))
+                  isinstance(_w._rajz_elem.get(id(_w._rajzok[0])),
+                             pyqtgraph.LineSegmentROI))
             # ⚠ IDOBEN TAROLUNK, NEM BAR-INDEXBEN — idosikot valtva az indexek
             # atszamozodnak, az idopont viszont ugyanaz marad.
             _d = _w._rajzok[0].szotar()

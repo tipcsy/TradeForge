@@ -994,6 +994,8 @@
   "lab.nem_adtal_meg_belepot_a_futas": "   (no entry given — the run will be empty)",
   "lab.rajz.db": "{n} manual drawing(s) on the chart",
   "lab.rajz.trend_masodik": "Trend line: click the SECOND endpoint",
+  "lab.rajz_kozos": "Shared drawings",
+  "lab.rajz_kozos_tipp": "Drawings appear in every window with sharing on — a trend line is timeframe-independent (it lives in time and price), so it points to the same place on M1 and H1. Deleting one removes it everywhere. Switched off, the window keeps its own set.",
   "lab.rajz_torol": "Clear drawings",
   "lab.savok": "State bands",
   "lab.savok_tipp": "Diagnostic strip under the chart, four rows per bar: GREY = no-trade hour · GREEN/RED = signal direction · BLUE = active signal window · ORANGE = market regime. Off by default: it takes space and is rarely needed.",

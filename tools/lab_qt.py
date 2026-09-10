@@ -230,6 +230,55 @@ class Szinkron(QtCore.QObject):
 # ⚠ A megnyitott ablakok hivatkozásai. Enélkül a `_uj_ablak`-ban létrehozott
 # `QMainWindow`-t a szemétgyűjtő azonnal elvinné (a Qt-oldali objektum a Python
 # hivatkozással együtt megy), és az ablak felvillanás után eltűnne.
+class RajzTar:
+    """KÖZÖS rajz-készlet több labor-ablaknak.
+
+    ⚠ A rajzok IDŐBEN és ÁRBAN élnek (lásd `Rajz`), tehát idősík-függetlenek —
+    ugyanaz a trendvonal az M1-en és a H1-en is ugyanoda mutat. Ezért lehet
+    megosztani őket anélkül, hogy bármit át kellene számolni.
+
+    ⚠ EGY LISTA, NEM HÁROM MÁSOLAT. A tagok UGYANARRA a listára hivatkoznak,
+    ezért a felhasználó által kért törlés-szemantika magától adódik: „felrajzolok
+    egy trendvonalat (megjelenik mindenhol), letörlöm (törlődik mindenhol)".
+    Három másolatnál ehhez azonosítani kellene, melyik másolat melyiknek felel
+    meg — és az elcsúszás csak idő kérdése volna."""
+
+    def __init__(self):
+        self.lista: list = []
+        self._tagok: list = []
+
+    def belep(self, ablak) -> None:
+        if ablak not in self._tagok:
+            self._tagok.append(ablak)
+
+    def kilep(self, ablak) -> None:
+        if ablak in self._tagok:
+            self._tagok.remove(ablak)
+
+    def tagok(self) -> list:
+        return list(self._tagok)
+
+    def valtozott(self, forras=None) -> None:
+        """Újrarajzoltat MINDEN tagot (a forrást kivéve — az már kész)."""
+        for a in list(self._tagok):
+            if a is forras:
+                continue
+            try:
+                a.rajzok_ujra()
+            except Exception:          # bezárt ablak ne akassza meg a többit
+                self.kilep(a)
+
+
+_RAJZTAR = None
+
+
+def rajztar() -> "RajzTar":
+    global _RAJZTAR
+    if _RAJZTAR is None:
+        _RAJZTAR = RajzTar()
+    return _RAJZTAR
+
+
 _ABLAKOK: list = []
 
 _SZINKRON = None
@@ -584,11 +633,17 @@ class Rajz:
 
     FAJTAK = ("trend", "vizszintes", "fuggoleges")
 
+    # ⚠ A RAJZ NEM HORDOZ QT-ELEMET (2026-09-10). Amíg egy rajz egyetlen
+    # ablakban élt, kényelmes volt a grafikus elemet is benne tartani. Ha viszont
+    # UGYANAZ a rajz három ablakban látszik (M1 + M5 + M15), akkor három elem
+    # tartozik hozzá — egy mezőbe ez nem fér bele, és a második ablak némán
+    # felülírná az elsőét. Az elemeket ezért ABLAKONKÉNT tartjuk nyilván
+    # (`LabAblak._rajz_elem`), a `Rajz` pedig tiszta MODELL marad: idő + ár.
+
     def __init__(self, fajta, ido1=None, ar1=None, ido2=None, ar2=None):
         self.fajta = fajta
         self.ido1, self.ar1 = ido1, ar1
         self.ido2, self.ar2 = ido2, ar2
-        self.elem = None
 
     def kesz(self) -> bool:
         """Befejezett-e? A trendvonalhoz KÉT kattintás kell."""
@@ -787,6 +842,8 @@ class LabAblak(QtWidgets.QMainWindow):
         self._eredmeny_elemek = []
         self._nyitott_elemek = []   # a NYITOTT pozíció vonalai (kurzor-függő)
         self._rajzok = []           # kézi rajz-elemek (trend / vízszintes / függőleges)
+        self._rajz_elem = {}        # id(Rajz) -> Qt-elem (ABLAKONKÉNT)
+        self._rajz_megosztva = False
         self._fel_rajz = None       # a félbehagyott trendvonal (1. kattintás megvolt)
 
         self._epit_ui(symbol, strategy, tf_perc, tol, ig)
@@ -873,7 +930,10 @@ class LabAblak(QtWidgets.QMainWindow):
         self._mod = None
         self._mod_gombok = {}
         for ertek, cimke in (("BUY", "Add BUY"), ("SELL", "Add SELL"),
-                             ("BE", "Add BE"),
+                             # ⚠ Az „Add BE" EGYELŐRE KI (2026-09-10,
+                             # felhasználói kérés: „a BE-t kapcsoljuk ki, azzal
+                             # majd külön kezdünk valamit"). A mód-kezelő
+                             # változatlan; ha visszakerül, ez az egy sor elég.
                              # ⚠ RAJZ-MÓDOK: ugyanaz a mechanizmus, mint a
                              # belépő-lerakásé — egyszerre egy aktív mód.
                              ("trend", "╱ Trend"), ("vizszintes", "─ Vízsz."),
@@ -909,6 +969,10 @@ class LabAblak(QtWidgets.QMainWindow):
         # (`forgatokonyv_betolt`) továbbra is működjön.
         self._rr_mezok = {}
 
+        self._rajz_kozos = QtWidgets.QCheckBox(_t("lab.rajz_kozos"))
+        self._rajz_kozos.setToolTip(_t("lab.rajz_kozos_tipp"))
+        self._rajz_kozos.stateChanged.connect(self._rajz_megoszt_valt)
+        s2.addWidget(self._rajz_kozos)
         for cimke, fn in ((_t("lab.torol"), self.torol),
                           (_t("lab.rajz_torol"), self.rajz_torol_mind),
                           (_t("lab.json_mentes"), self.ment),
@@ -1688,16 +1752,17 @@ class LabAblak(QtWidgets.QMainWindow):
         törölni kell tudni, különben a chart egy kattintás után szemetes marad.
         A ROI `sigRemoveRequested`-je a MODELLBŐL is kiveszi — nem csak a
         képről —, különben mentéskor visszajönne."""
-        for r in self._rajzok:
-            if r.elem is not None:
-                self._plot.removeItem(r.elem)
-                r.elem = None
+        for _e in self._rajz_elem.values():
+            if _e is not None:
+                self._plot.removeItem(_e)
+        self._rajz_elem.clear()
         if self._tengely is None:
             return
         for r in self._rajzok:
             _sz = szin("yellow")
+            _el = None
             if r.fajta == "vizszintes":
-                r.elem = pg.InfiniteLine(
+                _el = pg.InfiniteLine(
                     pos=float(r.ar1), angle=0, movable=True,
                     pen=pg.mkPen(_sz, width=1),
                     hoverPen=pg.mkPen(_sz, width=3))
@@ -1705,7 +1770,7 @@ class LabAblak(QtWidgets.QMainWindow):
                 x = self._tengely.hol(int(r.ido1.timestamp()))
                 if x is None:
                     continue
-                r.elem = pg.InfiniteLine(
+                _el = pg.InfiniteLine(
                     pos=x, angle=90, movable=True,
                     pen=pg.mkPen(_sz, width=1),
                     hoverPen=pg.mkPen(_sz, width=3))
@@ -1714,38 +1779,71 @@ class LabAblak(QtWidgets.QMainWindow):
                 x2 = self._tengely.hol(int(r.ido2.timestamp()))
                 if x1 is None or x2 is None:
                     continue
-                r.elem = pg.LineSegmentROI(
+                _el = pg.LineSegmentROI(
                     [[x1, float(r.ar1)], [x2, float(r.ar2)]],
                     pen=pg.mkPen(_sz, width=2), removable=True)
-                r.elem.sigRegionChangeFinished.connect(
+                _el.sigRegionChangeFinished.connect(
                     lambda _x=None, _r=r: self._rajz_mozgott(_r))
-                r.elem.sigRemoveRequested.connect(
+                _el.sigRemoveRequested.connect(
                     lambda _x=None, _r=r: self._rajz_torol(_r))
-            if r.elem is None:
+            if _el is None:
                 continue
             if r.fajta != "trend":
-                r.elem.sigPositionChanged.connect(
+                _el.sigPositionChanged.connect(
                     lambda _x=None, _r=r: self._rajz_mozgott(_r))
                 # ⚠ Az `InfiniteLine`-nak nincs jobbklikk-menüje; a törlést a
                 # „Rajz törlése" gomb intézi (lásd `rajz_torol_mind`).
-            r.elem.setZValue(-10)
-            self._plot.addItem(r.elem)
+            _el.setZValue(-10)
+            self._rajz_elem[id(r)] = _el
+            self._plot.addItem(_el)
+
+    def rajzok_ujra(self) -> None:
+        """A közös tár kéri: rajzold újra a rajzokat (publikus felület)."""
+        self._rajzok_rajza()
+
+    def _rajz_valtozott(self) -> None:
+        """Változás után a TÖBBI megosztott ablak is kövesse."""
+        if self._rajz_megosztva:
+            rajztar().valtozott(forras=self)
+
+    def _rajz_megoszt_valt(self, *_a) -> None:
+        """Be/kilépés a KÖZÖS rajz-készletbe.
+
+        ⚠ BEKAPCSOLÁSKOR A SAJÁT RAJZOK ÁTKÖLTÖZNEK, nem vesznek el: amit eddig
+        rajzoltál, azt látni akarod a többi ablakban is. Kikapcsoláskor viszont
+        MÁSOLATOT kap az ablak — különben a „különvált" ablak törlése a
+        közösből is kivenne, ami pont az ellenkezője a kikapcsolásnak."""
+        _tar = rajztar()
+        if self._rajz_kozos.isChecked():
+            for r in self._rajzok:
+                if r not in _tar.lista:
+                    _tar.lista.append(r)
+            self._rajzok = _tar.lista
+            self._rajz_megosztva = True
+            _tar.belep(self)
+            _tar.valtozott(forras=None)      # mindenki lássa az újakat
+        else:
+            _tar.kilep(self)
+            self._rajz_megosztva = False
+            self._rajzok = list(self._rajzok)     # MÁSOLAT
+        self._rajzok_rajza()
 
     def _rajz_mozgott(self, r: "Rajz") -> None:
         """Húzás után VISSZAÍRJUK az időt/árat — a modell a mérvadó, nem a kép.
         Enélkül a mentés a lerakás pillanatának koordinátáit őrizné meg."""
-        if r.elem is None or self._tengely is None:
+        _el = self._rajz_elem.get(id(r))
+        if _el is None or self._tengely is None:
             return
         if r.fajta == "vizszintes":
-            r.ar1 = float(r.elem.value())
+            r.ar1 = float(_el.value())
         elif r.fajta == "fuggoleges":
-            _ido = self._ido_x(float(r.elem.value()))
+            _ido = self._ido_x(float(_el.value()))
             if _ido is not None:
                 r.ido1 = _ido
         else:
             try:
-                _p = r.elem.getSceneHandlePositions()
-                _pk = [r.elem.mapSceneToParent(h[1]) for h in _p]
+                _p = _el.getSceneHandlePositions()
+                _pk = [_el.mapSceneToParent(h[1]) for h in _p]
             except Exception:
                 return
             if len(_pk) < 2:
@@ -1756,14 +1854,18 @@ class LabAblak(QtWidgets.QMainWindow):
                 return
             r.ido1, r.ar1 = _t1, float(_pk[0].y())
             r.ido2, r.ar2 = _t2, float(_pk[1].y())
+        # ⚠ A TÖBBI ABLAK IS KÖVESSE: megosztott rajznál az elhúzott vonal
+        # ugyanaz az OBJEKTUM, csak máshol kirajzolva.
+        self._rajz_valtozott()
 
     def _rajz_torol(self, r: "Rajz") -> None:
-        if r.elem is not None:
-            self._plot.removeItem(r.elem)
-            r.elem = None
+        _el = self._rajz_elem.pop(id(r), None)
+        if _el is not None:
+            self._plot.removeItem(_el)
         if r in self._rajzok:
             self._rajzok.remove(r)
         self._allapot.setText(_t("lab.rajz.db", n=len(self._rajzok)))
+        self._rajz_valtozott()
 
     def rajz_torol_mind(self) -> None:
         for r in list(self._rajzok):
@@ -2614,6 +2716,7 @@ class LabAblak(QtWidgets.QMainWindow):
         try:
             if self._szinkron is not None:
                 self._szinkron.kilep(self)
+            rajztar().kilep(self)
         finally:
             self._szinkron = None
         if self in _ABLAKOK:

@@ -994,6 +994,8 @@
   "lab.nem_adtal_meg_belepot_a_futas": "   (nem adtál meg belépőt — a futás üres lesz)",
   "lab.rajz.db": "{n} kézi rajz a charton",
   "lab.rajz.trend_masodik": "Trendvonal: kattints a MÁSODIK végpontra",
+  "lab.rajz_kozos": "Közös rajzok",
+  "lab.rajz_kozos_tipp": "A rajzok MINDEN közös-rajzú ablakban megjelennek — a trendvonal idősík-független (időben és árban él), tehát az M1-en és a H1-en ugyanoda mutat. Egy vonal törlése mindenhonnan törli. Kikapcsolva az ablak külön készletet kap.",
   "lab.rajz_torol": "Rajz törlése",
   "lab.savok": "Sávok",
   "lab.savok_tipp": "Diagnosztikai csík a chart alatt, gyertyánként négy sorral: SZÜRKE = no-trade óra · ZÖLD/PIROS = a jel iránya · KÉK = aktív jel-ablak · NARANCS = piac-besorolás. Alapból kikapcsolva, mert helyet visz és ritkán kell.",

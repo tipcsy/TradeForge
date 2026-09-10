@@ -384,6 +384,63 @@ check("...és a pár neve is benne van",
       _cx._sym.currentText() in _swx.windowTitle(), _swx.windowTitle())
 
 
+# ══ 5f. KÖZÖS RAJZOK: egy vonal, minden idősíkon ════════════════════════
+# A kérés: „ha húzok egy trendvonalat, az minden idősíkon jelenjen meg…
+# felrajzolok egy trendvonalat (megjelenik mindenhol), felrajzolok egy
+# függőlegest (megjelenik mindenhol), letörlöm CSAK a trendvonalat (törlődik
+# mindenhol)". És: lehessen csak egy idősíkra is.
+#
+# ⚠ EGY LISTA, NEM HÁROM MÁSOLAT. A rajzok időben és árban élnek (idősík-
+# függetlenek), ezért megoszthatók anélkül, hogy bármit átszámolnánk — és a
+# kért törlés-szemantika ebből MAGÁTÓL adódik. Három másolatnál azonosítani
+# kellene, melyik felel meg melyiknek, és az elcsúszás idő kérdése volna.
+#
+# ⚠ A `Rajz` ezért NEM hordoz Qt-elemet többé: ha egy rajz három ablakban
+# látszik, három elem tartozik hozzá — egy mezőbe ez nem fér, a második ablak
+# némán felülírta volna az elsőét.
+from tools.lab_qt import Rajz, rajztar
+
+_ra, _rb = mt.chartok()[0], mt.chartok()[1]
+_ra._rajz_kozos.setChecked(True)
+_rb._rajz_kozos.setChecked(True)
+app.processEvents()
+check("mindkét ablak a közös rajz-tár tagja", len(rajztar().tagok()) >= 2)
+check("⚠ …és UGYANARRA a listára hivatkoznak", _ra._rajzok is _rb._rajzok)
+
+_t0 = _ra._chart.index[10]
+_trend = Rajz("trend", _t0, 29100.0, _ra._chart.index[20], 29200.0)
+_fugg = Rajz("fuggoleges", _t0, None)
+_ra._rajzok.extend([_trend, _fugg])
+_ra._rajzok_rajza()
+_ra._rajz_valtozott()
+app.processEvents()
+check("⚠ a rajzok a MÁSIK ablakban is megjelennek",
+      len(_rb._rajz_elem) == 2, f"{len(_rb._rajz_elem)} elem")
+check("...és a sajátban is", len(_ra._rajz_elem) == 2)
+
+_ra._rajz_torol(_trend)
+app.processEvents()
+check("⚠ CSAK a trendvonal törlése MINDENHOL törli",
+      len(_ra._rajzok) == 1 and len(_rb._rajz_elem) == 1
+      and _fugg in _rb._rajzok,
+      f"A:{len(_ra._rajzok)} B-elem:{len(_rb._rajz_elem)}")
+
+_rb._rajz_kozos.setChecked(False)
+app.processEvents()
+check("⚠ kikapcsolva az ablak SAJÁT (másolt) készletet kap",
+      _rb._rajzok is not _ra._rajzok and len(_rb._rajzok) == 1)
+_ra._rajz_torol(_fugg)
+app.processEvents()
+check("⚠ …és onnantól a közösből törlés NEM érinti",
+      len(_ra._rajzok) == 0 and len(_rb._rajzok) == 1)
+_rb._rajzok = []
+_rb._rajzok_rajza()
+
+# Az „Add BE" mód egyelőre lekerült (felhasználói kérés).
+check("⚠ az Add-BE mód EGYELŐRE nincs a felületen",
+      "BE" not in _ra._mod_gombok, str(sorted(_ra._mod_gombok)))
+
+
 # ══ 6. A HATÁR: a LabAblak önállóan is megáll ═══════════════════════════
 # ⚠ Ez a 2. verzió (kiszakítás külön ablakba) előfeltétele — és a `--egy`
 # parancssori kapcsolóé is. Ha a chart csak munkaterületen belül működne, a
