@@ -1524,6 +1524,16 @@ class LabAblak(QtWidgets.QMainWindow):
             # gyertyákra is ráfeküdt, ahol a pozíció már/még nem élt, és nem
             # lehetett ránézésre megmondani, meddig tartott a kötés.
             _x2 = self._sav_vege(b, x)
+            # ⚠ A VONALAK MINDENHOL, A DOBOZ CSAK AZ AKTÍV ABLAKBAN
+            # (felhasználói döntés). Egy belépő három ablakban látszik, de három
+            # nagy színes kockázat/cél-sáv elnyomná a chartokat; a vonalak
+            # viszont vékonyak, és épp azok mondják meg, HOL van a belépő, az SL
+            # és a TP. Így minden idősíkon látod a pozíciót, de csak ott
+            # „dolgozol" vele, ahol épp nézed.
+            for it in (_slv, _tpv):
+                self._plot.addItem(it)
+            if not self.aktiv_e():
+                continue
             _kock = _Savdoboz(x, min(_be, b.sl), _x2, max(_be, b.sl),
                               pg.mkBrush(220, 0, 0, 38))
             _cel = _Savdoboz(x, min(_be, b.tp_ar(_be)), _x2,
@@ -1533,8 +1543,6 @@ class LabAblak(QtWidgets.QMainWindow):
             self._bel_set(b, "cel", _cel)
             for it in (_kock, _cel):
                 it.setZValue(-20)
-                self._plot.addItem(it)
-            for it in (_slv, _tpv):
                 self._plot.addItem(it)
             if _akt:
                 self._trail_vonalak(b, _be)
@@ -1827,6 +1835,16 @@ class LabAblak(QtWidgets.QMainWindow):
             self._be_elem.pop((id(b), nev), None)
         else:
             self._be_elem[(id(b), nev)] = elem
+
+    def aktiv_e(self) -> bool:
+        """EZ az ablak az aktív? (Önálló ablak mindig az.)"""
+        _mt = getattr(self, "_munkaterulet", None)
+        if _mt is None:
+            return True
+        try:
+            return _mt._aktiv_chart() is self
+        except Exception:
+            return True
 
     def belepok_ujra(self) -> None:
         """A közös tár kéri: rajzold újra a belépőket (publikus felület)."""
@@ -3589,10 +3607,25 @@ class Munkaterulet(QtWidgets.QMainWindow):
     def _aktiv_valtozott(self, *_a) -> None:
         """Chart-váltás: a közös panel AZONNAL a másik chartét mutassa.
 
+        ⚠ A BELÉPŐ-SÁVOKAT is újra kell rajzolni: a doboz csak az AKTÍV ablakban
+        látszik, tehát a váltásnál az EDDIGIRŐL le kell kerülnie, az ÚJON meg
+        meg kell jelennie. Csak a két érintett ablakot rajzoljuk újra — minden
+        chart újrarajzolása chart-váltásonként fölösleges munka volna.
+
         ⚠ Nem várhatunk a chart következő frissítésére: az csak akkor jön, ha
         mozdul a kurzora. Addig a panel a RÉGI chart pozícióit mutatná az ÚJ
         chart neve alatt."""
         w = self._aktiv_chart()
+        _elozo = getattr(self, "_utolso_aktiv", None)
+        if _elozo is not w:
+            self._utolso_aktiv = w
+            for _ch in (_elozo, w):
+                if _ch is None:
+                    continue
+                try:
+                    _ch.belepok_ujra()
+                except Exception:
+                    pass
         if w is None:
             self._szamla.setText("")
             self._kotesek_kiir(None)

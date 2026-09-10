@@ -467,6 +467,39 @@ app.processEvents()
 check("⚠ a törlése is MINDENHOL törli",
       len(_rb._belepok) == 0 and _rb._bel(_bel, "vonal") is None)
 
+# ── A VONALAK MINDENHOL, A DOBOZ CSAK AZ AKTÍV ABLAKBAN ─────────────────
+# ⚠ Felhasználói döntés. Egy belépő három ablakban látszik, de három nagy
+# színes kockázat/cél-sáv elnyomná a chartokat; a vonalak viszont vékonyak, és
+# épp azok mondják meg, HOL van a belépő, az SL és a TP.
+_ra._belepok.append(_bel)
+_ra._belepok_rajz()
+_ra._terv_valtozott()
+app.processEvents()
+_swp = {x.widget(): x for x in mt._mdi.subWindowList()}
+
+mt._mdi.setActiveSubWindow(_swp[_ra])
+app.processEvents()
+check("⚠ az AKTÍV ablakban ott a doboz (kockázat-sáv)",
+      _ra._bel(_bel, "kock") is not None)
+check("⚠ …a NEM aktívban viszont NINCS",
+      _rb._bel(_bel, "kock") is None)
+check("⚠ …de a VONALAK mindkettőn ott vannak",
+      _ra._bel(_bel, "vonal") is not None
+      and _rb._bel(_bel, "vonal") is not None)
+
+mt._mdi.setActiveSubWindow(_swp[_rb])
+app.processEvents()
+check("⚠ chart-váltáskor a doboz ÁTKÖLTÖZIK",
+      _rb._bel(_bel, "kock") is not None and _ra._bel(_bel, "kock") is None)
+check("...a vonalak közben végig megvannak",
+      _ra._bel(_bel, "vonal") is not None
+      and _rb._bel(_bel, "vonal") is not None)
+
+_ra._belepok.remove(_bel)
+_ra._belepok_rajz()
+_ra._terv_valtozott()
+app.processEvents()
+
 # A megnyitás-jelző a modellen ül (a doboz-felület ide fog kötni).
 check("a Belepo ismeri a MEGNYITOTT állapotot", hasattr(_bel, "nyitva")
       and _bel.nyitva is False)
