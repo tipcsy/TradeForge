@@ -257,6 +257,32 @@ def kotes_oszlopok() -> dict:
     }
 
 
+def egyenleg_rajzol(plot, elemek: list, gorbe) -> None:
+    """A számlagörbe kirajzolása egy tetszőleges `PlotWidget`-be.
+
+    ⚠ EGY FORRÁS: ugyanez a görbe kell a chart alatti csíkba (önálló mód) ÉS a
+    munkaterület közös „Számla állapot" dokkjába. Két külön rajzoló előbb-utóbb
+    máshogy skálázna, és a felhasználó azt hinné, két különböző számláról van
+    szó."""
+    for it in list(elemek):
+        try:
+            plot.removeItem(it)
+        except Exception:
+            pass
+    elemek.clear()
+    if gorbe is None:
+        return
+    real, eq, kezdo = gorbe
+    x = np.arange(len(real), dtype=float)
+    # A kezdő egyenleg vonala — enélkül nem látszik, mikor megyünk mínuszba.
+    _ln = pg.InfiniteLine(pos=kezdo, angle=0,
+                          pen=pg.mkPen("#4a5560", style=QtCore.Qt.DashLine))
+    plot.addItem(_ln)
+    elemek.append(_ln)
+    elemek.append(plot.plot(x, eq, pen=pg.mkPen("#4ea1ff", width=1)))
+    elemek.append(plot.plot(x, real, pen=pg.mkPen("#7ecb7e", width=2)))
+
+
 def kotes_tablak(szulo=None) -> tuple:
     """`(QTabWidget, {kulcs: QTableWidget})` — a Nyitott/Lezárt fülpár.
 
@@ -947,15 +973,32 @@ class LabAblak(QtWidgets.QMainWindow):
         self._kp_pct.setRange(1, 100)
         self._kp_pct.setValue(100)
         self._kp_pct.setSuffix("%")
-        self._kp_pct.setFixedWidth(64)
+        # ⚠ A SZÁM IS LÁTSZÓDJON. 64 px-en a „100%" alá szorult a két nyíl
+        # mellett, és csak a nyilak látszottak — egy mező, aminek az ÉRTÉKE nem
+        # olvasható, nem vezérlő, csak dísz.
+        self._kp_pct.setFixedWidth(92)
         self._kp_pct.setToolTip(_t("lab.kp_pct_tipp"))
         self._kp_pct.valueChanged.connect(lambda *_: self._kp_ujraszamol())
         s3.addWidget(self._kp_pct)
+        # ⚠ A SZÁMLAGÖRBE SORA is eltüntethető (felhasználói jelzés: az üres
+        # panel a 0,2–0,8 tengelyével helyet vitt, és nem mondta meg, mi lenne
+        # benne). Ugyanaz az elv, mint a sávoknál: ADAT-VEZÉRELT — forgatókönyv
+        # (és így eredmény) nélkül nincs mit rajzolni, tehát el is tűnik.
+        self._egyenleg_kapcs = QtWidgets.QCheckBox(_t("lab.egyenleg"))
+        self._egyenleg_kapcs.setToolTip(_t("lab.egyenleg_tipp"))
+        self._egyenleg_kapcs.setChecked(True)
+        self._egyenleg_kapcs.stateChanged.connect(
+            lambda *_: self._egyenleg_lathatosag())
+        s3.addWidget(self._egyenleg_kapcs)
         self._savok = QtWidgets.QCheckBox(_t("lab.savok"))
         self._savok.setToolTip(_t("lab.savok_tipp"))
         self._savok.setChecked(True)
         self._savok.stateChanged.connect(lambda *_: self._sav_rajz())
         s3.addWidget(self._savok)
+        self._autofit = QtWidgets.QCheckBox(_t("lab.autofit"))
+        self._autofit.setToolTip(_t("lab.autofit_tipp"))
+        self._autofit.stateChanged.connect(self._autofit_valt)
+        s3.addWidget(self._autofit)
         self._gorget = QtWidgets.QCheckBox(_t("lab.gorgetes"))
         self._gorget.setToolTip(_t("lab.gorgetes_tipp"))
         self._gorget.stateChanged.connect(self._gorgetes_valt)
@@ -1079,7 +1122,20 @@ class LabAblak(QtWidgets.QMainWindow):
         self._ido_cimke = pg.TextItem(anchor=(1, 1), color=szin("yellow"))
         self._ido_cimke.setZValue(60)
         self._plot.addItem(self._ido_cimke, ignoreBounds=True)
+        # ── A görgetés POZICIONÁLÓ háromszöge (a chart tetején) ─────────
+        self._gorget_jelolo = pg.InfiniteLine(
+            angle=90, movable=True,
+            pen=pg.mkPen(szin("gray"), width=1, style=QtCore.Qt.DashLine),
+            hoverPen=pg.mkPen(szin("yellow"), width=2))
+        self._gorget_jelolo.addMarker("v", position=1.0, size=14)
+        self._gorget_jelolo.setZValue(55)
+        self._gorget_jelolo.setVisible(False)
+        self._gorget_jelolo.sigPositionChanged.connect(self._jelolo_huzva)
+        self._plot.addItem(self._gorget_jelolo, ignoreBounds=True)
+        self._autofit_alatt = False
         self._vb.sigRangeChanged.connect(lambda *_: self._cimke_helyre())
+        self._vb.sigRangeChanged.connect(lambda *_: self._jelolo_helyre())
+        self._vb.sigRangeChanged.connect(lambda *_: self._autofit_korlat())
 
     def _mod_valt(self, ertek: str) -> None:
         """Kattintás-mód váltása (egyszerre csak egy aktív)."""
@@ -1154,6 +1210,10 @@ class LabAblak(QtWidgets.QMainWindow):
             _t("lab.status.markers_short", bars=len(chart), drawn=_db["kirajzolt"],
                outside=_db["idon_kivul"]))
         self._cim_frissit()
+        # ⚠ A `_kurzor_rajz` KORAI VISSZATÉRÉSE miatt itt is kell: kurzor
+        # nélkül (friss betöltés) az oda tett hívás nem futna le, és az üres
+        # számlagörbe-sor ott maradna — épp az, ami zavaró volt.
+        self._egyenleg_lathatosag()
 
     def cim(self) -> str:
         """A chart neve: `PÁR · IDŐSÍK`."""
@@ -2140,24 +2200,12 @@ class LabAblak(QtWidgets.QMainWindow):
         return ki
 
     def _egyenleg_rajz(self) -> None:
-        for it in self._egyenleg_elemek:
-            self._egyenleg.removeItem(it)
-        self._egyenleg_elemek.clear()
+        self._egyenleg_lathatosag()
         g = self._szamla_gorbe()
+        egyenleg_rajzol(self._egyenleg, self._egyenleg_elemek, g)
         if g is None:
-            self._szamla.setText("")
+            self._szamla_kiir("")
             return
-        real, eq, kezdo = g
-        x = np.arange(len(real), dtype=float)
-        # A kezdő egyenleg vonala — enélkül nem látszik, mikor megyünk mínuszba.
-        _ln = pg.InfiniteLine(pos=kezdo, angle=0,
-                              pen=pg.mkPen("#4a5560", style=QtCore.Qt.DashLine))
-        self._egyenleg.addItem(_ln)
-        self._egyenleg_elemek.append(_ln)
-        self._egyenleg_elemek.append(
-            self._egyenleg.plot(x, eq, pen=pg.mkPen("#4ea1ff", width=1)))
-        self._egyenleg_elemek.append(
-            self._egyenleg.plot(x, real, pen=pg.mkPen("#7ecb7e", width=2)))
         self._szamla_frissit()
 
     def _szamla_frissit(self) -> None:
@@ -2555,10 +2603,138 @@ class LabAblak(QtWidgets.QMainWindow):
         ⚠ A felhasználó kérése: „a play vonalat OTT tartja". Egy fix arány
         (mondjuk mindig 75%) bekapcsoláskor ELRÁNTANÁ a képet — a helyes
         viselkedés az, hogy ott marad, ahová a felhasználó tette."""
-        if not self._gorget.isChecked():
+        _be = self._gorget.isChecked()
+        self._jelolo_lathatosag()
+        if not _be:
+            # ⚠ KIKAPCSOLÁSKOR VISSZA KELL ADNI A KURZORNAK A HELYET. A chart
+            # helyesen megáll — de a kurzor a nézet ~75%-ánál ragadt, és pár
+            # lépés után KIFUT a képből: a felhasználó azt látja, hogy „nem áll
+            # vissza arra, hogy a sáv mozogjon". Ezért a nézetet úgy toljuk,
+            # hogy a kurzor a BAL oldalra kerüljön, és legyen hova söpörnie.
+            self._kurzor_balra()
             return
         self._gorget_arany = self._kurzor_kepaeranya()
         self._gorgetes_kovet()
+        self._jelolo_helyre()
+
+    KURZOR_BAL = 0.12            # kikapcsolás után ide kerül a kurzor
+
+    def _kurzor_balra(self) -> None:
+        """A nézet eltolása úgy, hogy a kurzor a bal széphez közel kerüljön."""
+        if self._kurzor is None or self._chart is None:
+            return
+        try:
+            (x0, x1), _ = self._vb.viewRange()
+        except Exception:
+            return
+        _szel = x1 - x0
+        if not (_szel > 0):
+            return
+        _uj0 = float(self._kurzor) - self.KURZOR_BAL * _szel
+        self._vb.setXRange(_uj0, _uj0 + _szel, padding=0)
+
+    # ── A pozicionáló háromszög (görgetés közben) ────────────────────────
+    def _jelolo_lathatosag(self) -> None:
+        _j = getattr(self, "_gorget_jelolo", None)
+        if _j is not None:
+            _j.setVisible(bool(self._gorget.isChecked()))
+
+    def _jelolo_helyre(self) -> None:
+        """A háromszög oda, ahol a kurzor TARTÓ helye van a képen."""
+        _j = getattr(self, "_gorget_jelolo", None)
+        if _j is None or not self._gorget.isChecked():
+            return
+        try:
+            (x0, x1), _ = self._vb.viewRange()
+        except Exception:
+            return
+        _a = getattr(self, "_gorget_arany", self.GORGETES_ALAP)
+        _j.blockSignals(True)
+        _j.setValue(x0 + _a * (x1 - x0))
+        _j.blockSignals(False)
+
+    def _jelolo_huzva(self) -> None:
+        """A háromszöget elhúzták → ONNANTÓL ott tartja a play-vonalat.
+
+        ⚠ A felhasználó kérése: „jelenjen meg egy lefelé háromszög a chart
+        tetején, amivel lehessen pozicionálni a chartot". A háromszög NEM a
+        kurzort mozgatja, hanem azt mondja meg, a kép melyik pontján ÁLLJON a
+        kurzor, miközben a chart csúszik alatta."""
+        _j = getattr(self, "_gorget_jelolo", None)
+        if _j is None or not self._gorget.isChecked():
+            return
+        try:
+            (x0, x1), _ = self._vb.viewRange()
+        except Exception:
+            return
+        _szel = x1 - x0
+        if not (_szel > 0):
+            return
+        _a = (float(_j.value()) - x0) / _szel
+        self._gorget_arany = min(0.95, max(0.05, _a))
+        self._gorgetes_kovet()
+
+    # ── AutoFit: a látható gyertyák FÉRJENEK BELE (magasságban) ──────────
+    def _autofit_valt(self, *_a) -> None:
+        if self._autofit.isChecked():
+            self._autofit_illeszt()
+
+    def _lathato_savhatar(self):
+        """A LÁTHATÓ gyertyák ár-burkolója `(alj, csúcs)`, vagy `None`."""
+        if self._chart is None or not len(self._chart):
+            return None
+        try:
+            (x0, x1), _ = self._vb.viewRange()
+        except Exception:
+            return None
+        i0 = max(0, int(np.floor(x0)))
+        i1 = min(len(self._chart), int(np.ceil(x1)) + 1)
+        if i1 <= i0:
+            return None
+        _sz = self._chart.iloc[i0:i1]
+        _lo = float(np.nanmin(_sz["low"].to_numpy(dtype=float)))
+        _hi = float(np.nanmax(_sz["high"].to_numpy(dtype=float)))
+        if not (np.isfinite(_lo) and np.isfinite(_hi)) or _hi <= _lo:
+            return None
+        return _lo, _hi
+
+    def _autofit_illeszt(self) -> None:
+        """A függőleges nézet a látható gyertyákra — CSAK magasságban."""
+        if not self._autofit.isChecked():
+            return
+        _h = self._lathato_savhatar()
+        if _h is None:
+            return
+        _lo, _hi = _h
+        _p = (_hi - _lo) * 0.04
+        self._vb.setYRange(_lo - _p, _hi + _p, padding=0)
+
+    def _autofit_korlat(self) -> None:
+        """SZÉTHÚZÁS-korlát: a nézet nem lehet tágabb, mint amit a gyertyák
+        kitöltenek.
+
+        ⚠ A felhasználó kérése pontosan ez: „összenyomni össze szabad, és akkor
+        tartania kellene az összenyomott állapotot, de amikor szét akarom húzni,
+        akkor csak addig engedi, amíg minden gyertya látszik". Tehát a
+        BENAGYÍTÁS szabad és megmarad; csak a KIZOOMOLÁS ütközik falba."""
+        if not self._autofit.isChecked() or self._autofit_alatt:
+            return
+        _h = self._lathato_savhatar()
+        if _h is None:
+            return
+        _lo, _hi = _h
+        _p = (_hi - _lo) * 0.04
+        try:
+            _, (y0, y1) = self._vb.viewRange()
+        except Exception:
+            return
+        if y0 < _lo - _p or y1 > _hi + _p:
+            self._autofit_alatt = True
+            try:
+                self._vb.setYRange(max(y0, _lo - _p), min(y1, _hi + _p),
+                                   padding=0)
+            finally:
+                self._autofit_alatt = False
 
     def _kurzor_kepaeranya(self):
         """A kurzor helye a látható tartományon belül (0..1), vagy az alapérték."""
@@ -2685,6 +2861,14 @@ class LabAblak(QtWidgets.QMainWindow):
         _f.allit(float(self._kurzor), _oh)
         _f.setVisible(True)
 
+    def _egyenleg_lathatosag(self) -> None:
+        """A számlagörbe sora: csak ha KÉRIK és van is mit mutatni."""
+        _e = getattr(self, "_egyenleg", None)
+        if _e is None:
+            return
+        _van = bool((self._eredmeny or {}).get("res"))
+        _e.setVisible(bool(self._egyenleg_kapcs.isChecked()) and _van)
+
     def _kotes_panel(self, *_a) -> None:
         """A kötés-táblák mutatása/rejtése."""
         self._kotes_panel_lathato = bool(self._kotesek.isChecked())
@@ -2710,6 +2894,13 @@ class LabAblak(QtWidgets.QMainWindow):
 
     def _kurzor_rajz(self, vonal: bool = True) -> None:
         self._gorgetes_kovet()
+        # ⚠ LEJÁTSZÁS KÖZBEN illesztünk: a felhasználó kérése szerint a Play
+        # igazítja a magasságot. Megállított kurzornál a kézi nagyítás szabad
+        # (csak a széthúzást korlátozzuk) — különben minden mozdulatot
+        # visszarántanánk.
+        if self._ido_zito.isActive() or (self._szinkron is not None
+                                         and self._szinkron.jatszik()):
+            self._autofit_illeszt()
         van = self._kurzor is not None and self._chart is not None
         self._kurzor_vonal.setVisible(van)
         for _l in (self._bid, self._ask):
@@ -2735,6 +2926,7 @@ class LabAblak(QtWidgets.QMainWindow):
             _tol = (i - 0.5) if self._kp_aktiv() else (i + 0.5)
             self._takaro.setRegion((_tol, len(self._chart) + 5))
         self._formalodo_rajz()
+        self._egyenleg_lathatosag()
         self._ido_cimke.setText(
             self._chart.index[i].strftime("%Y-%m-%d %H:%M"))
         self._sav_frissit()
@@ -2902,6 +3094,15 @@ class Munkaterulet(QtWidgets.QMainWindow):
         self._szamla.setWordWrap(True)
         self._szamla.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
         self._dokk_fulek, self._dokk_tablak = kotes_tablak()
+        # ⚠ HARMADIK FÜL: a SZÁMLAGÖRBE. A felhasználó: „ez minden idősíkon
+        # felesleges… a nyitott, lezárt mellé lehetne tenni. Nem?" — de igen: a
+        # görbe is SZÁMLA-szintű, nem chart-szintű. Egy chart egy NÉZET
+        # ugyanarra a kísérletre; a számla állapota a kísérleté.
+        self._dokk_egyenleg = pg.PlotWidget()
+        self._dokk_egyenleg.showGrid(y=True, alpha=0.15)
+        self._dokk_egyenleg.hideAxis("bottom")
+        self._dokk_egyenleg_elemek = []
+        self._dokk_fulek.addTab(self._dokk_egyenleg, _t("lab.egyenleg"))
         _doboz = QtWidgets.QWidget()
         _el = QtWidgets.QVBoxLayout(_doboz)
         _el.setContentsMargins(0, 0, 0, 0)
@@ -3085,6 +3286,10 @@ class Munkaterulet(QtWidgets.QMainWindow):
         # ami semmit nem kapcsol, rosszabb, mint ha ott sem volna.
         w._kotesek.setChecked(False)
         w._kotesek.setVisible(False)
+        # ⚠ A SZÁMLAGÖRBE a közös dokkba került (harmadik fül) — a chart alatti
+        # csík a munkaterületen belül CSAK duplikálná, minden idősíkon.
+        w._egyenleg_kapcs.setChecked(False)
+        w._egyenleg_kapcs.setVisible(False)
         if _meglevo:
             # A második charttól az állapot-sáv is ki: háromszor vinné a helyet.
             w._savok.setChecked(False)
@@ -3149,6 +3354,13 @@ class Munkaterulet(QtWidgets.QMainWindow):
             if chart is not None else ([], [])
         LabAblak._tabla_ir(self._dokk_tablak["nyitott"], _ny)
         LabAblak._tabla_ir(self._dokk_tablak["lezart"], _le)
+        _g = None
+        if chart is not None:
+            try:
+                _g = chart._szamla_gorbe()
+            except Exception:
+                _g = None
+        egyenleg_rajzol(self._dokk_egyenleg, self._dokk_egyenleg_elemek, _g)
 
     def _aktiv_chart(self):
         sw = self._mdi.activeSubWindow()

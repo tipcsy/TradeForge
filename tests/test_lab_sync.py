@@ -422,6 +422,114 @@ if QT_OK:
     w_s.close()
 
 
+# ══ 6d. GÖRGETÉS-JELÖLŐ, AUTOFIT, és a panel-sorok ══════════════════════
+if QT_OK:
+    w_u = LabAblak(symbol=_PAR, tf_perc=15, tol="2026-08-25", ig="2026-08-26")
+    w_u.show()
+    app.processEvents()
+    if w_u._chart is None or len(w_u._chart) < 250:
+        print("KIHAGYVA (UI): nincs elég gyertya")
+    else:
+        _n = len(w_u._chart)
+        w_u._kurzor = _n // 2
+        w_u._vb.setXRange(w_u._kurzor - 100, w_u._kurzor + 100, padding=0)
+        app.processEvents()
+
+        # ── A %-mező LEGYEN OLVASHATÓ ───────────────────────────────────
+        # ⚠ 64 px-en a „100%" a két nyíl mellé szorult, és csak a nyilak
+        # látszottak — egy mező, aminek az ÉRTÉKE nem olvasható, nem vezérlő.
+        check("⚠ a kontrollpont-% mező elég széles a számnak",
+              w_u._kp_pct.width() >= 84, f"{w_u._kp_pct.width()} px")
+
+        # ── A POZICIONÁLÓ HÁROMSZÖG ─────────────────────────────────────
+        check("görgetés nélkül nincs háromszög",
+              not w_u._gorget_jelolo.isVisible())
+        w_u._gorget.setChecked(True)
+        app.processEvents()
+        check("⚠ görgetésnél MEGJELENIK a pozicionáló háromszög",
+              w_u._gorget_jelolo.isVisible())
+        check("...és a kurzoron áll",
+              abs(w_u._gorget_jelolo.value() - w_u._kurzor) < 1.0,
+              f"{w_u._gorget_jelolo.value():.1f} vs {w_u._kurzor}")
+
+        (_gx0, _gx1), _ = w_u._vb.viewRange()
+        w_u._gorget_jelolo.setValue(_gx0 + 0.30 * (_gx1 - _gx0))
+        app.processEvents()
+        check("⚠ a háromszög ELHÚZÁSA átállítja a tartó-arányt",
+              abs(w_u._gorget_arany - 0.30) < 0.02, f"{w_u._gorget_arany:.2f}")
+        w_u._kurzor += 20
+        w_u._kurzor_rajz()
+        app.processEvents()
+        (_a0, _a1), _ = w_u._vb.viewRange()
+        check("⚠ …és a lejátszás ONNANTÓL ott tartja a kurzort",
+              abs((w_u._kurzor - _a0) / (_a1 - _a0) - 0.30) < 0.02,
+              f"{(w_u._kurzor - _a0) / (_a1 - _a0):.2f}")
+
+        # ── KIKAPCSOLÁS: a kurzornak legyen hova söpörnie ────────────────
+        # ⚠ A chart helyesen megállt, de a kurzor a nézet ~75%-ánál ragadt és
+        # pár lépés után KIFUTOTT a képből — a felhasználó ezt úgy látta, hogy
+        # „nem áll vissza arra, hogy a sáv mozogjon".
+        w_u._gorget.setChecked(False)
+        app.processEvents()
+        (_b0, _b1), _ = w_u._vb.viewRange()
+        check("⚠ kikapcsolás után a kurzor BALRA kerül (van hova söpörnie)",
+              (w_u._kurzor - _b0) / (_b1 - _b0) < 0.25,
+              f"{(w_u._kurzor - _b0) / (_b1 - _b0):.2f}")
+        check("...és a háromszög eltűnik", not w_u._gorget_jelolo.isVisible())
+        _c0 = w_u._vb.viewRange()[0][0]
+        w_u._kurzor += 20
+        w_u._kurzor_rajz()
+        app.processEvents()
+        check("...a chart pedig tényleg ÁLL (a kurzor mozog)",
+              abs(w_u._vb.viewRange()[0][0] - _c0) < 1e-6)
+
+        # ── AUTOFIT ─────────────────────────────────────────────────────
+        _hat = w_u._lathato_savhatar()
+        check("a látható gyertyák sáv-határa kiszámolható", _hat is not None)
+        if _hat:
+            _lo, _hi = _hat
+            w_u._autofit.setChecked(True)
+            app.processEvents()
+            _y0, _y1 = w_u._vb.viewRange()[1]
+            check("⚠ AutoFit: MINDEN látható gyertya belefér",
+                  _y0 <= _lo and _y1 >= _hi,
+                  f"nézet {_y0:.1f}..{_y1:.1f} vs gyertyák {_lo:.1f}..{_hi:.1f}")
+            # BENAGYÍTÁS szabad, és MEGMARAD.
+            _k, _f = (_y0 + _y1) / 2, (_y1 - _y0) / 6
+            w_u._vb.setYRange(_k - _f, _k + _f, padding=0)
+            app.processEvents()
+            _z0, _z1 = w_u._vb.viewRange()[1]
+            check("⚠ …a benagyítás (összenyomás) SZABAD és megmarad",
+                  (_z1 - _z0) < (_y1 - _y0) * 0.6,
+                  f"{_z1 - _z0:.1f} vs {_y1 - _y0:.1f}")
+            # SZÉTHÚZÁS: csak a gyertyákig.
+            w_u._vb.setYRange(_lo - 500, _hi + 500, padding=0)
+            app.processEvents()
+            _q0, _q1 = w_u._vb.viewRange()[1]
+            check("⚠ …a széthúzás viszont FALBA ütközik",
+                  _q0 > _lo - 500 + 1 and _q1 < _hi + 500 - 1,
+                  f"{_q0:.1f}..{_q1:.1f}")
+            check("...de minden gyertya még belefér", _q0 <= _lo and _q1 >= _hi)
+
+        # ── A PANEL-SOROK eltüntethetők ─────────────────────────────────
+        # ⚠ Az ÜRES számlagörbe-sor (0,2–0,8 tengellyel) helyet vitt, és nem
+        # mondta meg, mi lenne benne — ugyanaz a panasz, mint a sávoknál.
+        check("⚠ eredmény nélkül a SZÁMLAGÖRBE sora sem látszik",
+              not w_u._egyenleg.isVisible())
+
+        class _Res0:
+            trades = []
+
+        w_u._eredmeny = {"res": _Res0(), "balance": 1000.0}
+        w_u._egyenleg_lathatosag()
+        app.processEvents()
+        check("⚠ eredménnyel viszont megjelenik", w_u._egyenleg.isVisible())
+        w_u._egyenleg_kapcs.setChecked(False)
+        app.processEvents()
+        check("...és kézzel is kikapcsolható", not w_u._egyenleg.isVisible())
+    w_u.close()
+
+
 # ══ 7. A HATÁR: a szinkron nem hoz be második végrehajtási utat ══════════
 _src = (ROOT / "tools" / "lab_qt.py").read_text(encoding="utf-8")
 _i = _src.index("class Szinkron(")

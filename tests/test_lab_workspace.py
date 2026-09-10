@@ -121,6 +121,17 @@ check("⚠ a chartok SAJÁT számla-sora rejtve (a területen egy van belőle)",
       all(not c._szamla.isVisible() for c in mt.chartok()))
 check("a dokkban ott a NYITOTT és a LEZÁRT tábla",
       sorted(mt._dokk_tablak) == ["lezart", "nyitott"])
+# ⚠ A SZÁMLAGÖRBE IS SZÁMLA-SZINTŰ (felhasználói jelzés: „ez minden idősíkon
+# felesleges… a nyitott, lezárt mellé lehetne tenni. Nem?"). Egy chart egy
+# NÉZET ugyanarra a kísérletre; a számla állapota a kísérleté.
+check("⚠ …és HARMADIK fülként a SZÁMLAGÖRBE",
+      mt._dokk_fulek.count() == 3
+      and mt._dokk_fulek.widget(2) is mt._dokk_egyenleg,
+      str([mt._dokk_fulek.tabText(i) for i in range(mt._dokk_fulek.count())]))
+check("⚠ a chartok SAJÁT számlagörbe-csíkja rejtve (a dokk mutatja)",
+      all(not c._egyenleg.isVisible() for c in mt.chartok()))
+check("⚠ …és a jelölője sincs ott", 
+      all(not c._egyenleg_kapcs.isVisible() for c in mt.chartok()))
 check("⚠ a dokk és a chart oszlopai EGY forrásból valók",
       mt._dokk_tablak["nyitott"].columnCount()
       == mt.chartok()[0]._tablak["nyitott"].columnCount()
