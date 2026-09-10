@@ -193,8 +193,12 @@ check("⚠ 127x-es lelet: a `_chart` a betolt() ELŐTT áll be",
       0 < _i_attr < _i_hiv, f"_chart@{_i_attr} < betolt@{_i_hiv}")
 
 _qt = (ROOT / "tools" / "lab_qt.py").read_text(encoding="utf-8")
+# ⚠ AZ ALAK VÁLTOZOTT, A SZÁNDÉK NEM. A `Belepo` v3.68.0 óta nem hordoz
+# Qt-elemet (megosztott terv: egy belépő több ablakban), ezért a hívás
+# `self._bel(b, "kock").sav(...)` lett. A lelet lényege változatlan: a sávot a
+# `sav()` állítja, nem a `LinearRegionItem.setRegion`.
 check("⚠ 124x-es lelet: a `kock` sávot a `sav()` állítja, nem a setRegion",
-      "kock.setRegion(" not in _qt and "b.kock.sav(" in _qt)
+      "kock.setRegion(" not in _qt and '"kock").sav(' in _qt)
 
 _main = (ROOT / "main.py").read_text(encoding="utf-8")
 check("⚠ 2x-es lelet: a `pack-gate` arg_spec-je 'argv'",

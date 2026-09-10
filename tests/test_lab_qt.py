@@ -19,6 +19,10 @@ megjelenítést érintette. Az adat a `lab_chart.keszit()`-ből, a futtatás a
 `lab_scenario.futtat()`-ból jön — ha a Qt-s ablak saját végrehajtást kapna,
 visszajönne a projekt visszatérő kárforrása (két forrás, ami külön romlik el).
 """
+# ⚠ A BELÉPŐ RAJZ-ELEMEI ABLAKONKÉNT (v3.68.0): ha EGY belépő TÖBB ablakban
+# látszik (M1-en nyitva, de az M5-ön és M15-ön is látni akarjuk), ablakonként
+# külön Qt-elem tartozik hozzá. A `Belepo` tiszta MODELL lett; az elemeket az
+# ablak tartja (`_w._bel(belepo, "mező")`).
 import sys
 from pathlib import Path
 
@@ -146,23 +150,23 @@ if QT_OK:
             _w._belepok_rajz()
             _b0 = _w._belepok[0]
             check("a kockázat-sáv HATÁROLT téglalap (nem végtelen régió)",
-                  isinstance(_b0.kock, lq._Savdoboz), type(_b0.kock).__name__)
+                  isinstance(_w._bel(_b0, "kock"), lq._Savdoboz), type(_w._bel(_b0, "kock")).__name__)
             _x1 = _w._tengely.hol(int(_b0.ido.timestamp()))
             check("a sáv a BELÉPŐNÉL kezdődik",
-                  abs(_b0.kock.rect().x() - _x1) < 1e-6,
-                  f"{_b0.kock.rect().x()} vs {_x1}")
+                  abs(_w._bel(_b0, "kock").rect().x() - _x1) < 1e-6,
+                  f"{_w._bel(_b0, "kock").rect().x()} vs {_x1}")
             # ⚠ Sosem rövidebb a belépőnél (hátrafelé nyúló sáv értelmetlen)
             check("a sáv vége NEM a belépő előtt van",
                   _w._sav_vege(_b0, _x1) >= _x1)
             # A lejátszó kurzora növeli a sávot (a pozíció „még nyitva van")
             _w._kurzor = _x1 + 5
             _w._sav_frissit()
-            _sz1 = _b0.kock.rect().width()
+            _sz1 = _w._bel(_b0, "kock").rect().width()
             _w._kurzor = _x1 + 20
             _w._sav_frissit()
             check("a sáv a lejátszó kurzorával NŐ",
-                  _b0.kock.rect().width() > _sz1,
-                  f"{_sz1} -> {_b0.kock.rect().width()}")
+                  _w._bel(_b0, "kock").rect().width() > _sz1,
+                  f"{_sz1} -> {_w._bel(_b0, "kock").rect().width()}")
 
             # ══ A VONALAK TÉNYLEGES MEGHÚZÁSA ═══════════════════════════
             # ⚠ EZ A TESZT EGY VALÓDI ÖSSZEOMLÁS UTÁN SZÜLETETT. A sáv
@@ -174,21 +178,22 @@ if QT_OK:
             # fogták meg. Minden `sigPositionChanged`-kezelőt el kell sütni.
             _bd = _w._belepok[0]
             _bear = _w._be_ar(_bd.ido)
-            _bd.sl_vonal.setValue(_bear - 25.0)          # → _sl_mozgott
+            _w._bel(_bd, "sl_vonal").setValue(_bear - 25.0)          # → _sl_mozgott
             check("az SL HÚZÁSA nem dob kivételt", True)
             check("...és a modell követi", abs(_bd.sl - (_bear - 25.0)) < 1e-6,
                   f"{_bd.sl} vs {_bear - 25.0}")
             check("...és a kockázat-sáv is",
-                  abs(_bd.kock.rect().height() - 25.0) < 1e-6,
-                  str(_bd.kock.rect().height()))
-            _bd.tp_vonal.setValue(_bear + 75.0)          # → _tp_mozgott
+                  abs(_w._bel(_bd, "kock").rect().height() - 25.0) < 1e-6,
+                  str(_w._bel(_bd, "kock").rect().height()))
+            _w._bel(_bd, "tp_vonal").setValue(_bear + 75.0)          # → _tp_mozgott
             check("a TP HÚZÁSA nem dob kivételt", True)
             check("...és az R-szorzó ebből számolódik",
                   abs(_bd.rr - 3.0) < 1e-6, str(_bd.rr))
-            _bd.vonal.setValue(float(_bd.vonal.value()) + 3)   # → _belepo_mozgott
+            _w._bel(_bd, "vonal").setValue(float(_w._bel(_bd, "vonal").value()) + 3)   # → _belepo_mozgott
             check("a BELÉPŐ-vonal húzása nem dob kivételt", True)
             # ⚠ Hiányzó rajz-elemmel se álljon meg a főszál
-            _bd.kock, _bd.cel = None, None
+            _w._bel_set(_bd, "kock", None)
+            _w._bel_set(_bd, "cel", None)
             _w._savok_igazit(_bd, _bear)
             check("hiányzó sáv-elem esetén sem száll el (a főszál él)", True)
             _w._belepok_rajz()
@@ -284,17 +289,17 @@ if QT_OK:
             _w._belepok_rajz()
             _bt = _w._belepok[0]
             check("a trailing két HÚZHATÓ vonalat kapott",
-                  _bt.trail_be is not None and _bt.trail_tav is not None)
-            if _bt.trail_be is not None:
+                  _w._bel(_bt, "trail_be") is not None and _w._bel(_bt, "trail_tav") is not None)
+            if _w._bel(_bt, "trail_be") is not None:
                 _atr = _w._trail_atr(_bt)
                 _bear = _w._be_ar(_bt.ido)
                 _d = 1 if _bt.irany == "BUY" else -1
                 check("az aktiválás-vonal a belépőtől 1,0 ATR-re",
-                      abs(float(_bt.trail_be.value()) - (_bear + _d * _atr)) < 1e-6,
-                      f"{_bt.trail_be.value()} vs {_bear + _d * _atr}")
+                      abs(float(_w._bel(_bt, "trail_be").value()) - (_bear + _d * _atr)) < 1e-6,
+                      f"{_w._bel(_bt, "trail_be").value()} vs {_bear + _d * _atr}")
                 check("a követés-vonal az aktiválástól 1,5 ATR-re",
-                      abs(float(_bt.trail_tav.value())
-                          - (float(_bt.trail_be.value()) - _d * 1.5 * _atr)) < 1e-6)
+                      abs(float(_w._bel(_bt, "trail_tav").value())
+                          - (float(_w._bel(_bt, "trail_be").value()) - _d * 1.5 * _atr)) < 1e-6)
                 # ⚠ A HUZAS VISSZAIRJA az ATR-szorzot: a mezo es a vonal EGY
                 # allapot ket nezete, kulonben a futtatas mast csinalna.
                 # ⚠ A VONAL MÁR NEM HÚZHATÓ. Eddig a kézi mezőbe írt vissza;
@@ -303,7 +308,7 @@ if QT_OK:
                 # A vonal MEGMARADT, mert azt MUTATJA, amit a pár mentett
                 # kockázatcsökkentése tényleg csinálni fog.
                 check("a trailing-vonal CSAK KIJELZÉS (nem húzható)",
-                      not _bt.trail_be.movable)
+                      not _w._bel(_bt, "trail_be").movable)
         except Exception as _ex:
             check("az ablak FELÉPÜL (a konstruktor végigfut)", False,
                   f"{type(_ex).__name__}: {_ex}")

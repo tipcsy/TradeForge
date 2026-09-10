@@ -244,7 +244,8 @@ class RajzTar:
     meg — és az elcsúszás csak idő kérdése volna."""
 
     def __init__(self):
-        self.lista: list = []
+        self.lista: list = []          # a RAJZOK
+        self.belepok: list = []        # és a BELÉPŐK — együtt alkotják a TERVET
         self._tagok: list = []
 
     def belep(self, ablak) -> None:
@@ -265,6 +266,7 @@ class RajzTar:
                 continue
             try:
                 a.rajzok_ujra()
+                a.belepok_ujra()
             except Exception:          # bezárt ablak ne akassza meg a többit
                 self.kilep(a)
 
@@ -716,18 +718,23 @@ class Belepo:
     ⚠ AZ IDŐ AZ AZONOSÍTÓ, nem a bar-index: idősíkot váltva az indexek
     átszámozódnak, az időpont viszont ugyanaz marad."""
 
+    # Az ABLAK ezekben a kulcsokban tartja a belépő rajz-elemeit.
+    ELEM_MEZOK = ("vonal", "sl_vonal", "tp_vonal", "kock", "cel",
+                  "trail_be", "trail_tav")
+
     def __init__(self, ido, irany, sl, rr):
         self.ido = ido
         self.irany = irany
         self.sl = sl
         self.rr = float(rr)
-        self.vonal = None       # a függőleges belépő-vonal
-        self.sl_vonal = None
-        self.tp_vonal = None
-        self.kock = None        # kockázat-sáv
-        self.cel = None         # cél-sáv
-        self.trail_be = None    # trailing INDULÁS (aktiválás) vonala
-        self.trail_tav = None   # trailing KÖVETÉSI TÁVOLSÁG vonala
+        self.nyitva = False     # a terv MEGNYITOTT pozícióvá vált-e
+        # ⚠ A RAJZ-ELEMEK MÁR NEM ITT ÜLNEK (2026-09-10). Ugyanaz a lecke, mint
+        # a `Rajz`-nál: ha EGY belépő TÖBB ablakban látszik (M1-en nyitva, de az
+        # M5-ön és az M15-ön is látni akarjuk), ablakonként KÜLÖN Qt-elem
+        # tartozik hozzá — egy mezőbe ez nem fér bele, és a második ablak NÉMÁN
+        # felülírná az elsőét. Az elemeket az ablak tartja nyilván
+        # (`LabAblak._be_elem`, `(id(Belepo), mező)` kulccsal); a `Belepo`
+        # tiszta MODELL: idő, irány, SL, R.
 
     def tp_ar(self, be_ar: float) -> float:
         d = 1 if self.irany == "BUY" else -1
@@ -843,6 +850,7 @@ class LabAblak(QtWidgets.QMainWindow):
         self._nyitott_elemek = []   # a NYITOTT pozíció vonalai (kurzor-függő)
         self._rajzok = []           # kézi rajz-elemek (trend / vízszintes / függőleges)
         self._rajz_elem = {}        # id(Rajz) -> Qt-elem (ABLAKONKÉNT)
+        self._be_elem = {}          # (id(Belepo), mező) -> Qt-elem
         self._rajz_megosztva = False
         self._fel_rajz = None       # a félbehagyott trendvonal (1. kattintás megvolt)
 
@@ -1455,13 +1463,19 @@ class LabAblak(QtWidgets.QMainWindow):
 
     def _belepok_rajz(self) -> None:
         """A terv elemeinek (újra)építése."""
-        for b in self._belepok:
-            for it in (b.vonal, b.sl_vonal, b.tp_vonal, b.kock, b.cel,
-                       b.trail_be, b.trail_tav):
-                if it is not None:
-                    self._plot.removeItem(it)
-            b.vonal = b.sl_vonal = b.tp_vonal = b.kock = b.cel = None
-            b.trail_be = b.trail_tav = None
+        # ⚠ MINDEN korábbi elemet takarítunk, NEM csak a MOST meglévő belépőkét.
+        # A régi alak a `self._belepok`-on ment végig — egy KIVETT belépő elemei
+        # így sosem kerültek le a chartról: árva vonalak és sávok maradtak rajta,
+        # amiket semmi nem tudott már megfogni. Megosztott tervnél ez azonnal
+        # látszott is: a MÁSIK ablakból törölt belépő nyoma ittmaradt. (A teszt
+        # fogta meg — a listát ott ürítettük, és az elem mégis megvolt.)
+        for _it in list(self._be_elem.values()):
+            if _it is not None:
+                try:
+                    self._plot.removeItem(_it)
+                except Exception:
+                    pass
+        self._be_elem.clear()
         if self._tengely is None:
             return
         for b in self._belepok:
@@ -1469,13 +1483,15 @@ class LabAblak(QtWidgets.QMainWindow):
             if x is None:
                 continue
             _sz = szin("lime" if b.irany == "BUY" else "magenta")
-            b.vonal = pg.InfiniteLine(
+            _vonal = pg.InfiniteLine(
                 pos=x, angle=90, movable=True, pen=pg.mkPen(_sz, width=2),
-                hoverPen=pg.mkPen(_sz, width=4), label=b.irany,
+                hoverPen=pg.mkPen(_sz, width=4),
+                label=(b.irany + (" ●" if b.nyitva else "")),
                 labelOpts={"position": 0.97, "color": _sz})
-            b.vonal.sigPositionChanged.connect(
+            _vonal.sigPositionChanged.connect(
                 lambda _l=None, _b=b: self._belepo_mozgott(_b))
-            self._plot.addItem(b.vonal)
+            self._bel_set(b, "vonal", _vonal)
+            self._plot.addItem(_vonal)
             if b.sl is None:
                 continue
             _be = self._be_ar(b.ido)
@@ -1485,36 +1501,40 @@ class LabAblak(QtWidgets.QMainWindow):
             # Több belépőnél N pár vízszintes vonal olvashatatlan lenne; a
             # kiválasztás (kattintás a belépő-vonalra) tartja tisztán a képet.
             _akt = (b is self._valasztott) or (len(self._belepok) == 1)
-            b.sl_vonal = pg.InfiniteLine(
+            _slv = pg.InfiniteLine(
                 pos=b.sl, angle=0, movable=_akt,
                 pen=pg.mkPen(szin("red"), width=2 if _akt else 1),
                 hoverPen=pg.mkPen("#ff7777", width=3),
                 label="SL {value:0.2f}",
                 labelOpts={"position": 0.9, "color": szin("red")})
-            b.tp_vonal = pg.InfiniteLine(
+            _tpv = pg.InfiniteLine(
                 pos=b.tp_ar(_be), angle=0, movable=_akt,
                 pen=pg.mkPen(szin("green"), width=2 if _akt else 1),
                 hoverPen=pg.mkPen("#77ff77", width=3),
                 label=f"TP {b.rr:0.2f}R",
                 labelOpts={"position": 0.9, "color": szin("green")})
-            b.sl_vonal.sigPositionChanged.connect(
+            self._bel_set(b, "sl_vonal", _slv)
+            self._bel_set(b, "tp_vonal", _tpv)
+            _slv.sigPositionChanged.connect(
                 lambda _l=None, _b=b: self._sl_mozgott(_b))
-            b.tp_vonal.sigPositionChanged.connect(
+            _tpv.sigPositionChanged.connect(
                 lambda _l=None, _b=b: self._tp_mozgott(_b))
             # ⚠ A SÁV CSAK A POZÍCIÓ ÉLETTARTAMÁRA. Korábban `LinearRegionItem`
             # volt, ami KONSTRUKCIÓ SZERINT végigér a képen — így a sáv olyan
             # gyertyákra is ráfeküdt, ahol a pozíció már/még nem élt, és nem
             # lehetett ránézésre megmondani, meddig tartott a kötés.
             _x2 = self._sav_vege(b, x)
-            b.kock = _Savdoboz(x, min(_be, b.sl), _x2, max(_be, b.sl),
-                               pg.mkBrush(220, 0, 0, 38))
-            b.cel = _Savdoboz(x, min(_be, b.tp_ar(_be)), _x2,
-                              max(_be, b.tp_ar(_be)),
-                              pg.mkBrush(0, 170, 0, 38))
-            for it in (b.kock, b.cel):
+            _kock = _Savdoboz(x, min(_be, b.sl), _x2, max(_be, b.sl),
+                              pg.mkBrush(220, 0, 0, 38))
+            _cel = _Savdoboz(x, min(_be, b.tp_ar(_be)), _x2,
+                             max(_be, b.tp_ar(_be)),
+                             pg.mkBrush(0, 170, 0, 38))
+            self._bel_set(b, "kock", _kock)
+            self._bel_set(b, "cel", _cel)
+            for it in (_kock, _cel):
                 it.setZValue(-20)
                 self._plot.addItem(it)
-            for it in (b.sl_vonal, b.tp_vonal):
+            for it in (_slv, _tpv):
                 self._plot.addItem(it)
             if _akt:
                 self._trail_vonalak(b, _be)
@@ -1560,7 +1580,7 @@ class LabAblak(QtWidgets.QMainWindow):
                 pen=pg.mkPen(szin(_szn), width=1, style=QtCore.Qt.DashDotLine),
                 label=_cim,
                 labelOpts={"position": 0.25, "color": szin(_szn)})
-            setattr(b, _nev, _l)
+            self._bel_set(b, _nev, _l)
             self._plot.addItem(_l, ignoreBounds=True)
 
     def _trail_mozgott(self, b: "Belepo", nev: str) -> None:
@@ -1570,14 +1590,14 @@ class LabAblak(QtWidgets.QMainWindow):
         if _be is None or _atr <= 0:
             return
         d = 1 if b.irany == "BUY" else -1
-        if nev == "trail_be" and b.trail_be is not None:
-            _uj = max(0.0, d * (float(b.trail_be.value()) - _be) / _atr)
+        if nev == "trail_be" and self._bel(b, "trail_be") is not None:
+            _uj = max(0.0, d * (float(self._bel(b, "trail_be").value()) - _be) / _atr)
             if "trail_activation_atr" in self._rr_mezok:
                 self._rr_mezok["trail_activation_atr"].setText(f"{_uj:.2f}")
-        elif nev == "trail_tav" and b.trail_tav is not None:
-            _akt = (float(b.trail_be.value()) if b.trail_be is not None
+        elif nev == "trail_tav" and self._bel(b, "trail_tav") is not None:
+            _akt = (float(self._bel(b, "trail_be").value()) if self._bel(b, "trail_be") is not None
                     else _be)
-            _uj = max(0.0, d * (_akt - float(b.trail_tav.value())) / _atr)
+            _uj = max(0.0, d * (_akt - float(self._bel(b, "trail_tav").value())) / _atr)
             if "trail_distance_atr" in self._rr_mezok:
                 self._rr_mezok["trail_distance_atr"].setText(f"{_uj:.2f}")
         # ⚠ A TERV MEGVÁLTOZOTT: a korábbi futtatás eredménye már nem ehhez a
@@ -1709,7 +1729,7 @@ class LabAblak(QtWidgets.QMainWindow):
                  if _lat is None and 0 <= int(self._kurzor) < len(self._chart)
                  else None)
         for b in self._belepok:
-            if b.trail_be is None and b.trail_tav is None:
+            if self._bel(b, "trail_be") is None and self._bel(b, "trail_tav") is None:
                 continue
             _mutat = True
             if _most is not None:
@@ -1724,7 +1744,7 @@ class LabAblak(QtWidgets.QMainWindow):
                             break
                     except (TypeError, ValueError):
                         continue
-            for it in (b.trail_be, b.trail_tav):
+            for it in (self._bel(b, "trail_be"), self._bel(b, "trail_tav")):
                 if it is not None:
                     it.setVisible(_mutat)
 
@@ -1734,13 +1754,13 @@ class LabAblak(QtWidgets.QMainWindow):
         if self._tengely is None:
             return
         for b in self._belepok:
-            if b.kock is None and b.cel is None:
+            if self._bel(b, "kock") is None and self._bel(b, "cel") is None:
                 continue
             x1 = self._tengely.hol(int(b.ido.timestamp()))
             if x1 is None:
                 continue
             _x2 = self._sav_vege(b, x1)
-            for it in (b.kock, b.cel):
+            for it in (self._bel(b, "kock"), self._bel(b, "cel")):
                 if it is not None:
                     it.vege(_x2)
 
@@ -1797,6 +1817,21 @@ class LabAblak(QtWidgets.QMainWindow):
             self._rajz_elem[id(r)] = _el
             self._plot.addItem(_el)
 
+    # ── A belépő rajz-elemei ABLAKONKÉNT ─────────────────────────────────
+    def _bel(self, b, nev: str):
+        """A `b` belépő `nev` elemének Qt-objektuma EBBEN az ablakban."""
+        return self._be_elem.get((id(b), nev))
+
+    def _bel_set(self, b, nev: str, elem) -> None:
+        if elem is None:
+            self._be_elem.pop((id(b), nev), None)
+        else:
+            self._be_elem[(id(b), nev)] = elem
+
+    def belepok_ujra(self) -> None:
+        """A közös tár kéri: rajzold újra a belépőket (publikus felület)."""
+        self._belepok_rajz()
+
     def rajzok_ujra(self) -> None:
         """A közös tár kéri: rajzold újra a rajzokat (publikus felület)."""
         self._rajzok_rajza()
@@ -1818,7 +1853,11 @@ class LabAblak(QtWidgets.QMainWindow):
             for r in self._rajzok:
                 if r not in _tar.lista:
                     _tar.lista.append(r)
+            for _b in self._belepok:
+                if _b not in _tar.belepok:
+                    _tar.belepok.append(_b)
             self._rajzok = _tar.lista
+            self._belepok = _tar.belepok
             self._rajz_megosztva = True
             _tar.belep(self)
             _tar.valtozott(forras=None)      # mindenki lássa az újakat
@@ -1826,7 +1865,9 @@ class LabAblak(QtWidgets.QMainWindow):
             _tar.kilep(self)
             self._rajz_megosztva = False
             self._rajzok = list(self._rajzok)     # MÁSOLAT
+            self._belepok = list(self._belepok)
         self._rajzok_rajza()
+        self._belepok_rajz()
 
     def _rajz_mozgott(self, r: "Rajz") -> None:
         """Húzás után VISSZAÍRJUK az időt/árat — a modell a mérvadó, nem a kép.
@@ -1903,7 +1944,7 @@ class LabAblak(QtWidgets.QMainWindow):
             koz.total_seconds() * arany)))).floor("min")
 
     def _belepo_mozgott(self, b: "Belepo") -> None:
-        t = self._ido_x(b.vonal.value())
+        t = self._ido_x(self._bel(b, "vonal").value())
         if t is None or t == b.ido:
             return
         b.ido = t
@@ -1911,8 +1952,8 @@ class LabAblak(QtWidgets.QMainWindow):
         _be = self._be_ar(t)
         if _be is not None and b.sl is not None:
             self._savok_igazit(b, _be)
-            if b.tp_vonal is not None:
-                b.tp_vonal.setValue(b.tp_ar(_be))
+            if self._bel(b, "tp_vonal") is not None:
+                self._bel(b, "tp_vonal").setValue(b.tp_ar(_be))
 
     def _savok_igazit(self, b: "Belepo", be_ar: float) -> None:
         """A kockázat- és cél-sáv ÁR-tartományának igazítása a húzás után.
@@ -1924,20 +1965,20 @@ class LabAblak(QtWidgets.QMainWindow):
         következő teljes rajzolásnál úgyis helyreáll."""
         if b.sl is None:
             return
-        if b.kock is not None:
-            b.kock.sav(be_ar, b.sl)
-        if b.cel is not None:
-            b.cel.sav(be_ar, b.tp_ar(be_ar))
+        if self._bel(b, "kock") is not None:
+            self._bel(b, "kock").sav(be_ar, b.sl)
+        if self._bel(b, "cel") is not None:
+            self._bel(b, "cel").sav(be_ar, b.tp_ar(be_ar))
 
     def _sl_mozgott(self, b: "Belepo") -> None:
-        b.sl = float(b.sl_vonal.value())
+        b.sl = float(self._bel(b, "sl_vonal").value())
         _be = self._be_ar(b.ido)
         if _be is None:
             return
         # ⚠ A TP A STOP FÜGGVÉNYE: húzod a pirosat, mozog a zöld.
-        b.tp_vonal.blockSignals(True)
-        b.tp_vonal.setValue(b.tp_ar(_be))
-        b.tp_vonal.blockSignals(False)
+        self._bel(b, "tp_vonal").blockSignals(True)
+        self._bel(b, "tp_vonal").setValue(b.tp_ar(_be))
+        self._bel(b, "tp_vonal").blockSignals(False)
         self._savok_igazit(b, _be)
         self._terv_valtozott(rajzol=False)
 
@@ -1949,8 +1990,8 @@ class LabAblak(QtWidgets.QMainWindow):
         if _tav <= 0:
             return
         d = 1 if b.irany == "BUY" else -1
-        b.rr = max(0.0, d * (float(b.tp_vonal.value()) - _be) / _tav)
-        b.tp_vonal.label.setFormat(f"TP {b.rr:0.2f}R")
+        b.rr = max(0.0, d * (float(self._bel(b, "tp_vonal").value()) - _be) / _tav)
+        self._bel(b, "tp_vonal").label.setFormat(f"TP {b.rr:0.2f}R")
         self._savok_igazit(b, _be)
         self._terv_valtozott(rajzol=False)
 
@@ -1961,6 +2002,11 @@ class LabAblak(QtWidgets.QMainWindow):
             self._terv_valtozott(rajzol=False)
 
     def _terv_valtozott(self, rajzol: bool = True) -> None:
+        # ⚠ A TERV a többi megosztott ablakban is változzon: egy M1-en nyitott
+        # pozíciónak az M5-ön és az M15-ön is látszania kell (felhasználói
+        # kérés). A `Belepo` időben él, tehát idősík-független.
+        if self._rajz_megosztva:
+            rajztar().valtozott(forras=self)
         """A terv változott → a korábbi futtatás érvénytelen."""
         self._eredmeny = None
         for it in getattr(self, "_egyenleg_elemek", []):

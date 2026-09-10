@@ -436,6 +436,41 @@ check("⚠ …és onnantól a közösből törlés NEM érinti",
 _rb._rajzok = []
 _rb._rajzok_rajza()
 
+# ── A BELÉPŐK IS KÖZÖSEK ────────────────────────────────────────────────
+# ⚠ A kérés: „ha ezt is megnyitottuk M1-en, akkor annak is illene látszódnia a
+# többi idősíkon". A `Belepo` — mint a `Rajz` — IDŐBEN él, tehát idősík-
+# független; ugyanaz az objektum három ablakban, ablakonként SAJÁT Qt-elemmel.
+from tools.lab_qt import Belepo
+
+_ra._rajz_kozos.setChecked(True)
+_rb._rajz_kozos.setChecked(True)
+app.processEvents()
+check("⚠ a BELÉPŐ-lista is közös", _ra._belepok is _rb._belepok)
+
+_bi = len(_ra._chart) // 2
+_bel = Belepo(_ra._chart.index[_bi],
+              "BUY", float(_ra._chart["close"].iloc[_bi]) - 30.0, 2.0)
+_ra._belepok.append(_bel)
+_ra._belepok_rajz()
+_ra._terv_valtozott()
+app.processEvents()
+check("⚠ az egyik ablakban lerakott belépő a MÁSIKON is megjelenik",
+      _rb._bel(_bel, "vonal") is not None)
+check("⚠ …de KÜLÖN Qt-elemmel (egy mezőbe három nem férne)",
+      _ra._bel(_bel, "vonal") is not _rb._bel(_bel, "vonal"))
+check("a modell viszont EGY objektum", _ra._belepok[0] is _rb._belepok[0])
+
+_ra._belepok.remove(_bel)
+_ra._belepok_rajz()
+_ra._terv_valtozott()
+app.processEvents()
+check("⚠ a törlése is MINDENHOL törli",
+      len(_rb._belepok) == 0 and _rb._bel(_bel, "vonal") is None)
+
+# A megnyitás-jelző a modellen ül (a doboz-felület ide fog kötni).
+check("a Belepo ismeri a MEGNYITOTT állapotot", hasattr(_bel, "nyitva")
+      and _bel.nyitva is False)
+
 # Az „Add BE" mód egyelőre lekerült (felhasználói kérés).
 check("⚠ az Add-BE mód EGYELŐRE nincs a felületen",
       "BE" not in _ra._mod_gombok, str(sorted(_ra._mod_gombok)))
