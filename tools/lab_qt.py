@@ -170,6 +170,20 @@ class Szinkron(QtCore.QObject):
             except Exception:                 # egy bezárt ablak ne állítsa meg
                 self.kilep(a)
 
+    def kp_allit(self, be: bool, pct: int, forras=None) -> None:
+        """A kontrollpont-beállítás KÖZÖS: egy ablakban bekapcsolva mind bont.
+
+        ⚠ Enélkül az M1-en lejátszva az M15/H1 ablak KÉSZ gyertyát mutatott,
+        holott a felhasználó épp a kialakulását akarta látni — a jelölő
+        ablakonként külön ült, és csak ott volt bekapcsolva, ahol rákattintott."""
+        for a in list(self._tagok):
+            if a is forras:
+                continue
+            try:
+                a.kp_beallit(be, pct)
+            except Exception:
+                self.kilep(a)
+
     def ido(self):
         """A közös óra állása. Ha még nem járt, a tagok kurzorából indul."""
         if self._ido is not None:
@@ -421,6 +435,88 @@ def kontroll_pontok(al_barok, szazalek: float = 100.0):
     return _np.asarray(ut, dtype=float)
 
 
+def tick_pontok(arak, szazalek: float = 100.0):
+    """A gyertyán BELÜLI árút TICKEKBŐL — az M1 gyertya „kontrollpontjai".
+
+    ⚠ M1-EN A TICK A FINOMABB ADAT. A felhasználó: „a legfinomabb jelzés az a
+    tick. Nekem M1-en ha azt látom, hogy Kontrollpont 100%, akkor az egyenrangú
+    a tickkel!" Tickből nincs OHLC-sorrend-találgatás: az árút maga a
+    tick-sorozat, a % pedig ritkítás — de a RITKÍTÁS ITT SEM VÁGHAT LE CSÚCSOT
+    (ugyanaz az elv, mint a `kontroll_pontok`-nál): az első, az utolsó, a
+    legmagasabb és a legalacsonyabb tick mindig benne marad."""
+    import numpy as _np
+    a = _np.asarray(arak, dtype=float)
+    n = len(a)
+    if n == 0:
+        return _np.empty(0, dtype=float)
+    try:
+        pct = float(szazalek)
+    except (TypeError, ValueError):
+        pct = 100.0
+    pct = min(100.0, max(1.0, pct))
+    if pct >= 100.0 or n <= 4:
+        return a
+    _kell = max(1, int(round(n * pct / 100.0)))
+    _lepes = max(1, int(round(n / _kell)))
+    v = list(range(0, n, _lepes)) + [0, n - 1, int(_np.argmax(a)),
+                                     int(_np.argmin(a))]
+    return a[sorted(set(v))]
+
+
+TICK_DIR = ROOT / "data" / "ticks"
+
+
+def tick_nap(sym: str, nap, point_size: float):
+    """EGY NAP tickjei `(idő-index UTC, bid-ár)` DataFrame-ként — vagy `None`.
+
+    ⚠ A TICK-TÁR 19 GB, ezért NAPONKÉNT olvasunk, és a hívó gyorsítótáraz. A
+    napi fájl (`_napok/<nap>.parquet`) az olcsó út; ha a nap már havi fájlba
+    olvadt, a havi fájlból SZŰRVE olvasunk (`filters` → row-group-statisztika
+    alapján a pyarrow csak az érintett csoportokat bontja ki). Az ár PONTBAN
+    tárolt egész (`bid_pt`) — itt váltjuk vissza, ugyanúgy, mint a
+    gyertya-építő (`tools/build_bars._bars_from_ticks`)."""
+    try:
+        _nap = pd.Timestamp(nap).tz_localize(None).normalize()
+    except (TypeError, ValueError):
+        return None
+    _d = TICK_DIR / sym
+    if not _d.is_dir():
+        return None
+    _napi = _d / "_napok" / ("%s.parquet" % _nap.strftime("%Y-%m-%d"))
+    _havi = _d / ("%s.parquet" % _nap.strftime("%Y-%m"))
+    _t0 = int(_nap.tz_localize("UTC").timestamp() * 1000)
+    _t1 = _t0 + 86_400_000
+    try:
+        if _napi.exists():
+            df = pd.read_parquet(_napi, columns=["time_msc", "bid_pt"])
+        elif _havi.exists():
+            df = pd.read_parquet(_havi, columns=["time_msc", "bid_pt"],
+                                 filters=[("time_msc", ">=", _t0),
+                                          ("time_msc", "<", _t1)])
+        else:
+            return None
+    except Exception as ex:
+        log.warning("%s — a %s napi tick-adat nem olvasható: %s",
+                    sym, _nap.date(), ex)
+        return None
+    if df is None or df.empty:
+        return None
+    df = df[(df["time_msc"] >= _t0) & (df["time_msc"] < _t1)]
+    if df.empty:
+        return None
+    _idx = pd.to_datetime(df["time_msc"].to_numpy(), unit="ms", utc=True)
+    _bid = df["bid_pt"].to_numpy(dtype=float) * float(point_size)
+    ki = pd.DataFrame({"bid": _bid}, index=_idx)
+    return ki.sort_index()
+
+
+def tick_van(sym: str) -> bool:
+    """Van-e egyáltalán tick-tár a párhoz?"""
+    _d = TICK_DIR / sym
+    return _d.is_dir() and (any(_d.glob("*.parquet"))
+                            or any((_d / "_napok").glob("*.parquet")))
+
+
 def reszgyertya(pontok, n: int):
     """A FORMÁLÓDÓ gyertya `(open, high, low, close)`-a az `n`-edik pontig.
 
@@ -595,6 +691,29 @@ class Gyertyak(pg.GraphicsObject):
         return self._teljes
 
 
+class Nezet(pg.ViewBox):
+    """ViewBox, ami külön jelzi az EGÉRREL HÚZÁST.
+
+    ⚠ A `sigRangeChangedManually` a görgőt (nagyítás) és a húzást (eltolás)
+    EGYFORMÁN jelzi. A görgetés-módban a kettő mást jelent: húzáskor a
+    felhasználó TEKER (a play-vonalat viszi), nagyításkor csak közelebb
+    hajol — ilyenkor a kurzor maradjon, ahol volt. Ezért kell egy jelzés,
+    ami csak a húzásról szól."""
+    sigHuzva = QtCore.Signal()
+
+    huzas = False                 # igaz, amíg az ősosztály a húzást dolgozza fel
+
+    def mouseDragEvent(self, ev, axis=None):
+        self.huzas = True
+        try:
+            super().mouseDragEvent(ev, axis)
+        finally:
+            self.huzas = False
+        if (ev.button() == QtCore.Qt.LeftButton
+                and self.state.get("mouseMode") != pg.ViewBox.RectMode):
+            self.sigHuzva.emit()
+
+
 class IdoTengely(pg.AxisItem):
     """Dátum a vízszintes tengelyen — bar-INDEXBŐL.
 
@@ -709,6 +828,59 @@ class _Savdoboz(QtWidgets.QGraphicsRectItem):
         a `_belepok_rajz`-ban van, és az másodpercenként több százszor futna."""
         r = self.rect()
         self.setRect(QtCore.QRectF(r.x(), r.y(), max(0.0, x2 - r.x()), r.height()))
+
+
+class Szakasz(pg.InfiniteLine):
+    """HÚZHATÓ vonal, ami csak `a..b` között látszik (és fogható).
+
+    ⚠ MIÉRT NEM SIMA `InfiniteLine`. Az KONSTRUKCIÓ SZERINT végigér a képen —
+    egy stop, ami a pozíció zárása UTÁN is ott fekszik a charton, azt sugallja,
+    hogy a pozíció még él (a felhasználó jelzése: „bezárta (SL), de a zöld és
+    piros vonal továbbra is élt… a nyitás pillanatától a zárás pillanatáig
+    kellene élnie"). Három belépőnél ráadásul hat végtelen vonal olvashatatlan.
+
+    ⚠ MIÉRT NEM `LineSegmentROI`. Az két sarokfogóval jön, és a sarok az ÁRAT
+    is vinné — itt a vonal csak függőlegesen (árban) húzható, a hossza pedig a
+    pozíció élettartama, nem kézi beállítás. Az `InfiniteLine` húzása, címkéje
+    és jelzései maradnak; csak a KITERJEDÉSÉT kötjük adat-koordinátához.
+
+    A határ a vonal SAJÁT tengelyén értendő: vízszintes vonalnál (angle=0)
+    x-ben (bar-index), függőlegesnél (angle=90) y-ban (ár). Belül a
+    `span`-frakcióra fordítjuk, amit az ősosztály amúgy is ismer — így a
+    rajzolás, a találat-terület és a címke helye mind követi."""
+
+    def __init__(self, a, b, **kw):
+        self._hatar = (float(a), float(b))
+        super().__init__(**kw)
+
+    def hatar(self, a, b) -> None:
+        """A kiterjedés átállítása (lejátszás közben körönként hívható)."""
+        _uj = (float(a), float(b))
+        if _uj == self._hatar:
+            return
+        self._hatar = _uj
+        self.viewTransformChanged()          # a rajz-terület újraszámolása
+        _c = getattr(self, "label", None)    # csak címkés vonalnak van
+        if _c is not None:
+            _c.valueChanged()                # …és a címke utána
+
+    def hatarok(self) -> tuple:
+        return self._hatar
+
+    def _computeBoundingRect(self):
+        vr = self.viewRect()
+        if vr is not None and vr.width() > 0:
+            a, b = self._hatar
+            if self.angle == 90:
+                la = self.mapFromView(QtCore.QPointF(0.0, a)).x()
+                lb = self.mapFromView(QtCore.QPointF(0.0, b)).x()
+            else:
+                la = self.mapFromView(QtCore.QPointF(a, 0.0)).x()
+                lb = self.mapFromView(QtCore.QPointF(b, 0.0)).x()
+            fa = (min(la, lb) - vr.left()) / vr.width()
+            fb = (max(la, lb) - vr.left()) / vr.width()
+            self.span = (max(0.0, min(1.0, fa)), max(0.0, min(1.0, fb)))
+        return super()._computeBoundingRect()
 
 
 class Belepo:
@@ -846,6 +1018,8 @@ class LabAblak(QtWidgets.QMainWindow):
         self._kp_bar = None         # melyik barhoz tartozik
         self._kp_idx = 0            # hányadik ponton állunk
         self._m1_finom = None       # a finomabb (M1) gyertyák — lustán
+        self._tick_nap = None       # az M1 alá: EGY nap tickjei — lustán
+        self._kp_szinkron_alatt = False
         self._belepok = []
         self._be_ido = None
         self._eredmeny = None
@@ -982,6 +1156,18 @@ class LabAblak(QtWidgets.QMainWindow):
         # `_rr_mezok` üres marad, hogy a mentett forgatókönyvek betöltése
         # (`forgatokonyv_betolt`) továbbra is működjön.
         self._rr_mezok = {}
+        # ⚠ AZ AUTOMATIZMUS LÁTHATÓ ÉS ALAPBÓL KI. A v3.63.0 a pár mentett
+        # kalibrációját NÉMÁN alkalmazta (`rr_preset: "off"` — aminek a NEVE
+        # „ki", a JELENTÉSE viszont „BE + trailing"; a név-csapdát a backteszt
+        # kódja is külön megjegyzi). A felhasználó ezt így látta: „valami
+        # automatizmus túl korán lezárta (pozitívba!), pedig nincs bekapcsolva
+        # sem entry-to-BE" — a 0,5 ATR-es trailing zárta. A laborban a kézi
+        # kezelés a lényeg, ezért a pár BE/trailingje CSAK KÉRÉSRE fut, és
+        # akkor látszik is a két vonala.
+        self._rr_auto = QtWidgets.QCheckBox(_t("lab.rr_auto"))
+        self._rr_auto.setToolTip(_t("lab.rr_auto_tipp"))
+        self._rr_auto.stateChanged.connect(lambda *_: self._terv_valtozott())
+        s2.addWidget(self._rr_auto)
 
         self._rajz_kozos = QtWidgets.QCheckBox(_t("lab.rajz_kozos"))
         self._rajz_kozos.setToolTip(_t("lab.rajz_kozos_tipp"))
@@ -1056,7 +1242,7 @@ class LabAblak(QtWidgets.QMainWindow):
         # olvasható, nem vezérlő, csak dísz.
         self._kp_pct.setFixedWidth(92)
         self._kp_pct.setToolTip(_t("lab.kp_pct_tipp"))
-        self._kp_pct.valueChanged.connect(lambda *_: self._kp_ujraszamol())
+        self._kp_pct.valueChanged.connect(self._kp_pct_valt)
         s3.addWidget(self._kp_pct)
         # ⚠ A SZÁMLAGÖRBE SORA is eltüntethető (felhasználói jelzés: az üres
         # panel a 0,2–0,8 tengelyével helyet vitt, és nem mondta meg, mi lenne
@@ -1104,7 +1290,8 @@ class LabAblak(QtWidgets.QMainWindow):
         pg.setConfigOptions(antialias=False, background="#101418",
                             foreground="#c8c8c8")
         self._x_tengely = IdoTengely(orientation="bottom")
-        self._plot = pg.PlotWidget(axisItems={"bottom": self._x_tengely})
+        self._plot = pg.PlotWidget(axisItems={"bottom": self._x_tengely},
+                                   viewBox=Nezet())
         self._plot.showGrid(x=True, y=True, alpha=0.15)
         self._vb = self._plot.getViewBox()
         self._plot.scene().sigMouseClicked.connect(self._kattintas)
@@ -1219,6 +1406,19 @@ class LabAblak(QtWidgets.QMainWindow):
         self._vb.sigRangeChanged.connect(lambda *_: self._cimke_helyre())
         self._vb.sigRangeChanged.connect(lambda *_: self._jelolo_helyre())
         self._vb.sigRangeChanged.connect(lambda *_: self._autofit_korlat())
+        # ⚠ AZ ABLAK ÁTMÉRETEZÉSE IS ILLESZTÉS. Az AutoFit eddig csak lejátszás
+        # közben és bekapcsoláskor futott; a felhasználó nagyobbra húzta a
+        # chartot, és a gyertyák a képernyő közepén maradtak összenyomva.
+        self._vb.sigResized.connect(lambda *_: self._autofit_illeszt())
+        # ⚠ GÖRGETÉS-MÓDBAN A HÚZÁS = TEKERÉS. A play-vonal a képen egy fix
+        # helyen áll (a háromszögnél); ha a chartot elhúzod alatta, más gyertya
+        # kerül a vonal alá — tehát a kurzor odalép. Így a felület megfogásával
+        # előre-hátra lehet tekerni. Nagyításkor (görgő) viszont a kurzor
+        # marad, és a nézet igazodik hozzá.
+        self._tekeres_alatt = False
+        self._vb.sigHuzva.connect(self._gorget_tekeres)
+        self._vb.sigRangeChangedManually.connect(
+            lambda *_: self._gorget_nagyitas_utan())
 
     def _mod_valt(self, ertek: str) -> None:
         """Kattintás-mód váltása (egyszerre csak egy aktív)."""
@@ -1507,14 +1707,18 @@ class LabAblak(QtWidgets.QMainWindow):
             # Több belépőnél N pár vízszintes vonal olvashatatlan lenne; a
             # kiválasztás (kattintás a belépő-vonalra) tartja tisztán a képet.
             _akt = (b is self._valasztott) or (len(self._belepok) == 1)
-            _slv = pg.InfiniteLine(
-                pos=b.sl, angle=0, movable=_akt,
+            # ⚠ A VONAL A POZÍCIÓ ÉLETTARTAMÁRA ÉR (mint a sáv): a belépőtől a
+            # zárásig / a kurzorig. Végtelen vonalnál a lezárt pozíció stopja
+            # is a képen maradt — lásd `Szakasz`.
+            _x2 = self._sav_vege(b, x)
+            _slv = Szakasz(
+                x, _x2, pos=b.sl, angle=0, movable=_akt,
                 pen=pg.mkPen(szin("red"), width=2 if _akt else 1),
                 hoverPen=pg.mkPen("#ff7777", width=3),
                 label="SL {value:0.2f}",
                 labelOpts={"position": 0.9, "color": szin("red")})
-            _tpv = pg.InfiniteLine(
-                pos=b.tp_ar(_be), angle=0, movable=_akt,
+            _tpv = Szakasz(
+                x, _x2, pos=b.tp_ar(_be), angle=0, movable=_akt,
                 pen=pg.mkPen(szin("green"), width=2 if _akt else 1),
                 hoverPen=pg.mkPen("#77ff77", width=3),
                 label=f"TP {b.rr:0.2f}R",
@@ -1529,7 +1733,6 @@ class LabAblak(QtWidgets.QMainWindow):
             # volt, ami KONSTRUKCIÓ SZERINT végigér a képen — így a sáv olyan
             # gyertyákra is ráfeküdt, ahol a pozíció már/még nem élt, és nem
             # lehetett ránézésre megmondani, meddig tartott a kötés.
-            _x2 = self._sav_vege(b, x)
             # ⚠ A VONALAK MINDENHOL, A DOBOZ CSAK AZ AKTÍV ABLAKBAN
             # (felhasználói döntés). Egy belépő három ablakban látszik, de három
             # nagy színes kockázat/cél-sáv elnyomná a chartokat; a vonalak
@@ -1614,7 +1817,11 @@ class LabAblak(QtWidgets.QMainWindow):
         # ⚠ Se árat, se belépő-időt nem mozgat — a pozíció VÉGÉT állítja. Ezért
         # nem sarok-pont, hanem függőleges vonal: egy sarokfogóról a felhasználó
         # joggal várná, hogy az árat is vigye.
-        _szel = pg.InfiniteLine(
+        # ⚠ CSAK A DOBOZ MAGASSÁGÁBAN. Teljes képmagasságú vonalként a jobb
+        # szél egy újabb csík volt a képen („kezd túl sok vonal lenni").
+        _tp = b.tp_ar(be_ar)
+        _szel = Szakasz(
+            min(b.sl, _tp), max(b.sl, _tp),
             pos=x2, angle=90, movable=True,
             pen=pg.mkPen("#8aa0b8", width=1, style=QtCore.Qt.DashLine),
             hoverPen=pg.mkPen(szin("yellow"), width=3))
@@ -1675,6 +1882,12 @@ class LabAblak(QtWidgets.QMainWindow):
             _sav = self._bel(b, _m)
             if _sav is not None:
                 _sav.vege(_x2)
+        _x1 = self._tengely.hol(int(b.ido.timestamp())) if self._tengely else None
+        if _x1 is not None:
+            for _m in ("sl_vonal", "tp_vonal"):
+                _v = self._bel(b, _m)
+                if isinstance(_v, Szakasz):
+                    _v.hatar(_x1, _x2)
         _be = self._be_ar(b.ido)
         if _be is not None:
             self._doboz_igazit(b, _be)
@@ -1932,7 +2145,8 @@ class LabAblak(QtWidgets.QMainWindow):
         if self._tengely is None:
             return
         for b in self._belepok:
-            if self._bel(b, "kock") is None and self._bel(b, "cel") is None:
+            if (self._bel(b, "kock") is None and self._bel(b, "cel") is None
+                    and self._bel(b, "sl_vonal") is None):
                 continue
             x1 = self._tengely.hol(int(b.ido.timestamp()))
             if x1 is None:
@@ -1941,6 +2155,9 @@ class LabAblak(QtWidgets.QMainWindow):
             for it in (self._bel(b, "kock"), self._bel(b, "cel")):
                 if it is not None:
                     it.vege(_x2)
+            for it in (self._bel(b, "sl_vonal"), self._bel(b, "tp_vonal")):
+                if isinstance(it, Szakasz):
+                    it.hatar(x1, _x2)
             # ⚠ A DOBOZ IS KÖVESSE. Enélkül a fogó és a gomb a kurzortól
             # elszakadva ott maradna, ahol a rajzoláskor volt — és a gomb egy
             # olyan helyen fogadna kattintást, ahol már nincs doboz.
@@ -2168,6 +2385,10 @@ class LabAblak(QtWidgets.QMainWindow):
             self._bel(b, "kock").sav(be_ar, b.sl)
         if self._bel(b, "cel") is not None:
             self._bel(b, "cel").sav(be_ar, b.tp_ar(be_ar))
+        _szel = self._bel(b, "szel")
+        if isinstance(_szel, Szakasz):
+            _tp = b.tp_ar(be_ar)
+            _szel.hatar(min(b.sl, _tp), max(b.sl, _tp))
         # ⚠ A SZÁM IS KÖVESSE A VONALAT. A doboz értelme, hogy húzás KÖZBEN
         # mutassa, mibe kerül a döntés; egy csak-elengedéskor frissülő felirat
         # pont a hasznos pillanatban hallgatna.
@@ -2299,6 +2520,10 @@ class LabAblak(QtWidgets.QMainWindow):
                 continue
         if ki:
             return ki
+        # ⚠ KAPCSOLÓ NÉLKÜL ÜRES — és a futtatás `none` presetet kap, tehát a
+        # stop ott marad, ahová a felhasználó tette (lásd `_forgatokonyv`).
+        if not self._rr_auto.isChecked():
+            return {}
         try:
             from core import rr_state as _rrs
             _rrs.ensure_loaded()
@@ -2306,6 +2531,15 @@ class LabAblak(QtWidgets.QMainWindow):
         except Exception as ex:
             log.debug("a pár rr-kalibrációja nem olvasható: %s", ex)
             return {}
+
+    def _rr_preset(self) -> str:
+        """A futtatás presetje: `none` = TÉNYLEG semmi; `off` = BE + trailing.
+
+        ⚠ NÉV-CSAPDA (a `core.risk_reduction` is figyelmeztet rá): a `PRESET_OFF`
+        értéke `"off"`, de az az AKTÍV alapértelmezés — BE és trailing. A „ki
+        (semmi)" a `PRESET_NONE`. A labor eddig `"off"`-fal futott, és ezért
+        zárt „magától"."""
+        return "off" if self._rr_ertekek() else "none"
 
     def _forgatokonyv(self) -> dict:
         _f = self._tol.text() or (str(self._chart.index[0])[:16]
@@ -2329,7 +2563,7 @@ class LabAblak(QtWidgets.QMainWindow):
                  **({"end": str(b.veg)[:16]} if b.veg is not None else {})}
                 for b in sorted(self._belepok, key=lambda e: e.ido)],
             "breakeven_at": (str(self._be_ido)[:16] if self._be_ido else None),
-            "rr_preset": "off",
+            "rr_preset": self._rr_preset(),
             "rr": self._rr_ertekek(),
             "build": bool(self._epites.isChecked()),
             "balance": 1000.0,
@@ -2428,6 +2662,10 @@ class LabAblak(QtWidgets.QMainWindow):
                 _me.setVisible(False)
                 self._rr_mezok[_k] = _me
             self._rr_mezok[_k].setText(str(_v))
+        # A mentett preset dönt a kapcsolóról: `none` (vagy hiány) = ki.
+        self._rr_auto.blockSignals(True)
+        self._rr_auto.setChecked(str(fk.get("rr_preset") or "none") != "none")
+        self._rr_auto.blockSignals(False)
         self._epites.setChecked(bool(fk.get("build")))
         for d in (fk.get("drawings") or []):
             r = Rajz.szotarbol(d) if isinstance(d, dict) else None
@@ -2450,6 +2688,132 @@ class LabAblak(QtWidgets.QMainWindow):
         self._rajzok_rajza()
         self._kurzor_rajz()
         self._listak_frissit()
+
+    # ══ A NÉZET ÁLLAPOTA (az elrendezés-mentéshez) ══════════════════════
+    # ⚠ „HA VALAHOGY BEÁLLÍTOTTAM A KÉPERNYŐT, AKKOR AZT MENTSE LE." Az
+    # elrendezés (v3.61.0) a chartok HELYÉT és ADATÁT őrizte — a nagyítást, a
+    # kapcsolókat, a kurzort és a tervet nem, tehát a felhasználó minden
+    # indításnál újra beállította ugyanazt. A nézet IDŐBEN mentődik (nem
+    # bar-indexben), mert az index az adat újratöltésével elcsúszhat.
+
+    KAPCSOLOK = ("gorget", "autofit", "kp", "csak_eddig", "bidask", "savok",
+                 "egyenleg_kapcs", "rr_auto", "rajz_kozos")
+
+    def nezet_leiro(self) -> dict:
+        d = {"kapcsolok": {k: bool(getattr(self, "_" + k).isChecked())
+                           for k in self.KAPCSOLOK},
+             "kp_pct": int(self._kp_pct.value()),
+             "sebesseg": float(self._sebesseg.value()),
+             "gorget_arany": float(getattr(self, "_gorget_arany",
+                                           self.GORGETES_ALAP))}
+        if self._chart is not None and len(self._chart) > 1:
+            try:
+                (x0, x1), (y0, y1) = self._vb.viewRange()
+                _t0, _t1 = self._ido_x(x0), self._ido_x(x1)
+                d["nezet"] = {"tol": str(_t0)[:16], "ig": str(_t1)[:16],
+                              "x_szel": float(x1 - x0),
+                              "y": [float(y0), float(y1)]}
+            except Exception as ex:
+                log.debug("nézet-leírás hiba: %s", ex)
+            _kt = self._kurzor_ido()
+            if _kt is not None:
+                d["kurzor"] = str(_kt)[:16]
+        # A TERV csak akkor a charté, ha nem a közös tárból jön (azt a
+        # munkaterület egyszer menti — három másolat három konfliktus volna).
+        if not self._rajz_megosztva:
+            d["terv"] = self.terv_leiro()
+        return d
+
+    def terv_leiro(self) -> dict:
+        _fk = self._forgatokonyv()
+        return {"entries": _fk.get("entries") or [],
+                "drawings": _fk.get("drawings") or [],
+                "breakeven_at": _fk.get("breakeven_at")}
+
+    def terv_vissza(self, d: dict) -> None:
+        """A terv (belépők + rajzok) visszatöltése a MEGLÉVŐ chartra."""
+        _elemek = {"entries": d.get("entries") or [],
+                   "drawings": d.get("drawings") or [],
+                   "breakeven_at": d.get("breakeven_at")}
+        if not (_elemek["entries"] or _elemek["drawings"]):
+            return
+        for e in _elemek["entries"]:
+            try:
+                _b = Belepo(pd.Timestamp(e["time"]), e.get("direction", "BUY"),
+                            e.get("sl"), float(e.get("tp_rr", 2.0)))
+            except (KeyError, ValueError, TypeError):
+                continue
+            _b.nyitva = bool(e.get("opened"))
+            if e.get("end"):
+                try:
+                    _b.veg = pd.Timestamp(e["end"])
+                except (ValueError, TypeError):
+                    _b.veg = None
+            self._belepok.append(_b)
+        for r in _elemek["drawings"]:
+            _r = Rajz.szotarbol(r) if isinstance(r, dict) else None
+            if _r is not None:
+                self._rajzok.append(_r)
+        if _elemek["breakeven_at"]:
+            try:
+                self._be_ido = pd.Timestamp(_elemek["breakeven_at"])
+            except (ValueError, TypeError):
+                pass
+        self._idok_igazit()
+        if self._valasztott is None and self._belepok:
+            self._valasztott = self._belepok[0]
+        self._belepok_rajz()
+        self._rajzok_rajza()
+
+    def nezet_vissza(self, d: dict) -> None:
+        """A mentett nézet visszaállítása (a chart MÁR be van töltve)."""
+        for k, v in (d.get("kapcsolok") or {}).items():
+            _w = getattr(self, "_" + k, None)
+            if _w is None or k not in self.KAPCSOLOK:
+                continue
+            if k == "kp" and v and not self._kp_aktiv_lehet():
+                continue                    # nincs finomabb adat → nem erőltetjük
+            if bool(_w.isChecked()) != bool(v):
+                _w.setChecked(bool(v))
+        if d.get("kp_pct"):
+            self._kp_pct.setValue(int(d["kp_pct"]))
+        if d.get("sebesseg"):
+            self._sebesseg.setValue(int(float(d["sebesseg"])))
+        if d.get("gorget_arany") is not None:
+            self._gorget_arany = min(0.95, max(0.05, float(d["gorget_arany"])))
+        if d.get("terv"):
+            self.terv_vissza(d["terv"])
+        if self._chart is None or len(self._chart) < 2:
+            return
+        if d.get("kurzor"):
+            try:
+                self._kurzor_vissza(self._ido_zonaba(pd.Timestamp(d["kurzor"])))
+                self._kurzor_rajz()
+            except Exception as ex:
+                log.debug("kurzor-visszaállítás hiba: %s", ex)
+        _n = d.get("nezet") or {}
+        try:
+            _x0 = self._tengely.hol(int(self._ido_zonaba(
+                pd.Timestamp(_n["tol"])).timestamp())) if self._tengely else None
+            if _x0 is not None:
+                _szel = float(_n.get("x_szel") or 0.0)
+                if _szel <= 0:
+                    _x1 = self._tengely.hol(int(self._ido_zonaba(
+                        pd.Timestamp(_n["ig"])).timestamp()))
+                    _szel = (_x1 - _x0) if _x1 is not None else 0.0
+                if _szel > 0:
+                    self._vb.setXRange(_x0, _x0 + _szel, padding=0)
+            _y = _n.get("y") or []
+            if len(_y) == 2 and float(_y[1]) > float(_y[0]):
+                self._vb.setYRange(float(_y[0]), float(_y[1]), padding=0)
+        except Exception as ex:
+            log.debug("nézet-visszaállítás hiba: %s", ex)
+        self._jelolo_helyre()
+
+    def _kp_aktiv_lehet(self) -> bool:
+        """Bekapcsolható-e a kontrollpont ezen a charton (van finomabb adat)?"""
+        return (int(self._tf.currentData() or 0) > 1
+                or tick_van(self._sym.currentText()))
 
     def _ido_zonaba(self, ts):
         """Egy időpont a CHART időzónájába (naiv → lokalizált, eltérő → váltva)."""
@@ -2939,8 +3303,15 @@ class LabAblak(QtWidgets.QMainWindow):
             return
         sz = szinkron()
         t = sz.ido()                 # a MÁR bent lévőké (én még nem vagyok tag)
+        _bent = [a for a in sz.tagok() if a is not self]
         self._szinkron = sz
         sz.belep(self)
+        if _bent:                    # a kontrollpont-beállítás is a bentieké
+            try:
+                self.kp_beallit(bool(_bent[0]._kp.isChecked()),
+                                int(_bent[0]._kp_pct.value()))
+            except Exception as ex:
+                log.debug("kontrollpont-átvétel hiba: %s", ex)
         if t is not None:
             self.szinkron_ido(t)
         else:
@@ -3017,6 +3388,48 @@ class LabAblak(QtWidgets.QMainWindow):
         self._gorget_arany = self._kurzor_kepaeranya()
         self._gorgetes_kovet()
         self._jelolo_helyre()
+
+    def _gorget_tekeres(self) -> None:
+        """Húzás görgetés-módban → a kurzor arra a gyertyára, ami a jel alá került."""
+        if (not self._gorget.isChecked() or self._chart is None
+                or self._kurzor is None):
+            return
+        try:
+            (x0, x1), _ = self._vb.viewRange()
+        except Exception:
+            return
+        _szel = x1 - x0
+        if not (_szel > 0):
+            return
+        _a = getattr(self, "_gorget_arany", self.GORGETES_ALAP)
+        _uj = max(0, min(len(self._chart) - 1, int(round(x0 + _a * _szel - 0.5))))
+        if _uj == int(self._kurzor):
+            return
+        # Tekerés közben a lejátszás áll (mint a kurzor kézi húzásánál).
+        if self._szinkron is not None and self._szinkron.jatszik():
+            self._szinkron.szunet()
+        self._ido_zito.stop()
+        self._play.setText("▶ Play")
+        self._biztos_eredmeny()
+        self._kurzor = _uj
+        self._kp_idx = 0
+        # ⚠ A NÉZETET NEM RÁNTJUK VISSZA: a felhasználó keze van rajta. A
+        # `_gorgetes_kovet` a kerek bar-indexre igazítana, ami minden
+        # mozdulatnál fél gyertyányit „rángatna".
+        self._tekeres_alatt = True
+        try:
+            self._kurzor_rajz()
+        finally:
+            self._tekeres_alatt = False
+        self._listak_frissit()
+        self._kozzetesz()
+
+    def _gorget_nagyitas_utan(self) -> None:
+        """Nagyítás (görgő) után a nézet igazodik a kurzorhoz, nem fordítva."""
+        if getattr(self._vb, "huzas", False):
+            return                      # húzás: azt a `_gorget_tekeres` kezeli
+        if self._gorget.isChecked() and not self._tekeres_alatt:
+            self._gorgetes_kovet()
 
     KURZOR_BAL = 0.12            # kikapcsolás után ide kerül a kurzor
 
@@ -3147,7 +3560,10 @@ class LabAblak(QtWidgets.QMainWindow):
             return self.GORGETES_ALAP
         if not (x1 > x0):
             return self.GORGETES_ALAP
-        a = (float(self._kurzor) - x0) / (x1 - x0)
+        # ⚠ +0,5: a kurzor-VONAL a gyertya közepén áll (i + 0,5); a háromszög és a
+        # sárga vonal csak így esik egybe (felhasználói kérés: „a sárga jelzés és a
+        # görgetősáv jelzése ugyanazt mutassa").
+        a = (float(self._kurzor) + 0.5 - x0) / (x1 - x0)
         return a if 0.02 <= a <= 0.98 else self.GORGETES_ALAP
 
     def _gorgetes_kovet(self) -> None:
@@ -3156,7 +3572,8 @@ class LabAblak(QtWidgets.QMainWindow):
         ⚠ CSAK VÍZSZINTESEN és CSAK az X-tartományt tolja el — a SZÉLESSÉGET
         (nagyítást) és az Y-t nem bántja. Enélkül a görgetés visszanagyítana
         minden képen, és a felhasználó nem tudna belezoomolni futás közben."""
-        if not self._gorget.isChecked() or self._kurzor is None:
+        if (not self._gorget.isChecked() or self._kurzor is None
+                or getattr(self, "_tekeres_alatt", False)):
             return
         try:
             (x0, x1), _ = self._vb.viewRange()
@@ -3166,7 +3583,7 @@ class LabAblak(QtWidgets.QMainWindow):
         if not (_szel > 0):
             return
         _a = getattr(self, "_gorget_arany", self.GORGETES_ALAP)
-        _uj0 = float(self._kurzor) - _a * _szel
+        _uj0 = float(self._kurzor) + 0.5 - _a * _szel
         if abs(_uj0 - x0) < 1e-9:
             return
         self._vb.setXRange(_uj0, _uj0 + _szel, padding=0)
@@ -3191,21 +3608,65 @@ class LabAblak(QtWidgets.QMainWindow):
         return _m1
 
     def _kp_aktiv(self) -> bool:
-        """Van-e ÉRTELME kontrollpontnak? M1 charton nincs finomabb adat."""
-        return (self._kp.isChecked() and self._chart is not None
-                and int(self._tf.currentData() or 0) > 1)
+        """Van-e ÉRTELME kontrollpontnak? M5+ charton az M1-ből, M1-en TICKBŐL."""
+        if not self._kp.isChecked() or self._chart is None:
+            return False
+        if int(self._tf.currentData() or 0) > 1:
+            return True
+        return tick_van(self._sym.currentText())
 
     def _kp_valt(self, *_a) -> None:
-        if self._kp.isChecked() and int(self._tf.currentData() or 0) <= 1:
-            # ⚠ NEM CSENDBEN: az M1 a legfinomabb gyertyánk. Tick-alapú
-            # kontrollpont más adatút volna (a tick-tár 19 GB), és a mérés
-            # szerint a motorban úgysem érne semmit.
-            self._allapot.setText(_t("lab.kp_m1_nincs"))
+        if (self._kp.isChecked() and int(self._tf.currentData() or 0) <= 1
+                and not tick_van(self._sym.currentText())):
+            # ⚠ NEM CSENDBEN. M1-en a finomabb adat a TICK; ha a párhoz nincs
+            # tick-tár, azt meg kell mondani — egy némán visszaugró jelölő
+            # hibának látszana.
+            self._allapot.setText(_t("lab.kp_m1_nincs_tick",
+                                     sym=self._sym.currentText()))
             self._kp.blockSignals(True)
             self._kp.setChecked(False)
             self._kp.blockSignals(False)
             return
         self._kp_ujraszamol()
+        # ⚠ KAPCSOLT ABLAKOKBAN A KONTROLLPONT KÖZÖS. Az M1-en lejátszva a
+        # felhasználó az M15 és a H1 gyertya KIALAKULÁSÁT is látni akarja —
+        # ehhez azoknak az ablakoknak is bontaniuk kell, nem csak annak, ahol
+        # a jelölőt bekapcsolta. Az idő már közös; a bontás finomsága is az.
+        if self._szinkron is not None and not self._kp_szinkron_alatt:
+            self._szinkron.kp_allit(self._kp.isChecked(),
+                                    int(self._kp_pct.value()), forras=self)
+
+    def kp_beallit(self, be: bool, pct: int) -> None:
+        """A szinkron ÁLLÍTJA a kontrollpont-beállításunkat (nem küldjük vissza)."""
+        self._kp_szinkron_alatt = True
+        try:
+            self._kp_pct.blockSignals(True)
+            self._kp_pct.setValue(int(pct))
+            self._kp_pct.blockSignals(False)
+            if bool(self._kp.isChecked()) != bool(be):
+                self._kp.setChecked(bool(be))     # → `_kp_valt` (visszaküldés nélkül)
+            else:
+                self._kp_ujraszamol()
+        finally:
+            self._kp_szinkron_alatt = False
+
+    def _tick_nap_barok(self, nap):
+        """Az adott NAP tickjei — a párra és a napra gyorsítótárazva."""
+        _sym = self._sym.currentText()
+        _kulcs = (_sym, pd.Timestamp(nap).tz_localize(None).normalize())
+        if self._tick_nap is not None and self._tick_nap[0] == _kulcs:
+            return self._tick_nap[1]
+        _ps = float(((self.cfg.get("pairs") or {}).get(_sym) or {})
+                    .get("point_size") or 0.0)
+        _df = tick_nap(_sym, nap, _ps) if _ps > 0 else None
+        self._tick_nap = (_kulcs, _df)
+        return _df
+
+    def _kp_pct_valt(self, *_a) -> None:
+        self._kp_ujraszamol()
+        if self._szinkron is not None and not self._kp_szinkron_alatt:
+            self._szinkron.kp_allit(self._kp.isChecked(),
+                                    int(self._kp_pct.value()), forras=self)
 
     def _kp_ujraszamol(self) -> None:
         """Az aktuális bar kontrollpontjainak eldobása → újraszámolás."""
@@ -3217,13 +3678,34 @@ class LabAblak(QtWidgets.QMainWindow):
         """Az `i`-edik chart-gyertya árútja (gyorsítótárazva a barra)."""
         if self._kp_bar == i and self._kp_pontok is not None:
             return self._kp_pontok
-        _m1 = self._finom_barok()
         self._kp_bar, self._kp_pontok = i, None
-        if _m1 is None or self._chart is None:
+        if self._chart is None:
+            return None
+        _tf = int(self._tf.currentData() or 1)
+        if _tf <= 1:
+            # ⚠ M1: TICKBŐL. Ugyanaz a `searchsorted`-elv, mint lent — a napi
+            # tick-tömb 800 ezer soros, egy maszk itt is 20 ms-os lenne.
+            try:
+                _t0 = self._chart.index[i]
+                _tk = self._tick_nap_barok(_t0)
+                if _tk is None:
+                    return None
+                _i0 = int(_tk.index.searchsorted(_t0, side="left"))
+                _i1 = int(_tk.index.searchsorted(_t0 + pd.Timedelta(minutes=1),
+                                                 side="left"))
+                _bid = _tk["bid"].to_numpy()[_i0:_i1]
+            except Exception as ex:
+                log.debug("tick-szeletelés hiba: %s", ex)
+                return None
+            if len(_bid) < 2:
+                return None
+            self._kp_pontok = tick_pontok(_bid, float(self._kp_pct.value()))
+            return self._kp_pontok
+        _m1 = self._finom_barok()
+        if _m1 is None:
             return None
         try:
             _t0 = self._chart.index[i]
-            _tf = int(self._tf.currentData() or 1)
             _t1 = _t0 + pd.Timedelta(minutes=_tf)
             # ⚠ `searchsorted`, NEM boolean maszk. A maszkos alak
             # (`(idx >= t0) & (idx < t1)`) VÉGIGPÁSZTÁZZA a teljes M1-et és két
@@ -3401,9 +3883,20 @@ def elrendezes_leiro(mt) -> dict:
             "max": bool(sw.isMaximized()),
             "kotesek": bool(w._kotesek.isChecked()),
             "kapcsolt": bool(w._kapcs.isChecked()),
+            "nezet": w.nezet_leiro(),
         })
+    _kozos = None
+    _tar = rajztar()
+    if _tar.lista or _tar.belepok:
+        # ⚠ A KÖZÖS TERV EGYSZER, nem chartonként: a tagok UGYANARRA a listára
+        # mutatnak, három másolat visszatöltve háromszor annyi belépő volna.
+        for w in (sw.widget() for sw in mt._mdi.subWindowList()):
+            if isinstance(w, LabAblak) and w._rajz_megosztva:
+                _kozos = w.terv_leiro()
+                break
     return {
         "verzio": ELRENDEZES_VERZIO,
+        "kozos_terv": _kozos,
         "ablak_geometria": _b64(mt.saveGeometry()),
         "ablak_allapot": _b64(mt.saveState()),
         "tabos": bool(mt._tabos.isChecked()),
@@ -3618,6 +4111,11 @@ class Munkaterulet(QtWidgets.QMainWindow):
             w._kotesek.setChecked(bool(c.get("kotesek", _elso)))
             if c.get("kapcsolt"):
                 w._kapcs.setChecked(True)
+            try:
+                w.nezet_vissza(c.get("nezet") or {})
+            except Exception as ex:
+                log.warning("A mentett chart-nézet (%s) nem állítható vissza: %s",
+                            _sym, ex)
             _g = c.get("geo") or []
             _sw = w.parent()
             if len(_g) == 4 and isinstance(_sw, QtWidgets.QMdiSubWindow):
@@ -3629,6 +4127,19 @@ class Munkaterulet(QtWidgets.QMainWindow):
             _elso = False
         if not self.chartok():          # minden chart kimaradt → legyen egy
             self.uj_chart()
+        # A KÖZÖS terv: az első megosztott chartba töltjük — a tár közös, tehát
+        # a többi megosztott ablak is látja.
+        _kozos = ment.get("kozos_terv")
+        if _kozos:
+            for w in self.chartok():
+                if w._rajz_megosztva:
+                    try:
+                        w.terv_vissza(_kozos)
+                        w._terv_valtozott()
+                        w._rajz_valtozott()
+                    except Exception as ex:
+                        log.warning("A mentett közös terv nem tölthető vissza: %s", ex)
+                    break
 
     def cfg_parok(self) -> list:
         """A configban létező párok (a mentett elrendezés szűréséhez)."""

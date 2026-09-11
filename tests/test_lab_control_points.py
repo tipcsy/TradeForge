@@ -55,6 +55,8 @@ except Exception as _e:
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+import tempfile
+
 import numpy as np
 import pandas as pd
 from PySide6 import QtWidgets as QW
@@ -192,17 +194,65 @@ else:
     check("...és a maszk visszaáll a kurzor UTÁNRA",
           w._takaro.getRegion()[0] > w._kurzor)
 
-    # ── M1 charton nincs finomabb adat → NEM CSENDBEN utasítja el ───────
+    # ── M1 charton a finomabb adat a TICK ───────────────────────────────
+    # A felhasználó: „a legfinomabb jelzés az a tick. Nekem M1-en ha azt
+    # látom, hogy Kontrollpont 100%, akkor az egyenrangú a tickkel!"
     w1 = LabAblak(symbol=PAR, tf_perc=1, tol=TOL, ig=IG)
     w1.show()
     app.processEvents()
-    w1._kp.setChecked(True)
-    app.processEvents()
-    check("⚠ M1 charton a kontrollpont NEM kapcsolható be",
-          not w1._kp.isChecked() and not w1._kp_aktiv())
-    check("⚠ …és MEGMONDJA, miért (nem néma visszautasítás)",
-          "M1" in w1._allapot.text(), w1._allapot.text()[:70])
+    if not lab_qt.tick_van(PAR):
+        print(f"KIHAGYVA (tick): nincs tick-tár a(z) {PAR} párhoz")
+    else:
+        w1._kurzor = len(w1._chart) // 2
+        w1._kp.setChecked(True)
+        app.processEvents()
+        check("⚠ M1 charton a kontrollpont TICKBŐL bekapcsolható",
+              w1._kp.isChecked() and w1._kp_aktiv())
+        _tp = w1._kp_bar_pontjai(w1._kurzor)
+        check("⚠ egy M1 bar alá SOK tick esik (több, mint 4 pont)",
+              _tp is not None and len(_tp) > 4,
+              f"{0 if _tp is None else len(_tp)} pont")
+        if _tp is not None and len(_tp) > 4:
+            _s1 = w1._chart.iloc[w1._kurzor]
+            _v = lab_qt.reszgyertya(_tp, len(_tp) - 1)
+            # ⚠ A tick-út vége a KÉSZ gyertya: a bid-ből épült M1 nyitó/záró
+            # és a tick első/utolsó bidje ugyanaz a szám.
+            check("⚠ a tick-út nyitója == a kész M1 gyertya nyitója",
+                  abs(_v[0] - float(_s1["open"])) < 1e-6,
+                  f"{_v[0]} vs {_s1['open']}")
+            check("⚠ …a záró a záróval", abs(_v[3] - float(_s1["close"])) < 1e-6,
+                  f"{_v[3]} vs {_s1['close']}")
+            check("⚠ …a csúcs/alj a kész gyertyáé (a ritkítás sem vághatja le)",
+                  abs(_v[1] - float(_s1["high"])) < 1e-6
+                  and abs(_v[2] - float(_s1["low"])) < 1e-6,
+                  f"{_v[1]}/{_v[2]} vs {_s1['high']}/{_s1['low']}")
+            w1._kp_pct.setValue(5)
+            _t5 = w1._kp_bar_pontjai(w1._kurzor)
+            _v5 = lab_qt.reszgyertya(_t5, len(_t5) - 1)
+            check("⚠ 5%-on KEVESEBB pont, de a csúcs/alj marad",
+                  _t5 is not None and len(_t5) < len(_tp)
+                  and abs(_v5[1] - _v[1]) < 1e-9 and abs(_v5[2] - _v[2]) < 1e-9,
+                  f"{len(_t5)} vs {len(_tp)}")
+            w1._kp_pct.setValue(100)
     w1.close()
+
+    # ── Tick-tár NÉLKÜL: NEM CSENDBEN utasítja el ───────────────────────
+    _tick_dir_volt = lab_qt.TICK_DIR
+    lab_qt.TICK_DIR = Path(tempfile.mkdtemp(prefix="tf_notick_"))
+    try:
+        w0 = LabAblak(symbol=PAR, tf_perc=1, tol=TOL, ig=IG)
+        w0.show()
+        app.processEvents()
+        w0._kp.setChecked(True)
+        app.processEvents()
+        check("⚠ tick-tár nélkül M1-en a kontrollpont NEM kapcsolható be",
+              not w0._kp.isChecked() and not w0._kp_aktiv())
+        check("⚠ …és MEGMONDJA, miért (nem néma visszautasítás)",
+              "M1" in w0._allapot.text() and PAR in w0._allapot.text(),
+              w0._allapot.text()[:90])
+        w0.close()
+    finally:
+        lab_qt.TICK_DIR = _tick_dir_volt
 w.close()
 
 

@@ -135,11 +135,20 @@ if QT_OK:
             # a motor dolgozik).
             for _e in _w._rr_mezok.values():
                 _e.setText("")
+            # ⚠ v3.70.0: az automatizmus KAPCSOLÓS, és alapból KI. A pár
+            # kalibrációja („mint a motorban") csak az „Auto BE/trailing"
+            # jelölővel jön — enélkül a labor `none` presettel fut, a stop
+            # ott marad, ahová a felhasználó tette.
+            check("⚠ kapcsoló nélkül NINCS automatizmus (üres rr, `none` preset)",
+                  _w._rr_ertekek() == {} and _w._rr_preset() == "none",
+                  f"{_w._rr_ertekek()} / {_w._rr_preset()}")
+            _w._rr_auto.setChecked(True)
             _rrp = _w._rr_ertekek()
             from core import rr_state as _rrs_q
             _rrs_q.ensure_loaded()
-            check("mező nélkül a PÁR kalibrációja jön (mint a motorban)",
+            check("a kapcsolóval a PÁR kalibrációja jön (mint a motorban)",
                   _rrp == dict(_rrs_q.get_calibration(_par) or {}), str(_rrp))
+            _w._rr_auto.setChecked(False)
             check("üres BE/trailing mező → nincs KÉZI felülírás",
                   not any(_e.text().strip() for _e in _w._rr_mezok.values()),
                   str({k: e.text() for k, e in _w._rr_mezok.items()}))

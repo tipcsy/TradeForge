@@ -342,9 +342,18 @@ _src1 = (ROOT / "tools" / "lab_qt.py").read_text(encoding="utf-8")
 check("...és a felépítésük is eltűnt a kódból",
       'self._rr_mezok[_k] = _e' not in _src1)
 
+# ⚠ v3.70.0: a pár kalibrációja CSAK az „Auto BE/trailing" jelölővel fut.
+# Enélkül a `rr_preset: "off"` (= BE + trailing!) némán zárta a pozíciókat —
+# a felhasználó: „valami automatizmus túl korán lezárta (pozitívba!)".
+check("⚠ alapból NINCS automatizmus: üres rr és `none` preset",
+      _c[0]._rr_ertekek() == {} and _c[0]._rr_preset() == "none",
+      f"{_c[0]._rr_ertekek()} / {_c[0]._rr_preset()}")
+_c[0]._rr_auto.setChecked(True)
 _rr = _c[0]._rr_ertekek()
-check("⚠ a forgatókönyv rr-értékei a PÁR kalibrációjából jönnek",
+check("⚠ a jelölővel a forgatókönyv rr-értékei a PÁR kalibrációjából jönnek",
       isinstance(_rr, dict) and len(_rr) > 0, str(_rr))
+check("...és a preset ilyenkor `off` (= BE + trailing)",
+      _c[0]._rr_preset() == "off")
 from core import rr_state as _rrs_t
 _rrs_t.ensure_loaded()
 _var = dict(_rrs_t.get_calibration(_c[0]._sym.currentText()) or {})

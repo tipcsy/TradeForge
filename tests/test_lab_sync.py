@@ -355,9 +355,12 @@ if QT_OK:
               abs((_u0 - _b0) - 60) < 1e-6, f"{_u0 - _b0:+.1f} (várt +60)")
         check("⚠ …és a NAGYÍTÁS változatlan (nem zoomol vissza)",
               abs((_u1 - _u0) - _szel) < 1e-6, f"{_u1-_u0:.1f} vs {_szel:.1f}")
-        check("⚠ …a kurzor a MEGJEGYZETT arányon marad",
-              abs((w_g._kurzor - _u0) / (_u1 - _u0) - _arany) < 1e-6,
-              f"{(w_g._kurzor - _u0)/(_u1-_u0):.3f} vs {_arany:.3f}")
+        # ⚠ +0,5: a kurzor-VONAL a gyertya közepén áll (i + 0,5). A régi képlet
+        # a bar-index bal szélét vette, ezért a háromszög és a sárga vonal fél
+        # gyertyával elcsúszott egymástól (felhasználói jelzés).
+        check("⚠ …a kurzor-VONAL a MEGJEGYZETT arányon marad",
+              abs((w_g._kurzor + 0.5 - _u0) / (_u1 - _u0) - _arany) < 1e-6,
+              f"{(w_g._kurzor + 0.5 - _u0)/(_u1-_u0):.3f} vs {_arany:.3f}")
 
         # Kikapcsolva megint áll.
         w_g._gorget.setChecked(False)
