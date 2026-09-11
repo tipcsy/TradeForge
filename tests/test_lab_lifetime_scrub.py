@@ -376,6 +376,54 @@ if _c2:
 mt2.close()
 lab_qt.rajztar().belepok.clear()
 lab_qt.rajztar().lista.clear()
+
+# ⚠ A MENTETT ELRENDEZÉS `--symbol` MELLETT IS VISSZAJÖN. Az első szabály
+# fordítva szólt („a parancssor nyer"): `--symbol`/`--from`-mal indítva a
+# mentett három ablak NÉMÁN kimaradt — a felhasználó: „az elrendezést nem
+# jegyzi meg… 3 ablak, görgetés, AutoFit… ennek a mentése nem történik meg".
+mt3 = Munkaterulet(symbol=PAR, tf_perc=5, tol=TOL, ig=IG)
+mt3.show()
+app.processEvents()
+check("⚠ `--symbol`-lal indítva IS a mentett elrendezés jön (nem a parancssor)",
+      len(mt3.chartok()) == 1 and int(mt3.chartok()[0]._tf.currentData()) == 15
+      and mt3.chartok()[0]._autofit.isChecked(),
+      str([int(c._tf.currentData()) for c in mt3.chartok()]))
+mt3.close()
+lab_qt.rajztar().belepok.clear()
+lab_qt.rajztar().lista.clear()
+mt4 = Munkaterulet(symbol=PAR, tf_perc=5, tol=TOL, ig=IG, uj=True)
+mt4.show()
+app.processEvents()
+check("⚠ `--uj`-jal viszont TISZTA LAP: a parancssor chartja",
+      len(mt4.chartok()) == 1 and int(mt4.chartok()[0]._tf.currentData()) == 5
+      and not mt4.chartok()[0]._autofit.isChecked(),
+      str([int(c._tf.currentData()) for c in mt4.chartok()]))
+
+# ── SABLON: mentés névvel → betöltés a mostani chartok helyére ──────────
+lab_qt.SABLON_DIR = Path(tempfile.mkdtemp(prefix="tf_sablon_"))
+mt4.uj_chart(symbol=PAR, tf_perc=60, tol=TOL, ig=IG)
+app.processEvents()
+for c in mt4.chartok():
+    c._gorget.setChecked(True)
+mt4._rendez(True)
+app.processEvents()
+_sab = mt4.sablon_ment(lab_qt.SABLON_DIR / "harom.json")
+check("a sablon fájlba ment (névvel)", _sab is not None and _sab.exists())
+mt4.elrendezes_alkalmaz({"chartok": [{"symbol": PAR, "tf": 1, "tol": TOL, "ig": IG}]})
+app.processEvents()
+check("közben MÁS elrendezés (egy M1 chart)",
+      [int(c._tf.currentData()) for c in mt4.chartok()] == [1])
+check("⚠ a sablon betöltése a MOSTANI chartok HELYÉRE hozza a mentettet",
+      mt4.sablon_betolt(_sab)
+      and sorted(int(c._tf.currentData()) for c in mt4.chartok()) == [5, 60]
+      and all(c._gorget.isChecked() for c in mt4.chartok()),
+      str([(int(c._tf.currentData()), c._gorget.isChecked()) for c in mt4.chartok()]))
+check("...nem-sablon fájlra NEM csinál semmit (és megmondja)",
+      not mt4.sablon_betolt(lab_qt.ELRENDEZES_PATH.with_name("nincs.json"))
+      and len(mt4.chartok()) == 2)
+mt4.close()
+lab_qt.rajztar().belepok.clear()
+lab_qt.rajztar().lista.clear()
 w.close()
 app.processEvents()
 

@@ -43,6 +43,7 @@ applog.harden_console()
 import argparse
 import json
 import logging
+import time as _time
 
 import numpy as np
 import pandas as pd
@@ -209,7 +210,7 @@ class Szinkron(QtCore.QObject):
         except Exception:
             _most = None
         self._ido = _most if _most is not None else self._ido
-        self._zito.start(int(1000 / MAX_KEP_MP))
+        self._zito.start(int(1000 / MAX_KEP_MP))    # az ütem menet közben igazodik
         for a in self._tagok:
             a.play_felirat(True)
 
@@ -233,12 +234,33 @@ class Szinkron(QtCore.QObject):
             return
         # ⚠ A SAJÁT óránkról lépünk, nem a vezér kvantált kurzoráról (lásd a
         # `_ido` mezőt). A vezértől csak a TEMPÓ és a VÉGE kell.
+        #
+        # ⚠ ÖNSZABÁLYOZÓ KÉPFREKVENCIA. Ha egy kép tovább tart, mint az
+        # időzítő köze, az időzítő GYORSABBAN lő, mint ahogy a képek
+        # elkészülnek: a sor megtelik, a felhasználó kattintása (Pause!) a sor
+        # végén vár, és a felület „beragad, homokórázik" — ez kétszer is
+        # megtörtént (a boolean maszk 20 ms-a, majd a tick-tár pásztázása).
+        # A gyökér-okot mindkétszer javítottuk, de a SZERKEZET maradt
+        # törékeny. Ezért a lépés a TÉNYLEGES képközhöz igazodik: ha lassabbak
+        # a képek, ritkábban, de NAGYOBBAT lépünk — a chart-idő sebessége
+        # (gyertya/mp) marad, csak a kép ritkul. A felület így mindig marad
+        # kattintható.
+        _alap = int(1000 / MAX_KEP_MP)
+        # Az alap-közhöz képest arányosan (a névleges 60 kép/mp az alap-köznél
+        # PONTOSAN 60 marad — az `int(1000/60)` = 16 ms kerekítése ne csússzon
+        # bele a lépésbe).
+        _koz_mp = MAX_KEP_MP * _alap / max(1, self._zito.interval())
         uj = kovetkezo_ido(self._ido if self._ido is not None else most,
-                           lepes_ido(seb, tf), veg)
+                           lepes_ido(seb, tf, kep_mp=_koz_mp), veg)
         if uj is None:
             self.szunet()
             return
+        _t0 = _time.perf_counter()
         self.allit(uj, forras=None)
+        _dt_ms = (_time.perf_counter() - _t0) * 1000.0
+        _kivant = int(max(_alap, min(250.0, _dt_ms * 1.5)))
+        if abs(_kivant - self._zito.interval()) > 2:
+            self._zito.setInterval(_kivant)
 
 
 # ⚠ A megnyitott ablakok hivatkozásai. Enélkül a `_uj_ablak`-ban létrehozott
@@ -510,11 +532,26 @@ def tick_nap(sym: str, nap, point_size: float):
     return ki.sort_index()
 
 
+_TICK_VAN: dict = {}
+
+
 def tick_van(sym: str) -> bool:
-    """Van-e egyáltalán tick-tár a párhoz?"""
+    """Van-e egyáltalán tick-tár a párhoz? — GYORSÍTÓTÁRAZVA.
+
+    ⚠ A KÖNYVTÁR-PÁSZTÁZÁS 2 ms, ÉS KÉPENKÉNT TÖBBSZÖR HÍVÓDOTT. A `_kp_aktiv`
+    minden kurzor-rajzolásnál (és a `_kurzor_x`-en át még többször) kérdezi;
+    három kapcsolt ablakkal ez 1,6 mp volt 60 képből — az időzítő gyorsabban
+    lőtt, mint ahogy a képek elkészültek, a kattintás sorban állt, és a Pause
+    „beragadt, homokórázott". Ugyanaz a hibafajta, mint a boolean maszk volt
+    (20 ms/bar): egy olcsónak látszó hívás a forró úton. A tick-tár futás közben
+    nem változik, egy válasz elég."""
+    if sym in _TICK_VAN:
+        return _TICK_VAN[sym]
     _d = TICK_DIR / sym
-    return _d.is_dir() and (any(_d.glob("*.parquet"))
+    _van = _d.is_dir() and (any(_d.glob("*.parquet"))
                             or any((_d / "_napok").glob("*.parquet")))
+    _TICK_VAN[sym] = bool(_van)
+    return _TICK_VAN[sym]
 
 
 def reszgyertya(pontok, n: int):
@@ -1633,11 +1670,23 @@ class LabAblak(QtWidgets.QMainWindow):
         ido = self._ido_zonaba(ido)
         if ido is None:
             return None
+        # ⚠ GYORSÍTÓTÁR: a `get_indexer(method="nearest")` 1,4 ms, és lejátszás
+        # közben ablakonként-képenként többször hívódik (sáv, doboz, nyitott
+        # vonalak). Az eredmény a charthoz és az időhöz kötött, tehát a kulcs
+        # a kettő azonossága; a chart újratöltésével a kulcs magától elévül.
+        _k = (id(self._chart), ido)
+        _c = self.__dict__.setdefault("_be_ar_tar", {})
+        if _k in _c:
+            return _c[_k]
         try:
             poz = self._chart.index.get_indexer([ido], method="nearest")
-            return float(self._chart["close"].iloc[int(poz[0])])
+            _ar = float(self._chart["close"].iloc[int(poz[0])])
         except (IndexError, ValueError, KeyError):
             return None
+        if len(_c) > 512:
+            _c.clear()
+        _c[_k] = _ar
+        return _ar
 
     def _atr_ar(self, ido) -> float:
         """A volatilitás-mérték ÁRBAN az adott gyertyánál — EGY forrásból.
@@ -2070,43 +2119,57 @@ class LabAblak(QtWidgets.QMainWindow):
         return _sl, _tp
 
     def _nyitott_rajz(self) -> None:
-        """A kurzor pillanatában NYITOTT kötések Entry/SL/TP vonalai."""
-        for it in self._nyitott_elemek:
-            self._plot.removeItem(it)
-        self._nyitott_elemek.clear()
+        """A kurzor pillanatában NYITOTT kötések Entry/SL/TP vonalai.
+
+        ⚠ AZ ELEMEKET ÚJRAHASZNOSÍTJUK, nem építjük újra. A régi alak minden
+        képen leszedte és újra létrehozta a vonalakat és címkéket (3 ablak ×
+        2 elem × 3 sor = 18 `addItem`/kép) — mérve 1,1 ms/hívás, ami a 16 ms-os
+        képkeret hetede, semmiért: a geometria változik, az elem nem. Ugyanaz
+        az elv, mint a `_Savdoboz.vege`-nél."""
+        _pool = self.__dict__.setdefault("_nyitott_pool", {})
         res = (self._eredmeny or {}).get("res")
-        if res is None or self._tengely is None or self._kurzor is None:
-            return
-        if self._chart is None or not (0 <= int(self._kurzor) < len(self._chart)):
-            return
-        _most = self._chart.index[int(self._kurzor)]
-        _xm = float(self._kurzor) + 0.5
-        for t in (getattr(res, "trades", None) or []):
-            if t.open_time is None or t.open_time > _most:
-                continue
-            # ⚠ A LEZÁRT pozíció vonalai ELTŰNNEK — ez a lényege: a képen csak
-            # az látszik, ami ÉPP ÉL, ahogy a terminálban.
-            if t.close_time is not None and t.close_time <= _most:
-                continue
-            x1 = self._tengely.hol(int(t.open_time.timestamp()))
-            if x1 is None:
-                continue
-            _sl, _tp = self._szintek_ekkor(t, _most)
-            _sorok = [(float(t.open_price), "white", QtCore.Qt.SolidLine, "Entry")]
-            if _sl:
-                _sorok.append((_sl, "red", QtCore.Qt.DashLine, "SL"))
-            if _tp:
-                _sorok.append((_tp, "green", QtCore.Qt.DashLine, "TP"))
-            for _ar, _sz, _stilus, _cim in _sorok:
+        _kell = {}
+        if (res is not None and self._tengely is not None
+                and self._kurzor is not None and self._chart is not None
+                and 0 <= int(self._kurzor) < len(self._chart)):
+            _most = self._chart.index[int(self._kurzor)]
+            _xm = float(self._kurzor_x())
+            for t in (getattr(res, "trades", None) or []):
+                if t.open_time is None or t.open_time > _most:
+                    continue
+                # ⚠ A LEZÁRT pozíció vonalai ELTŰNNEK — ez a lényege: a képen
+                # csak az látszik, ami ÉPP ÉL, ahogy a terminálban.
+                if t.close_time is not None and t.close_time <= _most:
+                    continue
+                x1 = self._tengely.hol(int(t.open_time.timestamp()))
+                if x1 is None:
+                    continue
+                _sl, _tp = self._szintek_ekkor(t, _most)
+                _sorok = [(float(t.open_price), "white", QtCore.Qt.SolidLine, "Entry")]
+                if _sl:
+                    _sorok.append((_sl, "red", QtCore.Qt.DashLine, "SL"))
+                if _tp:
+                    _sorok.append((_tp, "green", QtCore.Qt.DashLine, "TP"))
+                for _ar, _sz, _stilus, _cim in _sorok:
+                    _kell[(id(t), _cim)] = (x1, _xm, _ar, _sz, _stilus, _cim)
+        # Ami már nem kell, le; ami kell, frissítve vagy létrehozva.
+        for _k in [k for k in _pool if k not in _kell]:
+            for _it in _pool.pop(_k):
+                self._plot.removeItem(_it)
+        for _k, (x1, _xm, _ar, _sz, _stilus, _cim) in _kell.items():
+            _pár = _pool.get(_k)
+            if _pár is None:
                 _it = pg.PlotDataItem(
                     [x1, _xm], [_ar, _ar],
                     pen=pg.mkPen(szin(_sz), width=2, style=_stilus))
-                self._plot.addItem(_it)
-                self._nyitott_elemek.append(_it)
                 _c = pg.TextItem(_cim, color=szin(_sz), anchor=(0, 0.5))
-                _c.setPos(_xm, _ar)
-                self._plot.addItem(_c)
-                self._nyitott_elemek.append(_c)
+                self._plot.addItem(_it)
+                self._plot.addItem(_c, ignoreBounds=True)
+                _pár = _pool[_k] = (_it, _c)
+            else:
+                _pár[0].setData([x1, _xm], [_ar, _ar])
+            _pár[1].setPos(_xm, _ar)
+        self._nyitott_elemek = [it for pár in _pool.values() for it in pár]
 
     def _trail_lathatosag(self) -> None:
         """A trailing két beállító vonala ELTŰNIK, ha a trailing MÁR ELINDULT.
@@ -3879,6 +3942,7 @@ class LabAblak(QtWidgets.QMainWindow):
 
 ELRENDEZES_PATH = ROOT / "data" / "lab_elrendezes.json"
 ELRENDEZES_VERZIO = 1
+SABLON_DIR = ROOT / "data" / "lab_sablonok"
 
 
 def _b64(qba) -> str:
@@ -3934,14 +3998,22 @@ def elrendezes_leiro(mt) -> dict:
     }
 
 
-def elrendezes_ment(mt) -> bool:
-    """Az elrendezés kiírása. `False`, ha nem sikerült (és NAPLÓZ)."""
+def elrendezes_ment(mt, csak_ha_valtozott: bool = False) -> bool:
+    """Az elrendezés kiírása. `False`, ha nem sikerült (és NAPLÓZ).
+
+    `csak_ha_valtozott`: az időzített mentés nem koptatja a lemezt, ha semmi
+    nem változott az előző kiírás óta."""
     try:
+        _szoveg = json.dumps(elrendezes_leiro(mt), ensure_ascii=False, indent=2)
+        if csak_ha_valtozott and _szoveg == getattr(mt, "_elrendezes_utolso", None):
+            return True
         ELRENDEZES_PATH.parent.mkdir(parents=True, exist_ok=True)
         tmp = ELRENDEZES_PATH.with_suffix(".tmp")
-        tmp.write_text(json.dumps(elrendezes_leiro(mt), ensure_ascii=False,
-                                  indent=2), encoding="utf-8")
+        tmp.write_text(_szoveg, encoding="utf-8")
         tmp.replace(ELRENDEZES_PATH)
+        mt._elrendezes_utolso = _szoveg
+        log.info("%s: labor-elrendezés mentve (%d chart).", ELRENDEZES_PATH.name,
+                 len(mt.chartok()))
         return True
     except Exception as ex:
         # ⚠ NEM NÉMA. A mentés elmaradása csak a KÖVETKEZŐ indításkor derülne
@@ -3996,7 +4068,8 @@ class Munkaterulet(QtWidgets.QMainWindow):
     így indítja), tehát a kiszakítás nem szerkezeti akadály, csak munka.
     """
 
-    def __init__(self, symbol=None, strategy=None, tf_perc=15, tol=None, ig=None):
+    def __init__(self, symbol=None, strategy=None, tf_perc=15, tol=None, ig=None,
+                 uj: bool = False):
         super().__init__()
         from version import APP_NAME, APP_VERSION
         self.setWindowTitle(_t("lab.window_title", app=APP_NAME,
@@ -4094,27 +4167,109 @@ class Munkaterulet(QtWidgets.QMainWindow):
             m.addAction(self._eszkoz_dokkok[_kulcs][0].toggleViewAction())
         m.addAction(self._szamla_dokk.toggleViewAction())
 
+        m.addSeparator()
+        # ⚠ SABLONOK (felhasználói ötlet: „ez lehetne akár valamilyen sablon
+        # is"). Ugyanaz a leíró, mint az automatikus mentésé, csak NÉVVEL, a
+        # `data/lab_sablonok/` mappában — így egy bevált képernyő (H1 / M15 /
+        # M1 egymás alatt, görgetéssel, AutoFittel) egy kattintással
+        # visszahozható, és instrumentumonként több is tartható.
+        self._tett(m, _t("lab.menu_sablon_ment"), self.sablon_ment)
+        self._tett(m, _t("lab.menu_sablon_betolt"), self.sablon_betolt)
         self._tett(m, _t("lab.menu_elrendezes_felejt"), self._elrendezes_felejt)
 
-        # ⚠ A PARANCSSOR NYER A MENTETT ELRENDEZÉS FÖLÖTT. Ha a felhasználó
-        # `--symbol`-lal indít, azt akarja látni — nem azt, amit két hete
-        # bezárt. Mentett elrendezést csak ARGUMENTUM NÉLKÜLI indításnál
-        # töltünk vissza; a keret (ablakméret, dokkok) viszont mindig.
-        _ment = elrendezes_olvas()
-        if _ment.get("ablak_geometria"):
-            self.restoreGeometry(_qba(_ment["ablak_geometria"]))
-        if _ment.get("ablak_allapot"):
-            self.restoreState(_qba(_ment["ablak_allapot"]))
-        _visszaall = bool(_ment.get("chartok")) and symbol is None
-        if _visszaall:
-            self._chartok_vissza(_ment)
+        # ⚠ A MENTETT ELRENDEZÉS NYER — a parancssor csak akkor, ha kéred.
+        # Az első szabály fordítva szólt („a parancssor nyer"): egy
+        # `--symbol`/`--from` kapcsolóval indítva a mentett elrendezés NÉMÁN
+        # kimaradt, és a felhasználó azt látta, hogy „nem jegyzi meg" (három
+        # ablak, görgetés, AutoFit — minden indításnál újra). Aki tiszta lapot
+        # akar, azt az `--uj` kapcsolóval kéri; a parancssor egyéb értékei
+        # ilyenkor (vagy mentés híján) adják az első chartot.
+        _ment = {} if uj else elrendezes_olvas()
+        if _ment.get("chartok"):
+            self.elrendezes_alkalmaz(_ment)
+            log.info("%s: labor-elrendezés visszaállítva (%d chart).",
+                     ELRENDEZES_PATH.name, len(self.chartok()))
         else:
+            if _ment.get("ablak_geometria"):
+                self.restoreGeometry(_qba(_ment["ablak_geometria"]))
+            if _ment.get("ablak_allapot"):
+                self.restoreState(_qba(_ment["ablak_allapot"]))
             self.uj_chart(symbol=symbol, strategy=strategy, tf_perc=tf_perc,
                           tol=tol, ig=ig)
-        if _ment.get("tabos"):
-            self._tabos.setChecked(True)
-            self._tabos_valt(True)
+        # ⚠ IDŐZÍTETT MENTÉS IS, nem csak bezáráskor. Ha a folyamat nem a
+        # bezárás-gombbal ér véget (lefagyott ablak, leölt processz, áramszünet),
+        # a `closeEvent` nem fut le, és a felhasználó azt látja, hogy „nem jegyzi
+        # meg az elrendezést". 20 másodpercenként, és csak ha változott.
+        self._elrendezes_zito = QtCore.QTimer(self)
+        self._elrendezes_zito.setInterval(20_000)
+        self._elrendezes_zito.timeout.connect(
+            lambda: elrendezes_ment(self, csak_ha_valtozott=True))
+        self._elrendezes_zito.start()
         self._aktiv_valtozott()
+
+    def elrendezes_alkalmaz(self, ment: dict) -> None:
+        """Egy elrendezés-leíró ALKALMAZÁSA a meglévő chartok helyére.
+
+        Ugyanaz az út az induláskori visszaállításnak és a sablon
+        betöltésének — két külön út előbb-utóbb máshogy állítana vissza."""
+        for sw in list(self._mdi.subWindowList()):
+            sw.close()
+        _tar = rajztar()
+        _tar.lista.clear()
+        _tar.belepok.clear()
+        if ment.get("ablak_geometria"):
+            self.restoreGeometry(_qba(ment["ablak_geometria"]))
+        if ment.get("ablak_allapot"):
+            self.restoreState(_qba(ment["ablak_allapot"]))
+        self._chartok_vissza(ment)
+        _tabos = bool(ment.get("tabos"))
+        if self._tabos.isChecked() != _tabos:
+            self._tabos.setChecked(_tabos)
+        self._tabos_valt(_tabos)
+        self._aktiv_valtozott()
+
+    # ── SABLONOK ─────────────────────────────────────────────────────────
+    def sablon_ment(self, ut=None) -> "Path | None":
+        """A mostani képernyő NÉVVEL (fájl-párbeszéd, ha nincs út)."""
+        SABLON_DIR.mkdir(parents=True, exist_ok=True)
+        if ut is None:
+            ut, _ = QtWidgets.QFileDialog.getSaveFileName(
+                self, _t("lab.sablon_mentese"), str(SABLON_DIR / "sablon.json"),
+                "JSON (*.json)")
+            if not ut:
+                return None
+        ut = Path(ut)
+        try:
+            ut.write_text(json.dumps(elrendezes_leiro(self), ensure_ascii=False,
+                                     indent=2), encoding="utf-8")
+        except Exception as ex:
+            log.warning("A sablon mentése nem sikerült (%s): %s", ut, ex)
+            self.statusBar().showMessage(f"HIBA: {ex}", 8000)
+            return None
+        self.statusBar().showMessage(_t("lab.sablon_mentve", nev=ut.name), 5000)
+        return ut
+
+    def sablon_betolt(self, ut=None) -> bool:
+        """Egy sablon betöltése a mostani chartok HELYÉRE."""
+        if ut is None:
+            SABLON_DIR.mkdir(parents=True, exist_ok=True)
+            ut, _ = QtWidgets.QFileDialog.getOpenFileName(
+                self, _t("lab.sablon_betoltese"), str(SABLON_DIR), "JSON (*.json)")
+            if not ut:
+                return False
+        try:
+            d = json.loads(Path(ut).read_text(encoding="utf-8"))
+        except Exception as ex:
+            log.warning("A sablon nem olvasható (%s): %s", ut, ex)
+            self.statusBar().showMessage(f"HIBA: {ex}", 8000)
+            return False
+        if not isinstance(d, dict) or not d.get("chartok"):
+            self.statusBar().showMessage(_t("lab.sablon_ures", nev=Path(ut).name), 8000)
+            return False
+        self.elrendezes_alkalmaz(d)
+        self.statusBar().showMessage(_t("lab.sablon_betoltve", nev=Path(ut).name,
+                                        n=len(self.chartok())), 5000)
+        return True
 
     def _chartok_vissza(self, ment: dict) -> None:
         """A mentett chartok újranyitása.
@@ -4322,6 +4477,12 @@ class Munkaterulet(QtWidgets.QMainWindow):
                 _g = chart._szamla_gorbe()
             except Exception:
                 _g = None
+        # ⚠ CSAK HA MÁS GÖRBE. A `_szamla_gorbe` gyorsítótárazott (ugyanaz az
+        # objektum jön vissza képről képre), a rajzoló viszont minden képen
+        # leszedte és újrarakta a három elemet — 5 ms/kép, semmiért.
+        if _g is getattr(self, "_dokk_egyenleg_utolso", object()):
+            return
+        self._dokk_egyenleg_utolso = _g
         egyenleg_rajzol(self._dokk_egyenleg, self._dokk_egyenleg_elemek, _g)
 
     def _aktiv_chart(self):
@@ -4400,11 +4561,32 @@ def main(argv=None) -> int:
     ap.add_argument("--to", dest="ig")
     ap.add_argument("--egy", action="store_true",
                     help="EGYETLEN chart-ablak, munkaterület nélkül (a régi mód)")
+    ap.add_argument("--uj", action="store_true",
+                    help="TISZTA LAP: a mentett elrendezés figyelmen kívül hagyva")
     a = ap.parse_args(argv)
+    # ⚠ A LABORNAK SAJÁT NAPLÓJA VAN. A dashboard `data/tradeforge.log`-ja egy
+    # másik processzé (forgó fájl — két író egyszerre Windowson elakadna); a
+    # labor figyelmeztetései eddig csak a konzolra mentek, és egy bezárt
+    # ablak után nem lehetett megnézni, mi történt.
+    try:
+        import logging.handlers as _lh
+        _h = _lh.RotatingFileHandler(ROOT / "data" / "lab.log", maxBytes=2_000_000,
+                                     backupCount=2, encoding="utf-8")
+        _h.setFormatter(logging.Formatter("%(asctime)s  %(levelname)-8s %(name)s: %(message)s",
+                                          datefmt="%Y-%m-%d %H:%M:%S"))
+        _root = logging.getLogger()
+        _root.addHandler(_h)
+        if _root.level > logging.INFO or _root.level == logging.NOTSET:
+            _root.setLevel(logging.INFO)
+    except Exception as _ex:
+        log.warning("A labor naplófájlja nem nyitható: %s", _ex)
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
-    oszt = LabAblak if a.egy else Munkaterulet
-    w = oszt(symbol=a.symbol, strategy=a.strategy, tf_perc=a.tf,
-             tol=a.tol, ig=a.ig)
+    if a.egy:
+        w = LabAblak(symbol=a.symbol, strategy=a.strategy, tf_perc=a.tf,
+                     tol=a.tol, ig=a.ig)
+    else:
+        w = Munkaterulet(symbol=a.symbol, strategy=a.strategy, tf_perc=a.tf,
+                         tol=a.tol, ig=a.ig, uj=a.uj)
     w.show()
     return app.exec()
 

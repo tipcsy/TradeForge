@@ -222,6 +222,51 @@ if QT_OK:
     g._frissit()
     check("...nagy ugrás viszont igen", g._tart != _elozo, str(g._tart))
 
+
+# ══ 4. A HARMADIK LELET (2026-09-11): a Pause „beragad, homokórázik" ═══════
+# Három kapcsolt ablak (H1+M15+M1), kontrollpontokkal, egy nyitott tervvel:
+# 104,8 ms/kép. Az időzítő 16 ms-onként lőtt, a sor megtelt, a kattintás a
+# sor végén várt. Négy tétel, mind „olcsónak látszó hívás a forró úton":
+#   tick_van()          könyvtár-pásztázás   2,0 ms × 12/kép   → gyorsítótár
+#   egyenleg_rajzol()   3 elem le+fel         5,0 ms × 3/kép    → csak ha más
+#   _be_ar()            get_indexer(nearest)  1,4 ms × 9/kép    → gyorsítótár
+#   _nyitott_rajz()     addItem × 18/kép      1,1 ms × 9/kép    → újrahasznosít
+# Mérve: 104,8 → 60,6 → 38,0 → 27,6 ms/kép (a maradék a Qt festése).
+# És a SZERKEZET: a szinkron ütem a TÉNYLEGES képközhöz igazodik — lassú kép
+# esetén ritkábban, de nagyobbat lép, a felület kattintható marad.
+import time as _time
+
+from tools import lab_qt as _lq
+
+_tv_dir = _lq.TICK_DIR
+try:
+    import tempfile as _tf
+    _lq.TICK_DIR = Path(_tf.mkdtemp(prefix="tf_tv_"))
+    (_lq.TICK_DIR / "XX").mkdir()
+    for _i in range(300):                       # egy „nagy" tick-tár
+        (_lq.TICK_DIR / "XX" / f"2020-{_i:03d}.parquet").write_bytes(b"")
+    _lq._TICK_VAN.clear()
+    _t0 = _time.perf_counter()
+    for _ in range(200):
+        _lq.tick_van("XX")
+    _dt = (_time.perf_counter() - _t0) * 1000
+    check("⚠ tick_van() GYORSÍTÓTÁRAZOTT (200 hívás < 20 ms; pásztázva ~400 ms volna)",
+          _dt < 20.0 and _lq._TICK_VAN.get("XX") is True, f"{_dt:.1f} ms")
+finally:
+    _lq.TICK_DIR = _tv_dir
+    _lq._TICK_VAN.clear()
+
+check("⚠ a közös dokk számlagörbéje csak MÁS görbénél rajzol újra",
+      "_dokk_egyenleg_utolso" in _src)
+check("⚠ a `_be_ar` gyorsítótárazott (chart-azonosság + idő)",
+      "_be_ar_tar" in _src)
+check("⚠ a nyitott pozíció vonalai ÚJRAHASZNOSULNAK (pool), nem épülnek újra",
+      "_nyitott_pool" in _src and "setData([x1, _xm], [_ar, _ar])" in _src)
+_ut = _src[_src.index("    def _utem(self) -> None:" + chr(10) + "        v = self._vezer"):]
+_ut = _ut[:_ut.index(chr(10) + "class ")]
+check("⚠ a szinkron ütem ÖNSZABÁLYOZÓ (a képközhöz igazodik, a sebesség marad)",
+      "setInterval(" in _ut and "kep_mp=_koz_mp" in _ut)
+
 print()
 n, m = sum(results), len(results)
 print(f"{n}/{m} teszt PASS")

@@ -152,15 +152,27 @@ mt2.close()
 app.processEvents()
 
 
-# ══ 3. A PARANCSSOR NYER ═════════════════════════════════════════════════
+# ══ 3. A MENTETT ELRENDEZÉS NYER — a parancssor csak `--uj`-jal ═══════════
+# ⚠ MEGFORDÍTVA (v3.70.2). Az első szabály itt „a parancssor nyer" volt: egy
+# `--symbol`/`--from` kapcsolóval indítva a mentett elrendezés NÉMÁN kimaradt,
+# és a felhasználó azt látta, hogy „nem jegyzi meg" (három ablak, görgetés,
+# AutoFit — minden indításnál újra). A tiszta lapot az `--uj` kéri.
 mt3 = lab_qt.Munkaterulet(symbol=PAR, tf_perc=5, tol=TOL, ig=IG)
 mt3.show()
 app.processEvents()
-check("⚠ `--symbol`-lal indítva NEM a mentett készlet jön, hanem az kért chart",
+check("⚠ `--symbol`-lal indítva IS a mentett készlet jön (2 chart)",
+      len(mt3.chartok()) == 2,
+      f"{len(mt3.chartok())} chart, {[c._tf.currentText() for c in mt3.chartok()]}")
+check("...és a KERET (dokk-hely) is visszaáll",
+      mt3.dockWidgetArea(mt3._szamla_dokk) == QtCore.Qt.RightDockWidgetArea)
+mt3.close()
+app.processEvents()
+mt3 = lab_qt.Munkaterulet(symbol=PAR, tf_perc=5, tol=TOL, ig=IG, uj=True)
+mt3.show()
+app.processEvents()
+check("⚠ `--uj`-jal viszont a kért chart jön (tiszta lap)",
       len(mt3.chartok()) == 1 and mt3.chartok()[0]._tf.currentText() == "M5",
       f"{len(mt3.chartok())} chart, {mt3.chartok()[0]._tf.currentText()}")
-check("...de a KERET (dokk-hely) akkor is visszaáll",
-      mt3.dockWidgetArea(mt3._szamla_dokk) == QtCore.Qt.RightDockWidgetArea)
 mt3.close()
 app.processEvents()
 

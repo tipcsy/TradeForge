@@ -271,6 +271,7 @@ else:
     # ── Tick-tár NÉLKÜL: NEM CSENDBEN utasítja el ───────────────────────
     _tick_dir_volt = lab_qt.TICK_DIR
     lab_qt.TICK_DIR = Path(tempfile.mkdtemp(prefix="tf_notick_"))
+    lab_qt._TICK_VAN.clear()             # a gyorsítótár a régi tárra emlékezne
     try:
         w0 = LabAblak(symbol=PAR, tf_perc=1, tol=TOL, ig=IG)
         w0.show()
@@ -285,6 +286,7 @@ else:
         w0.close()
     finally:
         lab_qt.TICK_DIR = _tick_dir_volt
+        lab_qt._TICK_VAN.clear()
 w.close()
 
 

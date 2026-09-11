@@ -532,7 +532,8 @@ check("...és ilyenkor a saját számla-sora látszik",
 w.close()
 
 _src = (ROOT / "tools" / "lab_qt.py").read_text(encoding="utf-8")
-check("a belépési pont a MUNKATERÜLETET nyitja", "oszt = LabAblak if a.egy else Munkaterulet" in _src)
+check("a belépési pont a MUNKATERÜLETET nyitja",
+      "w = Munkaterulet(symbol=a.symbol" in _src and "if a.egy:" in _src)
 check("...de a régi, egy-ablakos mód megmarad (`--egy`)", '"--egy"' in _src)
 
 mt.close()
