@@ -720,7 +720,9 @@ class Belepo:
 
     # Az ABLAK ezekben a kulcsokban tartja a belépő rajz-elemeit.
     ELEM_MEZOK = ("vonal", "sl_vonal", "tp_vonal", "kock", "cel",
-                  "trail_be", "trail_tav")
+                  "trail_be", "trail_tav",
+                  # A doboz-felület elemei (CSAK az aktív ablakban):
+                  "szel", "cimke_tp", "cimke_sl", "cimke_kozep")
 
     def __init__(self, ido, irany, sl, rr):
         self.ido = ido
@@ -728,6 +730,10 @@ class Belepo:
         self.sl = sl
         self.rr = float(rr)
         self.nyitva = False     # a terv MEGNYITOTT pozícióvá vált-e
+        # ⚠ A pozíció VÉGE — IDŐBEN, mint minden más ebben az osztályban.
+        # `None` = automatikus (a kötés zárása, vagy a lejátszó kurzora); a
+        # jobb oldali fogóval állítható, „ha véget ért a pozíció".
+        self.veg = None
         # ⚠ A RAJZ-ELEMEK MÁR NEM ITT ÜLNEK (2026-09-10). Ugyanaz a lecke, mint
         # a `Rajz`-nál: ha EGY belépő TÖBB ablakban látszik (M1-en nyitva, de az
         # M5-ön és az M15-ön is látni akarjuk), ablakonként KÜLÖN Qt-elem
@@ -1544,9 +1550,165 @@ class LabAblak(QtWidgets.QMainWindow):
             for it in (_kock, _cel):
                 it.setZValue(-20)
                 self._plot.addItem(it)
+            self._doboz_rajz(b, x, _x2, _be)
             if _akt:
                 self._trail_vonalak(b, _be)
         self._be_jelolo_rajz()
+
+    # ══ A POZÍCIÓ-DOBOZ (TradingView-szerű) ══════════════════════════════
+    #
+    # ⚠ A TERV NEM POZÍCIÓ, AMÍG MEG NEM NYITOD. A doboz kirakása még csak
+    # szándék; a KÖZÉPSŐ gombra kattintva válik megnyitottá. Utána is
+    # SZERKESZTHETŐ marad (kifejezett felhasználói kérés) — így az SL BE-be
+    # húzása egyetlen mozdulat, és a doboz utólag is szűkíthető.
+    #
+    # ⚠ AMI SZÁNDÉKOSAN NINCS BENNE: a PÉNZ-érték (lot, kockázat devizában).
+    # A méretezés a `core/risk_manager`-é; ha itt is kiszámolnám, két méretező
+    # út lenne — a projekt visszatérő kárforrása —, és a naiv képlet ráadásul
+    # HAZUDNA is, mert a `min_lot` és a slot-keret felülírja (lásd a
+    # „min_lot túlkockázat" leletet). A doboz ezért ÁRAT, TÁVOLSÁGOT (pontban
+    # és %-ban) és R:R-t mutat: ezek a belépőből és a stopból egyértelműen
+    # adódnak, nem kell hozzá számla-modell.
+
+    DOBOZ_GOMB_X = 0.5          # a gomb helye a dobozon belül (0..1)
+
+    def _doboz_cimke(self, szoveg: str, hatter: str, horgony) -> "pg.TextItem":
+        _c = pg.TextItem(szoveg, color="#ffffff", anchor=horgony,
+                         fill=pg.mkBrush(hatter), border=pg.mkPen("#000000"))
+        _c.setZValue(70)
+        return _c
+
+    def _doboz_szoveg(self, b: "Belepo", be_ar: float) -> tuple:
+        """A három felirat szövege: `(cél, stop, közép)`.
+
+        ⚠ MINDIG A MODELLBŐL SZÁMOL, nem tárolt számból: a felhasználó kérése
+        az volt, hogy „folyamatosan számolja az értéket". Egy eltett érték az
+        első húzásnál elavulna."""
+        _ps = float(((self.cfg.get("pairs") or {})
+                     .get(self._sym.currentText()) or {}).get("point_size") or 0.0)
+        _tp = b.tp_ar(be_ar)
+
+        def _tav(ar):
+            _d = abs(ar - be_ar)
+            _pont = (_t("lab.doboz.pont", n=int(round(_d / _ps)))
+                     if _ps > 0 else "")
+            _szaz = ("%.3f" % (_d / be_ar * 100.0)) if be_ar else "-"
+            return _szaz, _pont
+
+        _szt, _pt_t = _tav(_tp)
+        _szs, _pt_s = _tav(b.sl)
+        _dt, _ds = abs(_tp - be_ar), abs(b.sl - be_ar)
+        _rr = ("%.2f" % (_dt / _ds)) if _ds > 0 else "-"
+        return (_t("lab.doboz.cel", ar=self._ar(_tp), szaz=_szt, pont=_pt_t),
+                _t("lab.doboz.stop", ar=self._ar(b.sl), szaz=_szs, pont=_pt_s),
+                "%s   %s   R:R %s" % (
+                    _t("lab.doboz.nyitva" if b.nyitva else "lab.doboz.nyit"),
+                    b.irany, _rr))
+
+    def _doboz_rajz(self, b: "Belepo", x1: float, x2: float,
+                    be_ar: float) -> None:
+        """A doboz fogója és feliratai. CSAK az aktív ablakban hívjuk."""
+        _cel_sz, _stop_sz, _kozep_sz = self._doboz_szoveg(b, be_ar)
+
+        # ── A JOBB OLDALI FOGÓ: CSAK a szélesség ─────────────────────────
+        # ⚠ Se árat, se belépő-időt nem mozgat — a pozíció VÉGÉT állítja. Ezért
+        # nem sarok-pont, hanem függőleges vonal: egy sarokfogóról a felhasználó
+        # joggal várná, hogy az árat is vigye.
+        _szel = pg.InfiniteLine(
+            pos=x2, angle=90, movable=True,
+            pen=pg.mkPen("#8aa0b8", width=1, style=QtCore.Qt.DashLine),
+            hoverPen=pg.mkPen(szin("yellow"), width=3))
+        _szel.addMarker("o", position=0.5, size=10)
+        _szel.setZValue(58)
+        _szel.sigPositionChanged.connect(
+            lambda _l=None, _b=b: self._doboz_szelesseg(_b))
+        self._bel_set(b, "szel", _szel)
+        self._plot.addItem(_szel, ignoreBounds=True)
+
+        _ct = self._doboz_cimke(_cel_sz, "#1b7f5a", (0.0, 1.0))
+        _ct.setPos(x1, b.tp_ar(be_ar))
+        _cs = self._doboz_cimke(_stop_sz, "#a03030", (0.0, 0.0))
+        _cs.setPos(x1, b.sl)
+        _ck = self._doboz_cimke(_kozep_sz,
+                                "#2d6a4f" if b.nyitva else "#334a63", (0.5, 0.5))
+        _ck.setPos(x1 + (x2 - x1) * self.DOBOZ_GOMB_X, be_ar)
+        for _nev, _el in (("cimke_tp", _ct), ("cimke_sl", _cs),
+                          ("cimke_kozep", _ck)):
+            self._bel_set(b, _nev, _el)
+            self._plot.addItem(_el, ignoreBounds=True)
+
+    def _doboz_igazit(self, b: "Belepo", be_ar: float) -> None:
+        """A feliratok újraszámolása húzás közben — ÚJRAÉPÍTÉS NÉLKÜL.
+
+        ⚠ HÚZÁS KÖZBEN SOHA NEM ÉPÍTÜNK ÚJRA. A `_belepok_rajz` eldobná azt a
+        Qt-elemet, amit a felhasználó épp fog — a húzás ettől megszakad, és a
+        felület elszállhat a kézben maradt elemen. Ugyanezért hív minden
+        húzás-kezelő `_terv_valtozott(rajzol=False)`-t."""
+        _ct = self._bel(b, "cimke_tp")
+        _cs = self._bel(b, "cimke_sl")
+        _ck = self._bel(b, "cimke_kozep")
+        if _ct is None or _cs is None or _ck is None or self._tengely is None:
+            return
+        x1 = self._tengely.hol(int(b.ido.timestamp()))
+        if x1 is None:
+            return
+        x2 = self._sav_vege(b, x1)
+        _cel_sz, _stop_sz, _kozep_sz = self._doboz_szoveg(b, be_ar)
+        _ct.setText(_cel_sz)
+        _ct.setPos(x1, b.tp_ar(be_ar))
+        _cs.setText(_stop_sz)
+        _cs.setPos(x1, b.sl)
+        _ck.setText(_kozep_sz)
+        _ck.setPos(x1 + (x2 - x1) * self.DOBOZ_GOMB_X, be_ar)
+
+    def _doboz_szelesseg(self, b: "Belepo") -> None:
+        """A jobb oldali fogót elhúzták → a pozíció VÉGE (időben)."""
+        _el = self._bel(b, "szel")
+        if _el is None:
+            return
+        _ido = self._ido_x(float(_el.value()))
+        if _ido is None or _ido <= b.ido:
+            return                      # a vég sosem előzheti meg a belépőt
+        b.veg = _ido
+        _x2 = float(_el.value())
+        for _m in ("kock", "cel"):
+            _sav = self._bel(b, _m)
+            if _sav is not None:
+                _sav.vege(_x2)
+        _be = self._be_ar(b.ido)
+        if _be is not None:
+            self._doboz_igazit(b, _be)
+        self._terv_valtozott(rajzol=False)
+
+    def _doboz_gomb_talalat(self, p) -> "Belepo | None":
+        """A kattintás a doboz KÖZÉPSŐ gombjára esett? Melyik belépőére?
+
+        ⚠ A pyqtgraph `TextItem` nem ad kattintás-jelzést, ezért a gombot a
+        jelenet-kattintásból találjuk el. A legkésőbb rajzolt (legfelső) elem
+        nyerjen, ezért megyünk visszafelé a listán."""
+        for b in reversed(self._belepok):
+            _ck = self._bel(b, "cimke_kozep")
+            if _ck is None or not _ck.isVisible():
+                continue
+            try:
+                if _ck.mapRectToView(_ck.boundingRect()).contains(p):
+                    return b
+            except Exception:
+                continue
+        return None
+
+    def _doboz_megnyit(self, b: "Belepo") -> None:
+        """A terv MEGNYITÁSA — vagy a megnyitás visszavonása.
+
+        ⚠ A MEGNYITÁS NEM FAGYASZT BE. Az SL, a TP és a szélesség utána is
+        húzható: ezt kérte a felhasználó, „így egyszerűbb lesz az SL-t is BE-be
+        húzni". Élesben ez nyilván nem így lenne — a laborban viszont épp az a
+        kérdés, hogy MIT csinálnál a már nyitott pozícióval."""
+        b.nyitva = not b.nyitva
+        self._allapot.setText(_t(
+            "lab.doboz.allapot_nyitva" if b.nyitva else "lab.doboz.allapot_terv",
+            ir=b.irany, ido=str(b.ido)[:16]))
+        self._terv_valtozott()
 
     def _trail_vonalak(self, b: "Belepo", be_ar: float) -> None:
         """A trailing két HÚZHATÓ vonala: honnan indul, és mekkora távban követ.
@@ -1639,6 +1801,14 @@ class LabAblak(QtWidgets.QMainWindow):
 
         ⚠ Sosem rövidebb a belépőnél: egy hátrafelé nyúló sáv azt sugallná,
         hogy a pozíció a nyitása ELŐTT élt."""
+        # ⚠ A KÉZI VÉG NYER. Ha a felhasználó a jobb oldali fogóval szűkítette
+        # a dobozt, azt tiszteljük — nem írja felül sem a kötés zárása, sem a
+        # kurzor. Enélkül a következő lejátszó-lépésnél visszanőne, és a fogó
+        # használhatatlan volna.
+        if b.veg is not None and self._tengely:
+            _xv = self._tengely.hol(int(b.veg.timestamp()))
+            if _xv is not None:
+                return max(x1, _xv)
         _kt = self._kotes_belepohoz(b)
         if _kt is not None and _kt.close_time is not None and self._tengely:
             _x = self._tengely.hol(int(_kt.close_time.timestamp()))
@@ -1771,6 +1941,17 @@ class LabAblak(QtWidgets.QMainWindow):
             for it in (self._bel(b, "kock"), self._bel(b, "cel")):
                 if it is not None:
                     it.vege(_x2)
+            # ⚠ A DOBOZ IS KÖVESSE. Enélkül a fogó és a gomb a kurzortól
+            # elszakadva ott maradna, ahol a rajzoláskor volt — és a gomb egy
+            # olyan helyen fogadna kattintást, ahol már nincs doboz.
+            _szel = self._bel(b, "szel")
+            if _szel is not None:
+                _szel.blockSignals(True)
+                _szel.setValue(_x2)
+                _szel.blockSignals(False)
+            _be = self._be_ar(b.ido)
+            if _be is not None:
+                self._doboz_igazit(b, _be)
 
     # ── Kézi rajz-elemek ─────────────────────────────────────────────────
     def _rajzok_rajza(self) -> None:
@@ -1987,6 +2168,10 @@ class LabAblak(QtWidgets.QMainWindow):
             self._bel(b, "kock").sav(be_ar, b.sl)
         if self._bel(b, "cel") is not None:
             self._bel(b, "cel").sav(be_ar, b.tp_ar(be_ar))
+        # ⚠ A SZÁM IS KÖVESSE A VONALAT. A doboz értelme, hogy húzás KÖZBEN
+        # mutassa, mibe kerül a döntés; egy csak-elengedéskor frissülő felirat
+        # pont a hasznos pillanatban hallgatna.
+        self._doboz_igazit(b, be_ar)
 
     def _sl_mozgott(self, b: "Belepo") -> None:
         b.sl = float(self._bel(b, "sl_vonal").value())
@@ -2041,11 +2226,21 @@ class LabAblak(QtWidgets.QMainWindow):
 
     # ── Kattintás ────────────────────────────────────────────────────────
     def _kattintas(self, ev) -> None:
-        if self._mod is None or self._chart is None:
+        if self._chart is None:
             return
         if ev.button() != QtCore.Qt.LeftButton:
             return
         p = self._vb.mapSceneToView(ev.scenePos())
+        # ⚠ A DOBOZ KÖZÉPSŐ GOMBJA RAJZ-MÓD NÉLKÜL is működik: nem rajzolni
+        # akarunk vele, hanem megnyitni a tervet. Ezért ELŐBB nézzük, mint a
+        # módokat — különben BUY-módban a gombra kattintás egy ÚJ belépőt tenne
+        # le a régi tetejére.
+        _gomb = self._doboz_gomb_talalat(p)
+        if _gomb is not None:
+            self._doboz_megnyit(_gomb)
+            return
+        if self._mod is None:
+            return
         t = self._ido_x(p.x())
         if t is None:
             return
@@ -2121,10 +2316,17 @@ class LabAblak(QtWidgets.QMainWindow):
             "symbol": self._sym.currentText(),
             "strategy": self._strat_nev(),
             "from": _f, "to": _i,
+            # ⚠ A `nyitva` és a `veg` a LABORÉ, nem a motoré: a
+            # `lab_scenario.futtat()` a belépőből csak az időt, az irányt és a
+            # szinteket nézi, a többi kulcsot figyelmen kívül hagyja. Mégis ide
+            # kerülnek, különben a doboz szűkítése és a megnyitás-jelölés az
+            # ablak bezárásakor elveszne — ugyanaz az ok, amiért a rajzok is.
             "entries": [
                 {"time": str(b.ido)[:16], "direction": b.irany,
                  **({"sl": float(b.sl), "tp_rr": float(b.rr)}
-                    if b.sl is not None else {})}
+                    if b.sl is not None else {}),
+                 **({"opened": True} if b.nyitva else {}),
+                 **({"end": str(b.veg)[:16]} if b.veg is not None else {})}
                 for b in sorted(self._belepok, key=lambda e: e.ido)],
             "breakeven_at": (str(self._be_ido)[:16] if self._be_ido else None),
             "rr_preset": "off",
@@ -2204,6 +2406,12 @@ class LabAblak(QtWidgets.QMainWindow):
                             e.get("sl"), float(e.get("tp_rr", 2.0)))
             except (KeyError, ValueError, TypeError):
                 continue
+            _b.nyitva = bool(e.get("opened"))
+            if e.get("end"):
+                try:
+                    _b.veg = pd.Timestamp(e["end"])
+                except (ValueError, TypeError):
+                    _b.veg = None
             self._belepok.append(_b)
         if fk.get("breakeven_at"):
             try:
