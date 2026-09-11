@@ -137,8 +137,13 @@ class Szinkron(QtCore.QObject):
         # lejátszás BEFAGYOTT az első lépés után (mérve: M15 +0, M1 +2 gyertya
         # húsz kép alatt). A saját, folytonos idő ezt kizárja.
         self._ido = None
-        self._zito = QtCore.QTimer(self)
-        self._zito.timeout.connect(self._utem)
+        # ⚠ NINCS ISMÉTLŐDŐ IDŐZÍTŐ — lásd `_utem`. A következő képet MINDIG a
+        # kész kép UTÁN ütemezzük egyszeri időzítővel; a lejátszás állapotát
+        # ez a jelző tartja, nem a `QTimer.isActive()`.
+        self._jatszik = False
+        self._utolso = None          # az előző ütem wall-clock ideje
+        self._var_festes = False     # a vezér festésére várunk-e
+        self._utem_kezdet = 0.0
 
     # ── tagság ───────────────────────────────────────────────────────────
     def belep(self, ablak) -> None:
@@ -157,7 +162,7 @@ class Szinkron(QtCore.QObject):
         return list(self._tagok)
 
     def jatszik(self) -> bool:
-        return self._zito.isActive()
+        return bool(self._jatszik)
 
     # ── az idő ───────────────────────────────────────────────────────────
     def allit(self, ido, forras=None) -> None:
@@ -210,12 +215,62 @@ class Szinkron(QtCore.QObject):
         except Exception:
             _most = None
         self._ido = _most if _most is not None else self._ido
-        self._zito.start(int(1000 / MAX_KEP_MP))    # az ütem menet közben igazodik
+        self._jatszik = True
+        self._utolso = None
+        self._kovetkezo_kep()
         for a in self._tagok:
             a.play_felirat(True)
 
+    KEP_TARTALEK_MS = 150        # ha nem jön festés (rejtett ablak), ennyi után lépünk
+
+    def _kovetkezo_kep(self) -> None:
+        """A következő kép ütemezése — a MOSTANI kép KIFESTÉSE UTÁN.
+
+        ⚠ MIÉRT A FESTÉSHEZ KÖTVE, ÉS NEM IDŐZÍTŐHÖZ. Windowson a WM_PAINT a
+        LEGALACSONYABB prioritású üzenet: csak akkor jön, ha a sor egyébként
+        üres. Egy 16 ms-os időzítő-lánc + a jelenet frissítései a sort sosem
+        hagyták kiürülni → a Qt SOHA nem festett, és a többi időzítő (200 ms-os
+        szívverés, 1,5 mp-es próba) SEM futott le — mérve: 20 másodpercen át
+        „utem" 85 ms-onként, 0 festés, 0 szívverés. A felhasználó ezt látta:
+        szürke, „nem válaszol" ablak, a Pause-ra nem reagál. (Előtte ugyanez
+        ismétlődő időzítővel; az egyszeri lánc önmagában nem oldotta meg.)
+
+        Ha a következő képet a VEZÉR FESTÉSE indítja, akkor a sorrend
+        szerkezetileg garantált: a frissítés után az egér, a billentyű, a
+        többi időzítő, VÉGÜL a festés jön — és csak azután a következő lépés.
+        Tartalék-időzítő arra az esetre, ha nincs festés (rejtett/minimalizált
+        ablak): akkor ritkábban, de megy tovább."""
+        v = self._vezer
+        self._var_festes = True
+        self._utem_kezdet = _time.perf_counter()
+        _lepes_kesz = False
+        if v is not None:
+            try:
+                v.kep_utan(self._kep_kesz)
+                _lepes_kesz = True
+            except Exception as ex:               # régi/idegen vezér — tartalék
+                log.debug("kep_utan nem elérhető: %s", ex)
+        QtCore.QTimer.singleShot(self.KEP_TARTALEK_MS, self._kep_tartalek)
+        if not _lepes_kesz:
+            self._var_festes = False
+            QtCore.QTimer.singleShot(int(1000 / MAX_KEP_MP), self._utem)
+
+    def _kep_kesz(self) -> None:
+        """A vezér kifestette a képet → jöhet a következő (legalább 16 ms-onként)."""
+        if not self._var_festes:
+            return
+        self._var_festes = False
+        _eltelt = (_time.perf_counter() - self._utem_kezdet) * 1000.0
+        QtCore.QTimer.singleShot(int(max(1.0, 1000.0 / MAX_KEP_MP - _eltelt)),
+                                 self._utem)
+
+    def _kep_tartalek(self) -> None:
+        if self._var_festes and self._jatszik:
+            self._var_festes = False
+            self._utem()
+
     def szunet(self) -> None:
-        self._zito.stop()
+        self._jatszik = False
         for a in list(self._tagok):
             try:
                 a.play_felirat(False)
@@ -223,6 +278,8 @@ class Szinkron(QtCore.QObject):
                 self._tagok.remove(a)
 
     def _utem(self) -> None:
+        if not self._jatszik:
+            return
         v = self._vezer
         if v is None or v not in self._tagok:
             self.szunet()
@@ -235,32 +292,38 @@ class Szinkron(QtCore.QObject):
         # ⚠ A SAJÁT óránkról lépünk, nem a vezér kvantált kurzoráról (lásd a
         # `_ido` mezőt). A vezértől csak a TEMPÓ és a VÉGE kell.
         #
-        # ⚠ ÖNSZABÁLYOZÓ KÉPFREKVENCIA. Ha egy kép tovább tart, mint az
-        # időzítő köze, az időzítő GYORSABBAN lő, mint ahogy a képek
-        # elkészülnek: a sor megtelik, a felhasználó kattintása (Pause!) a sor
-        # végén vár, és a felület „beragad, homokórázik" — ez kétszer is
-        # megtörtént (a boolean maszk 20 ms-a, majd a tick-tár pásztázása).
-        # A gyökér-okot mindkétszer javítottuk, de a SZERKEZET maradt
-        # törékeny. Ezért a lépés a TÉNYLEGES képközhöz igazodik: ha lassabbak
-        # a képek, ritkábban, de NAGYOBBAT lépünk — a chart-idő sebessége
-        # (gyertya/mp) marad, csak a kép ritkul. A felület így mindig marad
-        # kattintható.
-        _alap = int(1000 / MAX_KEP_MP)
-        # Az alap-közhöz képest arányosan (a névleges 60 kép/mp az alap-köznél
-        # PONTOSAN 60 marad — az `int(1000/60)` = 16 ms kerekítése ne csússzon
-        # bele a lépésbe).
-        _koz_mp = MAX_KEP_MP * _alap / max(1, self._zito.interval())
+        # ⚠ MIÉRT EGYSZERI IDŐZÍTŐ, ÉS MIÉRT WALL-CLOCK LÉPÉS. Az ismétlődő
+        # `QTimer` 16 ms-onként LŐTT — függetlenül attól, hogy az előző kép
+        # elkészült-e. Ha a kép (Python + a Qt FESTÉSE) tovább tartott, az
+        # időzítő eseménye már a sorban volt, mire a kezelő visszatért: az
+        # eseményhurok SOHA nem ürült ki, a kattintás (Pause!) a sor végén
+        # várt, és a felület „beragadt, homokórázott" — háromszor egymás
+        # után, három különböző forró-úti tétellel. (Mérve: 3 kapcsolt ablak,
+        # teljes időszak, görgetéssel: 130 ütem 10 kép alatt.) Az első
+        # önszabályozó változat csak a Python-részt mérte, a festést nem —
+        # ezért nem segített.
+        #
+        # Most: a következő képet a MOSTANI kép kezelője ütemezi, egyszeri
+        # időzítővel. Két kép közt így MINDIG van legalább 16 ms, amiben a
+        # festés, az egér és a billentyű sorra kerül — ez SZERKEZETI garancia,
+        # nem a forró út gyorsaságán múlik. A chart-idő sebessége pedig marad:
+        # a lépés a TÉNYLEGESEN eltelt wall-clock időből számolódik (lassú
+        # kép → ritkább, de nagyobb lépés). Felső korlát 0,5 mp: egy
+        # megakasztott alkalmazás (fájlpárbeszéd, hibernálás) után nem
+        # ugrunk órákat.
+        _most_wc = _time.perf_counter()
+        _alap_mp = 1.0 / MAX_KEP_MP
+        _eltelt = (_most_wc - self._utolso) if self._utolso is not None else _alap_mp
+        self._utolso = _most_wc
+        _eltelt = min(0.5, max(_alap_mp, _eltelt))
         uj = kovetkezo_ido(self._ido if self._ido is not None else most,
-                           lepes_ido(seb, tf, kep_mp=_koz_mp), veg)
+                           lepes_ido(seb, tf, kep_mp=1.0 / _eltelt), veg)
         if uj is None:
             self.szunet()
             return
-        _t0 = _time.perf_counter()
         self.allit(uj, forras=None)
-        _dt_ms = (_time.perf_counter() - _t0) * 1000.0
-        _kivant = int(max(_alap, min(250.0, _dt_ms * 1.5)))
-        if abs(_kivant - self._zito.interval()) > 2:
-            self._zito.setInterval(_kivant)
+        if self._jatszik:
+            self._kovetkezo_kep()
 
 
 # ⚠ A megnyitott ablakok hivatkozásai. Enélkül a `_uj_ablak`-ban létrehozott
@@ -1332,6 +1395,9 @@ class LabAblak(QtWidgets.QMainWindow):
         self._plot.showGrid(x=True, y=True, alpha=0.15)
         self._vb = self._plot.getViewBox()
         self._plot.scene().sigMouseClicked.connect(self._kattintas)
+        self._vp_figyelt = self._plot.viewport()
+        self._vp_figyelt.installEventFilter(self)
+        self._kep_utan_fn = None
         fo.addWidget(self._plot, stretch=1)
 
         # sáv-állapot (a stratégia BarState-jei)
@@ -3228,10 +3294,26 @@ class LabAblak(QtWidgets.QMainWindow):
         self._utem_indit()
 
     def _utem_indit(self) -> None:
+        """A következő lépés ütemezése — a FESTÉS után (lásd `Szinkron._kovetkezo_kep`).
+
+        Az `_ido_zito` itt egyszeri: a kifestett kép után indítjuk újra, így
+        a Windows-üzenetsor minden lépés közt kiürül (egér, billentyű, festés)."""
         _seb = max(1.0, float(self._sebesseg.value()))
         self._lepes = max(1, int(round(_seb / MAX_KEP_MP)))
-        self._ido_zito.start(max(int(1000 / MAX_KEP_MP),
-                                 int(1000 * self._lepes / _seb)))
+        _koz = max(int(1000 / MAX_KEP_MP), int(1000 * self._lepes / _seb))
+        self._utem_koz = _koz
+        self._ido_zito.setSingleShot(True)
+        self._ido_zito.start(self.UTEM_TARTALEK_MS)          # tartalék
+        self._utem_kezdet = _time.perf_counter()
+        self.kep_utan(self._utem_kep_kesz)
+
+    UTEM_TARTALEK_MS = 150
+
+    def _utem_kep_kesz(self) -> None:
+        if not self._ido_zito.isActive():
+            return                              # közben leállították
+        _eltelt = (_time.perf_counter() - getattr(self, "_utem_kezdet", 0.0)) * 1000.0
+        self._ido_zito.start(int(max(1.0, getattr(self, "_utem_koz", 16) - _eltelt)))
 
     def _utem(self) -> None:
         if self._chart is None or self._kurzor is None:
@@ -3298,6 +3380,26 @@ class LabAblak(QtWidgets.QMainWindow):
     def kurzor_ido(self):
         """A kurzor ideje (a szinkron ebből olvas)."""
         return self._kurzor_ido()
+
+    def kep_utan(self, fn) -> None:
+        """`fn` a chart KÖVETKEZŐ kifestése után fut (egyszer).
+
+        A `viewport` Paint-eseményére kötve (eseményszűrő) — a lejátszó
+        ebből tudja, hogy a kép tényleg a képernyőre került, és csak azután
+        lép tovább (lásd `Szinkron._kovetkezo_kep`)."""
+        self._kep_utan_fn = fn
+        self._plot.viewport().update()
+
+    def eventFilter(self, obj, ev):
+        if (obj is getattr(self, "_vp_figyelt", None)
+                and ev.type() == QtCore.QEvent.Paint):
+            _fn = getattr(self, "_kep_utan_fn", None)
+            if _fn is not None:
+                self._kep_utan_fn = None
+                # ⚠ A festés UTÁN, nem közben: a Paint-esemény még csak most
+                # kezdődik; egy 0 ms-os időzítő a festés végére teszi a hívást.
+                QtCore.QTimer.singleShot(0, _fn)
+        return super().eventFilter(obj, ev)
 
     def play_felirat(self, jatszik: bool) -> None:
         """A Play/Pause felirat — a szinkron állítja MINDEN tagon egyszerre."""

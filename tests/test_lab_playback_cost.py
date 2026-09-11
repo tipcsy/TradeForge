@@ -125,7 +125,7 @@ if QT_OK:
     check("...és az új hosszal", len(g5[0]) == 100, str(len(g5[0])))
 
     # A gyorsítótárazott érték EGYEZZEN a friss számítással.
-    from tools.lab_qt import szamla_gorbe as _friss
+    from tools.lab_qt import LabAblak, szamla_gorbe as _friss
     _f = _friss(w._chart, [], 5000.0)
     check("⚠ a gyorsítótárazott görbe BITAZONOS a frissen számolttal",
           np.allclose(g5[0], _f[0]) and np.allclose(g5[1], _f[1]))
@@ -262,10 +262,33 @@ check("⚠ a `_be_ar` gyorsítótárazott (chart-azonosság + idő)",
       "_be_ar_tar" in _src)
 check("⚠ a nyitott pozíció vonalai ÚJRAHASZNOSULNAK (pool), nem épülnek újra",
       "_nyitott_pool" in _src and "setData([x1, _xm], [_ar, _ar])" in _src)
-_ut = _src[_src.index("    def _utem(self) -> None:" + chr(10) + "        v = self._vezer"):]
-_ut = _ut[:_ut.index(chr(10) + "class ")]
-check("⚠ a szinkron ütem ÖNSZABÁLYOZÓ (a képközhöz igazodik, a sebesség marad)",
-      "setInterval(" in _ut and "kep_mp=_koz_mp" in _ut)
+_ut = _src[_src.index("class Szinkron("):_src.index("class RajzTar:")]      # a szinkron egésze
+# ⚠ A NEGYEDIK LELET (2026-09-11, este): a szürke, „nem válaszol" ablak.
+# Windowson a WM_PAINT a LEGALACSONYABB prioritású üzenet: csak akkor jön, ha
+# a sor egyébként üres. Egy 16 ms-os időzítő-lánc + a jelenet frissítései a
+# sort sosem hagyták kiürülni: 20 mp-en át „utem" 85 ms-onként, 0 festés, 0
+# szívverés (egy 200 ms-os próba-időzítő sem futott le). Ezért a következő
+# képet a VEZÉR FESTÉSE indítja (`kep_utan` → Paint-esemény), tartalékkal.
+check("⚠ a szinkron ütem NEM ismétlődő időzítő (nincs `_zito.start`)",
+      "self._zito" not in _src[_src.index("class Szinkron("):_src.index("class RajzTar:")])
+check("⚠ a következő kép a vezér FESTÉSE után jön (kep_utan), tartalék-időzítővel",
+      "v.kep_utan(self._kep_kesz)" in _ut and "KEP_TARTALEK_MS" in _ut)
+check("⚠ a lépés a TÉNYLEGES eltelt időből (a sebesség lassú képnél is marad)",
+      "kep_mp=1.0 / _eltelt" in _ut)
+from PySide6 import QtWidgets as _QW
+_app = _QW.QApplication.instance() or _QW.QApplication([])
+_lw = _lq.LabAblak(symbol="UsaTec", tf_perc=15, tol="2026-08-25", ig="2026-08-26")
+_lw.show()
+_app.processEvents()
+_hivva = []
+_lw.kep_utan(lambda: _hivva.append(1))
+_lw._plot.viewport().repaint()          # szinkron festés → Paint-esemény
+_app.processEvents()
+check("⚠ `kep_utan` a festés UTÁN pontosan egyszer hív", _hivva == [1], str(_hivva))
+_lw._plot.viewport().repaint()
+_app.processEvents()
+check("...és másodszorra már nem (egyszeri)", _hivva == [1], str(_hivva))
+_lw.close()
 
 print()
 n, m = sum(results), len(results)
