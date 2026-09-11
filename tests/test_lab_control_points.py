@@ -187,6 +187,38 @@ else:
           "(különben a kész gyertya elárulná a végét)",
           w._takaro.getRegion()[0] < w._kurzor,
           f"maszk {w._takaro.getRegion()[0]} vs kurzor {w._kurzor}")
+    # ⚠ „LÁTSZIK" ≠ „LÁTHATÓ". Az `isVisible()` a takaró ALATT is igaz volt: a
+    # formálódó gyertya z=45-tel a takaró (z=50) alatt ült, ezért a „csak eddig
+    # látszik" bekapcsolva pont a formálódást rejtette el — a felhasználó: „a
+    # gyertya kialakulását továbbra sem látom… így nincs értelme az egész
+    # kontrollpontnak". A z-sorrend az állítás része.
+    check("⚠ a formálódó gyertya a TAKARÓ FÖLÖTT van (különben a takaró elrejti)",
+          w._takaro.isVisible() and w._formalodo.zValue() > w._takaro.zValue(),
+          f"formálódó z={w._formalodo.zValue()} takaró z={w._takaro.zValue()}")
+    check("⚠ …és a kurzor-vonal is a takaró fölött (a baron BELÜL jár)",
+          w._kurzor_vonal.zValue() > w._takaro.zValue())
+    # A vonal a baron BELÜL: a 10. pontnál a bal és a jobb szél KÖZÖTT.
+    _xv = float(w._kurzor_vonal.value())
+    check("⚠ a kurzor-vonal a formálódó gyertyán BELÜL áll (nem a jobb szélén)",
+          (w._kurzor - 0.5) < _xv < (w._kurzor + 0.5)
+          and abs(_xv - (w._kurzor - 0.5 + 10 / (len(_pont) - 1))) < 1e-9,
+          f"x={_xv:.3f} bar={w._kurzor}")
+    # Pixel-szinten is: a formálódó gyertya testének közepe NEM háttérszínű.
+    try:
+        from PySide6 import QtCore as _QC
+        _o, _h, _l, _c = w._formalodo._ohlc
+        _sc = w._vb.mapViewToScene(_QC.QPointF(float(w._kurzor), (_o + _c) / 2))
+        _pt = w._plot.mapFromScene(_sc)
+        _img = w._plot.grab().toImage()
+        _px = _img.pixelColor(int(_pt.x()), int(_pt.y()))
+        _hatter = _img.pixelColor(int(_pt.x()) + 40, int(_pt.y()))  # a takarón
+        check("⚠ PIXEL-SZINTEN: a formálódó gyertya színe eltér a takarótól",
+              (_px.red(), _px.green(), _px.blue()) != (_hatter.red(), _hatter.green(), _hatter.blue())
+              and max(_px.red(), _px.green()) > 80,
+              f"gyertya={_px.name()} takaró={_hatter.name()}")
+    except Exception as _ex:
+        check("⚠ PIXEL-SZINTEN: a formálódó gyertya színe eltér a takarótól", False,
+              f"{type(_ex).__name__}: {_ex}")
     w._kp.setChecked(False)
     w._kurzor_rajz()
     app.processEvents()

@@ -1347,6 +1347,7 @@ class LabAblak(QtWidgets.QMainWindow):
             angle=90, movable=True, pen=pg.mkPen(szin("yellow"), width=2),
             hoverPen=pg.mkPen("#ffff99", width=3))
         self._kurzor_vonal.sigPositionChanged.connect(self._kurzor_huzva)
+        self._kurzor_vonal.setZValue(56)      # a takaró fölött (a baron BELÜL jár)
         self._kurzor_vonal.setVisible(False)
         # ⚠ `ignoreBounds=True` MINDEN DÍSZÍTŐ ELEMRE — különben az „A"
         # (automatikus nagyítás) gomb VÉGTELEN CIKLUSBA fut. A hurok:
@@ -1477,7 +1478,13 @@ class LabAblak(QtWidgets.QMainWindow):
         self._plot.addItem(self._gyertyak)
         self._elemek.append(self._gyertyak)
         self._formalodo = Formalodo()
-        self._formalodo.setZValue(45)
+        # ⚠ A TAKARÓ (z=50) FÖLÉ. A formálódó gyertya z=45-tel a „csak eddig
+        # látszik" takaró ALATT ült — tehát pont akkor nem látszott, amikor a
+        # takaró be volt kapcsolva. A felhasználó: „a gyertya kialakulását
+        # továbbra sem látom… így nincs értelme az egész kontrollpontnak". A
+        # teszt `isVisible()`-t kérdezett, ami a takaró alatt is igaz — üres
+        # állítás volt (lásd `vacuous-parity-tests`); most a z-sorrendet is őrzi.
+        self._formalodo.setZValue(52)
         self._formalodo.setVisible(False)
         self._plot.addItem(self._formalodo, ignoreBounds=True)
         self._elemek.append(self._formalodo)
@@ -2028,7 +2035,7 @@ class LabAblak(QtWidgets.QMainWindow):
             if _x is not None:
                 return max(x1, _x)
         if self._kurzor is not None:
-            return max(x1, float(self._kurzor) + 0.5)
+            return max(x1, float(self._kurzor_x()))
         return max(x1, float(len(self._chart) - 1) if self._chart is not None else x1)
 
     # ── A NYITOTT pozíció vonalai (MT5-konvenció) ────────────────────────
@@ -3402,7 +3409,12 @@ class LabAblak(QtWidgets.QMainWindow):
         if not (_szel > 0):
             return
         _a = getattr(self, "_gorget_arany", self.GORGETES_ALAP)
-        _uj = max(0, min(len(self._chart) - 1, int(round(x0 + _a * _szel - 0.5))))
+        # A `_kurzor_x` INVERZE: kontrollpontokkal a vonal a [i − 0,5, i + 0,5)
+        # baron BELÜL jár → i = ⌊x + 0,5⌋; anélkül a bar JOBB szélén (i + 0,5)
+        # → a legközelebbi jobb szél, i = round(x − 0,5).
+        _x = x0 + _a * _szel
+        _i = int(np.floor(_x + 0.5)) if self._kp_aktiv() else int(round(_x - 0.5))
+        _uj = max(0, min(len(self._chart) - 1, _i))
         if _uj == int(self._kurzor):
             return
         # Tekerés közben a lejátszás áll (mint a kurzor kézi húzásánál).
@@ -3550,6 +3562,24 @@ class LabAblak(QtWidgets.QMainWindow):
             finally:
                 self._autofit_alatt = False
 
+    def _kurzor_x(self):
+        """A kurzor-VONAL helye bar-koordinátában, vagy `None`.
+
+        ⚠ KONTROLLPONTOKKAL A VONAL A GYERTYÁN BELÜL JÁR: a bar bal szélétől
+        (i − 0,5) a jobb széléig (i + 0,5), az árút hányada szerint. Eddig a
+        vonal a bar KEZDETÉN azonnal a jobb szélre ugrott — a felirat „05:56"-ot
+        mondott, a vonal a 06:00-t mutatta, és a formálódó gyertya „mögötte"
+        épült. Kontrollpont nélkül a bar zárt, a vonal a jobb szélen."""
+        if self._kurzor is None:
+            return None
+        i = int(self._kurzor)
+        if self._kp_aktiv():
+            _p = self._kp_bar_pontjai(i)
+            if _p is not None and len(_p) > 1:
+                _h = max(0, min(len(_p) - 1, int(self._kp_idx))) / (len(_p) - 1)
+                return i - 0.5 + _h
+        return i + 0.5
+
     def _kurzor_kepaeranya(self):
         """A kurzor helye a látható tartományon belül (0..1), vagy az alapérték."""
         if self._kurzor is None:
@@ -3560,10 +3590,10 @@ class LabAblak(QtWidgets.QMainWindow):
             return self.GORGETES_ALAP
         if not (x1 > x0):
             return self.GORGETES_ALAP
-        # ⚠ +0,5: a kurzor-VONAL a gyertya közepén áll (i + 0,5); a háromszög és a
-        # sárga vonal csak így esik egybe (felhasználói kérés: „a sárga jelzés és a
-        # görgetősáv jelzése ugyanazt mutassa").
-        a = (float(self._kurzor) + 0.5 - x0) / (x1 - x0)
+        # ⚠ A VONAL helye (nem a bar-index): a háromszög és a sárga vonal csak
+        # így esik egybe (felhasználói kérés: „a sárga jelzés és a görgetősáv
+        # jelzése ugyanazt mutassa").
+        a = (float(self._kurzor_x()) - x0) / (x1 - x0)
         return a if 0.02 <= a <= 0.98 else self.GORGETES_ALAP
 
     def _gorgetes_kovet(self) -> None:
@@ -3583,7 +3613,7 @@ class LabAblak(QtWidgets.QMainWindow):
         if not (_szel > 0):
             return
         _a = getattr(self, "_gorget_arany", self.GORGETES_ALAP)
-        _uj0 = float(self._kurzor) + 0.5 - _a * _szel
+        _uj0 = float(self._kurzor_x()) - _a * _szel
         if abs(_uj0 - x0) < 1e-9:
             return
         self._vb.setXRange(_uj0, _uj0 + _szel, padding=0)
@@ -3815,7 +3845,7 @@ class LabAblak(QtWidgets.QMainWindow):
         i = int(self._kurzor)
         if vonal:
             self._kurzor_vonal.blockSignals(True)
-            self._kurzor_vonal.setValue(i + 0.5)
+            self._kurzor_vonal.setValue(self._kurzor_x())
             self._kurzor_vonal.blockSignals(False)
         sor = self._chart.iloc[i]
         if self._bidask.isChecked():
