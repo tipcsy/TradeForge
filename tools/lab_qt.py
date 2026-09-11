@@ -967,6 +967,23 @@ class Szakasz(pg.InfiniteLine):
     def hatarok(self) -> tuple:
         return self._hatar
 
+    # ⚠ FOGHATÓ AKKOR IS, HA RÖVID. Egy két gyertyán belül lezárt pozíció
+    # SL/TP-vonala 10–20 pixel hosszú — a felhasználó: „nem tudtam se SL-t, se
+    # TP-t állítani, mert a vízszintes vonalak nem voltak láthatóak… jobb
+    # lenne, ha látható lenne legalább egy kis kocka, amit meg tudok fogni".
+    # Ezért (1) a szakasz jobb végén egy KOCKA ül, és (2) a szakasz fogható
+    # hossza sosem kisebb `MIN_FOGO_PX` pixelnél — a vonal jobbra kinyúlik
+    # annyira, hogy a kocka mindig megfogható legyen.
+    MIN_FOGO_PX = 44
+
+    def fogo(self, meret: float = 9.0) -> None:
+        """Kocka a szakasz JOBB végén (a húzás fogója)."""
+        _ut = QtGui.QPainterPath()
+        _ut.addRect(QtCore.QRectF(-0.5, -0.5, 1.0, 1.0))
+        self.markers.append((_ut, 1.0, float(meret)))
+        self._maxMarkerSize = max([m[2] / 2.0 for m in self.markers] + [0.0])
+        self.update()
+
     def _computeBoundingRect(self):
         vr = self.viewRect()
         if vr is not None and vr.width() > 0:
@@ -977,8 +994,16 @@ class Szakasz(pg.InfiniteLine):
             else:
                 la = self.mapFromView(QtCore.QPointF(a, 0.0)).x()
                 lb = self.mapFromView(QtCore.QPointF(b, 0.0)).x()
-            fa = (min(la, lb) - vr.left()) / vr.width()
-            fb = (max(la, lb) - vr.left()) / vr.width()
+            lo, hi = min(la, lb), max(la, lb)
+            if self.markers:
+                try:
+                    _egys = self.pixelLength(pg.Point(1.0, 0.0))   # 1 px a vonal mentén
+                except Exception:
+                    _egys = None
+                if _egys and (hi - lo) < self.MIN_FOGO_PX * _egys:
+                    hi = lo + self.MIN_FOGO_PX * _egys
+            fa = (lo - vr.left()) / vr.width()
+            fb = (hi - vr.left()) / vr.width()
             self.span = (max(0.0, min(1.0, fa)), max(0.0, min(1.0, fb)))
         return super()._computeBoundingRect()
 
@@ -1846,6 +1871,9 @@ class LabAblak(QtWidgets.QMainWindow):
                 hoverPen=pg.mkPen("#77ff77", width=3),
                 label=f"TP {b.rr:0.2f}R",
                 labelOpts={"position": 0.9, "color": szin("green")})
+            if _akt:
+                _slv.fogo()
+                _tpv.fogo()
             self._bel_set(b, "sl_vonal", _slv)
             self._bel_set(b, "tp_vonal", _tpv)
             _slv.sigPositionChanged.connect(
@@ -2692,11 +2720,13 @@ class LabAblak(QtWidgets.QMainWindow):
             # szinteket nézi, a többi kulcsot figyelmen kívül hagyja. Mégis ide
             # kerülnek, különben a doboz szűkítése és a megnyitás-jelölés az
             # ablak bezárásakor elveszne — ugyanaz az ok, amiért a rajzok is.
+            # ⚠ A FÁJLBA MINDEN belépő megy (`opened` jelöléssel), a MOTORNAK
+            # csak a megnyitottak — lásd `_motor_forgatokonyv`.
             "entries": [
                 {"time": str(b.ido)[:16], "direction": b.irany,
                  **({"sl": float(b.sl), "tp_rr": float(b.rr)}
                     if b.sl is not None else {}),
-                 **({"opened": True} if b.nyitva else {}),
+                 "opened": bool(b.nyitva),
                  **({"end": str(b.veg)[:16]} if b.veg is not None else {})}
                 for b in sorted(self._belepok, key=lambda e: e.ido)],
             "breakeven_at": (str(self._be_ido)[:16] if self._be_ido else None),
@@ -2777,7 +2807,9 @@ class LabAblak(QtWidgets.QMainWindow):
                             e.get("sl"), float(e.get("tp_rr", 2.0)))
             except (KeyError, ValueError, TypeError):
                 continue
-            _b.nyitva = bool(e.get("opened"))
+            # Régi forgatókönyv (nincs `opened` kulcs) = megnyitott: azok a
+            # belépők akkor mind futottak.
+            _b.nyitva = bool(e.get("opened", True))
             if e.get("end"):
                 try:
                     _b.veg = pd.Timestamp(e["end"])
@@ -2880,7 +2912,7 @@ class LabAblak(QtWidgets.QMainWindow):
                             e.get("sl"), float(e.get("tp_rr", 2.0)))
             except (KeyError, ValueError, TypeError):
                 continue
-            _b.nyitva = bool(e.get("opened"))
+            _b.nyitva = bool(e.get("opened", True))
             if e.get("end"):
                 try:
                     _b.veg = pd.Timestamp(e["end"])
@@ -2981,14 +3013,30 @@ class LabAblak(QtWidgets.QMainWindow):
         self._terv_valtozott()
         self._listak_frissit()
 
+    def nyitott_belepok(self) -> list:
+        """A MEGNYITOTT belépők — csak ezek futnak a motorban."""
+        return [b for b in self._belepok if b.nyitva]
+
+    def _motor_forgatokonyv(self) -> dict:
+        """A forgatókönyv, ahogy a MOTOR kapja: csak a MEGNYITOTT belépőkkel.
+
+        ⚠ A DOBOZ TERV, AMÍG A KÖZEPÉN LÉVŐ GOMBRA RÁ NEM KATTINTASZ. Eddig a
+        motor minden belépőt megkapott, a `nyitva` csak felirat volt — a
+        felhasználó: „a megnyitás gomb ellenére is megnyitotta a pozíciót!" A
+        mentett fájlban a terv-állapotú belépő is ott van (`opened: false`),
+        hogy ne vesszen el; a futtatás viszont nem lát belőle semmit."""
+        fk = self._forgatokonyv()
+        fk["entries"] = [e for e in fk["entries"] if e.get("opened", True)]
+        return fk
+
     def futtat(self) -> None:
-        if not self._belepok:
+        if not self.nyitott_belepok():
             return
         self._allapot.setText(_t("lab.futtatas"))
         QtWidgets.QApplication.processEvents()
         try:
             from tools.lab_scenario import futtat as _futtat
-            self._eredmeny = _futtat(self._forgatokonyv())
+            self._eredmeny = _futtat(self._motor_forgatokonyv())
         except SystemExit as ex:
             self._eredmeny = None
             self._allapot.setText(f"HIBA: {ex}")
@@ -3004,7 +3052,7 @@ class LabAblak(QtWidgets.QMainWindow):
 
     def _biztos_eredmeny(self) -> None:
         """A `Play` futtat — külön gomb nélkül, és csak ha a terv változott."""
-        if self._eredmeny is None and self._belepok:
+        if self._eredmeny is None and self.nyitott_belepok():
             self.futtat()
 
     def _eredmeny_rajz(self) -> None:

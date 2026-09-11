@@ -62,6 +62,7 @@ app = QW.QApplication.instance() or QW.QApplication([])
 
 from tools import lab_qt
 from tools.lab_qt import Belepo, LabAblak, Munkaterulet, Szakasz
+from pyqtgraph import Point as pg_Point
 
 lab_qt.ELRENDEZES_PATH = (Path(tempfile.mkdtemp(prefix="tf_ls_"))
                           / "elrendezes.json")
@@ -94,6 +95,23 @@ check("⚠ …és a futtatás presetje `none` (TÉNYLEG semmi), nem `off`",
 check("⚠ …és a trailing-vonalak SEM jelennek meg (nincs mit mutatniuk)",
       w._bel(b, "trail_be") is None and w._bel(b, "trail_tav") is None)
 
+# ⚠ A TERV NEM FUT, AMÍG MEG NEM NYITOD. A felhasználó: „a megnyitás gomb
+# ellenére is megnyitotta a pozíciót!" — a motor minden belépőt megkapott, a
+# `nyitva` csak felirat volt. Most csak a megnyitott belépők mennek a motornak.
+check("⚠ a MEG NEM NYITOTT terv nem megy a motornak (a motor listája üres)",
+      w._motor_forgatokonyv()["entries"] == [] and not w.nyitott_belepok())
+check("...de a FÁJLBA megy, `opened: false` jelöléssel (nem vész el)",
+      len(w._forgatokonyv()["entries"]) == 1
+      and w._forgatokonyv()["entries"][0]["opened"] is False)
+w.futtat()
+app.processEvents()
+check("⚠ …tehát a futtatás nem is indul (nincs eredmény)", w._eredmeny is None)
+b.nyitva = True
+w._terv_valtozott()
+app.processEvents()
+check("megnyitva már ott van a motornak szánt listában",
+      len(w._motor_forgatokonyv()["entries"]) == 1
+      and w._motor_forgatokonyv()["entries"][0]["opened"] is True)
 w.futtat()
 app.processEvents()
 _res = (w._eredmeny or {}).get("res")
@@ -172,6 +190,22 @@ _slv = w._bel(b, "sl_vonal")
 _slv.boundingRect()
 check("⚠ a vonal rajz-területe a szakaszra korlátozódik (span < teljes)",
       0.0 < _slv.span[0] < _slv.span[1] <= 1.0, str(_slv.span))
+# ⚠ FOGÓ-KOCKA, ÉS FOGHATÓ AKKOR IS, HA A SZAKASZ RÖVID. „nem tudtam se SL-t,
+# se TP-t állítani, mert a vízszintes vonalak nem voltak láthatóak… legalább
+# egy kis kocka, amit meg tudok fogni".
+check("⚠ a kiválasztott belépő SL/TP-vonalán fogó-kocka ül",
+      len(_slv.markers) >= 1 and len(w._bel(b, "tp_vonal").markers) >= 1)
+b.veg = b.ido + pd.Timedelta(minutes=30)          # KÉT gyertyás pozíció (M15)
+w._belepok_rajz()
+w._vb.setXRange(_x1 - 400, _x1 + 400, padding=0) # 800 gyertya a képen → 2 bar ≈ 5 px
+app.processEvents()
+_slv = w._bel(b, "sl_vonal")
+_br = _slv.boundingRect()
+_px = _slv.pixelLength(pg_Point(1.0, 0.0))
+check("⚠ két gyertyás pozíciónál is legalább 44 px a fogható hossz",
+      _px and (_br.width() / _px) >= 44 - 1e-6,
+      f"{_br.width() / _px if _px else 0:.0f} px (szakasz: {_slv.hatarok()})")
+b.veg = None
 
 
 # ══ 4. GÖRGETÉS-MÓD: a sárga vonal = a háromszög, és a húzás TEKER ═══════
