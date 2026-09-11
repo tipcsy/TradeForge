@@ -235,7 +235,61 @@ _p = (_h[1] - _h[0]) * 0.04
 check("⚠ átméretezés után a magasság a látható gyertyákra ILLESZKEDIK",
       abs(y0 - (_h[0] - _p)) < 1e-6 and abs(y1 - (_h[1] + _p)) < 1e-6,
       f"[{y0:.2f}, {y1:.2f}] vs [{_h[0]-_p:.2f}, {_h[1]+_p:.2f}]")
+
+# ── „LÁTHATÓ" = amit a felhasználó lát: a takaró mögötti gyertya NEM számít ──
+# A felhasználó: „az H1-en AutoFit-re kattintok, indokolatlanul összerántja a
+# képernyőt" — a kurzor UTÁNI (takart) gyertyák csúcsa/alja is beleszámolt, és a
+# látható gyertyák a kép közepén ültek összenyomva.
+w._gorget.setChecked(False)
+w._csak_eddig.setChecked(True)
+_n = len(w._chart)
+w._kurzor = _n // 4
+w._kp.setChecked(False)
+w._vb.setXRange(0, _n - 1, padding=0)          # a TELJES chart a képen
+w._kurzor_rajz()
+app.processEvents()
+_lathato = w._chart.iloc[0:w._kurzor + 1]
+_lo_l, _hi_l = float(_lathato["low"].min()), float(_lathato["high"].max())
+_lo_t, _hi_t = float(w._chart["low"].min()), float(w._chart["high"].max())
+_h = w._lathato_savhatar()
+check("⚠ a burkoló CSAK a kurzorig látható gyertyákból áll (a takart nem számít)",
+      _h is not None and abs(_h[0] - _lo_l) < 1e-9 and abs(_h[1] - _hi_l) < 1e-9,
+      f"{_h} vs látható {_lo_l}/{_hi_l}, teljes {_lo_t}/{_hi_t}")
+check("...és ez TÉNYLEG más, mint a teljes chart burkolója (a teszt nem üres)",
+      (_lo_l, _hi_l) != (_lo_t, _hi_t))
 w._autofit.setChecked(False)
+w._autofit.setChecked(True)                    # AutoFit „kattintás"
+app.processEvents()
+_, (y0, y1) = w._vb.viewRange()
+_p = (_hi_l - _lo_l) * 0.04
+check("⚠ AutoFit-re a látható gyertyákra illeszt (nem a takartakra)",
+      abs(y0 - (_lo_l - _p)) < 1e-6 and abs(y1 - (_hi_l + _p)) < 1e-6,
+      f"[{y0:.2f}, {y1:.2f}] vs [{_lo_l-_p:.2f}, {_hi_l+_p:.2f}]")
+
+# ── Vízszintes mozgás → újraillesztés; függőleges összenyomás → marad ──────
+w._csak_eddig.setChecked(False)
+w._vb.setXRange(0, 30, padding=0)              # más gyertyák a képen
+app.processEvents()
+_h2 = w._lathato_savhatar()
+_, (y0, y1) = w._vb.viewRange()
+_p2 = (_h2[1] - _h2[0]) * 0.04
+check("⚠ VÍZSZINTES görgetés után ÚJRAILLESZT (a kiment lejtő visszajön)",
+      abs(y0 - (_h2[0] - _p2)) < 1e-6 and abs(y1 - (_h2[1] + _p2)) < 1e-6,
+      f"[{y0:.2f}, {y1:.2f}] vs [{_h2[0]-_p2:.2f}, {_h2[1]+_p2:.2f}]")
+_kozep = (y0 + y1) / 2
+w._vb.setYRange(_kozep - (y1 - y0) * 0.25, _kozep + (y1 - y0) * 0.25, padding=0)
+app.processEvents()
+_, (z0, z1) = w._vb.viewRange()
+check("⚠ FÜGGŐLEGES összenyomás viszont MARAD (nem rántja vissza)",
+      abs((z1 - z0) - (y1 - y0) * 0.5) < 1e-6, f"{z1 - z0:.2f} vs {(y1-y0)*0.5:.2f}")
+w._vb.setYRange(_kozep - (y1 - y0) * 2, _kozep + (y1 - y0) * 2, padding=0)
+app.processEvents()
+_, (z0, z1) = w._vb.viewRange()
+check("...a széthúzást viszont a burkolónál megfogja",
+      z0 >= _h2[0] - _p2 - 1e-6 and z1 <= _h2[1] + _p2 + 1e-6,
+      f"[{z0:.2f}, {z1:.2f}] vs [{_h2[0]-_p2:.2f}, {_h2[1]+_p2:.2f}]")
+w._autofit.setChecked(False)
+w._kurzor = None
 
 
 # ══ 3. KAPCSOLT ABLAKOK: a kontrollpont KÖZÖS ════════════════════════════

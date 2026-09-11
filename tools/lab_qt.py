@@ -1509,7 +1509,8 @@ class LabAblak(QtWidgets.QMainWindow):
         self._autofit_alatt = False
         self._vb.sigRangeChanged.connect(lambda *_: self._cimke_helyre())
         self._vb.sigRangeChanged.connect(lambda *_: self._jelolo_helyre())
-        self._vb.sigRangeChanged.connect(lambda *_: self._autofit_korlat())
+        self._vb.sigRangeChanged.connect(
+            lambda _vb=None, _r=None, _v=None: self._autofit_korlat(_v))
         # ⚠ AZ ABLAK ÁTMÉRETEZÉSE IS ILLESZTÉS. Az AutoFit eddig csak lejátszás
         # közben és bekapcsoláskor futott; a felhasználó nagyobbra húzta a
         # chartot, és a gyertyák a képernyő közepén maradtak összenyomva.
@@ -3671,7 +3672,14 @@ class LabAblak(QtWidgets.QMainWindow):
             self._autofit_illeszt()
 
     def _lathato_savhatar(self):
-        """A LÁTHATÓ gyertyák ár-burkolója `(alj, csúcs)`, vagy `None`."""
+        """A LÁTHATÓ gyertyák ár-burkolója `(alj, csúcs)`, vagy `None`.
+
+        ⚠ „LÁTHATÓ" = AMIT A FELHASZNÁLÓ LÁT. A „csak eddig látszik" takaró
+        alatti (a kurzor utáni) gyertyák NEM számítanak: azok miatt az AutoFit
+        egy még meg nem történt csúcsra/aljra is méretezett, és a képen látható
+        gyertyák a kép közepén összenyomva ültek (felhasználói jelzés:
+        „indokolatlanul összerántja a képernyőt"). A kurzor FORMÁLÓDÓ
+        gyertyája viszont igen — az látszik."""
         if self._chart is None or not len(self._chart):
             return None
         try:
@@ -3680,11 +3688,26 @@ class LabAblak(QtWidgets.QMainWindow):
             return None
         i0 = max(0, int(np.floor(x0)))
         i1 = min(len(self._chart), int(np.ceil(x1)) + 1)
-        if i1 <= i0:
+        _takart = (self._kurzor is not None and self._csak_eddig.isChecked())
+        if _takart:
+            # A kurzor gyertyája kontrollpontokkal a formálódó alakjában látszik,
+            # anélkül készen — a KÉSZ gyertyát csak az utóbbi esetben számoljuk.
+            _utolso_kesz = int(self._kurzor) + (0 if self._kp_aktiv() else 1)
+            i1 = min(i1, _utolso_kesz)
+        _lo = _hi = None
+        if i1 > i0:
+            _sz = self._chart.iloc[i0:i1]
+            _lo = float(np.nanmin(_sz["low"].to_numpy(dtype=float)))
+            _hi = float(np.nanmax(_sz["high"].to_numpy(dtype=float)))
+        if _takart and self._kp_aktiv() and i0 <= int(self._kurzor) <= i1 + 1:
+            _f = getattr(self, "_formalodo", None)
+            _ohlc = getattr(_f, "_ohlc", None) if _f is not None else None
+            if _ohlc and x0 <= float(self._kurzor) <= x1:
+                _fl, _fh = float(_ohlc[2]), float(_ohlc[1])
+                _lo = _fl if _lo is None else min(_lo, _fl)
+                _hi = _fh if _hi is None else max(_hi, _fh)
+        if _lo is None or _hi is None:
             return None
-        _sz = self._chart.iloc[i0:i1]
-        _lo = float(np.nanmin(_sz["low"].to_numpy(dtype=float)))
-        _hi = float(np.nanmax(_sz["high"].to_numpy(dtype=float)))
         if not (np.isfinite(_lo) and np.isfinite(_hi)) or _hi <= _lo:
             return None
         return _lo, _hi
@@ -3700,15 +3723,29 @@ class LabAblak(QtWidgets.QMainWindow):
         _p = (_hi - _lo) * 0.04
         self._vb.setYRange(_lo - _p, _hi + _p, padding=0)
 
-    def _autofit_korlat(self) -> None:
+    def _autofit_korlat(self, valtozott=None) -> None:
         """SZÉTHÚZÁS-korlát: a nézet nem lehet tágabb, mint amit a gyertyák
-        kitöltenek.
+        kitöltenek — és VÍZSZINTES mozgásnál teljes újraillesztés.
 
         ⚠ A felhasználó kérése pontosan ez: „összenyomni össze szabad, és akkor
         tartania kellene az összenyomott állapotot, de amikor szét akarom húzni,
         akkor csak addig engedi, amíg minden gyertya látszik". Tehát a
-        BENAGYÍTÁS szabad és megmarad; csak a KIZOOMOLÁS ütközik falba."""
+        BENAGYÍTÁS szabad és megmarad; csak a KIZOOMOLÁS ütközik falba.
+
+        ⚠ ÉS HA A CHART KIMEGY A KÉPBŐL: „ha jobb oldalon már kiment a
+        képernyőből egy lejtő, akkor újra kellene rajzolnia". A kettő úgy fér
+        össze, hogy a VÍZSZINTES változás (görgetés, lejátszás, új gyertyák a
+        képen) ÚJRAILLESZT — más gyertyák látszanak, más a burkoló —, a csak
+        FÜGGŐLEGES változás (kézi nagyítás) pedig marad, csupán a széthúzást
+        fogjuk vissza. A `valtozott` a pyqtgraph `[x, y]` jelzője."""
         if not self._autofit.isChecked() or self._autofit_alatt:
+            return
+        if valtozott is not None and bool(valtozott[0]):
+            self._autofit_alatt = True
+            try:
+                self._autofit_illeszt()
+            finally:
+                self._autofit_alatt = False
             return
         _h = self._lathato_savhatar()
         if _h is None:
