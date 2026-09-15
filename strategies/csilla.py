@@ -305,8 +305,8 @@ class CsillaStrategy(Strategy):
         return self.warmup_bars(params, "M15")
 
     def visual_objects(self, md: MarketData) -> list:
-        """Élő D1/W1 szintek + M15-törések + belépők (a közös rajzolóval, ami a
-        belépő-naplót is tölti)."""
+        """M15-törések (a tört szint rövid szakaszával) + belépők (a közös
+        rajzolóval, ami a belépő-naplót is tölti). Élő szint-vonalak NINCSENEK."""
         hi = _closed((md.bars or {}).get("M15"))
         lo = _closed((md.bars or {}).get("M1"))
         if hi is None or lo is None or len(hi) < 200:
@@ -318,23 +318,21 @@ class CsillaStrategy(Strategy):
             return []
         objs: list = []
         t0 = lo.index[0]
-        # élő szintek a lo-ablak ársávjának ±3 %-án
-        lv = ctx["lv"]
-        lo_p, hi_p = float(lo["low"].min()) * 0.97, float(lo["high"].max()) * 1.03
-        for k, L in enumerate(lv.itertuples()):
-            if L.t_exp < t0 or L.t_conf > lo.index[-1] or not (lo_p <= L.price <= hi_p):
-                continue
-            col = "blue" if L.kind == "D1" else "magenta"
-            objs.append(viz.Trend(name=f"cs_lvl_{L.kind}_{k}", t1=int(max(L.t_conf, t0).timestamp()),
-                                  p1=float(L.price), t2=int(min(L.t_exp, lo.index[-1]).timestamp()),
-                                  p2=float(L.price), color=col, width=1 if L.kind == "D1" else 2))
-        # törések
+        # ⚠ NINCS vízszintes szint-vonal az élő charton. Az első változat a
+        # labor-viz mintájára a teljes ablakon áthúzta az élő D1/W1 szinteket
+        # (kék/lila) — a felhasználó jogosan „szemétnek" olvasta (2026-09-15).
+        # A szint csak OTT érdekes, ahol törik: a törés függőlegese mellé egy
+        # rövid (±8 M15) szakasz mutatja, MI tört.
         for e in ctx["evs"]:
             tb = hi.index[e["i"]]
             if tb < t0:
                 continue
             tc = int((tb + pd.Timedelta(minutes=HI_TF)).timestamp())
             objs.append(viz.VLine(name=f"cs_brk_{tc}", t1=tc, color="darkgold", width=2))
+            col = "blue" if e["kind"] == "D1" else "magenta"
+            objs.append(viz.Trend(name=f"cs_lvl_{tc}", t1=tc - 8 * HI_TF * 60, p1=float(e["level"]),
+                                  t2=tc + 8 * HI_TF * 60, p2=float(e["level"]),
+                                  color=col, width=2))
         # belépők: a közös rekord → napló + rajz
         pip = float(p.get("point_size", 0.0001) or 0.0001)
         _recs = []
