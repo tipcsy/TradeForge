@@ -213,7 +213,8 @@
         ],
         "sma_period": 100,
         "gate": [
-          "wpr_sma"
+          "wpr_sma",
+          "csilla"
         ]
       }
     },
