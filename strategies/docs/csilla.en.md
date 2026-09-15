@@ -13,7 +13,7 @@ A mechanical reading of Csilla's discretionary method; the rule lives in
 | **level** | confirmed D1 fractal swing (`k_d1` = 2 → known 2 days later) or W1 swing (`k_w1` = 1). High = resistance, low = support. Lives `ttl_d1` / `ttl_w1` days or until broken. Each level breaks once. |
 | **break** (M15) | an M15 candle closes ABOVE the level (BUY side) / BELOW it (SELL side) |
 | **entry** (M1) | within `max_wait` × 15 min after the break, a confirmed M1 swing on the break side (`k_lo` = 3), then a close beyond it → **enter on that close**. Several entries may follow one break. |
-| **session** | `session_hours` — Csilla's band: Ger40 8–11h, UsaTec and GOLD 15–18h (server time). Pairs not listed are unfiltered. |
+| **session** | NOT a strategy parameter: Csilla's band (Ger40 8–11h, UsaTec and GOLD 15–18h, server time) is the framework's strategy-scoped **trading hours** (the dashboard's hour picker, `data/optimized_params/csilla/<PAIR>_hours.json`). The strategy signals in every hour; the hour gate decides. |
 
 **SL** = `stop_atr` (1.5) × ATR of the **break's M15 candle** · **TP** = SL ×
 `tp_rr_ratio` — 30 R by default, i.e. effectively no target.

@@ -54,15 +54,16 @@ cfg = config_for_strategy(raw, NAME)
 cfg_file = ROOT / "strategies" / "config" / f"{NAME}.json"
 check("van strategia-config fajl", cfg_file.exists())
 base = s.base_params(cfg)
-for k in ("k_d1", "k_w1", "ttl_d1", "ttl_w1", "max_wait", "stop_atr", "tp_rr_ratio",
-          "session_hours"):
+for k in ("k_d1", "k_w1", "ttl_d1", "ttl_w1", "max_wait", "stop_atr", "tp_rr_ratio"):
     check(f"a(z) {k!r} a base_params-ban", k in base)
-from strategies.csilla import band_of                                    # noqa: E402
-check("a Csilla-sav a configban (Ger40 8-11, UsaTec/GOLD 15-18)",
-      band_of(base, "Ger40") == (8, 11) and band_of(base, "UsaTec") == (15, 18)
-      and band_of(base, "GOLD") == (15, 18), str(base["session_hours"]))
-check("a session_hours HASHELHETO a params-ban (az optimalizalo halmazba teszi)",
-      hash(base["session_hours"]) is not None)
+# ⚠ A napszak-sav NEM strategia-parameter: a keret strategia-hatokoru
+# kereskedesi-ora kapuja (params_store.trade_hours). Az elso valtozat sajat
+# `session_hours` parametert vitt — a Parameterek ablakban olvashatatlan
+# tuple-kent jelent meg, es duplikalta a keret funkciojat.
+check("NINCS session_hours parameter (a napszak a keret ora-kapuja)",
+      "session_hours" not in base)
+for v in base.values():
+    check(f"minden parameter-ertek hashelheto ({type(v).__name__})", hash(v) is not None) if not isinstance(v, (int, float, str, bool, type(None))) else None
 check("EGYEDI magic",
       len({get_strategy_by_name(n).magic(cfg) for n in registered_strategy_names()})
       == len(registered_strategy_names()))
@@ -101,7 +102,7 @@ else:
     hi_same = sw.resample(m1_lab, 15)
     lo = m1_lab[m1_lab.index >= m1_lab.index.max() - pd.Timedelta(days=60)]
     hi_i, lo_i = s.bt_indicators(hi_same, lo, prm)
-    for c in ("cs_sig", "cs_sl", "cs_hour"):
+    for c in ("cs_sig", "cs_sl"):
         check(f"a(z) {c!r} oszlop a lo keretben", c in lo_i.columns)
     check("a 'cs_atr_ref' oszlop a hi keretben", "cs_atr_ref" in hi_i.columns)
     mod = lo_i[lo_i["cs_sig"] != 0]
@@ -141,20 +142,10 @@ else:
         check("nativ M15-tel a belepok >= 80%-a egyezik", arany >= 0.8,
               f"{kozos}/{len(lab_w_t)} = {100*arany:.0f}% (modul {len(mod_n)})")
 
-    # ── napszak-szuro a motor-uton ──────────────────────────────────────
+    # ── a strategia MINDEN oraban jelez; az ora-kapu a kerete ──────────
     st = s.bt_new_state(SYM)
-    _in = _out = 0
-    for t_e, r_ in mod.iterrows():
-        sig = s.bt_on_low_close(st, None, r_, prm)
-        band = band_of(base, "Ger40")
-        inside = band[0] <= t_e.hour <= band[1]
-        _in += (sig != "NONE") == inside
-        _out += (sig != "NONE") != inside
-    check("a session_hours szuro a bt_on_low_close-ban el", _out == 0, f"hibas: {_out}")
-    # sav nelkul minden jelzes atmegy
-    prm_nb = {**prm, "session_hours": ()}
-    check("sav nelkul minden belepo atmegy",
-          all(s.bt_on_low_close(st, None, r_, prm_nb) != "NONE" for _, r_ in mod.iterrows()))
+    check("a strategia nem szur orara (minden belepo atmegy)",
+          all(s.bt_on_low_close(st, None, r_, prm) != "NONE" for _, r_ in mod.iterrows()))
 
     # ── a MOTORON, a forward-teszt kilepesevel ─────────────────────────
     from trading.backtest import run_pair                                # noqa: E402
@@ -165,7 +156,7 @@ else:
     rr = {**rrm.default_config(), "preset": rrm.PRESET_OFF, "breakeven_r": 0.67,
           "trail_activation_atr": 3.0, "trail_distance_atr": 3.0}
     m15_bt = hi_same
-    r = run_pair(SYM, m15_bt, lo, {**prm, "session_hours": ()}, raw["pairs"][SYM],
+    r = run_pair(SYM, m15_bt, lo, prm, raw["pairs"][SYM],
                  raw["trading"], 1000.0, strategy=s, rr=rr, cfg=raw)
     summ = r.summary(1000.0) or {}
     print(f"     backtest (sav nelkul, 60 nap): n={summ.get('trades', 0)} "
@@ -176,8 +167,9 @@ else:
     check("van BE/trailing kilepes (a spec hat, nem az alapertek)",
           any(st not in ("sl", "tp", "open", "") for st in _st) or
           any(bool(getattr(t, "risk_free", False)) for t in r.trades), str(_st))
+    # a Csilla-sav a KERET ora-kapujan at (allowed_hours), ahogy a motor is
     r2 = run_pair(SYM, m15_bt, lo, prm, raw["pairs"][SYM], raw["trading"], 1000.0,
-                  strategy=s, rr=rr, cfg=raw)
+                  strategy=s, rr=rr, cfg=raw, allowed_hours={8, 9, 10, 11})
     summ2 = r2.summary(1000.0) or {}
     print(f"     backtest (Csilla-sav 8-11): n={summ2.get('trades', 0)}")
     check("a savval KEVESEBB (vagy egyenlo) kotes", summ2.get("trades", 0) <= summ.get("trades", 0))

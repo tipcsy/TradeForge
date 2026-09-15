@@ -15,7 +15,9 @@ mérés története a „Csilla beszállója — mérés" jegyzetben; röviden:
 modulban él, és a kutató-labor (`tools/research/csilla_levels.py`) UGYANAZT
 hívja — a paritás szerkezeti, nem ígéret (`tests/test_csilla_parity.py`).
 Ez a modul csak a keret hookjait adja: időkeretek, warmup, jelölő-oszlop,
-élő jelzés, backtest-oszlopok, SL/TP, viz.
+élő jelzés, backtest-oszlopok, SL/TP, viz. A napszak-sáv (Ger40 8–11,
+UsaTec/GOLD 15–18) a KERET stratégia-hatókörű kereskedési-óra kapuja
+(`data/optimized_params/csilla/<PÁR>_hours.json`), nem a stratégiáé.
 
 A KILÉPÉS NEM A STRATÉGIÁÉ (lásd `strategy/base.py`): a forward-teszt
 kilépését — `breakeven_r = 0,67`, trailing 2 R (= 3,0 ATR15 aktiválás és
@@ -69,29 +71,13 @@ def _closed(df: pd.DataFrame | None) -> pd.DataFrame | None:
     return df.iloc[:-1]
 
 
-def band_of(params: dict, symbol: str):
-    """A pár napszak-sávja `(lo, hi)` vagy None. A `session_hours` a configban
-    szótár (`{"Ger40": [8, 11]}`), a params-ban viszont HASHELHETŐ tuple
-    (`(("Ger40", 8, 11), …)`) — az optimalizáló a paraméter-készleteket
-    halmazba teszi (dedup), és egy dict-értéken elszállna (mérve:
-    `test_strategy_param_space`). Mindkét alakot olvassuk."""
-    sh = params.get("session_hours") or ()
-    if isinstance(sh, dict):
-        b = sh.get(symbol)
-        return (int(b[0]), int(b[1])) if b else None
-    for row in sh:
-        if row and row[0] == symbol:
-            return int(row[1]), int(row[2])
-    return None
-
-
-def session_ok(params: dict, symbol: str, t: pd.Timestamp) -> bool:
-    """A pár napszak-sávja (`session_hours`, szerver-óra). Nem listázott pár →
-    nincs szűrés. A Csilla-sáv: Ger40 8–11, UsaTec 15–18, GOLD 15–18."""
-    band = band_of(params, symbol)
-    if band is None:
-        return True
-    return band[0] <= int(t.hour) <= band[1]
+# ⚠ NAPSZAK-SÁV: NEM stratégia-paraméter. Az első változat saját `session_hours`
+# paramétert vitt (a Csilla-sáv: Ger40 8–11, UsaTec/GOLD 15–18), ami a
+# Paraméterek ablakban olvashatatlan tuple-ként jelent meg — miközben a keretnek
+# VAN stratégia-hatókörű kereskedési-óra kapuja (`core.params_store.trade_hours`,
+# `data/optimized_params/csilla/<PÁR>_hours.json`, a dashboardról állítható; a
+# motor `allowed_hours`-a és a backtest ugyanazt használja). A sáv tehát ott él;
+# a stratégia minden órában jelez, az óra-kapu dönt.
 
 
 class _State:
@@ -186,8 +172,8 @@ class CsillaStrategy(Strategy):
         evs = ctx["evs"]
         if evs and evs[-1]["i"] >= len(hi) - p["max_wait"]:
             out["tores"] = Cell(_CIRCLE, "green" if evs[-1]["dir"] > 0 else "red")
-        # belépő: az utolsó ZÁRT M1 gyertya jelez-e (és a sávban van-e)
-        if len(sig) and sig[-1] != 0 and session_ok(md.params or {}, md.symbol, lo.index[-1]):
+        # belépő: az utolsó ZÁRT M1 gyertya jelez-e (az óra-kapu a KERETÉ)
+        if len(sig) and sig[-1] != 0:
             out["belep"] = Cell(_CIRCLE, "green" if sig[-1] > 0 else "red")
         return out
 
@@ -208,21 +194,14 @@ class CsillaStrategy(Strategy):
         t_last = lo.index[-1]
         if not len(sig) or sig[-1] == 0 or state.last_fired == t_last:
             return state, "NONE"
-        if not session_ok(md.params or {}, md.symbol, t_last):
-            return state, "NONE"
         state.last_fired = t_last
         return state, ("BUY" if sig[-1] > 0 else "SELL")
 
     # --- Optimalizálás ----------------------------------------------------
 
     def base_params(self, cfg: dict) -> dict:
-        sh = cfg.get("session_hours") or {}
         return {**cfg.get("indicators", {}), **cfg.get("sltp", {}),
-                **cfg.get("position_mgmt", {}),
-                # hashelhető alak (lásd `band_of`); a `_comment` kulcs kimarad
-                "session_hours": tuple(sorted((str(k), int(v[0]), int(v[1]))
-                                              for k, v in sh.items()
-                                              if not str(k).startswith("_") and v))}
+                **cfg.get("position_mgmt", {})}
 
     def param_space(self, cfg: dict, base_params: dict, method: str,
                     max_trials: int) -> list[dict]:
@@ -241,7 +220,7 @@ class CsillaStrategy(Strategy):
     def bt_indicators(self, df_hi, df_lo, params):
         """hi: `atr` + `cs_atr_ref` (a törés gyertyájának ATR-je, a törés utáni
         ablakra kitöltve — az SL ebből jön, mint a laborban); lo: `cs_sig`
-        (+1/−1 a belépő baron), `cs_sl` (a stop ÁRBAN), `cs_hour`."""
+        (+1/−1 a belépő baron), `cs_sl` (a stop ÁRBAN)."""
         hi = df_hi.copy()
         lo = df_lo.copy()
         p = _P(params)
@@ -255,7 +234,6 @@ class CsillaStrategy(Strategy):
         sig, sl, _a15 = sw.signal_column(lo, ctx=ctx, stop_atr=p["stop_atr"])
         lo["cs_sig"] = sig
         lo["cs_sl"] = sl
-        lo["cs_hour"] = lo.index.hour
         ref = np.full(len(hi), np.nan)
         for e in ctx["evs"]:
             i0 = int(e["i"])
@@ -278,10 +256,6 @@ class CsillaStrategy(Strategy):
         except (KeyError, TypeError, ValueError):
             return "NONE"
         if s == 0:
-            return "NONE"
-        sym = str(params.get("symbol", "") or state.symbol or "")
-        band = band_of(params, sym)
-        if band and not (band[0] <= int(lo_row["cs_hour"]) <= band[1]):
             return "NONE"
         return "BUY" if s > 0 else "SELL"
 
@@ -338,8 +312,6 @@ class CsillaStrategy(Strategy):
         _recs = []
         for i in np.flatnonzero(sig != 0):
             ti = lo.index[int(i)]
-            if not session_ok(p, md.symbol, ti):
-                continue
             d = "BUY" if sig[i] > 0 else "SELL"
             entry = float(lo["close"].iloc[int(i)])
             _sl = entry - (1 if d == "BUY" else -1) * float(sl[i])

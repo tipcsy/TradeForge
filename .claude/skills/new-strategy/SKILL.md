@@ -107,10 +107,9 @@ használd, ne találgasd a pár nevét.
 
 **A params-értékek legyenek HASHELHETŐK** (szám, string, tuple). Az optimalizáló
 a paraméter-készleteket halmazba teszi (dedup) — egy `dict`-értékű paraméter
-(pl. `{"Ger40": [8, 11]}`) `TypeError: unhashable`-lel bukik a
-`test_strategy_param_space`-ben. A configban maradhat szótár, a `base_params`
-alakítsa tuple-lé (`(("Ger40", 8, 11), …)`), és az olvasó fogadja el mindkettőt
-(`strategies/csilla.py: band_of`).
+(pl. egy per-pár szótár) `TypeError: unhashable`-lel bukik a
+`test_strategy_param_space`-ben. Ha mégis kell összetett érték, a `base_params`
+alakítsa tuple-lé — de per-pár beállításnak általában NEM a stratégia-paraméter a helye.
 
 > ⚠ **`md.bars` egy SZÓTÁR**, nem DataFrame: `{"M15": df, "M1": df}` — a
 > `timeframes()` címkéivel kulcsolva. `md.params` a **dict**, amiből dolgozol
@@ -225,8 +224,9 @@ a sornak: a nem engedélyezett blokk **marad** (oszlop-egyvonal), csak a Play t�
   (a Paraméterek ablak: `categories` + `params.<kulcs>.{recompute: signal|exec,
   category, comment}`). A váz-config ezt betöltéskor beolvasztja
   (`apply_strategy_config`), mentéskor kiszűri (`main_config_view`) — a config.json
-  nem szennyeződik stratégia-szekciókkal. Saját szekció (pl. `session_hours`) is
-  lehet, a `base_params` olvassa ki. ⚠ A JSON-ban a magyar idézőjel `„…”` legyen
+  nem szennyeződik stratégia-szekciókkal. Saját szekció (pl. egy saját szűrő küszöbe) is
+  lehet, a `base_params` olvassa ki — de ELŐBB nézd meg, nincs-e rá keret-funkció
+  (órák, kapuk, kockázatcsökkentés: lásd a „mi NEM a stratégiáé” táblát). ⚠ A JSON-ban a magyar idézőjel `„…”` legyen
   (a `"` lezárja a stringet — egyszer már elsült).
 - **Leírás**: `strategies/docs/<name>.md` (magyar, KÖTELEZŐ — teszt őrzi:
   `s.doc_path().exists()`, > 200 karakter) és `<name>.en.md` (angol, a csomag
@@ -249,6 +249,7 @@ a sornak: a nem engedélyezett blokk **marad** (oszlop-egyvonal), csak a Play t�
 | méretezés | kockázatkezelés (`core/risk_manager.py`, `trading.*`) | `account_risk_pct`, `max_open_slots` |
 | kimenet-menedzsment | **kockázatcsökkentés** (`core/risk_reduction.py` + `core/rr_state.py`) | `breakeven_pct`, `trail_*`, részleges zárás, runner-stop, Fibo/Harmados, exit-jel, cost-cut |
 | végrehajtási kapuk | keretrendszer (`core/execution_params.py`, `spread_gate`, `gates`) | `atr_period`, `max_spread_atr_ratio`, TF-együttállás |
+| **napszak / kereskedési órák** | keretrendszer, STRATÉGIA-hatókörű (`core/params_store.trade_hours` → `data/optimized_params/<strat>/<PÁR>_hours.json`, a dashboard óra-választója; a motor `allowed_hours`-a és a backtest is ezt használja) | „csak 8–11 között” — NEM egy saját `session_hours` paraméter (a `csilla` első változata ezt tette: olvashatatlan tuple a Paraméterek ablakban, és a keret funkciójának duplikátuma) |
 
 A stratégia az SL/TP **távot** adja (`sl_tp_points` / `bt_entry`), a lotot és a
 stop későbbi mozgatását **nem**.
