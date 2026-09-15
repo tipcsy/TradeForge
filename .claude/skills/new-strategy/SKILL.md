@@ -228,6 +228,16 @@ a sornak: a nem engedélyezett blokk **marad** (oszlop-egyvonal), csak a Play t�
   lehet, a `base_params` olvassa ki — de ELŐBB nézd meg, nincs-e rá keret-funkció
   (órák, kapuk, kockázatcsökkentés: lásd a „mi NEM a stratégiáé” táblát). ⚠ A JSON-ban a magyar idézőjel `„…”` legyen
   (a `"` lezárja a stringet — egyszer már elsült).
+- **Paraméter-NEVEK**: kövesd a meglévő konvenciót — `sl_atr_mult`, `tp_rr_ratio`,
+  `atr_ref_period` stb. (lásd `trend_pullback.json`). A keret több helyen NÉV
+  szerint ismeri fel őket (a `config_check` `tp_preset_conflict`-je a
+  `tp_rr_ratio`-t nézi, a Paraméterek ablak kategóriái, a migrációk). Egy saját
+  név (`stop_atr`) működik, de láthatatlan ezeknek az őröknek.
+- **Kategorikus paraméter** (pl. „melyik időkeret szintjeit": `level_kinds =
+  "D1+W1"`): stringként mehet a configba és a params-ba (hashelhető, a
+  Paraméterek ablak szerkeszthetően mutatja), de az optimalizáló rácsa CSAK
+  numerikus tartományt ismer — az ilyet ne tedd az `optimizer` szekcióba, a
+  mért/alap értéket viszont írd a `_comment`-be és a `param_meta` megjegyzésbe.
 - **Leírás**: `strategies/docs/<name>.md` (magyar, KÖTELEZŐ — teszt őrzi:
   `s.doc_path().exists()`, > 200 karakter) és `<name>.en.md` (angol, a csomag
   viszi). A Paraméterek ablak és a `.tfs` innen olvassa.
@@ -313,6 +323,40 @@ ami sokáig egy **elpazarolt optimalizálási tengely** volt. Lásd `strategy/ba
   átlagár-stop).
 - Kockázatcsökkentés (Felező/Pajzs/Risky), piac-előszűrő (market_strategy) — per-pár.
 
+## 5b. Élesítés a dashboardon — amin a `csilla` bevezetése elakadt (2026-09-15)
+
+- **A futó TradeForge ZÁROLJA a `config.json`-t** (Windows: `WinError 5` a
+  temp→replace-nél), és a saját memóriabeli cfg-jét írja vissza a következő
+  Play/Stop-nál — egy kézi szerkesztés tehát vagy nem ment el, vagy némán
+  felülíródik. Sorrend: **leállítás → szerkesztés (`strategy.settings.
+  write_config_file`) → indítás.** Előtte mentsd le a configot (nincs
+  verziókövetve).
+- **Kód-változás után újraindítás kell**: a stratégia-modulok indításkor
+  töltődnek; a viz-/jelzés-logika módosítása a futó példányban nem látszik.
+- **Csak-jelzés mód** (`core.trade_mode.set_mode` → `pairs.<sym>.strategy_mode
+  [<strat>] = "signal"`) + `run_state` `live` (`core.run_state.set_state`) + a
+  pár `strategies` listája — ez a három együtt kell egy papírkereskedéshez. A
+  napló induláskor kiírja: „🔔 CSAK JELZÉS mód (NEM köt): …" — ellenőrizd.
+- **Az `untuned_pair` config-lelet VÁRHATÓ** egy olyan stratégiánál, amelynek
+  az alapértékei MAGA a mért szabály (nincs és nem is kell optimalizált
+  készlet) — nem hiba, de a napló minden indításkor szólni fog.
+- **A viz élő charton legyen SZŰK.** A teljes ablakon áthúzott szint-/sáv-
+  vonalak (amik egy egyhetes labor-nézőben hasznosak) élő charton szemét — a
+  felhasználó azonnal szólt. Csak azt rajzold, amit a döntés használ, és ott,
+  ahol történik (a törésnél egy rövid szakasz, nem az élő szint). A TradeForgeViz
+  **nem töröl** objektumot: viz-logika módosítása után `python tools/viz_clear.py
+  <SYM>` minden érintett páron, különben a régi rajz ott marad.
+- **Két mérőhely, két szám.** A keretben futó stratégia eredménye ELTÉR a
+  kutató-labor számától akkor is, ha a belépők bitre azonosak: a motor kapui
+  (TF-együttállás, spread, volatilitás), a több slot, és az ATR-alapú kilépés
+  mást ad, mint a labor R-alapú, egy-pozíciós, idő-korlátos szimulációja.
+  Dokumentáld mindkettőt, és NE hangold egyiket a másikhoz — a labor a rögzített
+  szabály, a keret az „élesben így menne" kérdés.
+- **Ha egy pár-szintű beállítást a stratégia-paraméterek közé tennél** (napszak,
+  órák, per-pár küszöb), állj meg: a Paraméterek ablak MINDEN paramétert mutat,
+  és a keretnek szinte biztosan van rá funkciója (órák: `params_store.
+  trade_hours`; kapuk: `gates/`; kilépés: `risk_reduction`).
+
 ## 6. Ellenőrzés (mielőtt "kész")
 
 1. `python -m py_compile strategies/<name>.py` és a modul importja hibátlan.
@@ -329,3 +373,7 @@ ami sokáig egy **elpazarolt optimalizálási tengely** volt. Lásd `strategy/ba
    a constraints-tól; done-marker + "Utolsó opt" dátum megjelenik.
 4. Backtest ↔ live paritás: ugyanaz a `bt_entry`-terv élőben és backtestben.
 5. Egy portfólió-backtest a stratégiával; a P&L/R értelmes.
+6. Élesítés: `available_strategies` + a pár `strategies` listája + `strategy_mode`
+   (`signal` a papírteszthez) + `run_state`; a kapu-listák (`tf_align.gate`), a
+   stratégia-hatókörű órák, és a pár rr-specje beállítva; a napló induláskor
+   megnevezi a stratégiát a csak-jelzés listában; a chart nem szemetes.
