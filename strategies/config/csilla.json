@@ -1,5 +1,5 @@
 {
-  "_comment": "A csilla stratégia SAJÁT beállításai. Jelentős napi/heti (D1/W1) szint törése M15-ön, majd M1-zászló törése a belépő. A SZABÁLY a strategies/csilla_rules.py-ban van (a kutató-labor ugyanazt hívja). A mért (forward-tesztelt) változat: fix 1,5 ATR15 stop, a Csilla-sáv (Ger40 8–11, UsaTec/GOLD 15–18) a KERET stratégia-hatókörű kereskedési óráiban (data/optimized_params/csilla/<PÁR>_hours.json, a dashboardról), a kilépés a PÁR kockázatcsökkentésében: breakeven_r 0,67 + trailing 3,0 ATR (= 2 R), off preset.",
+  "_comment": "A csilla stratégia SAJÁT beállításai. Jelentős napi/heti (D1/W1) szint törése M15-ön, majd M1-zászló törése a belépő. A SZABÁLY a strategies/csilla_rules.py-ban van (a kutató-labor ugyanazt hívja). A mért (forward-tesztelt) változat: fix 1,5 ATR15 stop (sl_atr_mult), a Csilla-sáv (Ger40 8–11, UsaTec/GOLD 15–18) a KERET stratégia-hatókörű kereskedési óráiban (data/optimized_params/csilla/<PÁR>_hours.json, a dashboardról), a kilépés a PÁR kockázatcsökkentésében: breakeven_r 0,67 + trailing 3,0 ATR (= 2 R), off preset.",
   "quality": {
     "_comment": "Minősítési küszöbök (mint a többi stratégiánál).",
     "min_trades": 50,
@@ -13,18 +13,23 @@
     "winrate_good": 0.45
   },
   "indicators": {
-    "_comment": "A szint- és belépő-szabály paraméterei. ⚠ A mérés ezekkel az értékekkel készült (2026-09-14, előre rögzítve) — a forward teszt alatt NEM hangolhatók.",
+    "_comment": "A szint- és belépő-szabály paraméterei. ⚠ A mérés ezekkel az értékekkel készült (2026-09-14, előre rögzítve) — a forward teszt alatt NEM hangolhatók. A `level_kinds` mondja meg, MELYIK időkeret szintjeit keressük: H1 / H4 / D1 / W1 tetszőleges kombinációja „+”-szal (pl. D1+W1, H4+D1). A mért (forward) változat: D1+W1.",
+    "level_kinds": "D1+W1",
     "k_d1": 2,
     "k_w1": 1,
     "ttl_d1": 90,
     "ttl_w1": 365,
+    "k_h4": 3,
+    "ttl_h4": 30,
+    "k_h1": 3,
+    "ttl_h1": 10,
     "k_hi": 3,
     "k_lo": 3,
     "max_wait": 8
   },
   "sltp": {
-    "_comment": "SL = stop_atr × a TÖRÉS M15-gyertyájának ATR-je (fix, mint a mérésben). TP = SL × tp_rr_ratio — alapból MESSZE (30 R): a mért változatban nincs célár, a BE pedig R-alapú (breakeven_r), tehát a távoli célár nem kapcsolja ki.",
-    "stop_atr": 1.5,
+    "_comment": "SL = sl_atr_mult × a TÖRÉS M15-gyertyájának ATR(14)-e (fix, mint a mérésben; ⚠ szándékosan NEM a közös execution atr_period). TP = SL × tp_rr_ratio — alapból MESSZE (30 R): a mért változatban nincs célár, a BE pedig R-alapú (breakeven_r), tehát a távoli célár nem kapcsolja ki.",
+    "sl_atr_mult": 1.5,
     "tp_rr_ratio": 30.0
   },
   "position_mgmt": {
@@ -32,11 +37,6 @@
   },
   "optimizer": {
     "_comment": "Szűk rács — az Opt gomb működjön, de a forward alatt a mért értékek az érvényesek. A szint-paraméterek (k_d1/k_w1/ttl) szándékosan NEM hangolhatók: azok a „jelentős szint” definíciója.",
-    "stop_atr": {
-      "min": 1.0,
-      "max": 2.5,
-      "step": 0.25
-    },
     "max_wait": {
       "min": 4,
       "max": 16,
@@ -47,7 +47,12 @@
       "max": 30.0,
       "step": 2.0
     },
-    "constraints": []
+    "constraints": [],
+    "sl_atr_mult": {
+      "min": 1.0,
+      "max": 2.5,
+      "step": 0.25
+    }
   },
   "param_meta": {
     "_comment": "A Paraméterek ablak csoportosítása + megjegyzései.",
@@ -58,6 +63,11 @@
       "other"
     ],
     "params": {
+      "level_kinds": {
+        "recompute": "signal",
+        "category": "levels",
+        "comment": "Melyik időkeret szintjeit keressük: H1 / H4 / D1 / W1, „+”-szal kombinálva (pl. D1+W1). Mérve: D1+W1"
+      },
       "k_d1": {
         "recompute": "signal",
         "category": "levels",
@@ -78,6 +88,26 @@
         "category": "levels",
         "comment": "Egy W1 szint élettartama napokban"
       },
+      "k_h4": {
+        "recompute": "signal",
+        "category": "levels",
+        "comment": "H4 fraktál félablak (csak ha a level_kinds tartalmazza a H4-et)"
+      },
+      "ttl_h4": {
+        "recompute": "signal",
+        "category": "levels",
+        "comment": "Egy H4 szint élettartama napokban"
+      },
+      "k_h1": {
+        "recompute": "signal",
+        "category": "levels",
+        "comment": "H1 fraktál félablak (csak ha a level_kinds tartalmazza a H1-et)"
+      },
+      "ttl_h1": {
+        "recompute": "signal",
+        "category": "levels",
+        "comment": "Egy H1 szint élettartama napokban"
+      },
       "k_hi": {
         "recompute": "signal",
         "category": "levels",
@@ -93,10 +123,10 @@
         "category": "entry_m1",
         "comment": "A törés után ennyi M15-gyertyányi időn belül jöhet M1-belépő"
       },
-      "stop_atr": {
+      "sl_atr_mult": {
         "recompute": "exec",
         "category": "sltp",
-        "comment": "A stop a törés M15-gyertyájának ATR-je ennyiszerese (mérve: 1,5)"
+        "comment": "A stop a törés M15-gyertyájának ATR(14)-e ennyiszerese (mérve: 1,5)"
       },
       "tp_rr_ratio": {
         "recompute": "exec",

@@ -54,7 +54,8 @@ cfg = config_for_strategy(raw, NAME)
 cfg_file = ROOT / "strategies" / "config" / f"{NAME}.json"
 check("van strategia-config fajl", cfg_file.exists())
 base = s.base_params(cfg)
-for k in ("k_d1", "k_w1", "ttl_d1", "ttl_w1", "max_wait", "stop_atr", "tp_rr_ratio"):
+for k in ("level_kinds", "k_d1", "k_w1", "ttl_d1", "ttl_w1", "k_h4", "ttl_h4", "k_h1", "ttl_h1",
+          "max_wait", "sl_atr_mult", "tp_rr_ratio"):
     check(f"a(z) {k!r} a base_params-ban", k in base)
 # ⚠ A napszak-sav NEM strategia-parameter: a keret strategia-hatokoru
 # kereskedesi-ora kapuja (params_store.trade_hours). Az elso valtozat sajat
@@ -92,7 +93,17 @@ else:
     m1_all = m1_all[~m1_all.index.duplicated(keep="last")].sort_index()
     # a labor: a TELJES M1 (a szintek 1 evet neznek vissza) — az utolso ~500 nap
     m1_lab = m1_all[m1_all.index >= m1_all.index.max() - pd.Timedelta(days=800)]
-    lab = sw.entry_table(m1_lab, base, stop_atr=float(base["stop_atr"]))
+    lab = sw.entry_table(m1_lab, base, stop_atr=float(base["sl_atr_mult"]))
+    check("a mert alap: level_kinds = D1+W1", sw.parse_kinds(base["level_kinds"]) == ("D1", "W1"),
+          str(base["level_kinds"]))
+    check("parse_kinds: 'H4+D1' / 'w1' / ismeretlen",
+          sw.parse_kinds("H4+D1") == ("H4", "D1") and sw.parse_kinds("w1") == ("W1",)
+          and sw.parse_kinds("XX") == ("D1", "W1"))
+    # H4-szintekkel is fut a modul (mas belepo-halmaz, de nem ures / nem hiba)
+    _hi4, _lo4 = s.bt_indicators(sw.resample(m1_lab, 15), m1_lab[m1_lab.index >= m1_lab.index.max() - pd.Timedelta(days=60)],
+                                 {**prm, "level_kinds": "H4"})
+    check("level_kinds=H4: a modul fut es ad belepot", int((_lo4["cs_sig"] != 0).sum()) > 0,
+          str(int((_lo4["cs_sig"] != 0).sum())))
     lab = lab.drop_duplicates("i", keep="first")
     lab_t = m1_lab.index[lab.i.to_numpy(int)]
     check("a labor ad belepot (nem 0 vs 0)", len(lab) > 50, str(len(lab)))

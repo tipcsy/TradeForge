@@ -10,12 +10,12 @@ modulban van, amit a kutató-labor is ugyanígy hív.
 
 | lépés | mi történik |
 |---|---|
-| **szint** | igazolt D1 fraktál-swing (`k_d1` = 2 → 2 nappal később ismert) vagy W1 swing (`k_w1` = 1). Csúcs = ellenállás, völgy = támasz. Él `ttl_d1` / `ttl_w1` napig, vagy amíg át nem törik. Minden szint egyszer törhet. |
+| **szint** | `level_kinds` (alap `D1+W1`; H1 / H4 / D1 / W1 kombinálható): igazolt D1 fraktál-swing (`k_d1` = 2 → 2 nappal később ismert) vagy W1 swing (`k_w1` = 1); H4/H1 esetén `k_h4`/`ttl_h4`, `k_h1`/`ttl_h1`. Csúcs = ellenállás, völgy = támasz. Él `ttl_d1` / `ttl_w1` napig, vagy amíg át nem törik. Minden szint egyszer törhet. |
 | **törés** (M15) | egy M15 gyertya a szint FÖLÖTT zár (BUY-irány) / ALATT zár (SELL-irány) |
 | **belépő** (M1) | a törés utáni `max_wait` × 15 percen belül egy igazolt M1 swing az irány oldalán (`k_lo` = 3), majd zárás azon túl → **belépés a zárón**. Egy töréshez több belépő is jöhet. |
 | **napszak** | NEM a stratégia paramétere: a **Csilla-sáv** (Ger40 8–11h, UsaTec és GOLD 15–18h, szerver-idő) a keret stratégia-hatókörű **kereskedési órái** (a dashboard óra-választója, `data/optimized_params/csilla/<PÁR>_hours.json`). A stratégia minden órában jelez, az óra-kapu dönt. |
 
-**SL** = `stop_atr` (1,5) × a **törés M15-gyertyájának** ATR-je · **TP** =
+**SL** = `sl_atr_mult` (1,5) × a **törés M15-gyertyájának** ATR-je · **TP** =
 SL × `tp_rr_ratio` — alapból 30 R, azaz gyakorlatilag nincs célár.
 
 ## A kilépés — NEM a stratégiáé

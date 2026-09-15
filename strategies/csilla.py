@@ -54,13 +54,16 @@ _M15_PER_DAY = 96
 
 
 def _P(params: dict) -> dict:
-    """A core paraméterei a stratégia-configból (a hiányzókra a DEFAULTS)."""
+    """A core paraméterei a stratégia-configból (a hiányzókra a DEFAULTS).
+    `sl_atr_mult` a keret konvenciója (mint a többi stratégiánál); a core
+    belső neve `stop_atr`. A `level_kinds` ("D1+W1" alak) → `kinds` tuple."""
     p = dict(sw.DEFAULTS)
-    for k in ("k_hi", "k_lo", "k_d1", "k_w1", "ttl_d1", "ttl_w1", "max_wait",
-              "buffer_atr", "min_sl_atr"):
+    for k in ("k_hi", "k_lo", "k_d1", "k_w1", "ttl_d1", "ttl_w1", "k_h4", "ttl_h4",
+              "k_h1", "ttl_h1", "max_wait", "buffer_atr", "min_sl_atr"):
         if params.get(k) is not None:
             p[k] = params[k]
-    p["stop_atr"] = float(params.get("stop_atr", 1.5) or 1.5)
+    p["stop_atr"] = float(params.get("sl_atr_mult", params.get("stop_atr", 1.5)) or 1.5)
+    p["kinds"] = sw.parse_kinds(params.get("level_kinds", "D1+W1"))
     return p
 
 
@@ -134,7 +137,7 @@ class CsillaStrategy(Strategy):
                float(hi["close"].iloc[-2]), tuple(sorted((k, p[k]) for k in p)))
         ctx = self._ctx_cache.get(key)
         if ctx is None:
-            ctx = sw.hi_context(hi, p)
+            ctx = sw.hi_context(hi, {k: v for k, v in p.items() if k != "kinds"}, p["kinds"])
             # csak a legutóbbi kontextust tartjuk páronként
             self._ctx_cache = {k: v for k, v in self._ctx_cache.items() if k[0] != symbol}
             self._ctx_cache[key] = ctx
@@ -260,7 +263,8 @@ class CsillaStrategy(Strategy):
         return "BUY" if s > 0 else "SELL"
 
     def sl_tp_points(self, hi_row, params, point_size):
-        """SL = stop_atr × a TÖRÉS M15-gyertyájának ATR-je (a laborral azonos);
+        """SL = sl_atr_mult × a TÖRÉS M15-gyertyájának ATR(14)-e (a laborral azonos;
+        ⚠ NEM a közös `atr_period` — a mérés ATR(14)-gyel készült);
         ha nincs (ablakon kívül), az aktuális M15 ATR. TP = SL × tp_rr_ratio
         (alapból messze — a mért változatban nincs célár)."""
         a = hi_row.get("cs_atr_ref", np.nan)
@@ -268,7 +272,7 @@ class CsillaStrategy(Strategy):
             a = hi_row.get("atr", 0)
         if not a or pd.isna(a) or a <= 0 or point_size <= 0:
             return None
-        sl = float(params.get("stop_atr", 1.5) or 1.5) * float(a) / point_size
+        sl = _P(params)["stop_atr"] * float(a) / point_size
         return sl, sl * float(params.get("tp_rr_ratio", 30.0) or 30.0)
 
     # --- MT5 chart-vizualizáció ------------------------------------------

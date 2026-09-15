@@ -37,8 +37,24 @@ import numpy as np
 import pandas as pd
 
 DEFAULTS = dict(hi_tf=15, k_hi=3, k_lo=3, k_d1=2, k_w1=1, ttl_d1=90, ttl_w1=365,
+                # H4 / H1 szintek — a jegyzet ezeket is említi; a MÉRT változat
+                # csak D1+W1 (a `level_kinds` alapja). k = fraktál félablak,
+                # ttl = élettartam NAPBAN.
+                k_h4=3, ttl_h4=30, k_h1=3, ttl_h1=10,
                 max_wait=8, buffer_atr=0.2, min_sl_atr=1.0, retest_tol=0.1,
                 fib_ext=1.382, stop_atr=1.5)
+KINDS = ("H1", "H4", "D1", "W1")          # a `level_kinds` megengedett elemei
+
+
+def parse_kinds(spec) -> tuple:
+    """`"D1+W1"` / `"D1"` / `("D1","W1")` → rendezett tuple a KINDS-ból.
+    Ismeretlen elem kimarad; üres → a mért alap (D1+W1)."""
+    if isinstance(spec, str):
+        parts = [x.strip().upper() for x in spec.replace(",", "+").split("+")]
+    else:
+        parts = [str(x).strip().upper() for x in (spec or ())]
+    out = tuple(k for k in KINDS if k in parts)
+    return out or ("D1", "W1")
 
 
 # ── segédek ──────────────────────────────────────────────────────────────────
@@ -103,6 +119,12 @@ def level_table(m1: pd.DataFrame, kinds=("D1", "W1"), P: dict | None = None) -> 
     napi/heti OHLC ugyanaz, akár M1-ből, akár M15-ből jön."""
     P = {**DEFAULTS, **(P or {})}
     rows = []
+    if "H1" in kinds:
+        rows += _levels_of(resample(m1, 60), P["k_h1"], pd.Timedelta(hours=1),
+                           pd.Timedelta(days=P["ttl_h1"]), "H1")
+    if "H4" in kinds:
+        rows += _levels_of(resample(m1, 240), P["k_h4"], pd.Timedelta(hours=4),
+                           pd.Timedelta(days=P["ttl_h4"]), "H4")
     if "D1" in kinds:
         rows += _levels_of(resample(m1, 1440), P["k_d1"], pd.Timedelta(days=1),
                            pd.Timedelta(days=P["ttl_d1"]), "D1")
@@ -277,7 +299,7 @@ def hi_context(hi: pd.DataFrame, P: dict | None = None, kinds=("D1", "W1")) -> d
     trend = d1_trend_series(hi, P)
     d1_opp = lv[lv.kind == "D1"] if "D1" in kinds else level_table(hi, ("D1",), P)
     evs = hi_events(hi, lv, trend, d1_opp, P)
-    return dict(lv=lv, evs=evs, a15=a15, P=P)
+    return dict(lv=lv, evs=evs, a15=a15, P=P, kinds=tuple(kinds))
 
 
 def entries_from(ctx: dict, m1: pd.DataFrame, mode: str = "break",
