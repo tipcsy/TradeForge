@@ -118,7 +118,9 @@ def simulate(df: pd.DataFrame, idx: np.ndarray, side: np.ndarray,
              be_at_r: float = 0.0, trail_r: float = 0.0,
              spread_fallback_pts: float = 0.0,
              one_at_a_time: bool = True,
-             pair_cfg: dict | None = None) -> np.ndarray:
+             pair_cfg: dict | None = None,
+             be_at_abs: np.ndarray | None = None,
+             be_offset_abs: np.ndarray | None = None) -> np.ndarray:
     """M1 bar-szintu szimulacio. `idx`: belepo bar indexek (a bar ZARASAN lepunk be).
     `side`: +1 BUY / -1 SELL. `sl_pts`/`tp_pts`: tavolsag PONTBAN (tp<=0 -> nincs TP).
     `eod_min`: ha nem None, a nap ezen perce (UTC perc a nap kezdetetol) utan
@@ -157,6 +159,13 @@ def simulate(df: pd.DataFrame, idx: np.ndarray, side: np.ndarray,
     ⚠ HA A MOTORHOZ AKAROD HASONLITANI, add meg:  `be_at_r = 0,5 * tp_rr_ratio`
     (es `pair_cfg`-t a koltseghez). Enelkul a labor SZAMA MAGASABB LESZ, es a
     kulonbseg nem hiba, hanem MAS KERDESRE adott valasz.
+
+    `be_at_abs` / `be_offset_abs` (2026-09-15, „pozitívba kockázatmentesítés"):
+    kötésenkénti tömbök ÁRBAN. `be_at_abs[t]` a kedvező elmozdulás, aminél a
+    stop a belépőre kerül (felülírja a `be_at_r`-t, ha nem None);
+    `be_offset_abs[t]` ennyivel a belépő FÖLÉ (a nyereség irányába) kerül a
+    stop — pl. 2×spread, hogy a „nullás" kötés is pozitív legyen. None →
+    a régi viselkedés bitre.
     """
     h = df["high"].to_numpy(float)
     l = df["low"].to_numpy(float)
@@ -204,10 +213,11 @@ def simulate(df: pd.DataFrame, idx: np.ndarray, side: np.ndarray,
                 status, xprice = 1, tp
                 break
             # BE / trailing (a KILEPESI oldalon merunk)
-            if be_at_r > 0 or trail_r > 0:
+            _be_thr = (be_at_abs[t] if be_at_abs is not None else be_at_r * slp)
+            if _be_thr > 0 or trail_r > 0:
                 fav = (bh - entry) if d > 0 else (entry - bl)
-                if be_at_r > 0 and not moved_be and fav >= be_at_r * slp:
-                    nsl = entry
+                if _be_thr > 0 and not moved_be and fav >= _be_thr:
+                    nsl = entry + (d * be_offset_abs[t] if be_offset_abs is not None else 0.0)
                     if (d > 0 and nsl > sl) or (d < 0 and nsl < sl):
                         sl = nsl
                     moved_be = True

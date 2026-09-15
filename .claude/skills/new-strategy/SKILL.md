@@ -93,7 +93,24 @@ visual_objects(md)               -> list   # `strategy.visual` OBJEKTUMOK, nem d
 > teszt-készlet elkapja.
 
 **`MarketData` (`md`) mezői:** `symbol`, `params`, **`bars`**, `no_trade_hours`,
-`show_signals`, `entry_gate`.
+`show_signals`, `entry_gate`, és (újabban) `lot_of` (lot-számoló a jelölő
+címkéjéhez), `exec_gates`, `on_entry_record` (a belépő-rekord gyűjtője → a
+perzisztens `strategy.signal_journal`; a `visual_objects`-ban HÍVD MEG minden
+belépőre), `gate_effects`, `gate_bands`. A hiteles lista mindig
+[strategy/base.py](../../strategy/base.py) — a régi mezőkre épülő stratégia
+változatlanul működik, az újak opcionálisak.
+
+**A `params` szótárba a motor INJEKTÁLJA** a `symbol`-t és a `point_size`-t
+(`run_pair` és a live_trader is: `{**params, "symbol": …, "point_size": …}`) —
+per-pár viselkedéshez (pl. napszak-sáv páronként, gyorsítótár-kulcs) ezt
+használd, ne találgasd a pár nevét.
+
+**A params-értékek legyenek HASHELHETŐK** (szám, string, tuple). Az optimalizáló
+a paraméter-készleteket halmazba teszi (dedup) — egy `dict`-értékű paraméter
+(pl. `{"Ger40": [8, 11]}`) `TypeError: unhashable`-lel bukik a
+`test_strategy_param_space`-ben. A configban maradhat szótár, a `base_params`
+alakítsa tuple-lé (`(("Ger40", 8, 11), …)`), és az olvasó fogadja el mindkettőt
+(`strategies/csilla.py: band_of`).
 
 > ⚠ **`md.bars` egy SZÓTÁR**, nem DataFrame: `{"M15": df, "M1": df}` — a
 > `timeframes()` címkéivel kulcsolva. `md.params` a **dict**, amiből dolgozol
@@ -106,11 +123,57 @@ a motor előre kiszámolt oszlopokon fut, szoros ciklusban. Ami több sort igén
 
 **Az SL/TP PONTBAN megy** (nem árban, nem pipben): a `point_size` a hívótól jön.
 
+**A warmup GYERTYÁBAN megy, a motor a keret ELEJÉRŐL vágja** (`m15.iloc[bt_warmup:]`
+— az indikátorok a TELJES kereten számolódnak, a szimuláció a vágás után indul).
+Ha a szabályod NAPBAN gondolkodik (pl. „egy szint 365 napig él”), a bar-szám
+instrumentum-függő: 96 M15/nap a 24 órás piacokon, ~56 egy index-CFD-n. Ha a
+keret RÖVIDEBB a warmupnál, a motor üres keretet kap és **0 kötéssel, némán**
+fut le — a `csilla` első paritás-tesztje pont ezen bukott. A backtest/teszt
+keretének hosszabbnak kell lennie a warmupnál.
+
 Opcionális, de gyakran kell: `signal_warmup_bars`, `live_cells`, `visual_lookback_bars`
 + `visual_objects` (MT5-viz), `grade`, `magic`, `constraints_ok`.
 
 Minta a bevált stratégiákból: [strategies/wpr_sma.py](../../strategies/wpr_sma.py) (klasszikus),
-[strategies/ml_ai.py](../../strategies/ml_ai.py) (tanítható — `fit`).
+[strategies/ml_ai.py](../../strategies/ml_ai.py) (tanítható — `fit`, saját
+segédmodulokkal), [strategies/trend_pullback.py](../../strategies/trend_pullback.py)
+(a jel egy vektorizált OSZLOP a `bt_indicators`-ban, az állapotgép csak a felfutó
+élt nézi — a legegyszerűbb, paritás-barát minta),
+[strategies/csilla.py](../../strategies/csilla.py) (a szabály KÜLÖN segédmodulban,
+amit a kutató-labor is hív → paritás-teszttel; gyorsítótárazott mély kontextus;
+per-pár napszak-sáv).
+
+### Hova kerüljön a stratégia SAJÁT logikája — és a `.tfs` csomag
+
+A `.tfs` csomagoló ([strategy/pack.py](../../strategy/pack.py)) a stratégia
+modulját, a **`strategies.<x>`-ből importált saját segédmoduljait** (transzitíven,
+AST-ből: `from strategies import x` / `from strategies.x import …`), a
+`config/<név>.json`-t és a `docs/<név>.md` + `.en.md` leírást viszi magával.
+**A `core/`-t NEM.** Tehát:
+
+* ami a stratégia SAJÁT szabálya (még ha a kutató-labor is használja), az
+  `strategies/<név>_<valami>.py` segédmodul legyen (mint `ml_features`,
+  `csilla_rules`) — így a csomag hordozza;
+* a `core/`-ba csak az való, amit a KERET nyújt minden stratégiának
+  (`resample_ohlc`, kapuk, kockázatkezelés). Egy `core/`-ra épített stratégia
+  máshol telepítve importhibával esik szét;
+* egy másik STRATÉGIÁT importálni tilos (`test_strategy_layout`), és a
+  csomagoló szándékosan ki is hagyja.
+
+Csomagolás: `strategy.pack.build("<név>")` → `<név>-<verzió>.tfs`; telepítés
+`strategy.pack.install(path)` (zip-slip, fájl-fehérlista, sha256 — kétlépcsős).
+Ellenőrizd a manifest `helpers` listáját: ha a segédmodulod nincs benne, az
+import-alak nem az, amit a csomagoló felismer.
+
+### A stratégia-szerződés (`api` + ujjlenyomat, v3.30.0)
+
+A `Strategy.api` (alap: `STRATEGY_API`) mondja meg, melyik szerződésre íródott
+a stratégia; a program betöltéskor összeveti a sajátjával, és eltérésnél
+megnevezi, melyik oldalt kell frissíteni. A `tests/test_strategy_contract.py`
+az interfész UJJLENYOMATÁT is őrzi: ha egy hook aláírása változik, a teszt
+bukik, és dönteni kell — törő (`STRATEGY_API + 1`) vagy sem (ujjlenyomat
+frissítése). Új hook alapértelmezett megvalósítással NEM törő. Új stratégia
+írásakor ehhez nem kell nyúlni; ha a KERETEN változtatsz közben, igen.
 
 ## 2. Regisztráció — AUTOMATIKUS (nincs teendő)
 
@@ -129,6 +192,10 @@ tölthető modult a felderítés kihagyja (warning a logban).
   (whitelist) is olvasható. Kihagyva = az összes regisztrált. **Egy új stratégia-modul,
   ami itt még nem szerepel, alapból ELÉRHETŐ** — nem tűnik el némán, kikapcsolni
   kifejezetten kell (`false`).
+  ⚠ **Ettől függetlenül a `tests/test_strategy_availability.py` megköveteli, hogy
+  MINDEN regisztrált stratégia szerepeljen** a `config.json` ÉS a
+  `config.example.json` térképében — az új modul után mindkettőbe vedd fel
+  (`"<név>": true/false`), különben a teszt bukik.
 - **`strategy.name`** (config.json): az ALAPÉRTELMEZETT stratégia — ezt használja egy
   pár, ha nincs saját `pairs.<sym>.strategies` listája. Ha nincs az elérhetők között,
   az elsőre esik vissza.
@@ -153,9 +220,24 @@ stratégia bevezetésekor a `row_source.row_data` `enabled_of` seamje adja a kü
 a sornak: a nem engedélyezett blokk **marad** (oszlop-egyvonal), csak a Play tétlenedik
 — az OPT viszont használható, hisz épp optimalizálni akarod, mielőtt bekapcsolod.
 - **Stratégia-config fájl**: `strategies/config/<name>.json` — `indicators`, `sltp`,
-  `position_mgmt`, `quality`, és az optimalizáló-tér + `constraints`. A váz-config ezt
-  betöltéskor beolvasztja (`apply_strategy_config`), mentéskor kiszűri
-  (`main_config_view`) — a config.json nem szennyeződik stratégia-szekciókkal.
+  `position_mgmt`, `quality`, az optimalizáló-tér (`optimizer`: a tartományok
+  KÖZVETLENÜL alatta, nem `ranges` alkulcsban) + `constraints`, és **`param_meta`**
+  (a Paraméterek ablak: `categories` + `params.<kulcs>.{recompute: signal|exec,
+  category, comment}`). A váz-config ezt betöltéskor beolvasztja
+  (`apply_strategy_config`), mentéskor kiszűri (`main_config_view`) — a config.json
+  nem szennyeződik stratégia-szekciókkal. Saját szekció (pl. `session_hours`) is
+  lehet, a `base_params` olvassa ki. ⚠ A JSON-ban a magyar idézőjel `„…”` legyen
+  (a `"` lezárja a stringet — egyszer már elsült).
+- **Leírás**: `strategies/docs/<name>.md` (magyar, KÖTELEZŐ — teszt őrzi:
+  `s.doc_path().exists()`, > 200 karakter) és `<name>.en.md` (angol, a csomag
+  viszi). A Paraméterek ablak és a `.tfs` innen olvassa.
+- **i18n**: a stádium-feliratokat `_t("stage.<rövidnév>_…")` kulccsal add
+  (`from core.i18n import t as _t`), és a kulcsokat vedd fel a `lang/hu.json` ÉS
+  `lang/en.json` fájlba (ábécérendben tartva). Hiányzó kulcsnál a felirat maga a
+  kulcs lesz — a `tests/test_i18n.py` és a saját teszted fogja meg.
+  A `param_meta.categories` minden ÚJ kategóriájához is kell felirat:
+  `param_cat.<kategória>` mindkét nyelvi fájlban (`tests/test_param_categories.py`
+  őrzi — a `csilla` `levels`/`entry_m1` kategóriája ezen bukott először).
 
 ### ⚠ MI NEM A STRATÉGIÁÉ — a legfontosabb szabály
 
@@ -195,6 +277,21 @@ ami sokáig egy **elpazarolt optimalizálási tengely** volt. Lásd `strategy/ba
   Új stratégia után **ÚJRAOPTIMALIZÁLÁS** kell.
 - **Költség-tudatos breakeven:** a BE-puffernek fedeznie kell a jutalék+swapot, különben
   nettó mínusz (kül. gold/risky). A backtest NEM modellez költséget — élőben ellenőrizd.
+- **A kilépést a PÁR rr-specje adja, és az LAPOS szótár:** `run_pair(..., rr=spec)` a
+  `core.rr_state.spec_for` alakját várja — `{**risk_reduction.default_config(),
+  "preset": …, "breakeven_r": …, "trail_activation_atr": …, …}` EGY szinten. Egy
+  beágyazott `{"preset", "cfg"}` alak némán az alapértékeket adja (BE a célár
+  felénél = távoli célárnál soha). A `breakeven_r` (> 0) R-alapú BE-t ad, amit a
+  hosszú célár nem kapcsol ki; a trailing viszont `entry_atr`-szorzó (a
+  VÉGREHAJTÁSI `atr_period` ATR-je a belépő M15-gyertyáján), nem R — egy
+  R-ben definiált kutató-kilépés csak KÖZELÍTŐLEG vihető át, és a motorban
+  NINCS idő-kilépés (max tartás), csak `cost_cut` (ha még veszteséges).
+  Paritást tehát a BELÉPŐKRE bizonyíts; a kilépés-eltérést mérd és írd le.
+- **A paritás-teszt ne legyen üres** (`vacuous-parity-tests`): a kutató-labor és a
+  motor-út (`bt_indicators` → jel-oszlop) UGYANAZON az adaton, belépő-szám > 0
+  kötelező, időpont + irány + SL egyezés — ÉS egy `run_pair`, ami kötést ad. A
+  `csilla` első futása 3 valódi hibát fogott (ablak-szél, üres keret a warmup
+  miatt, rossz rr-alak) — egy 0-vs-0 összevetés mind a hármat elnyelte volna.
 - **Deklaratív param-kényszerek:** a `constraints_ok`-ot vezéreld configból
   (`optimizer.constraints` + range gt/lt), hogy az optuna dinamikus tartománya 0
   elpazarolt trialt adjon. Biztonságos eval: [core/param_constraints.py](../../core/param_constraints.py).
@@ -219,7 +316,14 @@ ami sokáig egy **elpazarolt optimalizálási tengely** volt. Lásd `strategy/ba
 
 1. `python -m py_compile strategies/<name>.py` és a modul importja hibátlan.
 2. `available_strategy_names(cfg)` / a per-pár választó felkínálja; oszlop megjelenik
-   (újraindítás után).
+   (újraindítás után). A `config.json` + `config.example.json`
+   `available_strategies` térképében szerepel.
+2b. A stratégia-tesztek zöldek: `test_strategy_cell_contract`, `test_strategy_contract`,
+   `test_strategy_param_space`, `test_strategy_layout`, `test_strategy_availability`,
+   `test_i18n`, `test_strategy_pack` — és a saját `tests/test_<name>*.py` (minta:
+   `tests/test_bollinger_squeeze.py`, `tests/test_csilla_parity.py`).
+2c. `strategy.pack.build("<név>")` lefut, és a manifest `helpers` listája
+   tartalmazza a segédmoduljaidat.
 3. Optimalizálás lefut (Opt gomb; tanítható stratégiánál = tanítás), 0 érvénytelen trial
    a constraints-tól; done-marker + "Utolsó opt" dátum megjelenik.
 4. Backtest ↔ live paritás: ugyanaz a `bt_entry`-terv élőben és backtestben.

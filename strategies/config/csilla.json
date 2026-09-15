@@ -1,0 +1,114 @@
+{
+  "_comment": "A csilla stratégia SAJÁT beállításai. Jelentős napi/heti (D1/W1) szint törése M15-ön, majd M1-zászló törése a belépő. A SZABÁLY a strategies/csilla_rules.py-ban van (a kutató-labor ugyanazt hívja). A mért (forward-tesztelt) változat: fix 1,5 ATR15 stop, a Csilla-sáv (session_hours), a kilépés a PÁR kockázatcsökkentésében: breakeven_r 0,67 + trailing 3,0 ATR (= 2 R), off preset.",
+  "quality": {
+    "_comment": "Minősítési küszöbök (mint a többi stratégiánál).",
+    "min_trades": 50,
+    "maxdd_mid": 0.18,
+    "maxdd_weak": 0.25,
+    "maxdd_bad": 0.35,
+    "pf_mid": 1.4,
+    "pf_weak": 1.2,
+    "pf_bad": 1.0,
+    "winrate_weak": 0.35,
+    "winrate_good": 0.45
+  },
+  "indicators": {
+    "_comment": "A szint- és belépő-szabály paraméterei. ⚠ A mérés ezekkel az értékekkel készült (2026-09-14, előre rögzítve) — a forward teszt alatt NEM hangolhatók.",
+    "k_d1": 2,
+    "k_w1": 1,
+    "ttl_d1": 90,
+    "ttl_w1": 365,
+    "k_hi": 3,
+    "k_lo": 3,
+    "max_wait": 8
+  },
+  "sltp": {
+    "_comment": "SL = stop_atr × a TÖRÉS M15-gyertyájának ATR-je (fix, mint a mérésben). TP = SL × tp_rr_ratio — alapból MESSZE (30 R): a mért változatban nincs célár, a BE pedig R-alapú (breakeven_r), tehát a távoli célár nem kapcsolja ki.",
+    "stop_atr": 1.5,
+    "tp_rr_ratio": 30.0
+  },
+  "session_hours": {
+    "_comment": "A Csilla-sáv, SZERVER-órában (a belépő M1 gyertyájának órája, zárt intervallum). Nem listázott pár → nincs napszak-szűrés. Ez a stratégia része (a belépő-szűrő), nem a pár no_trade_hours-a.",
+    "Ger40": [8, 11],
+    "UsaTec": [15, 18],
+    "GOLD": [15, 18]
+  },
+  "position_mgmt": {
+    "_comment": "⚠ A BELÉPÉS UTÁNI dolgok NEM ezé a modulé. A forward-teszt kilépése — breakeven_r 0,67, trailing aktiválás és távolság 3,0 ATR (2 R), célár nélkül, off preset — a KOCKÁZATCSÖKKENTŐ modulé (core/risk_reduction.py + data/risk_mode.json, per pár)."
+  },
+  "optimizer": {
+    "_comment": "Szűk rács — az Opt gomb működjön, de a forward alatt a mért értékek az érvényesek. A szint-paraméterek (k_d1/k_w1/ttl) szándékosan NEM hangolhatók: azok a „jelentős szint” definíciója.",
+    "stop_atr": {
+      "min": 1.0,
+      "max": 2.5,
+      "step": 0.25
+    },
+    "max_wait": {
+      "min": 4,
+      "max": 16,
+      "step": 4
+    },
+    "tp_rr_ratio": {
+      "min": 2.0,
+      "max": 30.0,
+      "step": 2.0
+    },
+    "constraints": []
+  },
+  "param_meta": {
+    "_comment": "A Paraméterek ablak csoportosítása + megjegyzései.",
+    "categories": [
+      "levels",
+      "entry_m1",
+      "sltp",
+      "other"
+    ],
+    "params": {
+      "k_d1": {
+        "recompute": "signal",
+        "category": "levels",
+        "comment": "D1 fraktál félablak — a napi swing ennyi nappal később igazolódik"
+      },
+      "k_w1": {
+        "recompute": "signal",
+        "category": "levels",
+        "comment": "W1 fraktál félablak (hetekben)"
+      },
+      "ttl_d1": {
+        "recompute": "signal",
+        "category": "levels",
+        "comment": "Egy D1 szint élettartama napokban (utána lejár, ha nem törték)"
+      },
+      "ttl_w1": {
+        "recompute": "signal",
+        "category": "levels",
+        "comment": "Egy W1 szint élettartama napokban"
+      },
+      "k_hi": {
+        "recompute": "signal",
+        "category": "levels",
+        "comment": "M15 swing félablak (a szerkezeti stophoz)"
+      },
+      "k_lo": {
+        "recompute": "signal",
+        "category": "entry_m1",
+        "comment": "M1 zászló (pullback) fraktál félablak"
+      },
+      "max_wait": {
+        "recompute": "signal",
+        "category": "entry_m1",
+        "comment": "A törés után ennyi M15-gyertyányi időn belül jöhet M1-belépő"
+      },
+      "stop_atr": {
+        "recompute": "exec",
+        "category": "sltp",
+        "comment": "A stop a törés M15-gyertyájának ATR-je ennyiszerese (mérve: 1,5)"
+      },
+      "tp_rr_ratio": {
+        "recompute": "exec",
+        "category": "sltp",
+        "comment": "A célár a stop-táv ennyiszerese (R) — a mért változatban nincs célár, ezért messze"
+      }
+    }
+  }
+}
