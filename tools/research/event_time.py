@@ -315,3 +315,35 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+# ── ELŐREJELZÉS TETSZŐLEGES IDŐPONTOKRA (a méretezés-kérdéshez) ──────────────
+def forecast_A(sym: str, query_ms: np.ndarray, horizon_min: int) -> np.ndarray:
+    """A falióra (A) modell MINTÁN KÍVÜLI előrejelzése a `query_ms`
+    időpontokra: az (y−1). év óra-határain illesztve, az y. év kérdéseire
+    kiértékelve. NaN, ahol nincs modell (az első két év) vagy hiányzik a jellemző.
+    Ugyanaz az illesztés, mint az `evaluate`-ben — nem másolat, ugyanazok a
+    függvények."""
+    m1 = pd.read_parquet(OUT / f"{sym}_M1.parquet").sort_values("minute_ms")
+    bars = pd.read_parquet(OUT / f"{sym}_A.parquet")
+    mm = m1["minute_ms"].to_numpy(np.int64)
+    hours = np.unique(mm // 3_600_000) * 3_600_000
+    yrs_h = pd.to_datetime(hours, unit="ms").year
+    Xh = _features(bars, hours)
+    yh = _targets(m1, hours, horizon_min)
+    q = np.asarray(query_ms, dtype=np.int64)
+    yrs_q = pd.to_datetime(q, unit="ms").year
+    Xq = _features(bars, q)
+    out = np.full(len(q), np.nan)
+    y_first = yrs_h.min()
+    for yr in np.unique(yrs_q):
+        if yr <= y_first + 0:
+            continue
+        tr = (yrs_h == yr - 1) & np.isfinite(yh) & np.isfinite(Xh).all(axis=1)
+        if tr.sum() < 500:
+            continue
+        beta = _ols_fit(Xh[tr], yh[tr])
+        te = (yrs_q == yr) & np.isfinite(Xq).all(axis=1)
+        if te.any():
+            out[te] = _ols_pred(beta, Xq[te])
+    return out
