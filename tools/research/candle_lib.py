@@ -40,8 +40,28 @@ def _prev(a: np.ndarray, k: int = 1) -> np.ndarray:
     return out
 
 
-def gyertyak(o: np.ndarray, h: np.ndarray, l: np.ndarray, c: np.ndarray,
-             atr: np.ndarray | None = None) -> dict[str, np.ndarray]:
+def gyertyak(o, h, l, c, atr=None) -> dict[str, np.ndarray]:
+    """nev -> bool tomb (a minta a gyertyan lezarul)."""
+    return _szamol(o, h, l, c, atr)[0]
+
+
+def gyertyak_minoseg(o, h, l, c, atr=None) -> tuple[dict, dict]:
+    """(E, Q): a maszkok ES a FELISMERES MINOSEGE 0..1 (NaN, ahol nincs minta).
+
+    minoseg = 0,5 x alak + 0,5 x meret, ahol
+      alak  = mennyivel haladja meg a minta a sajat kuszobet (a kuszobon 0,
+              a kuszob ketszeresenel / a teljes alaknal 1),
+      meret = (tartomany/ATR - 0,5) / 1,0 levagva 0..1 (0,5 ATR -> 0, 1,5 ATR -> 1).
+    Fokozatok: gyenge < 0,33 <= kozepes < 0,66 <= eros.
+    """
+    return _szamol(o, h, l, c, atr)
+
+
+def _cl(x):
+    return np.clip(x, 0.0, 1.0)
+
+
+def _szamol(o, h, l, c, atr=None):
     o, h, l, c = (np.asarray(x, float) for x in (o, h, l, c))
     if atr is None:
         atr = lab.atr(h, l, c, 14)
@@ -78,27 +98,34 @@ def gyertyak(o: np.ndarray, h: np.ndarray, l: np.ndarray, c: np.ndarray,
     p2poz, p2neg, p2nagy = p2["poz"] == 1, p2["neg"] == 1, p2["nagy"] == 1
 
     E: dict[str, np.ndarray] = {}
+    Q: dict[str, np.ndarray] = {}      # alak-minoseg 0..1 mintankent (nev '->' nelkul)
+    np.seterr(divide="ignore", invalid="ignore")
+    q_meret = _cl((tart / atr - MIN_RANGE_ATR) / 1.0)
 
     # 1. doji
     doji = nagy & (test <= 0.1 * tart)
     E["gy_doji->long"] = doji & le1
     E["gy_doji->short"] = doji & fel1
+    Q["gy_doji"] = _cl(1.0 - (test / tart) / 0.1)
 
     # 2–3. kalapacs / akasztott ember (azonos alak, mas elozmeny)
     kalapacs_alak = nagy & (also >= 2 * test) & (felso <= 0.1 * tart) & (test > 0)
     E["gy_kalapacs->long"] = kalapacs_alak & le1
     E["gy_akasztott->short"] = kalapacs_alak & fel1
+    Q["gy_kalapacs"] = Q["gy_akasztott"] = _cl((also / test - 2.0) / 2.0)
 
     # 4–5. forditott kalapacs / hullocsillag
     ford_alak = nagy & (felso >= 2 * test) & (also <= 0.1 * tart) & (test > 0)
     E["gy_ford_kalapacs->long"] = ford_alak & le1
     E["gy_hullocsillag->short"] = ford_alak & fel1
+    Q["gy_ford_kalapacs"] = Q["gy_hullocsillag"] = _cl((felso / test - 2.0) / 2.0)
 
     # 6. elnyelo
     E["gy_bika_elnyelo->long"] = (nagy & p1nagy & p1neg & poz & (o <= p1["c"])
                                   & (c >= p1["o"]) & (test > p1["test"]))
     E["gy_medve_elnyelo->short"] = (nagy & p1nagy & p1poz & neg & (o >= p1["c"])
                                     & (c <= p1["o"]) & (test > p1["test"]))
+    Q["gy_bika_elnyelo"] = Q["gy_medve_elnyelo"] = _cl(test / p1["test"] - 1.0)
 
     # 7. harami (az elozo nagy testu, a mostani a testen belul)
     p1_nagytest = p1nagy & (p1["test"] >= 0.5 * p1["tart"])
@@ -106,6 +133,7 @@ def gyertyak(o: np.ndarray, h: np.ndarray, l: np.ndarray, c: np.ndarray,
             (np.minimum(o, c) >= np.minimum(p1["o"], p1["c"]))
     E["gy_bika_harami->long"] = p1_nagytest & p1neg & belul & poz
     E["gy_medve_harami->short"] = p1_nagytest & p1poz & belul & neg
+    Q["gy_bika_harami"] = Q["gy_medve_harami"] = _cl(1.0 - test / p1["test"])
 
     # 8. attoro / sotet felho
     p1_kozep = (p1["o"] + p1["c"]) / 2
@@ -113,6 +141,8 @@ def gyertyak(o: np.ndarray, h: np.ndarray, l: np.ndarray, c: np.ndarray,
                             & (c > p1_kozep) & (c < p1["o"]))
     E["gy_sotet_felho->short"] = (nagy & p1nagy & p1poz & neg & (o > p1["c"])
                                   & (c < p1_kozep) & (c > p1["o"]))
+    Q["gy_attoro"] = _cl((c - p1_kozep) / (p1["test"] / 2))
+    Q["gy_sotet_felho"] = _cl((p1_kozep - c) / (p1["test"] / 2))
 
     # 9. hajnalcsillag / esti csillag (3 gyertya: -2 nagy, -1 kicsi, 0 zaro)
     p2_nagytest = p2nagy & (p2["test"] >= 0.5 * p2["tart"])
@@ -122,6 +152,8 @@ def gyertyak(o: np.ndarray, h: np.ndarray, l: np.ndarray, c: np.ndarray,
                                    & (c > p2_kozep))
     E["gy_esti_csillag->short"] = (p2_nagytest & p2poz & kicsi_kozep & nagy & neg
                                    & (c < p2_kozep))
+    Q["gy_hajnalcsillag"] = _cl((c - p2_kozep) / (p2["test"] / 2))
+    Q["gy_esti_csillag"] = _cl((p2_kozep - c) / (p2["test"] / 2))
 
     # 10. harom feher katona / harom fekete varju
     teltest = nagy & (test >= 0.5 * tart)
@@ -136,20 +168,30 @@ def gyertyak(o: np.ndarray, h: np.ndarray, l: np.ndarray, c: np.ndarray,
     E["gy_harom_varju->short"] = (teltest & p1_teltest & p2_teltest & neg & p1neg & p2neg
                                   & (c < p1["c"]) & (p1["c"] < p2["c"])
                                   & o_p1testben & p1o_p2testben)
+    Q["gy_harom_katona"] = Q["gy_harom_varju"] = _cl(
+        ((test / tart + p1["test"] / p1["tart"] + p2["test"] / p2["tart"]) / 3 - 0.5) / 0.5)
 
     # 11. csipesz (ket gyertya, azonos szelsoertek 0,1 ATR-en belul)
     E["gy_csipesz_alj->long"] = (nagy & p1nagy & (np.abs(l - p1["l"]) <= 0.1 * atr)
                                  & p1neg & poz)
     E["gy_csipesz_teto->short"] = (nagy & p1nagy & (np.abs(h - p1["h"]) <= 0.1 * atr)
                                    & p1poz & neg)
+    Q["gy_csipesz_alj"] = _cl(1.0 - np.abs(l - p1["l"]) / (0.1 * atr))
+    Q["gy_csipesz_teto"] = _cl(1.0 - np.abs(h - p1["h"]) / (0.1 * atr))
 
     # 12. marubozu (folytatas)
     maru = nagy & (test >= 0.9 * tart)
     E["gy_marubozu->long"] = maru & poz
     E["gy_marubozu->short"] = maru & neg
+    Q["gy_marubozu"] = _cl((test / tart - 0.9) / 0.1)
 
-    return {k: np.where(np.isfinite(v.astype(float)), v, False).astype(bool)
-            for k, v in E.items()}
+    E = {k: np.where(np.isfinite(v.astype(float)), v, False).astype(bool)
+         for k, v in E.items()}
+    Qout = {}
+    for k, m in E.items():
+        q = 0.5 * Q[k.split("->")[0]] + 0.5 * q_meret
+        Qout[k] = np.where(m & np.isfinite(q), q, np.nan)
+    return E, Qout
 
 
 def irany(nev: str) -> str:
