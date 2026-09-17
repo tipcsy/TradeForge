@@ -31,6 +31,7 @@ _sys.path.insert(0, str(_Path(__file__).resolve().parent))
 import numpy as np
 import pandas as pd
 
+import candle_lib
 import indicator_screen as IS
 import lab
 
@@ -159,6 +160,13 @@ def build(sym: str, racs_ido: pd.DatetimeIndex) -> tuple[dict, dict]:
         j = np.searchsorted(zaras, racs_ido, side="right") - 1
         ok = j >= 0
         jj = np.where(ok, j, 0)
+        # GYERTYA-ALAKZATOK (2026-09-17, eloregisztralt): parameter nelkuli
+        # esemenyek, idosikonkent egyszer; a nev a tankonyvi iranyt hordozza.
+        for nev, arr in candle_lib.gyertyak(d["open"].to_numpy(), d["high"].to_numpy(),
+                                            d["low"].to_numpy(), d["close"].to_numpy()).items():
+            out = np.zeros(len(racs_ido), dtype=bool)
+            out[ok] = arr[jj[ok]]
+            E[f"M{tf}:{nev}"] = out
         for p in (14, 50) if tf >= 60 else (14, 50, 200):
             if len(d) < p * 3:
                 continue

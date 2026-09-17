@@ -1,0 +1,176 @@
+"""GYERTYA-ALAKZATOK mint ESEMENY-jelek — a klasszikus japan mintak szamszeru
+definicioi (eloregisztralva 2026-09-17, a vault „Gyertya-alakzatok —
+eloregisztralt kerdes" jegyzeteben).
+
+Minden fuggveny egy OHLC tablabol (egy idosik) ad vissza egy
+`nev -> bool tomb` szotart, ahol a nev a TANKONYVI IRANYT is hordozza
+(`…->long` / `…->short`). A jel azon a gyertyan igaz, amelyik a mintat LEZARJA
+— a `signal_lib.build` ezt tolja a zaras utani elso M5 racspontra.
+
+Konvenciok (a jegyzettel azonosan):
+    test      = |c - o|            tartomany = h - l
+    felso     = h - max(o, c)      also      = min(o, c) - l
+    ATR       = ATR(14) az adott idosikon
+    elozmeny  = a minta ELOTTI gyertya zarasa az 5-tel korabbi zarashoz kepest
+                (le = ereszkedo, fel = emelkedo)
+    torpe     = tartomany < 0,5 ATR  -> a minta-gyertyak egyike sem lehet torpe
+"""
+from __future__ import annotations
+
+import sys as _sys
+from pathlib import Path as _Path
+
+ROOT = _Path(__file__).resolve().parents[2]
+_sys.path.insert(0, str(ROOT))
+_sys.path.insert(0, str(_Path(__file__).resolve().parent))
+
+import numpy as np
+
+import lab
+
+MIN_RANGE_ATR = 0.5     # a minta-gyertya tartomanya legalabb ennyi ATR
+TREND_LOOKBACK = 5      # az elozmeny: c[-1] vs c[-1-5]
+
+
+def _prev(a: np.ndarray, k: int = 1) -> np.ndarray:
+    """`a` eltolva k gyertyaval hatra (az elso k ertek NaN)."""
+    out = np.full_like(a, np.nan, dtype=float)
+    if k < len(a):
+        out[k:] = a[:-k]
+    return out
+
+
+def gyertyak(o: np.ndarray, h: np.ndarray, l: np.ndarray, c: np.ndarray,
+             atr: np.ndarray | None = None) -> dict[str, np.ndarray]:
+    o, h, l, c = (np.asarray(x, float) for x in (o, h, l, c))
+    if atr is None:
+        atr = lab.atr(h, l, c, 14)
+    test = np.abs(c - o)
+    tart = h - l
+    felso = h - np.maximum(o, c)
+    also = np.minimum(o, c) - l
+    poz = c > o
+    neg = c < o
+    nagy = np.isfinite(atr) & (tart >= MIN_RANGE_ATR * atr)   # nem torpe
+
+    # elozmeny: a minta ELOTTI gyertya zarasa vs 5-tel korabbi
+    def elozmeny(elso_gyertya_eltolas: int):
+        """`elso_gyertya_eltolas` = hany gyertyaval korabban KEZDODIK a minta
+        (1-gyertyas minta: 0; 2-gyertyas: 1; 3-gyertyas: 2)."""
+        k = elso_gyertya_eltolas + 1
+        c_elott = _prev(c, k)
+        c_regen = _prev(c, k + TREND_LOOKBACK)
+        le = c_elott < c_regen
+        fel = c_elott > c_regen
+        return le, fel
+
+    # az elozmeny (a jegyzet szerint) CSAK az egygyertyas fordulos mintakhoz
+    # kell (doji, kalapacs/akasztott, forditott kalapacs/hullocsillag); a
+    # tobbgyertyas mintak alakja onmagaban hordozza az iranyt.
+    le1, fel1 = elozmeny(0)
+
+    p1 = {k: _prev(v, 1) for k, v in dict(o=o, h=h, l=l, c=c, test=test,
+                                            tart=tart, poz=poz, neg=neg,
+                                            nagy=nagy).items()}
+    p2 = {k: _prev(v, 2) for k, v in dict(o=o, c=c, test=test, tart=tart,
+                                            poz=poz, neg=neg, nagy=nagy).items()}
+    p1poz, p1neg, p1nagy = p1["poz"] == 1, p1["neg"] == 1, p1["nagy"] == 1
+    p2poz, p2neg, p2nagy = p2["poz"] == 1, p2["neg"] == 1, p2["nagy"] == 1
+
+    E: dict[str, np.ndarray] = {}
+
+    # 1. doji
+    doji = nagy & (test <= 0.1 * tart)
+    E["gy_doji->long"] = doji & le1
+    E["gy_doji->short"] = doji & fel1
+
+    # 2–3. kalapacs / akasztott ember (azonos alak, mas elozmeny)
+    kalapacs_alak = nagy & (also >= 2 * test) & (felso <= 0.1 * tart) & (test > 0)
+    E["gy_kalapacs->long"] = kalapacs_alak & le1
+    E["gy_akasztott->short"] = kalapacs_alak & fel1
+
+    # 4–5. forditott kalapacs / hullocsillag
+    ford_alak = nagy & (felso >= 2 * test) & (also <= 0.1 * tart) & (test > 0)
+    E["gy_ford_kalapacs->long"] = ford_alak & le1
+    E["gy_hullocsillag->short"] = ford_alak & fel1
+
+    # 6. elnyelo
+    E["gy_bika_elnyelo->long"] = (nagy & p1nagy & p1neg & poz & (o <= p1["c"])
+                                  & (c >= p1["o"]) & (test > p1["test"]))
+    E["gy_medve_elnyelo->short"] = (nagy & p1nagy & p1poz & neg & (o >= p1["c"])
+                                    & (c <= p1["o"]) & (test > p1["test"]))
+
+    # 7. harami (az elozo nagy testu, a mostani a testen belul)
+    p1_nagytest = p1nagy & (p1["test"] >= 0.5 * p1["tart"])
+    belul = (np.maximum(o, c) <= np.maximum(p1["o"], p1["c"])) & \
+            (np.minimum(o, c) >= np.minimum(p1["o"], p1["c"]))
+    E["gy_bika_harami->long"] = p1_nagytest & p1neg & belul & poz
+    E["gy_medve_harami->short"] = p1_nagytest & p1poz & belul & neg
+
+    # 8. attoro / sotet felho
+    p1_kozep = (p1["o"] + p1["c"]) / 2
+    E["gy_attoro->long"] = (nagy & p1nagy & p1neg & poz & (o < p1["c"])
+                            & (c > p1_kozep) & (c < p1["o"]))
+    E["gy_sotet_felho->short"] = (nagy & p1nagy & p1poz & neg & (o > p1["c"])
+                                  & (c < p1_kozep) & (c > p1["o"]))
+
+    # 9. hajnalcsillag / esti csillag (3 gyertya: -2 nagy, -1 kicsi, 0 zaro)
+    p2_nagytest = p2nagy & (p2["test"] >= 0.5 * p2["tart"])
+    p2_kozep = (p2["o"] + p2["c"]) / 2
+    kicsi_kozep = p1["test"] <= 0.3 * p2["test"]
+    E["gy_hajnalcsillag->long"] = (p2_nagytest & p2neg & kicsi_kozep & nagy & poz
+                                   & (c > p2_kozep))
+    E["gy_esti_csillag->short"] = (p2_nagytest & p2poz & kicsi_kozep & nagy & neg
+                                   & (c < p2_kozep))
+
+    # 10. harom feher katona / harom fekete varju
+    teltest = nagy & (test >= 0.5 * tart)
+    p1_teltest = p1nagy & (p1["test"] >= 0.5 * p1["tart"])
+    p2_teltest = p2nagy & (p2["test"] >= 0.5 * p2["tart"])
+    o_p1testben = (o >= np.minimum(p1["o"], p1["c"])) & (o <= np.maximum(p1["o"], p1["c"]))
+    p1o_p2testben = (p1["o"] >= np.minimum(p2["o"], p2["c"])) & \
+                    (p1["o"] <= np.maximum(p2["o"], p2["c"]))
+    E["gy_harom_katona->long"] = (teltest & p1_teltest & p2_teltest & poz & p1poz & p2poz
+                                  & (c > p1["c"]) & (p1["c"] > p2["c"])
+                                  & o_p1testben & p1o_p2testben)
+    E["gy_harom_varju->short"] = (teltest & p1_teltest & p2_teltest & neg & p1neg & p2neg
+                                  & (c < p1["c"]) & (p1["c"] < p2["c"])
+                                  & o_p1testben & p1o_p2testben)
+
+    # 11. csipesz (ket gyertya, azonos szelsoertek 0,1 ATR-en belul)
+    E["gy_csipesz_alj->long"] = (nagy & p1nagy & (np.abs(l - p1["l"]) <= 0.1 * atr)
+                                 & p1neg & poz)
+    E["gy_csipesz_teto->short"] = (nagy & p1nagy & (np.abs(h - p1["h"]) <= 0.1 * atr)
+                                   & p1poz & neg)
+
+    # 12. marubozu (folytatas)
+    maru = nagy & (test >= 0.9 * tart)
+    E["gy_marubozu->long"] = maru & poz
+    E["gy_marubozu->short"] = maru & neg
+
+    return {k: np.where(np.isfinite(v.astype(float)), v, False).astype(bool)
+            for k, v in E.items()}
+
+
+def irany(nev: str) -> str:
+    """A tankonyvi irany a nevbol: 'long' / 'short'."""
+    return nev.rsplit("->", 1)[-1].split(" ")[0]
+
+
+def alap_nev(nev: str) -> str:
+    """'M15:gy_kalapacs->long' -> 'kalapacs'."""
+    n = nev.split(":", 1)[-1]
+    n = n.split("->", 1)[0]
+    return n[3:] if n.startswith("gy_") else n
+
+
+if __name__ == "__main__":
+    sym = _sys.argv[1] if len(_sys.argv) > 1 else "Ger40"
+    m1 = lab.load_m1(sym)
+    for tf in (15, 60):
+        d = lab.resample(m1, tf)
+        E = gyertyak(d["open"].to_numpy(), d["high"].to_numpy(),
+                     d["low"].to_numpy(), d["close"].to_numpy())
+        print(f"{sym} M{tf}: {len(d):,} gyertya")
+        for k, v in E.items():
+            print(f"   {k:28s} {int(v.sum()):7d}  ({100 * v.mean():.2f} %)")
