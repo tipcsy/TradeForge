@@ -41,7 +41,7 @@ HOSSZ = {"doji": 1, "kalapacs": 1, "akasztott": 1, "ford_kalapacs": 1, "hullocsi
          "marubozu": 1, "bika_elnyelo": 2, "medve_elnyelo": 2, "bika_harami": 2,
          "medve_harami": 2, "attoro": 2, "sotet_felho": 2, "csipesz_alj": 2,
          "csipesz_teto": 2, "hajnalcsillag": 3, "esti_csillag": 3, "harom_katona": 3,
-         "harom_varju": 3}
+         "harom_varju": 3, "pipa": 12, "pinbar": 1}
 KAT = ["lentrol_fel", "fentrol_le", "le_folyt", "fel_folyt", "oldal->fel", "oldal->le", "->oldal"]
 
 

@@ -28,6 +28,9 @@ ELFOGADAS (egyetlen szabaly, a jegyzetbol):
 Futtatas:
     python tools/research/candle_patterns.py            # A + B
     python tools/research/candle_patterns.py --csak-a   # csak a szures
+    python tools/research/candle_patterns.py --csak pipa,pinbar --elsodleges 5,15
+        # csak a nevben ezeket tartalmazo mintak; elsodleges idosikok M5+M15
+        # (a „Pipa szignal" eloregisztralt meres, 2026-09-18)
 """
 from __future__ import annotations
 
@@ -50,6 +53,7 @@ SYMS = ["Ger40", "UsaInd", "UsaTec", "GOLD", "USDJPY"]
 B_SYMS = ["UsaTec", "UsaInd", "GOLD", "Ger40"]
 PRIMARY_TFS = (15, 60)
 INFO_TFS = (5, 30, 240)
+CSAK: tuple = ()          # ha nem ures: csak az ezeket tartalmazo minta-nevek
 T_MIN, YEAR_FRAC, INSTR_MIN, MIN_YEAR_N, TOP = 2.0, 0.60, 3, 30, 100
 OPP = {"long": "short", "short": "long"}
 
@@ -67,6 +71,8 @@ def candle_masks(sym: str, racs_ido: pd.DatetimeIndex, tfs) -> dict:
         jj = np.where(ok, j, 0)
         for nev, arr in candle_lib.gyertyak(d["open"].to_numpy(), d["high"].to_numpy(),
                                             d["low"].to_numpy(), d["close"].to_numpy()).items():
+            if CSAK and not any(x in nev for x in CSAK):
+                continue
             out = np.zeros(len(racs_ido), dtype=bool)
             out[ok] = arr[jj[ok]]
             E[f"M{tf}:{nev}"] = signal_lib.felfuto(out)
@@ -166,7 +172,7 @@ def lepcso_b(sym: str):
         return None, None
     A, E = signal_lib.build(sym, ido)
     an = sorted(A)
-    en = sorted(k for k in E if ":gy_" in k)
+    en = sorted(k for k in E if ":gy_" in k and (not CSAK or any(x in k for x in CSAK)))
     alap_k = {k: float(np.nanmean(v[kereso])) for k, v in R.items()}
     alap_h = {k: float(np.nanmean(v[hold])) for k, v in R.items()}
     print(f"   {len(en)} gyertya-esemeny x {len(an)} allapot; alapszint kereso "
@@ -201,7 +207,8 @@ def lepcso_b(sym: str):
     t["sym"] = sym
     print(f"   {n0} jelolt 0. szinten, {len(t) - n0:,} 1. szinten "
           f"(min. {MIN_N} kotes a keresoben)")
-    t.to_parquet(ROOT / "data" / f"search_candle_{sym}.parquet", index=False)
+    tag = ("_" + "_".join(CSAK)) if CSAK else ""
+    t.to_parquet(ROOT / "data" / f"search_candle{tag}_{sym}.parquet", index=False)
 
     # ── holdout: a harom teszt (holdout.py) — csak a holdouton is ertekelheto jeloltek
     h = t[np.isfinite(t.R_h)].copy()
@@ -234,12 +241,22 @@ def lepcso_b(sym: str):
 
 
 def main():
+    global CSAK, PRIMARY_TFS, INFO_TFS
     pd.set_option("display.width", 250)
     csak_a = "--csak-a" in _sys.argv
+    argv = _sys.argv[1:]
+    if "--csak" in argv:
+        CSAK = tuple(argv[argv.index("--csak") + 1].split(","))
+    if "--elsodleges" in argv:
+        PRIMARY_TFS = tuple(int(x) for x in argv[argv.index("--elsodleges") + 1].split(","))
+        INFO_TFS = tuple(tf for tf in (5, 15, 30, 60, 240) if tf not in PRIMARY_TFS)
+    if CSAK:
+        print(f"CSAK: {CSAK}; elsodleges idosikok: {PRIMARY_TFS}")
     print("════ A) SZURES A TELJES MINTAN ════", flush=True)
     ta = lepcso_a()
     _print_a(ta)
-    ta.to_csv(ROOT / "data" / "candle_A.csv", index=False)
+    ta.to_csv(ROOT / "data" / ("candle_A" + ("_" + "_".join(CSAK) if CSAK else "") + ".csv"),
+              index=False)
     atment = ta[ta.A_atment & ta.tf.isin(PRIMARY_TFS)]
     print(f"\nA) atment (elsodleges idosikok): {len(atment)} / "
           f"{int(ta.tf.isin(PRIMARY_TFS).sum())}")

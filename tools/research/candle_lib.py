@@ -30,6 +30,12 @@ import lab
 
 MIN_RANGE_ATR = 0.5     # a minta-gyertya tartomanya legalabb ennyi ATR
 TREND_LOOKBACK = 5      # az elozmeny: c[-1] vs c[-1-5]
+# PIPA (✓) — eloregisztralva 2026-09-18 (vault „Pipa szignal — eloregisztralt kerdes")
+PIPA_K = 12             # ablak: a melypont ennyi gyertyan belul van a kitores elott
+PIPA_W1 = 5             # a kezdoszint: a legmagasabb zaras a melypont elotti W1 gyertyan
+PIPA_MELYSEG = 1.0      # (P0 - melypont) / ATR legalabb ennyi
+# PIN BAR — ugyanott rogzitve: kanoc >= 2/3 tartomany, a test a masik harmadban
+PIN_KANOC = 2.0 / 3.0
 
 
 def _prev(a: np.ndarray, k: int = 1) -> np.ndarray:
@@ -59,6 +65,84 @@ def gyertyak_minoseg(o, h, l, c, atr=None) -> tuple[dict, dict]:
 
 def _cl(x):
     return np.clip(x, 0.0, 1.0)
+
+
+def _ablak(a: np.ndarray, k: int) -> np.ndarray:
+    """(n, k) nezet: az i. sor = a[i-k .. i-1] (a MEGELOZO k ertek); az elso k
+    sor NaN."""
+    from numpy.lib.stride_tricks import sliding_window_view
+    out = np.full((len(a), k), np.nan)
+    if len(a) > k:
+        out[k:] = sliding_window_view(a[:-1], k)
+    return out
+
+
+def pipa(o, h, l, c, atr, K=PIPA_K, W1=PIPA_W1, melyseg=PIPA_MELYSEG):
+    """PIPA (✓): gyors eses, majd a kezdoszint FOLE zaro visszapattanas.
+
+    Bika, a t gyertyan (a kitores):
+      m  = a legalacsonyabb low helye a [t-K, t) ablakban
+      P0 = a legmagasabb ZARAS az [m-W1, m) gyertyakon, helye a -> bal szar = m-a
+      (P0 - low[m]) / ATR[t] >= melyseg
+      close[t] > P0 es az (m, t) kozotti zarasok egyike sem > P0 (ELSO kitores)
+      jobb szar = t-m >= bal szar
+    Visszaad: (bika_maszk, medve_maszk, minoseg_bika, minoseg_medve) — a
+    minoseg az alak-resz (melyseg/ATR: 1 -> 0, 3 -> 1).
+    """
+    n = len(c)
+    t = np.arange(n)
+    # a megelozo K low / high -> melypont / csucs helye (abszolut index)
+    L = _ablak(l, K)
+    H = _ablak(h, K)
+    ok = t >= K + W1 + 1
+    m_lo = np.where(ok, t - K + np.nanargmin(np.where(np.isnan(L), np.inf, L), axis=1), 0)
+    m_hi = np.where(ok, t - K + np.nanargmax(np.where(np.isnan(H), -np.inf, H), axis=1), 0)
+    # kezdoszint: a legmagasabb (bika) / legalacsonyabb (medve) zaras a melypont
+    # elotti W1 gyertyan
+    C = _ablak(c, W1)                       # C[i] = c[i-W1 .. i-1]
+    Cm = C[m_lo]
+    a_rel = np.nanargmax(np.where(np.isnan(Cm), -np.inf, Cm), axis=1)
+    P0_b = Cm[np.arange(n), a_rel]
+    bal_b = m_lo - (m_lo - W1 + a_rel)      # = W1 - a_rel  (1..W1)
+    Cm2 = C[m_hi]
+    a_rel2 = np.nanargmin(np.where(np.isnan(Cm2), np.inf, Cm2), axis=1)
+    P0_m = Cm2[np.arange(n), a_rel2]
+    bal_m = W1 - a_rel2
+    jobb_b = t - m_lo
+    jobb_m = t - m_hi
+    # az (m, t) kozotti zarasok maximuma / minimuma: a K-ablak zarasai, az m-ig
+    # tartokat kizarva
+    CK = _ablak(c, K)                       # CK[i] = c[i-K .. i-1]
+    pos = np.arange(K)[None, :] + (t - K)[:, None]   # abszolut indexek
+    kozott_b = np.where(pos > m_lo[:, None], CK, -np.inf).max(axis=1)
+    kozott_m = np.where(pos > m_hi[:, None], CK, np.inf).min(axis=1)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        mely_b = (P0_b - l[m_lo]) / atr
+        mely_m = (h[m_hi] - P0_m) / atr
+        nagy = np.isfinite(atr) & ((h - l) >= MIN_RANGE_ATR * atr)
+        bika = (ok & nagy & np.isfinite(P0_b) & (mely_b >= melyseg) & (c > P0_b)
+                & (kozott_b <= P0_b) & (jobb_b >= bal_b) & (jobb_b >= 1))
+        medve = (ok & nagy & np.isfinite(P0_m) & (mely_m >= melyseg) & (c < P0_m)
+                 & (kozott_m >= P0_m) & (jobb_m >= bal_m) & (jobb_m >= 1))
+        q_b = _cl((mely_b - melyseg) / 2.0)
+        q_m = _cl((mely_m - melyseg) / 2.0)
+    return bika, medve, q_b, q_m
+
+
+def pinbar(o, h, l, c, atr, kanoc=PIN_KANOC):
+    """PIN BAR: az egyik kanoc >= kanoc x tartomany, a test (o es c) a masik
+    harmadban; NINCS trend-feltetel. Irany a kanoc ELLEN.
+    Visszaad: (long_maszk, short_maszk, minoseg_long, minoseg_short)."""
+    tart = h - l
+    also = np.minimum(o, c) - l
+    felso = h - np.maximum(o, c)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        nagy = np.isfinite(atr) & (tart >= MIN_RANGE_ATR * atr)
+        lo_ok = nagy & (also >= kanoc * tart) & (np.minimum(o, c) >= h - (1 - kanoc) * tart)
+        hi_ok = nagy & (felso >= kanoc * tart) & (np.maximum(o, c) <= l + (1 - kanoc) * tart)
+        q_lo = _cl((also / tart - kanoc) / (1 - kanoc))
+        q_hi = _cl((felso / tart - kanoc) / (1 - kanoc))
+    return lo_ok, hi_ok, q_lo, q_hi
 
 
 def _szamol(o, h, l, c, atr=None):
@@ -184,6 +268,14 @@ def _szamol(o, h, l, c, atr=None):
     E["gy_marubozu->long"] = maru & poz
     E["gy_marubozu->short"] = maru & neg
     Q["gy_marubozu"] = _cl((test / tart - 0.9) / 0.1)
+
+    # 13. PIPA (✓) es 14. PIN BAR — 2026-09-18, kulon eloregisztralva
+    pb, pm, qpb, qpm = pipa(o, h, l, c, atr)
+    E["gy_pipa->long"], E["gy_pipa->short"] = pb, pm
+    Q["gy_pipa"] = np.where(pb, qpb, qpm)
+    lb, sb, qlb, qsb = pinbar(o, h, l, c, atr)
+    E["gy_pinbar->long"], E["gy_pinbar->short"] = lb, sb
+    Q["gy_pinbar"] = np.where(lb, qlb, qsb)
 
     E = {k: np.where(np.isfinite(v.astype(float)), v, False).astype(bool)
          for k, v in E.items()}
