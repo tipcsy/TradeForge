@@ -139,6 +139,29 @@ def rajz(row: pd.Series, n_cimke: str) -> _Path:
             fej_ki = (x[H] - max(x[S1], x[S2])) if irany == "short" else (min(x[S1], x[S2]) - x[H])
             cim += (f"\nvállak {abs(x[S1] - x[S2]) / atr[S2]:.2f} ATR eltérés, fej +{fej_ki / atr[S2]:.2f} ATR, "
                     f"S1→H {H - S1} gy., H→S2 {S2 - H} gy., kitörés {t - S2} gy. az S2 után, minőség {row.minoseg:.2f} ({row.fokozat})")
+    elif minta in ("nr7", "nr4", "ibar"):
+        nsz = {"nr7": 7, "nr4": 4}.get(minta, 0)
+        # a szuk gyertya: az utolso t-1..t-5 kozul az, amelyik NR / belso es a t az elso kitores
+        i0 = -1
+        for i in range(t - 1, max(0, t - candle_lib.NR_K2) - 1, -1):
+            if nsz:
+                ok = (h[i] - l[i]) < np.min(h[i - nsz + 1:i] - l[i - nsz + 1:i])
+                sh, sl = h[i], l[i]
+            else:
+                ok = (h[i] < h[i - 1]) and (l[i] > l[i - 1])
+                sh, sl = h[i - 1], l[i - 1]
+            if ok and (all((c[j] <= sh) and (c[j] >= sl) for j in range(i + 1, t))):
+                i0 = i
+                break
+        if i0 >= 0:
+            ax.axvspan(i0 - (nsz - 1 if nsz else 1) - 0.5, i0 + 0.5, color="#fff3c4", zorder=0, alpha=0.8)
+            ax.hlines([sh, sl], i0 - 0.5, t + 2, color="#b8860b", lw=1.6, label="a szűk gyertya sávja")
+            ax.annotate("NR7" if nsz == 7 else "NR4" if nsz == 4 else "belső", (i0, h[i0]),
+                        xytext=(0, 10), textcoords="offset points", ha="center", fontsize=9, color="#7b2cbf")
+            ax.annotate(f"kitörés  c={c[t]:.5g}", (t, c[t]), xytext=(8, 0), textcoords="offset points",
+                        fontsize=9, color="#7b2cbf")
+            cim += (f"\nszűk gyertya tartománya {(h[i0] - l[i0]) / atr[i0]:.2f} ATR, kitörés {t - i0} gy. után, "
+                    f"minőség {row.minoseg:.2f} ({row.fokozat})")
     else:
         ax.annotate(f"{minta}", (t, h[t]), xytext=(0, 10), textcoords="offset points",
                     ha="center", fontsize=9, color="#7b2cbf")

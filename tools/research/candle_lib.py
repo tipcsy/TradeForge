@@ -56,6 +56,8 @@ FV_FEJ_MIN = 0.5         # a fej ennyivel a magasabb vall folott (ATR)
 FV_MELYSEG = 1.5         # fej - nyakvonal (a magasabb melypont) >= ennyi ATR
 FV_ELOTT = 20            # elozmeny: az S1 elotti 20 gyertya legalacsonyabb zarasa <= nyakvonal(S1)
 FV_K2 = 30               # a kitores legfeljebb ennyi gyertyaval S2 utan
+# NR7 / NR4 / BELSO GYERTYA kitores — 2026-09-18 (vault „NR7 szukules kitorese")
+NR_K2 = 5                # a kitores legfeljebb ennyi gyertyaval a szuk gyertya utan
 
 
 def _prev(a: np.ndarray, k: int = 1) -> np.ndarray:
@@ -401,6 +403,52 @@ def fejvall(o, h, l, c, atr, k=FV_K, tav=FV_TAV, vall_tol=FV_VALL_TOL,
     return res["long"][0], res["short"][0], res["long"][1], res["short"][1]
 
 
+def nr_kitores(o, h, l, c, atr, n_szuk=7, k2=NR_K2, belso=False):
+    """NR(n) / BELSO GYERTYA kitorese: a szuk gyertya csucsa fole (long) / alja
+    ala (short) zaro ELSO gyertya, legfeljebb k2 gyertyaval utana.
+
+    n_szuk=7: a tartomany szigoruan a legszukebb az utolso 7-bol (NR7);
+    belso=True: a gyertya az elozo gyertya savjan belul van (inside bar), es a
+    kitores az ANYA-gyertya savjabol tortenik.
+    Visszaad: (long, short, q_long, q_short); q = 0,5 x szukules + 0,5 x meret."""
+    n = len(c)
+    tart = h - l
+    with np.errstate(invalid="ignore", divide="ignore"):
+        nagy = np.isfinite(atr) & (tart >= MIN_RANGE_ATR * atr)
+        q_meret = _cl((tart / atr - MIN_RANGE_ATR) / 1.0)
+        if belso:
+            ph, pl = _prev(h, 1), _prev(l, 1)
+            szuk = (h < ph) & (l > pl)
+            sav_h, sav_l = ph, pl                       # az anya-gyertya sava
+            q_szuk = _cl(1.0 - tart / (ph - pl))
+        else:
+            W = _ablak(tart, n_szuk - 1)               # az elozo n-1 tartomany
+            elozo_min = np.nanmin(np.where(np.isnan(W), np.inf, W), axis=1)
+            szuk = np.isfinite(elozo_min) & (elozo_min < np.inf) & (tart < elozo_min)
+            sav_h, sav_l = h, l
+            q_szuk = _cl(1.0 - tart / elozo_min)
+    long_m = np.zeros(n, dtype=bool)
+    short_m = np.zeros(n, dtype=bool)
+    q_l = np.full(n, np.nan)
+    q_s = np.full(n, np.nan)
+    for i in np.flatnonzero(szuk):
+        if not np.isfinite(sav_h[i]) or not np.isfinite(sav_l[i]):
+            continue
+        hi = min(n, i + k2 + 1)
+        for t in range(i + 1, hi):
+            if c[t] > sav_h[i]:
+                if nagy[t]:
+                    long_m[t] = True
+                    q_l[t] = 0.5 * q_szuk[i] + 0.5 * q_meret[t]
+                break
+            if c[t] < sav_l[i]:
+                if nagy[t]:
+                    short_m[t] = True
+                    q_s[t] = 0.5 * q_szuk[i] + 0.5 * q_meret[t]
+                break
+    return long_m, short_m, q_l, q_s
+
+
 def pinbar(o, h, l, c, atr, kanoc=PIN_KANOC):
     """PIN BAR: az egyik kanoc >= kanoc x tartomany, a test (o es c) a masik
     harmadban; NINCS trend-feltetel. Irany a kanoc ELLEN.
@@ -567,6 +615,11 @@ def _szamol(o, h, l, c, atr=None):
     fl2, fs2, qfl2, qfs2 = fejvall(o, h, l, c, atr, szigoru=True)
     E["gy_fejvall2->long"], E["gy_fejvall2->short"] = fl2, fs2
     Q["gy_fejvall2"] = np.where(fl2, qfl2, qfs2)
+    # 19. NR7 / NR4 / BELSO GYERTYA kitorese — 2026-09-18, kulon eloregisztralva
+    for nev, kw in (("nr7", dict(n_szuk=7)), ("nr4", dict(n_szuk=4)), ("ibar", dict(belso=True))):
+        nl, ns_, qnl, qns = nr_kitores(o, h, l, c, atr, **kw)
+        E[f"gy_{nev}->long"], E[f"gy_{nev}->short"] = nl, ns_
+        Q[f"gy_{nev}"] = np.where(nl, qnl, qns)
 
     E = {k: np.where(np.isfinite(v.astype(float)), v, False).astype(bool)
          for k, v in E.items()}
