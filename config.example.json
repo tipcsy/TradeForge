@@ -230,5 +230,12 @@
       "sess_end": 24,
       "description": "GER40 Cash"
     }
+  },
+  "conductor": {
+    "_comment": "KARMESTER (docs/karmester.md). Jelenleg az F0 fazis: CSAK MERES — nem dont, nem javasol, nem ir configot. A telemetria a belepo-kiserletek kimenetelet gyujti napi bontasban (data/conductor/telemetry/), hogy a „miert nem kotott ma?” kerdesre legyen valasz.",
+    "telemetry": {
+      "_comment_keep": "Hany napig tartjuk meg a napi telemetria-fajlokat. 0 = nincs takaritas. Egy nap ~nehany KB.",
+      "keep_days": 90
+    }
   }
 }

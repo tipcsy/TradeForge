@@ -496,7 +496,7 @@ conductor/
 
 | Fázis | Tartalom | Kockázat |
 |---|---|---|
-| **F0** | kapu-telemetria · élő KPI-tár · várt aktivitás · pillanatkép · krónika | nulla (csak mérés) |
+| **F0** | kapu-telemetria ✅ (v3.75.0) · élő KPI-tár · várt aktivitás · pillanatkép · krónika | nulla (csak mérés) |
 | **F1** | egészségőr · „miért nem kötött" magyarázó · napi riport · **árnyék-mód** | nulla |
 | **F2** | javaslatmotor · Karmester fül · optimalizálás-ütemező (L1) | alacsony |
 | **F3** | életciklus-létra · kockázati karmester (L2→L3) | közepes |

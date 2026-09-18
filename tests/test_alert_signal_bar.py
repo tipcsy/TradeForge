@@ -92,15 +92,23 @@ check("a KOVETKEZO jel-gyertya viszont UJ azonosito", not (_a & _b), f"{_a} vs {
 
 # ── 3. A BEKOTES az elo uton ─────────────────────────────────────────────
 _src = (ROOT / "trading" / "live_trader.py").read_text(encoding="utf-8")
-_i = _src.find("_aid = f\"{symbol}|{strategy.name}|{signal}|{_bt}\"")
-check("az alert-id kepzese megvan", _i > 0)
-_blk = _src[max(0, _i - 1200):_i]
+check("az alert-id kepzese megvan",
+      '_aid = f"{symbol}|{strategy.name}|{signal}|{_bar_ts}"' in _src)
+# ⚠ A SZAMITAS ATKOLTOZOTT EGY KOZOS SEGEDBE (`_signal_bar_ts`). KET fogyasztoja
+# van, es ugyanazt kell latniuk: az MQL5 riasztas-azonosito ES a karmester
+# belepo-telemetriaja. Ha a telemetria a sajat masolatat szamolna, egy H1-es
+# strategia 60x-os sullyal jelenne meg egy M1-eshez kepest — ugyanaz a hiba,
+# ami a riasztasnal mar elsult (egy szetupra 60 uzenet).
+_blk = _src.split("def _signal_bar_ts(")[1].split(chr(10) + "def ")[0]
 check("...a JEL-gyertyara kerekit", "signal_bar_seconds" in _blk)
 check("...es csak ha van jel-idosik (0 -> valtozatlan)",
-      "if _sig_sec > 0:" in _blk)
+      "if sig_sec > 0:" in _blk)
 # ⚠ Egy hibas strategia-hook ne dontson el egy riasztast.
 check("...a hook hibaja nem viszi el a riasztast",
-      "except Exception" in _blk and "_sig_sec = 0" in _blk)
+      "except Exception" in _blk and "sig_sec = 0" in _blk)
+check("...es a telemetria UGYANEBBOL dolgozik",
+      "_bar_ts, _sig_sec = _signal_bar_ts(df_lo, strategy, params)" in _src
+      and "bar_ts=_bar_ts" in _src)
 
 
 print()
