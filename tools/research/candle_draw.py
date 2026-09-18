@@ -119,6 +119,26 @@ def rajz(row: pd.Series, n_cimke: str) -> _Path:
             cim += (f"\nswing-táv {p2 - p1} gy., egyezés {abs(x[p1] - x[p2]) / atr[p2]:.2f} ATR, "
                     f"mélység {abs(N - (max(x[p1], x[p2]) if irany == 'long' else min(x[p1], x[p2]))) / atr[p2]:.2f} ATR, "
                     f"kitörés {t - p2} gy. a 2. után, minőség {row.minoseg:.2f} ({row.fokozat})")
+    elif minta in ("fejvall", "fejvall2"):
+        pts = {}
+        candle_lib.fejvall(o, h, l, c, atr, pontok=pts, szigoru=(minta == "fejvall2"))
+        if (irany, t) in pts:
+            S1, H, S2, T1, T2 = pts[(irany, t)]
+            x, y = (h, l) if irany == "short" else (l, h)
+            slope = (y[T2] - y[T1]) / (T2 - T1)
+            ax.axvspan(S1 - 1, t, color="#fff3c4", zorder=0, alpha=0.8)
+            ax.plot([T1, t + 2], [y[T1], y[T1] + slope * (t + 2 - T1)], color="#b8860b", lw=1.6,
+                    label="nyakvonal")
+            ax.plot([S1, T1, H, T2, S2, t], [x[S1], y[T1], x[H], y[T2], x[S2], c[t]], color="#7b2cbf",
+                    lw=2.2, alpha=0.8, label="bal váll → fej → jobb váll → kitörés")
+            for nm, i in (("bal váll", S1), ("fej", H), ("jobb váll", S2)):
+                ax.annotate(nm, (i, x[i]), xytext=(0, 10 if irany == "short" else -16),
+                            textcoords="offset points", ha="center", fontsize=9, color="#7b2cbf")
+            ax.annotate(f"kitörés  c={c[t]:.5g}", (t, c[t]), xytext=(8, 0), textcoords="offset points",
+                        fontsize=9, color="#7b2cbf")
+            fej_ki = (x[H] - max(x[S1], x[S2])) if irany == "short" else (min(x[S1], x[S2]) - x[H])
+            cim += (f"\nvállak {abs(x[S1] - x[S2]) / atr[S2]:.2f} ATR eltérés, fej +{fej_ki / atr[S2]:.2f} ATR, "
+                    f"S1→H {H - S1} gy., H→S2 {S2 - H} gy., kitörés {t - S2} gy. az S2 után, minőség {row.minoseg:.2f} ({row.fokozat})")
     else:
         ax.annotate(f"{minta}", (t, h[t]), xytext=(0, 10), textcoords="offset points",
                     ha="center", fontsize=9, color="#7b2cbf")

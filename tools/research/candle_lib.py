@@ -48,6 +48,14 @@ DUPLA_TOL = 0.25         # a ket szelsoertek egyezese ATR-ben
 DUPLA_MELYSEG = 1.0      # nyakvonal - szelsoertek >= ennyi ATR
 DUPLA_ELOTT = 20         # az elozmeny: a p1 elotti 20 gyertya legmagasabb zarasa >= nyakvonal
 DUPLA_K2 = 30            # a kitores legfeljebb ennyi gyertyaval p2 utan
+# FEJ-VALL — 2026-09-18 (vault „Fej-vall — eloregisztralt kerdes")
+FV_K = 3                 # swing ±K
+FV_TAV = (3, 25)         # vall-fej es fej-vall tavolsag gyertyaban
+FV_VALL_TOL = 0.5        # a ket vall egyezese ATR-ben
+FV_FEJ_MIN = 0.5         # a fej ennyivel a magasabb vall folott (ATR)
+FV_MELYSEG = 1.5         # fej - nyakvonal (a magasabb melypont) >= ennyi ATR
+FV_ELOTT = 20            # elozmeny: az S1 elotti 20 gyertya legalacsonyabb zarasa <= nyakvonal(S1)
+FV_K2 = 30               # a kitores legfeljebb ennyi gyertyaval S2 utan
 
 
 def _prev(a: np.ndarray, k: int = 1) -> np.ndarray:
@@ -295,6 +303,104 @@ def dupla(o, h, l, c, atr, k=DUPLA_K, tav=DUPLA_TAV, tol=DUPLA_TOL,
     return res["long"][0], res["short"][0], res["long"][1], res["short"][1]
 
 
+def fejvall(o, h, l, c, atr, k=FV_K, tav=FV_TAV, vall_tol=FV_VALL_TOL,
+            fej_min=FV_FEJ_MIN, melyseg=FV_MELYSEG, elott=FV_ELOTT, k2=FV_K2,
+            pontok=None, szigoru=False):
+    """FEJ-VALL (short) / FORDITOTT FEJ-VALL (long) — a nyakvonal toresen.
+
+    A nyakvonal a ket kozbenso melypont (T1, T2) egyenese, a t-re extrapolalva.
+    Visszaad: (long_maszk, short_maszk, q_long, q_short); q = 0,5 x vall-szimmetria
+    + 0,5 x melyseg-alak.
+
+    `szigoru=True` (2. valtozat, a rajzok utan rogzitve): szimmetria
+    max/min(H-S1, S2-H) <= 2,5; a nyakvonal kozel vizszintes (|T2-T1| <= 0,75 ATR);
+    mindket vall >= 0,75 ATR-rel a nyakvonal folott (long: alatt)."""
+    n = len(c)
+    nagy = np.isfinite(atr) & ((h - l) >= MIN_RANGE_ATR * atr)
+    res = {}
+    for irany in ("long", "short"):
+        sgn = -1.0 if irany == "long" else 1.0      # short: csucsok felul (+), long: tukor
+        x = h if irany == "short" else l             # a vallak/fej ara
+        y = l if irany == "short" else h             # a nyakvonal pontjai
+        sw = np.flatnonzero(_swing(x, k, also=(irany == "long")))
+        maszk = np.zeros(n, dtype=bool)
+        q = np.full(n, np.nan)
+        for S2 in sw:
+            a2 = atr[S2]
+            if not np.isfinite(a2) or a2 <= 0 or S2 - tav[1] - tav[1] - elott < 0:
+                continue
+            # fej: a legszelsobb swing az [S2-25, S2-3] szakaszon
+            cand = sw[(sw >= S2 - tav[1]) & (sw <= S2 - tav[0])]
+            if len(cand) == 0:
+                continue
+            H = cand[np.argmax(sgn * x[cand])]
+            if sgn * (x[H] - x[S2]) < fej_min * a2:
+                continue
+            # bal vall: a H-hoz legkozelebbi swing az [H-25, H-3] szakaszon, ami egyezik
+            cand1 = sw[(sw >= H - tav[1]) & (sw <= H - tav[0])][::-1]
+            S1 = -1
+            for c1 in cand1:
+                if (abs(x[c1] - x[S2]) <= vall_tol * a2) and (sgn * (x[H] - x[c1]) >= fej_min * a2):
+                    S1 = c1
+                    break
+            if S1 < 0:
+                continue
+            # a fejnek az S1..S2 szakasz szelsoertekenek kell lennie
+            seg = x[S1:S2 + 1]
+            if (irany == "short" and seg.max() > x[H]) or (irany == "long" and seg.min() < x[H]):
+                continue
+            # nyakvonal: T1 az (S1,H), T2 a (H,S2) kozotti szelsoertek (short: min low)
+            if H - S1 < 2 or S2 - H < 2:
+                continue
+            seg1, seg2 = y[S1 + 1:H], y[H + 1:S2]
+            T1 = S1 + 1 + (int(np.argmin(seg1)) if irany == "short" else int(np.argmax(seg1)))
+            T2 = H + 1 + (int(np.argmin(seg2)) if irany == "short" else int(np.argmax(seg2)))
+            nyak_T = max(y[T1], y[T2]) if irany == "short" else min(y[T1], y[T2])
+            if sgn * (x[H] - nyak_T) < melyseg * a2:
+                continue
+            slope = (y[T2] - y[T1]) / (T2 - T1)
+            def nyak(i):
+                return y[T1] + slope * (i - T1)
+            if szigoru:
+                d1, d2 = H - S1, S2 - H
+                if max(d1, d2) / max(1, min(d1, d2)) > 2.5:
+                    continue
+                if abs(y[T2] - y[T1]) > 0.75 * a2:
+                    continue
+                if min(sgn * (x[S1] - nyak(S1)), sgn * (x[S2] - nyak(S2))) < 0.75 * a2:
+                    continue
+            # elozmeny: alulrol jott (short) / felulrol jott (long)
+            ce = c[S1 - elott:S1]
+            if irany == "short" and ce.min() > nyak(S1):
+                continue
+            if irany == "long" and ce.max() < nyak(S1):
+                continue
+            # kitores: az elso zaras a nyakvonalon tul S2+k utan, <= k2 gyertyaval S2 utan
+            lo, hi = S2 + k + 1, min(n, S2 + k2 + 1)
+            if lo >= hi:
+                continue
+            ii = np.arange(lo, hi)
+            ny = nyak(ii)
+            tul = (c[lo:hi] < ny) if irany == "short" else (c[lo:hi] > ny)
+            if not tul.any():
+                continue
+            t = lo + int(np.argmax(tul))
+            if not nagy[t]:
+                continue
+            kz = np.arange(S2 + 1, lo)
+            if len(kz):
+                nk = nyak(kz)
+                if ((c[kz] < nk).any() if irany == "short" else (c[kz] > nk).any()):
+                    continue
+            maszk[t] = True
+            if pontok is not None:
+                pontok[(irany, t)] = (int(S1), int(H), int(S2), int(T1), int(T2))
+            szim = 1.0 - abs(x[S1] - x[S2]) / (vall_tol * a2)
+            q[t] = 0.5 * _cl(szim) + 0.5 * _cl((sgn * (x[H] - nyak_T) / a2 - melyseg) / 2.0)
+        res[irany] = (maszk, q)
+    return res["long"][0], res["short"][0], res["long"][1], res["short"][1]
+
+
 def pinbar(o, h, l, c, atr, kanoc=PIN_KANOC):
     """PIN BAR: az egyik kanoc >= kanoc x tartomany, a test (o es c) a masik
     harmadban; NINCS trend-feltetel. Irany a kanoc ELLEN.
@@ -454,6 +560,13 @@ def _szamol(o, h, l, c, atr=None):
     dl2, ds2, qdl2, qds2 = dupla(o, h, l, c, atr, tol=0.5, gyengulo=True)
     E["gy_dupla2->long"], E["gy_dupla2->short"] = dl2, ds2
     Q["gy_dupla2"] = np.where(dl2, qdl2, qds2)
+    # 18. FEJ-VALL / FORDITOTT FEJ-VALL — 2026-09-18, kulon eloregisztralva
+    fl, fs, qfl, qfs = fejvall(o, h, l, c, atr)
+    E["gy_fejvall->long"], E["gy_fejvall->short"] = fl, fs
+    Q["gy_fejvall"] = np.where(fl, qfl, qfs)
+    fl2, fs2, qfl2, qfs2 = fejvall(o, h, l, c, atr, szigoru=True)
+    E["gy_fejvall2->long"], E["gy_fejvall2->short"] = fl2, fs2
+    Q["gy_fejvall2"] = np.where(fl2, qfl2, qfs2)
 
     E = {k: np.where(np.isfinite(v.astype(float)), v, False).astype(bool)
          for k, v in E.items()}
