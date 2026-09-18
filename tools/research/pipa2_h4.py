@@ -142,7 +142,8 @@ def itelet(df, alap, egy, tf, irany):
         return {"tf": f"M{tf}", "irany": irany, "n": len(d), "itelet": "nem ertekelheto (n<300)"}
     mu, t, n = _t(d.R.to_numpy(float))
     mu_m, _, _ = _t(d.R_tukor.to_numpy(float))
-    parok = d.groupby("sym").R.mean()
+    parok = d.groupby("sym").R.agg(["mean", "size"])
+    parok = parok[parok["size"] >= 30]["mean"]
     ev = d.groupby("ev").R.agg(["mean", "size"])
     ev = ev[ev["size"] >= MIN_YEAR_N]
     # tobblet: paronkent es iranyonkent a sajat alapszinthez
@@ -173,7 +174,16 @@ def main():
     gyors = "--gyors" in _sys.argv
     if "--minta" in _sys.argv:
         MINTA = _sys.argv[_sys.argv.index("--minta") + 1]
-    print(f"MINTA: {MINTA}")
+    global SYMS, TFS
+    tag = ""
+    if "--parok" in _sys.argv:
+        SYMS = _sys.argv[_sys.argv.index("--parok") + 1].split(",")
+        tag += "_rep"
+    if "--tf" in _sys.argv:
+        keep = [int(x) for x in _sys.argv[_sys.argv.index("--tf") + 1].split(",")]
+        TFS = {k: v for k, v in TFS.items() if k in keep}
+        tag += "_" + "_".join(f"M{k}" for k in TFS)
+    print(f"MINTA: {MINTA}  parok: {SYMS}  idosikok: {list(TFS)}")
     dfs, alap, egy = [], {}, {}
     for tf in TFS:
         for sym in SYMS:
@@ -183,7 +193,7 @@ def main():
             alap[(sym, tf)] = a
             egy[(sym, tf)] = e
     df = pd.concat(dfs, ignore_index=True)
-    df.to_parquet(ROOT / "data" / f"{MINTA}_h4_trades.parquet", index=False)
+    df.to_parquet(ROOT / "data" / f"{MINTA}_h4_trades{tag}.parquet", index=False)
 
     for tf in TFS:
         print(f"\n════ M{tf} — paronkent (fuggetlen, elsodleges kilepes) ════")
