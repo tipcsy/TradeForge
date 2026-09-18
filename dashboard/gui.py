@@ -4686,8 +4686,19 @@ class DashboardWindow:
                             _vp.set_on(self.cfg, sym, n, _axis, cur_vals[_k][n])
                 _vp.prune(self.cfg, sym, _names)
             if "mode" in rows:
-                for n in _names:
-                    _tm.set_mode(self.cfg, sym, n, cur_vals["mode"][n])
+                # ⚠ A KÖZÖS RÉTEGEN (`console_cmd.set_trade_mode`): a felület nem
+                # ír közvetlenül a `trade_mode`-ba. A megerősítést a `_save` már
+                # elintézte (`confirmed=True`), a `save=False` pedig azért kell,
+                # mert ez az ablak több sort alkalmaz akár tíz instrumentumra, és
+                # a VÉGÉN ment egyszer — egy beágyazott mentés egy félbeszakadt
+                # tömeges alkalmazást is lemezre vinne.
+                from core import console_cmd as _cc
+                _mctx = self._cmd_ctx()
+                for _m in (_tm.MODE_LIVE, _tm.MODE_SIGNAL):
+                    _ns = [n for n in _names if cur_vals["mode"][n] == _m]
+                    if _ns:
+                        _cc.set_trade_mode(_mctx, sym, _ns, _m,
+                                           confirmed=True, save=False)
             if "strategies" in rows:
                 if chosen == [default_strategy_name(self.cfg)]:
                     pc.pop("strategies", None)
@@ -4706,14 +4717,9 @@ class DashboardWindow:
             if "rr_preset" in rows:
                 # NEM a config.json-ba megy: a preset a per-pár `data/risk_mode.json`-ban
                 # él (`rr_state`). Ugyanazt az utat járjuk, mint a Pozíciók-fül menüje
-                # és a `classic` „R" gombja — a régi `risky_mode` szinkronban tartásával
-                # együtt, hogy az azt olvasó live/backtest változatlanul működjön.
-                from core import risky_mode as _rm
+                # és a `classic` „R" gombja — a régi `risky_mode` szinkronját maga a
+                # setter végzi (`rr_state._sync_risky`), nem a hívó.
                 _rrs.set_preset(sym, cur_vals["rr_preset"])
-                try:
-                    _rm.set_risky(sym, cur_vals["rr_preset"] == _rrx.PRESET_RISKY)
-                except Exception:
-                    pass
                 _ds_rr = self.dashboard_ref.get(sym)
                 if _ds_rr is not None:
                     _ds_rr.rr_preset = cur_vals["rr_preset"]
@@ -4751,27 +4757,58 @@ class DashboardWindow:
             changed = _ba.changed_rows(_init, now)
 
             targets = [symbol]
+            others  = []
+            _rows   = changed if all_var.get() else set(_ba.ROWS)
             if all_var.get():
                 if not changed:
                     lbl.config(text=_t("gui.nincs_modositott_sor_nincs"), fg=FG_YELLOW)
                     return
                 others = _ba.targets(self.cfg.get("pairs"), symbol, True)[1:]
+                targets += others
+
+            # ⚠ MELYIK (pár × stratégia) KEZD MOSTANTÓL VALÓDI MEGBÍZÁST KÜLDENI?
+            # A kérdést a közös réteg dönti el (`console_cmd.mode_changes`), és
+            # csak a TÉNYLEGES váltásokra — a már `live` módúra rákérdezni zaj.
+            # Eddig EGY instrumentum mentésénél ez a kérdés fel sem merült: a
+            # legördülőt „csak jelzés"-ről „valódi kötés"-re állítva a Mentés
+            # némán bekapcsolta a pénzt.
+            _live_switch = []
+            if "mode" in _rows:
+                from core import console_cmd as _cc
+                _qctx = self._cmd_ctx()
+                _wanted = [n for n in _names if now["mode"][n] == _tm.MODE_LIVE]
+                for _sym in targets:
+                    _live_switch += [(_sym, n) for n, _o in
+                                     _cc.mode_changes(_qctx, _sym, _wanted,
+                                                      _tm.MODE_LIVE)]
+
+            from tkinter import messagebox
+            if all_var.get():
                 # MEGERŐSÍTÉS: tételesen kiírjuk, MI és HÁNY páron változik. Enélkül
                 # egy pipa csendben átírná 10 instrumentum kötés-módját.
+                # ⚠ EGY kérdés, nem kettő: ha valódi kötés is bekapcsol, a
+                # NEVESÍTETT figyelmeztetés lép az általános helyére.
                 _warn = (_t("gui2.ez_penzt_erint_a")
                          if _ba.affects_money(changed) else "")
-                from tkinter import messagebox
+                if _live_switch:
+                    _warn = _t("gui.mode.live_warn",
+                               names=", ".join(f"{s}/{n}" for s, n in _live_switch))
                 if not messagebox.askyesno(
                         "Minden instrumentumra",
                         _t("gui.bulk.confirm", n=len(others), rows=_ba.summary(changed),
                         symbols=", ".join(others), warn=_warn),
                         parent=popup):
                     return
-                targets += others
+            elif _live_switch:
+                if not messagebox.askyesno(
+                        _t("gui.ctrl.confirm_title"),
+                        _t("console.mode.confirm_live", symbol=symbol,
+                           names=", ".join(n for _s, n in _live_switch)),
+                        parent=popup):
+                    return
 
             for _sym in targets:
-                _apply_to(_sym, changed if all_var.get() else set(_ba.ROWS),
-                          chosen, now)
+                _apply_to(_sym, _rows, chosen, now)
             try:
                 self._save_main_config()
                 _mstxt = (now["market"] if now["market"] != "Nincs"

@@ -40,6 +40,7 @@ from typing import Callable, Optional
 
 from core import opt_activity as _oa
 from core import run_state as _rs
+from core import trade_mode as _tm
 from core.i18n import t as _t
 
 
@@ -427,6 +428,151 @@ def cmd_stop(ctx: Context, args: list, confirmed: bool = False) -> Result:
     return stop_strategies(ctx, sym, names, confirmed=confirmed)
 
 
+# ---------------------------------------------------------------------------
+# KÖTÉS-MÓD (valódi kötés ↔ csak jelzés)
+# ---------------------------------------------------------------------------
+# ⚠ EZ A LEGDRÁGÁBB KAPCSOLÓ A RENDSZERBEN. A `signal` → `live` váltás után a
+# motor a KÖVETKEZŐ jelnél VALÓDI MEGBÍZÁST küld a számlára. Eddig egyetlen
+# helyen lehetett átállítani (a beállítás-ablak legördülője), tehát nem volt két
+# forrás — de épp ezért nem is volt SEMMILYEN közös szabály mögötte:
+#
+#   • egyetlen instrumentum mentésénél a felület MEG SEM KÉRDEZTE, hogy most
+#     kapcsoltál be valódi kötést (a „minden instrumentumra" ág kérdezett csak);
+#   • a nem engedélyezett stratégián beállított mód némán hatástalan;
+#   • a nyitott pozíció sorsáról (a motor tovább kezeli) sehol nem esett szó.
+#
+# A karmesternek EZ lesz a legfontosabb akciója (`signal` ↔ `live` léptetés az
+# életciklus-létrán), ezért a szabály ide került — egy helyre, ahol a felület, a
+# konzol és a karmester is ugyanazon megy át.
+#
+# ⚠ A TELEGRAM SZÁNDÉKOSAN NEM KAPJA MEG. A `telegram_cmd.ENGEDETT` engedélyező
+# lista — a `close` és a `quit` sincs benne. Egy chatüzenetből bekapcsolható
+# valódi kötés ugyanabba a kategóriába tartozik.
+
+
+def _tarolt_mod(cfg: dict, symbol: str, name: str):
+    """A configban TÉNYLEGESEN tárolt nyers érték (vagy `None`, ha nincs).
+
+    A `trade_mode.mode_of` értelmez (mindent `live`-nak olvas, amit nem ismer);
+    ide az kell, ami ODA VAN ÍRVA — ebből derül ki az érvénytelen maradék."""
+    pc = (cfg.get("pairs") or {}).get(symbol)
+    per = pc.get("strategy_mode") if isinstance(pc, dict) else None
+    return per.get(name) if isinstance(per, dict) else None
+
+
+def mode_changes(ctx: Context, symbol: str, names: list, mode: str) -> list:
+    """Mely stratégiák módja VÁLTOZNA meg ténylegesen → `[(név, régi_mód)]`.
+
+    TISZTA: nem ír semmit. A hívó ebből építi a megerősítő kérdést — és ebből
+    tudja, hogy van-e egyáltalán mit kérdezni (a már `live` módú stratégiára
+    rákérdezni zaj)."""
+    out = []
+    for n in (names or []):
+        if not n:
+            continue
+        regi = _tm.mode_of(ctx.cfg, symbol, n)
+        if regi != mode:
+            out.append((n, regi))
+    return out
+
+
+def set_trade_mode(ctx: Context, symbol: str, names: list, mode: str,
+                   confirmed: bool = False, save: bool = True) -> Result:
+    """A kötés-mód beállítása `(pár × stratégia)` szinten.
+
+    `mode`: ``"live"`` (valódi megbízás) vagy ``"signal"`` (csak jelzés).
+
+    ⚠ A `live` IRÁNY MEGERŐSÍTÉST KÉR — de csak akkor, ha tényleg VÁLTOZIK
+    valami. Ugyanaz a minta, mint a kivezetéssel járó `stop`-nál: `Result.confirm`
+    jön vissza, a hívó megkérdezi, és `confirmed=True`-val megismétli. A `signal`
+    irány nem kérdez: az a biztonságos oldal.
+
+    ⚠ `save=False`: a hívó VÁLLALJA a perzisztálást. A beállítás-ablak több sort
+    alkalmaz egyszerre, akár tíz instrumentumra, és a végén ment EGYSZER — ott egy
+    beágyazott mentés nemcsak fölösleges írás lenne, hanem egy félbeszakadt
+    tömeges alkalmazást is lemezre vinne. Ilyenkor az `ok` csak az ÍRÁSRA
+    vonatkozik, a `console.not_saved` sor pedig elmarad."""
+    if mode not in _tm.MODES:
+        return Result([_t("console.mode.unknown", mode=mode)], ok=False)
+
+    kert = [n for n in (names or []) if n]
+    if not kert:
+        return Result([_t("console.play.no_strategy", symbol=symbol)], ok=False)
+
+    valtozo = mode_changes(ctx, symbol, kert, mode)
+
+    # ⚠ ÉRVÉNYTELEN MARADÉK-ÉRTÉK. A `mode_of` MINDEN ismeretlen értéket `live`-nak
+    # olvas (biztonságos alapértelmezés), tehát egy elgépelt `"Signal"` a configban
+    # NEM okoz hibát — csak épp ott áll egy sor, ami valódi eltérést sugall,
+    # miközben a motor figyelmen kívül hagyja. Pontosan az a néma állapot, amit a
+    # `set_mode` takarítása (a `live` TÖRLI a kulcsot) megelőz — csak oda kell
+    # engedni, akkor is, ha a mód „nem változik".
+    szemet = [n for n in kert if _tarolt_mod(ctx.cfg, symbol, n)
+              not in (None, _tm.MODE_SIGNAL)]
+    if not valtozo and not szemet:
+        return Result([_t("console.mode.nochange", symbol=symbol,
+                          names=", ".join(kert), mode=_tm.LABELS.get(mode, mode))])
+
+    # ⚠ CSAK A VÁLTOZÓKRA kérdezünk rá, és csak a PÉNZT BEKAPCSOLÓ irányban.
+    # ⚠ CSAK VALÓDI VÁLTÁSRA kérdezünk: ha `valtozo` üres (pl. csak takarítás
+    # miatt jutottunk idáig), nincs mit megerősíteni — egy üres kérdés zaj.
+    if mode == _tm.MODE_LIVE and valtozo and not confirmed:
+        return Result(confirm=_t("console.mode.confirm_live", symbol=symbol,
+                                 names=", ".join(n for n, _ in valtozo)))
+
+    engedett = ctx.strategies_of(symbol) or []
+    sorok = []
+    # ⚠ AZ ÍRÁS MINDEN KÉRT STRATÉGIÁRA MEGY, nem csak a változókra. A
+    # `trade_mode.set_mode` idempotens ÉS takarít is (`live`-nál TÖRLI a kulcsot,
+    # hogy a `strategy_mode` jelenléte mindig valódi eltérést jelentsen). Ha csak
+    # a „változókra" hívnánk, egy érvénytelen maradék-érték (amit a `mode_of`
+    # amúgy is `live`-nak olvas) bennragadna a fájlban — pont az a néma
+    # állapot, amit a takarítás megelőz. A `valtozo` csak a KÉRDÉSHEZ és a
+    # JELENTÉSHEZ kell.
+    for n in kert:
+        _tm.set_mode(ctx.cfg, symbol, n, mode)
+    for n, _regi in valtozo:
+        # ⚠ NEM TILTÁS, CSAK JELZÉS: a nem engedélyezett stratégián a beállítás
+        # eltárolódik és később érvényes lesz — de MOST nem csinál semmit. A néma
+        # hatástalanság rosszabb, mint a hiányzó beállítás (lásd config_check).
+        if n not in engedett:
+            sorok.append(_t("console.mode.not_enabled", symbol=symbol, name=n))
+    if valtozo:
+        sorok.append(_t("console.mode.set", symbol=symbol,
+                        names=", ".join(n for n, _ in valtozo),
+                        mode=_tm.LABELS.get(mode, mode)))
+    else:
+        # Csak takarítás történt — a mód nem változott, de a config igen.
+        sorok.append(_t("console.mode.cleaned", symbol=symbol,
+                        names=", ".join(szemet)))
+    # ⚠ A MÓD CSAK AZ ÚJ BELÉPŐKRE VONATKOZIK. A „csak jelzés" ellenőrzése a
+    # motorban a BELÉPŐ útján ül (`live_trader`): egy már nyitott pozíciót a
+    # motor tovább kezel (breakeven, trailing, kiszállási jel). Aki `signal`-ra
+    # vált, könnyen hiszi, hogy ezzel „kikapcsolta" a párt — nem.
+    if _has_position(ctx, symbol):
+        sorok.append(_t("console.mode.open_position", symbol=symbol))
+
+    if not save:
+        return Result(sorok)
+    mentve = ctx.save_config()
+    if not mentve:
+        sorok.append(_t("console.not_saved"))
+    return Result(sorok, ok=mentve)
+
+
+def cmd_mode(ctx: Context, args: list, confirmed: bool = False) -> Result:
+    """`mode <pár> [stratégia] <live|signal>`"""
+    if len(args) < 2:
+        return Result([_t("console.mode.usage")], ok=False)
+    sym = _resolve_symbol(ctx, args[0])
+    if sym is None:
+        return Result([_t("console.unknown_pair", symbol=args[0])], ok=False)
+    mode = str(args[-1]).lower()
+    # Stratégia nélkül: a pár ÖSSZES engedélyezett stratégiája — mint a play/stop.
+    names = [args[1]] if len(args) > 2 else list(ctx.strategies_of(sym) or [])
+    return set_trade_mode(ctx, sym, names, mode, confirmed=confirmed)
+
+
 def cmd_balance(ctx: Context, args: list, confirmed: bool = False) -> Result:
     a = ctx.account() or {}
     if not a:
@@ -539,6 +685,7 @@ COMMANDS: dict = {
     "close":   cmd_close,
     "play":    cmd_play,
     "stop":    cmd_stop,
+    "mode":    cmd_mode,
     "balance": cmd_balance,
     "today":   cmd_today,
     "state":   cmd_state,
@@ -556,6 +703,7 @@ _HELP = (
     ("close <ticket>|all", "console.help.close"),
     ("play <pár> [stratégia]", "console.help.play"),
     ("stop <pár> [stratégia]", "console.help.stop"),
+    ("mode <pár> [strat] live|signal", "console.help.mode"),
     ("balance", "console.help.balance"),
     ("today", "console.help.today"),
     ("state", "console.help.state"),

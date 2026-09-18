@@ -240,6 +240,108 @@ check("...es a ZARON KIVUL hivodik (holtpont-kerules)",
                            for l in _sorok), str(_sorok))
 
 
+# ── 8. KOTES-MOD (valodi kotes <-> csak jelzes) a kozos retegben ─────────
+# ⚠ EZ A LEGDRAGABB KAPCSOLO: a `signal` -> `live` valtas utan a motor a
+# KOVETKEZO jelnel valodi megbizast kuld. Eddig egyetlen helyen (a beallitas-
+# ablak legorduloje) lehetett atallitani — tehat nem volt ket forras, de nem volt
+# SEMMILYEN kozos szabaly sem: egy instrumentum mentesenel a felulet meg sem
+# kerdezte, hogy most kapcsoltal be valodi kotest.
+from core import trade_mode as _tm
+
+cfg, ctx = _ctx()
+r = cc.set_trade_mode(ctx, "Ger40", ["wpr_sma"], "nincsilyen")
+check("ismeretlen mod: elutasitva", not r.ok and not r.confirm)
+
+# A `signal` irany a BIZTONSAGOS oldal — nem kerdez.
+cfg, ctx = _ctx()
+r = cc.set_trade_mode(ctx, "Ger40", ["wpr_sma"], _tm.MODE_SIGNAL)
+check("a `signal` irany NEM ker megerositest", not r.confirm and r.ok)
+check("...es tenyleg atallt", _tm.mode_of(cfg, "Ger40", "wpr_sma") == _tm.MODE_SIGNAL)
+
+# A `live` irany IGEN — es addig NEM ir.
+r = cc.set_trade_mode(ctx, "Ger40", ["wpr_sma"], _tm.MODE_LIVE)
+check("a `live` irany MEGERSITEST ker", bool(r.confirm), r.confirm[:60])
+check("...es addig NEM ir semmit",
+      _tm.mode_of(cfg, "Ger40", "wpr_sma") == _tm.MODE_SIGNAL)
+r = cc.set_trade_mode(ctx, "Ger40", ["wpr_sma"], _tm.MODE_LIVE, confirmed=True)
+check("megerositve atall", _tm.mode_of(cfg, "Ger40", "wpr_sma") == _tm.MODE_LIVE)
+
+# ⚠ A mar `live` moduran NINCS mit kerdezni — a folosleges kerdes zaj, es a
+# felhasznalo egy ido utan atkattint rajta.
+r = cc.set_trade_mode(ctx, "Ger40", ["wpr_sma"], _tm.MODE_LIVE)
+check("a mar `live` modunal nincs kerdes", not r.confirm and r.ok)
+check("...es meg is mondja, hogy nincs valtozas",
+      any("nincs változás" in x for x in r.lines), str(r.lines)[:70])
+check("mode_changes: tisztan megmondja, mi valtozna",
+      cc.mode_changes(ctx, "Ger40", ["wpr_sma", "ml_ai"], _tm.MODE_SIGNAL)
+      == [("wpr_sma", _tm.MODE_LIVE), ("ml_ai", _tm.MODE_LIVE)])
+
+# A NEM ENGEDELYEZETT strategian a mod nemán hatastalan — ezt kimondjuk.
+cfg, ctx = _ctx()
+r = cc.set_trade_mode(ctx, "Ger40", ["csilla"], _tm.MODE_SIGNAL)
+check("nem engedelyezett strategia: eltarolja, DE szol rola",
+      r.ok and any("nincs engedélyezve" in x for x in r.lines), str(r.lines)[:70])
+
+# NYITOTT POZICIO: a mod csak az UJ belepokre vonatkozik (a motorban a
+# „csak jelzes" ellenorzes a BELEPO utjan ul) — aki `signal`-ra valt, konnyen
+# hiszi, hogy ezzel „kikapcsolta" a part.
+cfg, ctx = _ctx(poz=8.0)
+r = cc.set_trade_mode(ctx, "Ger40", ["wpr_sma"], _tm.MODE_SIGNAL)
+check("nyitott pozicionál kimondja, hogy a motor tovabb kezeli",
+      any("tovább kezeli" in x for x in r.lines), str(r.lines)[:80])
+
+# `save=False`: a hivo vallalja a perzisztalast (a beallitas-ablak a VEGEN ment).
+_mentesek = []
+cfg, ctx = _ctx()
+ctx.save_config = lambda: _mentesek.append(1) or True
+cc.set_trade_mode(ctx, "Ger40", ["wpr_sma"], _tm.MODE_SIGNAL, save=False)
+check("save=False: NEM ment (a hivo menti)", not _mentesek)
+check("...de az irast elvegzi", _tm.mode_of(cfg, "Ger40", "wpr_sma") == _tm.MODE_SIGNAL)
+cc.set_trade_mode(ctx, "Ger40", ["ml_ai"], _tm.MODE_SIGNAL)
+check("save=True (alap): ment", len(_mentesek) == 1)
+
+# ⚠ ERVENYTELEN MARADEK-ERTEK a configban. A `mode_of` MINDEN ismeretlen erteket
+# `live`-nak olvas (biztonsagos alapertelmezes), tehat egy elgepelt "Signal" nem
+# okoz hibat — csak ott all egy sor, ami valodi elterest sugall, mikozben a motor
+# figyelmen kivul hagyja. A `set_mode` takaritja (a `live` TORLI a kulcsot), csak
+# oda kell engedni akkor is, ha a mod "nem valtozik".
+_cfg3 = {"pairs": {"Ger40": {"strategies": ["wpr_sma"],
+                             "strategy_mode": {"wpr_sma": "Signal_elgepelve"}}}}
+_ctx3 = cc.Context(cfg=_cfg3, save_config=lambda: True, positions=list,
+                   close_position=lambda t: False, account=dict, dashboard={},
+                   instrument_state={}, strategies_of=lambda s: ["wpr_sma"])
+check("az ervenytelen ertek `live`-nak olvasodik (valtozatlan alapertelmezes)",
+      _tm.mode_of(_cfg3, "Ger40", "wpr_sma") == _tm.MODE_LIVE)
+_r3 = cc.set_trade_mode(_ctx3, "Ger40", ["wpr_sma"], _tm.MODE_LIVE)
+check("...es NEM ker megerositest (nincs valodi valtas)", not _r3.confirm)
+check("...a szemet kitakarodik a configbol",
+      _cfg3["pairs"]["Ger40"].get("strategy_mode") is None,
+      str(_cfg3["pairs"]["Ger40"].get("strategy_mode")))
+check("...es ezt ki is mondja",
+      any("kitakarítva" in x for x in _r3.lines), str(_r3.lines)[:70])
+check("masodszorra mar 'nincs valtozas'",
+      any("nincs változás" in x for x in
+          cc.set_trade_mode(_ctx3, "Ger40", ["wpr_sma"], _tm.MODE_LIVE).lines))
+
+# A felulet sem ir kozvetlenul a trade_mode-ba.
+check("a felulet NEM hivja a _tm.set_mode-ot kozvetlenul",
+      "_tm.set_mode(" not in _gui)
+check("...hanem a kozos reteget", "_cc.set_trade_mode(" in _gui)
+check("a beallitas-ablak rakerdez a VALODI KOTES bekapcsolasara",
+      "_cc.mode_changes(" in _gui and "console.mode.confirm_live" in _gui)
+
+# A parancs elerheto a konzolon/TUI-n...
+check("a `mode` parancs be van jegyezve", "mode" in cc.COMMANDS)
+check("...es szerepel a sugoban",
+      any(n.startswith("mode ") for n, _k in cc._HELP))
+# ...de a TELEGRAMON SZANDEKOSAN NEM. Az `ENGEDETT` engedelyezo lista: a `close`
+# es a `quit` sincs benne. Egy chatuzenetbol bekapcsolhato valodi kotes
+# ugyanabba a kategoriaba tartozik.
+from core import telegram_cmd as _tc
+check("a `mode` NINCS a Telegram engedelyezo listajan", "mode" not in _tc.ENGEDETT,
+      str(_tc.ENGEDETT))
+
+
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")
 sys.exit(0 if all(results) else 1)

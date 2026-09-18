@@ -509,7 +509,7 @@ karmesternek nincs mit néznie.
 
 ---
 
-## 15. Előfeltétel: EGY parancsréteg — MEGVAN (v3.73.0)
+## 15. Előfeltétel: EGY parancsréteg — MEGVAN (v3.73.0 · v3.74.0)
 
 A karmester akciói a `core/console_cmd.py`-on mennek. Ezért még a karmester előtt
 helyre kellett állítani, hogy **minden felület ugyanott írjon**: a felület
@@ -526,9 +526,26 @@ a környezetet köti be és megjelenít. A szétcsúszás három mérhető pontj
 | Hangolatlan (alapértelmezett paraméteres) indulás | csak a felület írta ki | mindenhol kiírja |
 | Kivezetés-figyelmeztetés nyitott pozíciónál | csak a parancs kérdezett rá | a felület is rákérdez |
 
+**A kötés-mód (`signal` ↔ `live`) is bekerült** (v3.74.0) — ez lesz a karmester
+legfontosabb akciója az életciklus-létrán, és egyben a rendszer legdrágább
+kapcsolója: a váltás után a motor a **következő jelnél valódi megbízást küld**.
+Itt nem két forrás volt a baj (egyetlen író volt, a beállítás-ablak legördülője),
+hanem hogy **semmilyen közös szabály nem állt mögötte**:
+
+| | Korábban | Most (`console_cmd.set_trade_mode`) |
+|---|---|---|
+| Egy instrumentum mentése `signal` → `live` | **néma** — a Mentés bekapcsolta a pénzt, kérdés nélkül | nevesített megerősítés, csak a TÉNYLEGES váltásokra |
+| Nem engedélyezett stratégia módja | némán hatástalan | eltárolja, de kimondja, hogy a motor addig nem futtatja |
+| Nyitott pozíció sorsa | sehol nem szerepelt | kimondja: a motor tovább kezeli, a mód csak az ÚJ belépőkre vonatkozik |
+
+Új parancs a konzolon és a TUI-n: `mode <pár> [stratégia] <live|signal>`.
+**A Telegram szándékosan NEM kapja meg** — a `telegram_cmd.ENGEDETT` engedélyező
+lista, amiben a `close` és a `quit` sincs benne; egy chatüzenetből bekapcsolható
+valódi kötés ugyanabba a kategóriába tartozik.
+
 Ugyanebben a körben egy azonos osztályú hiba is megszűnt: a *„a régi
-`risky_mode`-ot szinkronban tartjuk (preset==risky)"* sor **három** helyen élt
-egymás mellett, kettőnél néma `except: pass` mögött. Mostantól a
+`risky_mode`-ot szinkronban tartjuk (preset==risky)"* sor **négy** helyen élt
+egymás mellett, háromnál néma `except: pass` mögött. Mostantól a
 `rr_state.set_preset` / `cycle_preset` **mellékhatása** — vagyis a karmester (és
 bárki más) sem tudja majd véletlenül kihagyni.
 
