@@ -166,8 +166,35 @@ def _set(symbol: str, **kw):
         _save_locked()
 
 
+def _sync_risky(symbol: str, preset: str) -> None:
+    """A RÉGI `risky_mode` (az „R" gomb és egy KÜLSŐ program által is írt fájl)
+    szinkronban tartása a presettel.
+
+    ⚠ MIÉRT ITT, ÉS NEM A HÍVÓKNÁL. Ez az egy sor HÁROM helyen élt egymás
+    mellett — a sor „R" gombjánál, a Pozíciók-fül kiszállás-menüjében és az
+    instrumentum-ablak preset-választójában —, mindháromnál ugyanazzal a
+    kommenttel („mint a másik"), kettőnél néma `except: pass` mögött. Aki
+    NEGYEDIKKÉNT hívná a settert (a motor, egy eszköz, egy teszt vagy a tervezett
+    karmester), annál a szinkron CSENDBEN elmaradna: a `risky_mode.json` a régi
+    értéket őrizné, és az azt olvasó élő/backtest ág MÁS kockázattal futna, mint
+    amit a felület mutat. A setternek egy gazdája van, tehát a mellékhatás is ide
+    tartozik.
+
+    ⚠ A ZÁRON KÍVÜL hívjuk: a `risky_mode` saját zárat használ, és két zár
+    egymásba ágyazása a jövőben holtpontot adhatna."""
+    try:
+        risky_mode.set_risky(symbol, preset == PRESET_RISKY)
+    except Exception as ex:
+        # A szinkron elmaradása nem dönthet el egy preset-váltást — de nem is
+        # néma: a két állapot ilyenkor eltér, és ezt látni kell a naplóban.
+        log.warning("rr_state: a risky_mode szinkronja nem sikerült (%s): %s",
+                    symbol, ex)
+
+
 def set_preset(symbol: str, preset: str):
-    _set(symbol, preset=preset if preset in PRESETS else PRESET_OFF)
+    p = preset if preset in PRESETS else PRESET_OFF
+    _set(symbol, preset=p)
+    _sync_risky(symbol, p)
 
 
 def set_runner(symbol: str, runner: str):
@@ -251,7 +278,9 @@ def cycle_preset(symbol: str) -> str:
         d["preset"] = nxt
         _state[symbol] = _norm(d)
         _save_locked()
-        return nxt
+    # ⚠ A ZÁRON KÍVÜL — és MINDEN preset-váltásnál, nem csak a settereknél.
+    _sync_risky(symbol, nxt)
+    return nxt
 
 
 def effective_preset(symbol: str) -> str:

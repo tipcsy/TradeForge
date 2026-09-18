@@ -717,6 +717,7 @@ Ha lehet, ennyit írj meg a levélben:
 
 - [`strategies/docs/wpr_sma.md`](strategies/docs/wpr_sma.md) — a WPR + SMA trendkövető stratégia
 - [`strategies/docs/ml_ai.md`](strategies/docs/ml_ai.md) — a gépi tanulásos stratégia (jelenleg **nem** javasolt élesben)
+- [`docs/karmester.md`](docs/karmester.md) — a KARMESTER terve (döntési réteg a sok instrumentum × stratégia mátrix fölé)
 - [`tools/MT5_BACKTEST_README.md`](tools/MT5_BACKTEST_README.md) — backtest visszajátszása MT5-ben
 - [`build/README.md`](build/README.md) — EXE-build (PyInstaller)
 - [`.claude/skills/new-strategy/SKILL.md`](.claude/skills/new-strategy/SKILL.md) — új stratégia bevezetésének checklistje
@@ -1474,6 +1475,7 @@ If you can, put this much in the mail:
 
 - [`strategies/docs/wpr_sma.md`](strategies/docs/wpr_sma.md) — the WPR + SMA trend-following strategy (Hungarian)
 - [`strategies/docs/ml_ai.md`](strategies/docs/ml_ai.md) — the machine-learning strategy (currently **not** recommended live) (Hungarian)
+- [`docs/karmester.md`](docs/karmester.md) — design of the CONDUCTOR: a decision layer above the instrument × strategy matrix (Hungarian)
 - [`tools/MT5_BACKTEST_README.md`](tools/MT5_BACKTEST_README.md) — replaying a backtest in MT5 (Hungarian)
 - [`build/README.md`](build/README.md) — EXE build (PyInstaller) (Hungarian)
 - [`.claude/skills/new-strategy/SKILL.md`](.claude/skills/new-strategy/SKILL.md) — checklist for introducing a new strategy (Hungarian)

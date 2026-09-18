@@ -3755,16 +3755,12 @@ class InstrumentParamsDialog:
 
     def _on_rr_change(self, name: str):
         """A választott preset mentése a per-pár állapotba (data/risk_mode.json).
-        A régi risky_mode-ot szinkronban tartjuk (preset==risky), mint a sor R gombja.
+        A régi risky_mode szinkronja a `rr_state.set_preset` MELLÉKHATÁSA — nem
+        itt (korábban három helyen állt ugyanaz a sor).
         Frissíti a vezérlők láthatóságát + az Óvatos méret alapértékét."""
         preset = self._preset_from_name(name)
         self._rrs.set_preset(self.symbol, preset)
         self._refresh_section_summaries()
-        try:
-            from core import risky_mode, risk_reduction as _rr
-            risky_mode.set_risky(self.symbol, preset == _rr.PRESET_RISKY)
-        except Exception:
-            pass
         # Óvatos alapérték: ha nincs kézi override, a preset szerint (Risky→pipa).
         from core import risk_reduction as _rr
         if self._rrs.get_cautious(self.symbol) is None:

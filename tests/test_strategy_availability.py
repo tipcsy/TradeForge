@@ -198,26 +198,37 @@ check("_live2_rows atadja az enabled_of-ot a row_source-nak",
 
 # ⚠ A teljes fuggvenytorzs (a kovetkezo `def`-ig): a rogzitett karakter-ablak
 # a magyarazo kommentektol elcsuszott, es a teszt NEM a hosszra kivancsi.
-_NEXT_DEF = chr(10) + "    def "
-_start = src.split("def _start_strategy")[1].split(_NEXT_DEF)[0]
+# ⚠ A KAPU A KOZOS PARANCS-RETEGBEN VAN (`console_cmd.start_strategies`), nem a
+# feluleten: igy a konzol, a TUI es a Telegram is ugyanugy megtagadja. Amig a
+# felulet a sajat masolatat irta, a ket oldal el is csuszott.
+_NEXT_TOP = chr(10) + "def "
+_ccsrc = (ROOT / "core" / "console_cmd.py").read_text(encoding="utf-8")
+_start = _ccsrc.split("def start_strategies")[1].split(_NEXT_TOP)[0]
 
-check("_start_strategy: ellenorzi az engedelyezettseget",
-      "if not self._strategy_enabled(symbol, name):" in _start)
+check("start_strategies: ellenorzi az engedelyezettseget",
+      "if n not in engedett:" in _start)
 # ⚠ A kapu az ALLAPOT-IRAS elott legyen: kulonben a `run_state` `live`-ban
 # ragadna a configban egy olyan strategiara, amit a motor sosem futtat.
 # (A params-ellenorzes MEGSZUNT: mentett keszlet nelkul a strategia SAJAT
 # alapertekeivel indul — lasd `live_trader.default_params`.)
-check("_start_strategy: a kapu az allapot-iras ELOTT van (nem ragad be a run_state)",
-      _start.index("_strategy_enabled") < _start.index("_rs.set_state"))
-check("_start_strategy: NINCS tobbe params-fajl tiltas",
+check("start_strategies: a kapu az allapot-iras ELOTT van (nem ragad be a run_state)",
+      _start.index("not in engedett") < _start.index("_rs.set_state"))
+check("start_strategies: NINCS tobbe params-fajl tiltas",
       "nincs paraméterkészlet" not in _start, _start[:200])
+# ⚠ ES AZ OPTIMALIZALAS ALATTI INDITAST IS TILTJA — ez korabban CSAK a feluleten
+# volt meg, a konzol/TUI/Telegram engedte, pedig a futas vegen a strategia
+# parameterfajlja irodik felul.
+check("start_strategies: optimalizalas alatt nem indit",
+      "_oa.busy(symbol, n)" in _start and "console.play.opt_running" in _start)
 # ⚠ A felirat a nyelvi katalogusban van (i18n) — a forrasban a KULCS all.
 import json as _json
 _HU_CAT = _json.loads((ROOT / "lang" / "hu.json").read_text(encoding="utf-8"))
-check("_start_strategy: beszedes uzenetet ad (nem nema no-op)",
-      "gui.ctrl.not_enabled" in _start
+check("start_strategies: beszedes uzenetet ad (nem nema no-op)",
+      "console.play.not_enabled" in _start
       and "nincs engedélyezve ezen az"
-      in _HU_CAT.get("gui.ctrl.not_enabled", ""))
+      in _HU_CAT.get("console.play.not_enabled", ""))
+check("a felulet a kozos retegen indit (nem ir kozvetlenul)",
+      "_cc.start_strategies(" in src and "_rs.set_state" not in src)
 
 # ══ 8. row_source: az 'enabled' atkerul a sorba, es metszi a 'live'-ot ════
 

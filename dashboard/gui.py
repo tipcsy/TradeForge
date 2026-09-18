@@ -4976,92 +4976,108 @@ class DashboardWindow:
         else:
             self._start_strategy(symbol, name)
 
-    def _start_strategy(self, symbol: str, name: str):
-        """Egy stratégia indítása ezen a páron."""
-        from core import run_state as _rs
-        from trading import live_trader as _lt
-        # A stratégiának ENGEDÉLYEZVE kell lennie ezen a páron, különben a motor
-        # (`_active = _enabled & _intent`) sosem futtatná — a sor viszont futónak
-        # mutatta volna, a `run_state` pedig `live`-ban ragadt volna a configban.
-        # Néma no-op helyett megmondjuk, hol lehet bekapcsolni.
-        if not self._strategy_enabled(symbol, name):
-            self._set_status(_t("gui.ctrl.not_enabled", symbol=symbol, name=name))
-            return
-        # ⚠ MENTETT KÉSZLET NÉLKÜL IS INDULHAT — a stratégia SAJÁT alapértékeivel
-        # (`live_trader.default_params`). Korábban itt egy tiltás állt („előbb
-        # futtasd az OPT-ot"), ami egy ÚJ stratégiát minden páron használhatatlanná
-        # tett, amíg le nem futott rá egy több órás optimalizálás — akkor is, ha az
-        # alapértékek épp jók. A doksi kérése az ellenkezője: „az alapértelmezett
-        # paramétereket vegye alapul, és azzal helyből engedjen kereskedni".
-        #
-        # ⚠ De NEM NÉMÁN: kiírjuk, hogy hangolatlanul indul, és az Áttekintés lap
-        # figyelmeztetése is fennmarad, amíg le nem fut rá egy optimalizálás.
-        # Egy hangolt és egy hangolatlan pár ránézésre egyforma volna.
-        _untuned = _lt.params_source(symbol, name) == "default"
-        if _opt_activity.busy(symbol, name):
-            self._set_status(_t("gui.ctrl.opt_running", symbol=symbol, name=name))
-            return
-        if _untuned:
-            self._set_status(_t("gui.ctrl.default_params", symbol=symbol, name=name))
-        _rs.set_state(self.cfg, symbol, name, _rs.LIVE)
-        _saved = self._save_main_config()
-        # A pár szintjén is engedni kell, különben a motor hozzá sem nyúl.
-        # KIVEZETÉS alatt ez egyben a leállítás visszavonása.
-        if self.instrument_state.get(symbol) != "LIVE":
-            self.instrument_state[symbol] = "LIVE"
-            if self._on_play:
-                self._on_play(symbol)
-        # Sikertelen mentésnél NEM írjuk felül a hibaüzenetet: a stratégia MOST
-        # elindul (a futásidejű cfg-t a motor ugyanabból a dictből olvassa), de a
-        # SZÁNDÉK nem perzisztált — újraindítás után nem folytatódna.
-        if _saved:
-            self._set_status(_t("gui.ctrl.started", symbol=symbol, name=name))
-        else:
-            self._set_status(_t("gui.ctrl.started_unsaved", symbol=symbol, name=name))
+    # ── A KÖZÖS PARANCS-RÉTEG ────────────────────────────────────────────
+    # ⚠ A FELÜLET NEM ÍR KÖZVETLENÜL a `run_state`-be. A konzol, a TUI és a
+    # Telegram a `core.console_cmd`-on megy; a felület sokáig a SAJÁT másolatát
+    # írta meg ugyanerre. Két írási út = két forrás, ami külön romlik el — ez a
+    # projekt visszatérő hibaosztálya —, és el is csúsztak (optimalizálás alatti
+    # indítás, hangolatlan indulás jelzése, kivezetés-figyelmeztetés). A
+    # szabályok mostantól EGY helyen vannak, itt csak a környezet készül el.
+
+    def _cmd_ctx(self):
+        """A közös parancs-réteg környezete (`core.console_cmd.Context`).
+
+        ⚠ MINDEN külső hatás hívható függvényként megy be, és mind VÉDETT: a
+        felület demó módban (`main.py dashboard`) MT5 nélkül is fut, ott a
+        brókeri lekérdezések egyszerűen üresek."""
+        from core import console_cmd as _cc
+        from strategy import enabled_strategy_names as _ensn
+
+        def _positions():
+            try:
+                from core import mt5_connector as _mt5
+                return _mt5.open_positions_detailed() or []
+            except Exception:
+                return []
+
+        def _close(ticket):
+            try:
+                from core import mt5_connector as _mt5
+                return bool(_mt5.close_position(ticket))
+            except Exception:
+                return False
+
+        def _params_source(symbol, name):
+            try:
+                from trading import live_trader as _lt
+                return _lt.params_source(symbol, name)
+            except Exception:
+                return ""
+
+        return _cc.Context(
+            cfg=self.cfg,
+            save_config=self._save_main_config,
+            positions=_positions,
+            close_position=_close,
+            account=dict,
+            dashboard=self.dashboard_ref,
+            instrument_state=self.instrument_state,
+            strategies_of=lambda sym: _ensn(self.cfg, sym) or [],
+            params_source=_params_source,
+        )
+
+    def _run_play(self, symbol: str, names: list):
+        """Indítás a közös rétegen át + a felület frissítése."""
+        from core import console_cmd as _cc
+        _elotte = self.instrument_state.get(symbol)
+        res = _cc.start_strategies(self._cmd_ctx(), symbol, names)
+        self._set_status(" ".join(res.lines))
+        if (_elotte != "LIVE" and self.instrument_state.get(symbol) == "LIVE"
+                and self._on_play):
+            self._on_play(symbol)
         self._apply_filter_sort()
+        return res
+
+    def _run_stop(self, symbol: str, names: list):
+        """Leállítás a közös rétegen át, a MEGERŐSÍTÉS-mintával.
+
+        ⚠ A KIVEZETÉS FIGYELMEZTETÉSE EDDIG CSAK A KONZOLON VOLT MEG. Ha a
+        leállítás az UTOLSÓ élő stratégiát vinné el egy NYITOTT pozíciós páron, a
+        `console_cmd` nem hajtja végre azonnal: `Result.confirm`-ot ad vissza. A
+        konzol beír egy i/n-t, a Telegram gombot tesz alá — a felület eddig fel
+        sem tette a kérdést, némán kivezetésbe állította a párt."""
+        from core import console_cmd as _cc
+        ctx = self._cmd_ctx()
+        res = _cc.stop_strategies(ctx, symbol, names)
+        if res.confirm:
+            from tkinter import messagebox
+            if not messagebox.askyesno(_t("gui.ctrl.confirm_title"), res.confirm,
+                                       parent=self.root):
+                return res
+            res = _cc.stop_strategies(ctx, symbol, names, confirmed=True)
+        self._set_status(" ".join(res.lines))
+        if self.instrument_state.get(symbol) == "STOPPED" and self._on_stop:
+            self._on_stop(symbol)
+        self._apply_filter_sort()
+        return res
+
+    def _start_strategy(self, symbol: str, name: str):
+        """Egy stratégia indítása ezen a páron — a közös parancs-rétegen át.
+
+        A szabályok (engedélyezettség · optimalizálás alatti tiltás · hangolatlan
+        indulás jelzése · mentés-hiba) a `console_cmd.start_strategies`-ben
+        laknak: ugyanaz fut a konzolon, a TUI-n és a Telegramon."""
+        self._run_play(symbol, [name])
 
     def _stop_strategy(self, symbol: str, name: str):
-        """Egy stratégia leállítása ezen a páron.
+        """Egy stratégia leállítása ezen a páron — a közös parancs-rétegen át.
 
         Amíg MARAD élő stratégia, a pár LIVE marad, és a motor a leállítottat
-        magától elengedi (nyitott pozícióval kivezetésbe teszi — lásd
-        `live_trader.run`). Ha ez volt az UTOLSÓ, a szimbólumot is le kell zárni,
-        és ott ugyanaz a szabály él, mint a `classic` Stopnál: nyitott
-        pozícióval KIVEZETÉS (a motor tovább kezeli), különben STOPPED."""
-        from core import run_state as _rs
-        _rs.set_state(self.cfg, symbol, name, _rs.STOPPED)
-        _saved = self._save_main_config()
-        # ⚠ A KÉRDÉS: fut-e MÉG valami EZEN A PÁRON? A választ a MOTOR listájából
-        # kell venni (a pár `strategies` listája), nem a soron MEGJELENÍTETT
-        # listából (`available_strategy_names`) — a kettő eltérhet.
-        #
-        # ⚠ ÉLESBEN MEGTÖRTÉNT (2026-08-23): az `available_strategies` blokkban a
-        # bollinger `false` volt (nem jelenik meg oszlopként), a párokon viszont
-        # ENGEDÉLYEZVE volt és FUTOTT. A megjelenítési listát nézve a Stop arra
-        # jutott, hogy „nem maradt élő stratégia", a szimbólumot STOPPED-re tette,
-        # a motor pedig a bollingert is LEÁLLÍTOTTA — három páron, egyetlen
-        # kattintásból. A szándéka a configban közben végig `live` maradt.
-        from strategy import enabled_strategy_names as _ensn
-        _others = _ensn(self.cfg, symbol) or []
-        if any(self._strategy_live(symbol, n) for n in _others):
-            # Mint az indításnál: a hibaüzenetet nem nyomjuk el. A leállítás MOST
-            # érvényes, de újraindítás után a stratégia visszaindulna.
-            self._set_status(
-                _t("gui.ctrl.stopped_one", symbol=symbol, name=name)
-                if _saved else
-                _t("gui.ctrl.stopped_unsaved", symbol=symbol, name=name))
-            self._apply_filter_sort()
-            return
-        ds = self.dashboard_ref.get(symbol)
-        if ds is not None and ds.position_pnl is not None:
-            self.instrument_state[symbol] = "CLOSING"
-            self._set_status(_t("gui.ctrl.closing", symbol=symbol))
-        else:
-            self.instrument_state[symbol] = "STOPPED"
-            self._set_status(_t("gui.ctrl.stopped", symbol=symbol))
-            if self._on_stop:
-                self._on_stop(symbol)
-        self._apply_filter_sort()
+        magától elengedi (nyitott pozícióval kivezetésbe teszi). Ha ez volt az
+        UTOLSÓ, a szimbólum is lezárul — a döntést a `console_cmd.stop_strategies`
+        hozza, a MOTOR stratégia-listájából (`enabled_strategy_names`), nem a
+        megjelenítettből."""
+        self._run_stop(symbol, [name])
 
     def _set_status(self, text: str):
         """Állapotsor-üzenet — az alsó sáv még nem biztos, hogy létezik (a tábla
@@ -5075,57 +5091,40 @@ class DashboardWindow:
         megmaradt (a pozíciót végig kezelte), ezért csak a szándékot állítjuk vissza."""
         if self.instrument_state.get(symbol) != "CLOSING":
             return
-        self.instrument_state[symbol] = "LIVE"
-        self._persist_run_state(symbol, "live")
+        self._run_play(symbol, self._opt_strategies_for(symbol))
         self._refresh_row(symbol)
 
-    def _persist_run_state(self, symbol: str, state: str):
-        """A kereskedés-SZÁNDÉK perzisztálása a config.json-ba (restart-biztos):
-        a szimbólum engedélyezett stratégiáira beállítja a `run_state`-et (+ az
-        `enabled`-et szinkronban), majd ment. Így újraindításkor a `run()` a
-        korábban futó párokat magától LIVE-ba teszi."""
-        try:
-            from core import run_state as _rs
-            from strategy import enabled_strategy_names
-            strat_names = enabled_strategy_names(self.cfg, symbol) or [self.strategy.name]
-            for sn in strat_names:
-                _rs.set_state(self.cfg, symbol, sn, state)
-            self._save_main_config()
-        except Exception:
-            pass
-
     def _handle_play(self, symbol: str):
-        ds = self.dashboard_ref.get(symbol)
-        if ds is None or not ds.trained:
+        """A klasszikus elrendezés Play gombja — a pár ÖSSZES engedélyezett
+        stratégiáját indítja (ott egy sor = egy instrumentum).
+
+        ⚠ HANGOLATLANUL IS INDULHAT. Korábban itt egy `if not ds.trained: return`
+        állt: mentett paraméterkészlet nélkül a gomb NÉMÁN nem csinált semmit. A
+        2.0 elrendezés ugyanezt a helyzetet a dokumentált szabály szerint kezelte
+        (indulhat az alapértékekkel, de kiírjuk) — vagyis a két elrendezés
+        UGYANARRA a kattintásra mást tett. Most mindkettő a közös rétegen megy,
+        ami az indoklást is megadja."""
+        if self.dashboard_ref.get(symbol) is None:
             return
         if self.instrument_state.get(symbol) != "STOPPED":
             return
-        self.instrument_state[symbol] = "LIVE"
-        self._persist_run_state(symbol, "live")      # restart után folytassa a kereskedést
-        if self._on_play:
-            self._on_play(symbol)
+        self._run_play(symbol, self._opt_strategies_for(symbol))
 
     def _handle_stop(self, symbol: str):
-        """Leállítás. NYITOTT POZÍCIÓVAL is megengedett: ilyenkor KIVEZETÉS
-        (`CLOSING`) állapotba kerül — a motor tovább kezeli a meglévő pozíciót
-        (breakeven, trailing, kiszállási jel), de ÚJ belépőt nem nyit. Amint a
-        pozíció lezárult, magától valódi STOPPED lesz.
+        """Leállítás — a pár ÖSSZES engedélyezett stratégiája.
 
-        A mentett szándék MINDKÉT esetben „stopped": újraindítás után sem kezd
-        magától kereskedni (nyitott pozíciónál a motor kivezetésbe áll vissza)."""
-        ds = self.dashboard_ref.get(symbol)
-        if ds is None:
+        NYITOTT POZÍCIÓVAL is megengedett: ilyenkor KIVEZETÉS (`CLOSING`) — a
+        motor tovább kezeli a meglévő pozíciót (breakeven, trailing, kiszállási
+        jel), de ÚJ belépőt nem nyit. A mentett szándék MINDKÉT esetben
+        „stopped": újraindítás után sem kezd magától kereskedni.
+
+        A kivezetésre a közös réteg RÁKÉRDEZ (lásd `_run_stop`)."""
+        if self.dashboard_ref.get(symbol) is None:
             return
         if self.instrument_state.get(symbol) != "LIVE":
             return
-        self._persist_run_state(symbol, "stopped")   # restart után NE induljon magától
-        if ds.position_pnl is not None:
-            self.instrument_state[symbol] = "CLOSING"
-            self._refresh_row(symbol)
-            return
-        self.instrument_state[symbol] = "STOPPED"
-        if self._on_stop:
-            self._on_stop(symbol)
+        self._run_stop(symbol, self._opt_strategies_for(symbol))
+        self._refresh_row(symbol)
 
     def _opt_strategies_for(self, symbol: str) -> list:
         """Az instrumentumon OPTIMALIZÁLHATÓ stratégiák (az engedélyezettek; ha nincs
@@ -5236,11 +5235,11 @@ class DashboardWindow:
         """Az „R" gomb: a kockázatcsökkentő PRESET körbe-váltása
         (Ki → Risky → Felező → Pajzs → Fibo → Harmados), per-pár mentve
         (data/risk_mode.json).
-        A régi risky_mode-ot szinkronban tartjuk (preset==risky), hogy az azt
-        olvasó live/backtest változatlanul működjön."""
-        from core import rr_state, risky_mode, risk_reduction as _rr
+        A régi risky_mode-ot a `rr_state` tartja szinkronban (preset==risky) —
+        ez a setter MELLÉKHATÁSA, nem a hívóé: így minden preset-váltás után
+        egyezik, bárhonnan jött."""
+        from core import rr_state, risk_reduction as _rr
         preset = rr_state.cycle_preset(symbol)
-        risky_mode.set_risky(symbol, preset == _rr.PRESET_RISKY)
         ds = self.dashboard_ref.get(symbol)
         if ds is not None:
             ds.rr_preset = preset
@@ -5735,14 +5734,10 @@ class DashboardWindow:
             menu.grab_release()
 
     def _set_exit_preset(self, symbol, preset):
+        # A régi risky_mode szinkronja a `rr_state.set_preset` dolga — korábban
+        # itt (és még két helyen) állt egy másolat, néma `except: pass` mögött.
         from core import rr_state as _rrs
-        from core import risky_mode, risk_reduction as _rrx
         _rrs.set_preset(symbol, preset)
-        # A régi risky_mode-ot szinkronban tartjuk (mint a Stratégia-ablak / R gomb).
-        try:
-            risky_mode.set_risky(symbol, preset == _rrx.PRESET_RISKY)
-        except Exception:
-            pass
         self._pos_tab.refresh()
 
     def _set_exit_runner(self, symbol, runner):

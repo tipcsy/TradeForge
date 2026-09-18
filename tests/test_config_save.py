@@ -131,18 +131,28 @@ check("_save_main_config: bool-t ad vissza (a hivo tud rola)",
 # A ket SZANDEK-hordozo hivo ne nyomja el a hibauzenetet a sajat
 # „elindítva"/„leállítva" szovegevel — kulonben a figyelmeztetes felvillanna es
 # eltunne, ami rosszabb, mint ha ott sem lenne.
-_start = gsrc.split("def _start_strategy")[1].split("\n    def ")[0]
-check("_start_strategy: figyeli a mentes eredmenyet",
-      "_saved = self._save_main_config()" in _start)
-check("_start_strategy: sikertelen mentesnel MAS uzenetet ad",
-      "if _saved:" in _start and "gui.ctrl.started_unsaved" in _start
-      and _says("gui.ctrl.started_unsaved", "nem folytatódik"))
-_stop = gsrc.split("def _stop_strategy")[1].split("\n    def ")[0]
-check("_stop_strategy: figyeli a mentes eredmenyet",
-      "_saved = self._save_main_config()" in _stop)
-check("_stop_strategy: sikertelen mentesnel MAS uzenetet ad",
-      "if _saved else" in _stop and "gui.ctrl.stopped_unsaved" in _stop
-      and _says("gui.ctrl.stopped_unsaved", "visszaindulna"))
+# ⚠ A SZABALY ATKOLTOZOTT A KOZOS PARANCS-RETEGBE. A mentes eredmenyet
+# mostantol a `console_cmd.start_strategies` / `stop_strategies` figyeli —
+# ugyanaz az ag fut a feluleten, a konzolon, a TUI-n es a Telegramon. A felulet
+# dolga csak annyi, hogy a SAJAT (allapotsorba iro) mentojet adja at.
+_ccsrc = (ROOT / "core" / "console_cmd.py").read_text(encoding="utf-8")
+_NEXT_TOP = chr(10) + "def "
+_start = _ccsrc.split("def start_strategies")[1].split(_NEXT_TOP)[0]
+check("start_strategies: figyeli a mentes eredmenyet",
+      "mentve = ctx.save_config()" in _start and "ok=mentve" in _start)
+check("start_strategies: sikertelen mentesnel KIMONDJA",
+      "console.not_saved" in _start
+      and _says("console.not_saved", "újraindítás után nem"))
+_stop = _ccsrc.split("def stop_strategies")[1].split(_NEXT_TOP)[0]
+check("stop_strategies: figyeli a mentes eredmenyet",
+      "mentve = ctx.save_config()" in _stop and "ok=mentve" in _stop)
+check("stop_strategies: sikertelen mentesnel KIMONDJA",
+      "console.not_saved" in _stop)
+check("a felulet a SAJAT mentojet adja at (hibanal az allapotsorba ir)",
+      "save_config=self._save_main_config" in gsrc)
+# ⚠ ES NEM IR MELLETTE: ket irasi ut ket forras, ami kulon romlik el.
+check("a felulet NEM ir kozvetlenul a run_state-be",
+      "_rs.set_state" not in gsrc and "_rst.set_state" not in gsrc)
 
 # A ⚙ szerkeszto is atomikusan ir (es a nyers irot hasznalja: a `new` mar vaz)
 # v2.9.0: a ⚙ ablak HAROM bal oldali fulre bomlott (Json / Kapuk / Strategiak);

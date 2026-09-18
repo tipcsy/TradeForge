@@ -38,6 +38,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
+from core import opt_activity as _oa
 from core import run_state as _rs
 from core.i18n import t as _t
 
@@ -84,6 +85,11 @@ class Context:
     # tudnak eltérő képet adni ugyanarról a napról.
     today_rows: Callable[[], list] = list
     cycle_sec: float = 10.0
+    # A mentett paraméterkészlet megléte: `"tuned"` | `"default"` | `""` (nem tudjuk).
+    # ⚠ FÜGGVÉNYKÉNT, mert a `live_trader.params_source` MT5-öt importáló modulban
+    # lakik — a parancs-réteg viszont MT5-mentes marad. Aki nem köti be, annál a
+    # hangolatlan indulás jelzése egyszerűen elmarad (nem hazudik, csak hallgat).
+    params_source: Callable[[str, str], str] = lambda s, n: ""
 
 
 # ---------------------------------------------------------------------------
@@ -283,37 +289,132 @@ def cmd_close(ctx: Context, args: list, confirmed: bool = False) -> Result:
     return Result(sorok, ok=(hiba == 0))
 
 
+# ---------------------------------------------------------------------------
+# INDÍTÁS / LEÁLLÍTÁS — a szabályok EGY helyen, felülettől függetlenül
+# ---------------------------------------------------------------------------
+# ⚠ MIÉRT VAN A PARANCS MÖGÖTT KÜLÖN FÜGGVÉNY. A `cmd_play`/`cmd_stop` SZÖVEGET
+# bont (`play EURUSD wpr_sma`); a grafikus felület viszont már tudja, melyik
+# cellára kattintottak — neki nincs mit parszolnia. Amíg csak parancs volt, a
+# GUI a saját másolatát írta meg, és a két oldal EL IS CSÚSZOTT:
+#
+#   • az OPTIMALIZÁLÁS alatti indítást a felület tiltotta, a konzol/TUI/Telegram
+#     engedte — pedig a futás végén a stratégia paraméterfájlja íródik felül;
+#   • a hangolatlan (alapértelmezett paraméteres) indulást a felület kiírta, a
+#     parancs-réteg nem — ugyanaz a néma állapot, amit a projekt máshol
+#     következetesen kigyomlál;
+#   • a KIVEZETÉS-figyelmeztetésre a parancs rákérdezett, a felület nem.
+#
+# A szabály ezért itt lakik, a parancs pedig már csak argumentumot bont.
+
+
+def start_strategies(ctx: Context, symbol: str, names: list) -> Result:
+    """A megadott stratégiák indítása ezen a páron (a szándék `live`).
+
+    Két dolgot utasít el — MINDKETTŐT INDOKKAL, mert a néma `return` a hívónak
+    sikernek látszik:
+
+      • ami NINCS engedélyezve a páron: a motor a `_enabled & _intent` szorzatot
+        futtatja, tehát a szándék `live`-ban ragadna, miközben sosem futna;
+      • amin ÉPP OPTIMALIZÁLÁS fut: a futás végén a paraméterfájlja íródna felül
+        az alól a stratégia alól, amelyik közben kereskedik.
+
+    ⚠ MENTETT KÉSZLET NÉLKÜL IS INDULHAT — a stratégia SAJÁT alapértékeivel
+    (`live_trader.default_params`). Egy tiltás egy ÚJ stratégiát minden páron
+    használhatatlanná tenne, amíg le nem fut rá egy több órás optimalizálás.
+    De nem is némán: kiírjuk, hogy hangolatlanul indul."""
+    engedett = ctx.strategies_of(symbol) or []
+    kert = [n for n in (names or []) if n]
+    if not kert:
+        return Result([_t("console.play.no_strategy", symbol=symbol)], ok=False)
+
+    sorok, indult = [], []
+    for n in kert:
+        if n not in engedett:
+            sorok.append(_t("console.play.not_enabled", symbol=symbol, name=n))
+            continue
+        if _oa.busy(symbol, n):
+            sorok.append(_t("console.play.opt_running", symbol=symbol, name=n))
+            continue
+        # ⚠ A KAPUK AZ ÁLLAPOT-ÍRÁS ELŐTT vannak — különben a `run_state` egy
+        # olyan stratégiára ragadna `live`-ban, amit a motor nem futtat.
+        _rs.set_state(ctx.cfg, symbol, n, _rs.LIVE)
+        indult.append(n)
+        try:
+            if ctx.params_source(symbol, n) == "default":
+                sorok.append(_t("console.play.default_params", symbol=symbol, name=n))
+        except Exception:
+            # A jelzés hiánya nem ok arra, hogy az indítás elbukjon.
+            pass
+    if not indult:
+        return Result(sorok, ok=False)
+
+    mentve = ctx.save_config()
+    if ctx.instrument_state.get(symbol) != "LIVE":
+        ctx.instrument_state[symbol] = "LIVE"
+    sorok.append(_t("console.play.started", symbol=symbol, names=", ".join(indult)))
+    if not mentve:
+        # ⚠ A stratégia MOST elindul (a motor ugyanabból a dictből olvas), de a
+        # SZÁNDÉK nem perzisztált — újraindítás után nem folytatódna.
+        sorok.append(_t("console.not_saved"))
+    return Result(sorok, ok=mentve)
+
+
+def stop_strategies(ctx: Context, symbol: str, names: list,
+                    confirmed: bool = False) -> Result:
+    """A megadott stratégiák leállítása ezen a páron (a szándék `stopped`).
+
+    ⚠ A „MARADT-E MÉG ÉLŐ STRATÉGIA?" KÉRDÉST A MOTOR LISTÁJÁBÓL kell
+    megválaszolni (`ctx.strategies_of` → `pairs.<sym>.strategies`), nem a
+    megjelenített listából. 2026-08-23-án az `available_strategies` blokkban a
+    bollinger `false` volt (nem kapott oszlopot), a párokon viszont ENGEDÉLYEZVE
+    volt és FUTOTT: a megjelenítési listát nézve a Stop arra jutott, hogy nem
+    maradt élő stratégia, a szimbólumot STOPPED-re tette, és a motor a bollingert
+    is leállította — három páron, egyetlen kattintásból.
+
+    ⚠ KIVEZETÉS: ha ez volt az utolsó élő stratégia ÉS van nyitott pozíció, a pár
+    nem STOPPED lesz, hanem CLOSING — a motor tovább kezeli a pozíciót (BE,
+    trailing, kiszállás), de új belépőt nem nyit. Ezt a hívónak MEG KELL
+    KÉRDEZNIE: `Result.confirm` jön vissza, és a parancsot `confirmed=True`-val
+    kell megismételni."""
+    kert = [n for n in (names or []) if n]
+    if not kert:
+        # ⚠ Ne jelentsünk sikeres leállítást, ha nem volt mit leállítani —
+        # a „leállítva — -" sor azt sugallná, hogy történt valami.
+        return Result([_t("console.play.no_strategy", symbol=symbol)], ok=False)
+
+    marad = [n for n in _live_strats(ctx, symbol) if n not in kert]
+    nyitott = _has_position(ctx, symbol)
+    if not marad and nyitott and not confirmed:
+        return Result(confirm=_t("console.stop.confirm_closing", symbol=symbol))
+
+    for n in kert:
+        _rs.set_state(ctx.cfg, symbol, n, _rs.STOPPED)
+    mentve = ctx.save_config()
+    sorok = [_t("console.stop.stopped", symbol=symbol, names=", ".join(kert) or "-")]
+    if marad:
+        sorok.append(_t("console.stop.still_live", names=", ".join(marad)))
+    elif nyitott:
+        ctx.instrument_state[symbol] = "CLOSING"
+        sorok.append(_t("console.stop.closing", symbol=symbol))
+    else:
+        ctx.instrument_state[symbol] = "STOPPED"
+        sorok.append(_t("console.stop.pair_stopped", symbol=symbol))
+    if not mentve:
+        # ⚠ A leállítás MOST érvényes, de a szándék nem perzisztált —
+        # újraindítás után a stratégia visszaindulna.
+        sorok.append(_t("console.not_saved"))
+    return Result(sorok, ok=mentve)
+
+
 def cmd_play(ctx: Context, args: list, confirmed: bool = False) -> Result:
     if not args:
         return Result([_t("console.play.usage")], ok=False)
     sym = _resolve_symbol(ctx, args[0])
     if sym is None:
         return Result([_t("console.unknown_pair", symbol=args[0])], ok=False)
-    engedett = ctx.strategies_of(sym) or []
-    kert = [args[1]] if len(args) > 1 else list(engedett)
-    if not kert:
-        return Result([_t("console.play.no_strategy", symbol=sym)], ok=False)
-
-    sorok, indult = [], []
-    for n in kert:
-        # ⚠ A NEM ENGEDÉLYEZETT stratégia NEM indítható — különben a szándék
-        # `live`-ban ragadna, miközben a motor sosem futtatná.
-        if n not in engedett:
-            sorok.append(_t("console.play.not_enabled", symbol=sym, name=n))
-            continue
-        _rs.set_state(ctx.cfg, sym, n, _rs.LIVE)
-        indult.append(n)
-    if not indult:
-        return Result(sorok, ok=False)
-    mentve = ctx.save_config()
-    if ctx.instrument_state.get(sym) != "LIVE":
-        ctx.instrument_state[sym] = "LIVE"
-    sorok.append(_t("console.play.started", symbol=sym, names=", ".join(indult)))
-    if not mentve:
-        # ⚠ A stratégia MOST elindul (a motor ugyanabból a dictből olvas), de a
-        # SZÁNDÉK nem perzisztált — újraindítás után nem folytatódna.
-        sorok.append(_t("console.not_saved"))
-    return Result(sorok, ok=mentve)
+    # Stratégia nélkül: a pár ÖSSZES engedélyezett stratégiája.
+    names = [args[1]] if len(args) > 1 else list(ctx.strategies_of(sym) or [])
+    return start_strategies(ctx, sym, names)
 
 
 def cmd_stop(ctx: Context, args: list, confirmed: bool = False) -> Result:
@@ -322,38 +423,8 @@ def cmd_stop(ctx: Context, args: list, confirmed: bool = False) -> Result:
     sym = _resolve_symbol(ctx, args[0])
     if sym is None:
         return Result([_t("console.unknown_pair", symbol=args[0])], ok=False)
-    engedett = ctx.strategies_of(sym) or []
-    kert = [args[1]] if len(args) > 1 else list(engedett)
-    if not kert:
-        # ⚠ Ne jelentsünk sikeres leállítást, ha nem volt mit leállítani —
-        # a „leállítva — -" sor azt sugallná, hogy történt valami.
-        return Result([_t("console.play.no_strategy", symbol=sym)], ok=False)
-
-    # Mi maradna élőben, ha ezeket leállítjuk?
-    marad = [n for n in _live_strats(ctx, sym) if n not in kert]
-    nyitott = _has_position(ctx, sym)
-    # ⚠ KIVEZETÉS: ha ez volt az utolsó élő stratégia ÉS van nyitott pozíció, a
-    # pár nem STOPPED lesz, hanem CLOSING — a motor tovább kezeli a pozíciót
-    # (BE, trailing, kiszállás), de új belépőt nem nyit. A felhasználónak ezt
-    # tudnia kell, mielőtt igent mond.
-    if not marad and nyitott and not confirmed:
-        return Result(confirm=_t("console.stop.confirm_closing", symbol=sym))
-
-    for n in kert:
-        _rs.set_state(ctx.cfg, sym, n, _rs.STOPPED)
-    mentve = ctx.save_config()
-    sorok = [_t("console.stop.stopped", symbol=sym, names=", ".join(kert) or "-")]
-    if marad:
-        sorok.append(_t("console.stop.still_live", names=", ".join(marad)))
-    elif nyitott:
-        ctx.instrument_state[sym] = "CLOSING"
-        sorok.append(_t("console.stop.closing", symbol=sym))
-    else:
-        ctx.instrument_state[sym] = "STOPPED"
-        sorok.append(_t("console.stop.pair_stopped", symbol=sym))
-    if not mentve:
-        sorok.append(_t("console.not_saved"))
-    return Result(sorok, ok=mentve)
+    names = [args[1]] if len(args) > 1 else list(ctx.strategies_of(sym) or [])
+    return stop_strategies(ctx, sym, names, confirmed=confirmed)
 
 
 def cmd_balance(ctx: Context, args: list, confirmed: bool = False) -> Result:
