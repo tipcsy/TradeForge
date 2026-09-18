@@ -56,6 +56,21 @@ def state_file() -> Path:
     return DIR / "state.json"
 
 
+def trades_csv() -> Path:
+    """A MOTOR kereskedési naplója (`trades.csv`) — a karmester OLVASSA, nem írja.
+
+    ⚠ MIÉRT NEM A `live_trader.TRADES_CSV`-t importáljuk. Az a modul MT5-öt húz
+    be; a karmester mérő rétege viszont MT5-mentes marad, hogy a felület, a
+    tesztek és egy későbbi elemző eszköz is használhassa. Az útvonal egy sor —
+    az MT5-függés az egész csomagot megfertőzné.
+
+    ⚠ ÉS MIÉRT EBBŐL DOLGOZUNK. Ez a napló a KÖZÖS forrás: innen mennek a
+    Telegram-értesítések és ebből számol a napi összesítő is. Egy külön
+    karmester-nyilvántartás a lezárt kötésekről előbb-utóbb MÁS számot adna
+    ugyanarra a napra — ez a projekt visszatérő hibaosztálya."""
+    return Path(_BASE) / "trades.csv"
+
+
 def off_switch() -> Path:
     """A KILL SWITCH fájlja. Ha létezik, a karmester L-1 (kikapcsolt) — és ezt
     a szál minden ciklus ELEJÉN, a mérés előtt megnézi."""

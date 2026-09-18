@@ -173,6 +173,14 @@ igazságforrása, amiből később a dashboard is élhet:
    elszáradt pár anomáliája **nem detektálható**.
 4. **Döntésnapló és javaslat-tár** (új).
 
+⚠ **A KRÓNIKA AZ F1-BE CSÚSZOTT, SZÁNDÉKOSAN.** Az F0-ban nem lett volna EGYETLEN
+írója sem: a mérő réteg nem hoz döntést, amit naplózni kellene. Egy író nélküli
+napló-modul halott kód — és pont az a fajta, ami hónapokig „kész funkciónak"
+látszik, miközben soha nem futott le (lásd a `.tfg`-kapu esetét a
+`live_trader`-ben). Az első valódi írója az F1 **árnyék-módja** lesz, ahol a
+karmester leírja, mit TENNE — ott a krónika formátuma is a tényleges használatból
+következik majd, nem egy előre kitalált sémából.
+
 ---
 
 ## 5. Amit tehet: a keskeny írási kapu (`conductor/actions.py`)
@@ -496,8 +504,8 @@ conductor/
 
 | Fázis | Tartalom | Kockázat |
 |---|---|---|
-| **F0** | kapu-telemetria ✅ (v3.75.0) · élő KPI-tár · várt aktivitás · pillanatkép · krónika | nulla (csak mérés) |
-| **F1** | egészségőr · „miért nem kötött" magyarázó · napi riport · **árnyék-mód** | nulla |
+| **F0** ✅ | belépő-telemetria · élő KPI-tár · várt aktivitás · pillanatkép · **„miért nem kötött" jelentés** (v3.75.0–v3.76.0) | nulla (csak mérés) |
+| **F1** | egészségőr · napi riport · krónika · **árnyék-mód** | nulla |
 | **F2** | javaslatmotor · Karmester fül · optimalizálás-ütemező (L1) | alacsony |
 | **F3** | életciklus-létra · kockázati karmester (L2→L3) | közepes |
 | **F4** | LLM tanácsadó réteg · természetes nyelvű lekérdezés | alacsony (csak javasol) |
@@ -509,7 +517,44 @@ karmesternek nincs mit néznie.
 
 ---
 
-## 15. Előfeltétel: EGY parancsréteg — MEGVAN (v3.73.0 · v3.74.0)
+## 15. Az F0 MEGVAN (v3.75.0 · v3.76.0)
+
+A mérő réteg áll, és a rendszer először tud válaszolni a napi kérdésre:
+
+```
+tf> why EURUSD
+EURUSD/wpr_sma — miért nem kötött ma?
+  12 jel → 3 kötés (25%).
+    • 6× (50%) — belépő-kapu blokkolt
+    • 3× (25%) — nincs szabad kockázati slot
+    kapuk: spread (5), tf_align (1)
+  Aktivitás: 0.33 kötés/nap, a mentett mérés 2.00-t ígért (17%).
+  Élő 90 nap: 30 kötés · PF 1.24 · +182.40
+  ⚠ Csak 30 élő kötés — ennyiből a PF még zaj is lehet.
+```
+
+| Modul | Mit ad |
+|---|---|
+| `conductor/telemetry.py` | minden JEL kimenetele napi bontásban, ismétlődés-védelemmel |
+| `conductor/metrics.py` | gördülő élő PF / expectancy / kötésszám a `trades.csv`-ből |
+| `conductor/expectation.py` | mit ígért a mentett OOS mérés — és az élő ↔ várt eltérés |
+| `conductor/snapshot.py` | a cella teljes állapota egy képben (a Kotta) |
+| `conductor/report.py` | ebből emberi mondat |
+
+A `why <pár> [stratégia]` a **közös parancsrétegben** van, tehát a konzol, a TUI
+és a Telegram ugyanazt a választ adja. (A Telegramon elérhető: csak olvas.)
+
+Két szabály, ami a számokba van kódolva:
+
+* **A kis minta figyelmeztetése kötelező.** Minden cella viszi a kötésszámot és
+  a belőle számolt bizonyíték-szorzót; a jelentés kimondja, ha a PF még zaj is
+  lehet (a `core/quality.py` mért adata alapján).
+* **Az élő ↔ várt eltérést SOSEM pénzben mérjük.** A backtest méretezése az
+  akkori egyenleghez igazodott — csak arányok és ráták hasonlíthatók össze.
+
+---
+
+## 16. Előfeltétel: EGY parancsréteg — MEGVAN (v3.73.0 · v3.74.0)
 
 A karmester akciói a `core/console_cmd.py`-on mennek. Ezért még a karmester előtt
 helyre kellett állítani, hogy **minden felület ugyanott írjon**: a felület

@@ -41,7 +41,11 @@ log = logging.getLogger(__name__)
 # egy új parancs a `console_cmd`-ben ne váljon automatikusan TÁVOLRÓL is
 # elérhetővé. A `quit` (a motor leállítása) és a `close` (pozíció zárása)
 # szándékosan NINCS itt — azok a következő kör (kötést nyitó/záró) döntései.
-ENGEDETT = ("help", "balance", "pos", "today", "state", "heart", "play", "stop")
+# ⚠ A `why` OLVASÓ parancs (a karmester belépő-telemetriája): nem állít
+# semmit, nem mozgat pénzt — a `pos`/`today` kategóriája. A `mode` EZÉRT
+# NINCS itt: az valódi kötést kapcsolna be egy chatüzenetből.
+ENGEDETT = ("help", "balance", "pos", "today", "why", "state", "heart",
+            "play", "stop")
 
 # Meddig él egy megerősítő gomb.
 AJANLAT_MP = 600
@@ -55,7 +59,7 @@ POLL_MP = 25
 # A parancs-menü sorrendje. ⚠ NEM ábécé: a leggyakrabban használt kerül előre,
 # és a két ÁLLÍTÓ parancs (`play`/`stop`) a végére — hogy ne azokra essen a
 # mutatóujj, amikor csak megnézni akarsz valamit.
-MENU_SORREND = ("state", "pos", "today", "balance", "heart", "help",
+MENU_SORREND = ("state", "pos", "today", "why", "balance", "heart", "help",
                 "play", "stop")
 
 
@@ -79,7 +83,7 @@ def parancs_lista(nyelv: str = "") -> list:
     for nev in sorrend:
         leiras = _szoveg(f"console.help.{nev}")
         # A paraméteres parancsoknál a menüben is látszódjon, mit vár.
-        if nev in ("play", "stop"):
+        if nev in ("play", "stop", "why"):
             leiras = _szoveg("tg.menu.arg_pair", leiras=leiras)
         ki.append((nev, leiras))
     return ki

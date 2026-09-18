@@ -573,6 +573,35 @@ def cmd_mode(ctx: Context, args: list, confirmed: bool = False) -> Result:
     return set_trade_mode(ctx, sym, names, mode, confirmed=confirmed)
 
 
+def cmd_why(ctx: Context, args: list, confirmed: bool = False) -> Result:
+    """`why <pár> [stratégia]` — miért nem kötött ma?
+
+    ⚠ EZ A KÉRDÉS EDDIG MEGVÁLASZOLHATATLAN VOLT. Egy nem kötő cella pontosan
+    úgy néz ki, mint amelyik épp nem talál belépőt. A választ a karmester
+    belépő-telemetriája adja (`conductor/telemetry.py`) — a motor a mérést
+    menet közben végzi, itt csak olvassuk.
+
+    ⚠ A PARANCS-RÉTEGBEN VAN, tehát a konzol, a TUI és a Telegram UGYANAZT a
+    választ kapja, mint a felület. Egy jelentés, ami felületenként mást mond,
+    rosszabb a hiányzónál."""
+    if not args:
+        return Result([_t("console.why.usage")], ok=False)
+    sym = _resolve_symbol(ctx, args[0])
+    if sym is None:
+        return Result([_t("console.unknown_pair", symbol=args[0])], ok=False)
+    names = [args[1]] if len(args) > 1 else list(ctx.strategies_of(sym) or [])
+    if not names:
+        return Result([_t("console.play.no_strategy", symbol=sym)], ok=False)
+
+    from conductor import report as _crep, snapshot as _csnap
+    sorok = []
+    for n in names:
+        snap = _csnap.cell(ctx.cfg, sym, n,
+                           strategies_of=lambda s: ctx.strategies_of(s) or [])
+        sorok += _crep.why_lines(snap)
+    return Result(sorok)
+
+
 def cmd_balance(ctx: Context, args: list, confirmed: bool = False) -> Result:
     a = ctx.account() or {}
     if not a:
@@ -686,6 +715,7 @@ COMMANDS: dict = {
     "play":    cmd_play,
     "stop":    cmd_stop,
     "mode":    cmd_mode,
+    "why":     cmd_why,
     "balance": cmd_balance,
     "today":   cmd_today,
     "state":   cmd_state,
@@ -704,6 +734,7 @@ _HELP = (
     ("play <pár> [stratégia]", "console.help.play"),
     ("stop <pár> [stratégia]", "console.help.stop"),
     ("mode <pár> [strat] live|signal", "console.help.mode"),
+    ("why <pár> [stratégia]", "console.help.why"),
     ("balance", "console.help.balance"),
     ("today", "console.help.today"),
     ("state", "console.help.state"),
