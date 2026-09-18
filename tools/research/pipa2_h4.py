@@ -23,8 +23,10 @@ ELFOGADAS (iranyonkent es osszevonva, idosikonkent):
 
 Tajekoztato: celar 2 R BE/csuszo nelkul; stop 1,0 ATR; tartas fele / ketszerese.
 
-Futtatas: python tools/research/pipa2_h4.py            (~30-60 perc, az alapszint miatt)
+Futtatas: python tools/research/pipa2_h4.py            (~25 perc, az alapszint miatt)
           python tools/research/pipa2_h4.py --gyors    (alapszint nelkul)
+          python tools/research/pipa2_h4.py --minta dupla   (masik minta ugyanezen a merohelyen;
+                                                            az alapszint gyorsitotarbol: data/alap_h1h4.parquet)
 """
 from __future__ import annotations
 
@@ -45,6 +47,8 @@ from search import _t
 SYMS = ["Ger40", "UsaInd", "UsaTec", "GOLD", "USDJPY"]
 TFS = {60: dict(hold=5 * 1440, alap_lepes=4), 240: dict(hold=15 * 1440, alap_lepes=1)}
 STOP_ATR, BE_R, TRAIL_R = 1.5, 0.67, 2.0
+MINTA = "pipa2"
+ALAP_CACHE = ROOT / "data" / "alap_h1h4.parquet"
 T_MIN, YEAR_FRAC, INSTR_MIN, MIN_N, MIN_YEAR_N = 2.0, 0.60, 3, 300, 20
 
 
@@ -68,6 +72,24 @@ def _sim(m1, sym, idx, dirs, sl_pts, hold, one, tp_rr=0.0, be=BE_R, trail=TRAIL_
                         pair_cfg=lab.PAIRS[sym])
 
 
+def _alapszint(m1, d, sym, tf, irany, jel, idx_all, ok, atr, ps, hold):
+    """Az alapszint (minden gyertya, fuggetlen) — gyorsitotarazva, mert ~20 perc."""
+    key = (sym, tf, irany)
+    if ALAP_CACHE.exists():
+        cache = pd.read_parquet(ALAP_CACHE)
+        hit = cache[(cache.sym == sym) & (cache.tf == tf) & (cache.irany == irany)]
+        if len(hit):
+            return (float(hit.R.mean()), int(len(hit)), hit.groupby("ev").R.mean())
+    lep = TFS[tf]["alap_lepes"]
+    ja = np.flatnonzero(ok)[::lep]
+    ta = _sim(m1, sym, idx_all[ja], np.full(len(ja), jel), STOP_ATR * atr[ja] / ps, hold, one=False)
+    rows = pd.DataFrame({"sym": sym, "tf": tf, "irany": irany, "ev": d.index[ja].year[:len(ta)],
+                         "R": ta["r"]})
+    cache = pd.concat([pd.read_parquet(ALAP_CACHE), rows]) if ALAP_CACHE.exists() else rows
+    cache.to_parquet(ALAP_CACHE, index=False)
+    return (float(rows.R.mean()), int(len(rows)), rows.groupby("ev").R.mean())
+
+
 def gyujt(sym, tf, gyors=False):
     m1, d, idx_all, atr, E, Q = _entries(sym, tf)
     ps = float(lab.PAIRS[sym]["point_size"])
@@ -75,7 +97,7 @@ def gyujt(sym, tf, gyors=False):
     ok = (idx_all >= 0) & np.isfinite(atr) & (atr > 0) & (idx_all < len(m1) - 2)
     rows, alap = [], {}
     for irany, jel in (("long", 1), ("short", -1)):
-        m = E[f"gy_pipa2->{irany}"] & ok
+        m = E[f"gy_{MINTA}->{irany}"] & ok
         j = np.flatnonzero(m)
         if len(j) == 0:
             continue
@@ -95,7 +117,7 @@ def gyujt(sym, tf, gyors=False):
         assert len(tr) == len(j) == len(tm)
         rows.append(pd.DataFrame({
             "sym": sym, "tf": tf, "irany": irany, "ido": d.index[j], "ev": d.index[j].year,
-            "minoseg": Q[f"gy_pipa2->{irany}"][j],
+            "minoseg": Q[f"gy_{MINTA}->{irany}"][j],
             "R": tr["r"], "R_tukor": tm["r"], "status": tr["status"],
             "napok": (tr["i_close"] - tr["i_open"]) / 1440.0,
             "R_tp2": t_tp["r"], "R_sl1": t_sl1["r"], "R_h2": t_h2["r"], "R_h05": t_h05["r"],
@@ -104,12 +126,7 @@ def gyujt(sym, tf, gyors=False):
         rows[-1].attrs["egy"] = float(np.mean(t1["r"])) if len(t1) else np.nan
         rows[-1].attrs["egy_n"] = int(len(t1))
         if not gyors:
-            lep = TFS[tf]["alap_lepes"]
-            ja = np.flatnonzero(ok)[::lep]
-            ta = _sim(m1, sym, idx_all[ja], np.full(len(ja), jel), STOP_ATR * atr[ja] / ps,
-                      hold, one=False)
-            alap[irany] = (float(np.mean(ta["r"])), int(len(ta)),
-                           pd.Series(ta["r"]).groupby(d.index[ja].year[:len(ta)]).mean())
+            alap[irany] = _alapszint(m1, d, sym, tf, irany, jel, idx_all, ok, atr, ps, hold)
     out = pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
     egy = {r.irany.iloc[0]: (r.attrs["egy"], r.attrs["egy_n"]) for r in rows}
     print(f"   {sym} M{tf}: long {int((out.irany == 'long').sum()) if len(out) else 0}, "
@@ -151,8 +168,12 @@ def itelet(df, alap, egy, tf, irany):
 
 
 def main():
+    global MINTA
     pd.set_option("display.width", 250)
     gyors = "--gyors" in _sys.argv
+    if "--minta" in _sys.argv:
+        MINTA = _sys.argv[_sys.argv.index("--minta") + 1]
+    print(f"MINTA: {MINTA}")
     dfs, alap, egy = [], {}, {}
     for tf in TFS:
         for sym in SYMS:
@@ -162,7 +183,7 @@ def main():
             alap[(sym, tf)] = a
             egy[(sym, tf)] = e
     df = pd.concat(dfs, ignore_index=True)
-    df.to_parquet(ROOT / "data" / "pipa2_h4_trades.parquet", index=False)
+    df.to_parquet(ROOT / "data" / f"{MINTA}_h4_trades.parquet", index=False)
 
     for tf in TFS:
         print(f"\n════ M{tf} — paronkent (fuggetlen, elsodleges kilepes) ════")

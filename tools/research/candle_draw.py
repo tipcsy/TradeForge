@@ -29,7 +29,7 @@ import candle_lib
 import lab
 
 OUT = ROOT / "data" / "candle_draw"
-ELOTT, UTAN = 40, 20
+ELOTT, UTAN = 70, 20
 
 
 def _candles(ax, d: pd.DataFrame, x0: int):
@@ -85,6 +85,40 @@ def rajz(row: pd.Series, n_cimke: str) -> _Path:
         melyseg = abs(P0 - ext) / atr[t]
         cim += (f"\nK={K} ablak (sárga), bal szár {m - aidx} gy., jobb szár {t - m} gy., "
                 f"mélység {melyseg:.2f} ATR, minőség {row.minoseg:.2f} ({row.fokozat})")
+    elif minta in ("dupla", "dupla2"):
+        k, tav = candle_lib.DUPLA_K, candle_lib.DUPLA_TAV
+        gyeng = minta == "dupla2"
+        tol = 0.5 if gyeng else candle_lib.DUPLA_TOL
+        sg = 1.0 if irany == "long" else -1.0
+        x, y = (l, h) if irany == "long" else (h, l)
+        sw = np.flatnonzero(candle_lib._swing(x, k, also=(irany == "long")))
+        sw = sw[(sw < t - k) & (sw >= t - candle_lib.DUPLA_K2 - tav[1])]
+        # a p2: az utolso swing t-k elott, amelyhez van egyezo p1
+        p1 = p2 = -1
+        for j2 in range(len(sw) - 1, -1, -1):
+            for j1 in range(j2 - 1, -1, -1):
+                dd = sw[j2] - sw[j1]
+                if dd > tav[1]:
+                    break
+                delta = sg * (x[sw[j2]] - x[sw[j1]])
+                egy = ((delta > 0) and (delta <= tol * atr[sw[j2]])) if gyeng else (abs(delta) <= tol * atr[sw[j2]])
+                if dd >= tav[0] and egy:
+                    p1, p2 = sw[j1], sw[j2]
+                    break
+            if p1 >= 0:
+                break
+        if p1 >= 0:
+            N = (y[p1 + 1:p2].max() if irany == "long" else y[p1 + 1:p2].min())
+            pn = p1 + 1 + (int(np.argmax(y[p1 + 1:p2])) if irany == "long" else int(np.argmin(y[p1 + 1:p2])))
+            ax.axvspan(p1 - 1, t, color="#fff3c4", zorder=0, alpha=0.8)
+            ax.hlines(N, p1, t + 2, color="#b8860b", lw=1.6, label=f"nyakvonal {N:.5g}")
+            ax.plot([p1, pn, p2, t], [x[p1], N, x[p2], c[t]], color="#7b2cbf", lw=2.2, alpha=0.8,
+                    label="1. alj → nyak → 2. alj → kitörés" if irany == "long" else "1. csúcs → nyak → 2. csúcs → kitörés")
+            ax.annotate(f"kitörés  c={c[t]:.5g}", (t, c[t]), xytext=(8, 0), textcoords="offset points",
+                        fontsize=9, color="#7b2cbf")
+            cim += (f"\nswing-táv {p2 - p1} gy., egyezés {abs(x[p1] - x[p2]) / atr[p2]:.2f} ATR, "
+                    f"mélység {abs(N - (max(x[p1], x[p2]) if irany == 'long' else min(x[p1], x[p2]))) / atr[p2]:.2f} ATR, "
+                    f"kitörés {t - p2} gy. a 2. után, minőség {row.minoseg:.2f} ({row.fokozat})")
     else:
         ax.annotate(f"{minta}", (t, h[t]), xytext=(0, 10), textcoords="offset points",
                     ha="center", fontsize=9, color="#7b2cbf")

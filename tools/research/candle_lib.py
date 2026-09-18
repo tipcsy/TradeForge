@@ -41,6 +41,13 @@ PIN_KANOC = 2.0 / 3.0
 PIPA2_MELYSEG = 1.5
 PIPA2_ELOTT = 20
 PIPA2_ELOTT_MIN_ATR = -1.0
+# DUPLA CSUCS / ALJ — 2026-09-18 (vault „Dupla csucs-alj — eloregisztralt kerdes")
+DUPLA_K = 3              # swing: a ±K gyertyan belul szelsoertek
+DUPLA_TAV = (5, 40)      # a ket swing tavolsaga gyertyaban
+DUPLA_TOL = 0.25         # a ket szelsoertek egyezese ATR-ben
+DUPLA_MELYSEG = 1.0      # nyakvonal - szelsoertek >= ennyi ATR
+DUPLA_ELOTT = 20         # az elozmeny: a p1 elotti 20 gyertya legmagasabb zarasa >= nyakvonal
+DUPLA_K2 = 30            # a kitores legfeljebb ennyi gyertyaval p2 utan
 
 
 def _prev(a: np.ndarray, k: int = 1) -> np.ndarray:
@@ -187,6 +194,105 @@ def pipa_szigoru(o, h, l, c, atr, K=PIPA_K, melyseg=PIPA2_MELYSEG,
         q_b = _cl((mely_b - melyseg) / 2.0)
         q_m = _cl((mely_m - melyseg) / 2.0)
     return bika, medve, q_b, q_m
+
+
+def _swing(x, k, also=True):
+    """Igazolt swing-pontok: az i. gyertya a ±k ablakban szelsoertek (szigoru
+    min/max a tobbivel szemben, dontetlen: az elso). Az i+k gyertyanal igazolodik."""
+    n = len(x)
+    out = np.zeros(n, dtype=bool)
+    if n < 2 * k + 1:
+        return out
+    from numpy.lib.stride_tricks import sliding_window_view
+    W = sliding_window_view(x, 2 * k + 1)          # W[j] = x[j .. j+2k], kozep j+k
+    mid = W[:, k][:, None]
+    tobbi = np.delete(W, k, axis=1)
+    if also:
+        ok = (mid < tobbi).all(axis=1) | ((mid <= tobbi).all(axis=1) & (np.argmin(W, axis=1) == k))
+    else:
+        ok = (mid > tobbi).all(axis=1) | ((mid >= tobbi).all(axis=1) & (np.argmax(W, axis=1) == k))
+    out[k:n - k] = ok
+    return out
+
+
+def dupla(o, h, l, c, atr, k=DUPLA_K, tav=DUPLA_TAV, tol=DUPLA_TOL,
+          melyseg=DUPLA_MELYSEG, elott=DUPLA_ELOTT, k2=DUPLA_K2, gyengulo=False):
+    """DUPLA ALJ (long) / DUPLA CSUCS (short) — a nyakvonal toresen.
+
+    Visszaad: (long_maszk, short_maszk, q_long, q_short) — a maszk a KITORO
+    gyertyan igaz; q = 0,5 x egyezes + 0,5 x melyseg-alak.
+
+    `gyengulo=True` (2. valtozat, 2026-09-18, a felhasznalo kerese): a masodik
+    szelsoertek a GYENGEBB oldalon van — dupla csucsnal a 2. csucs ALACSONYABB
+    (0 < high[p1]-high[p2] <= tol ATR), dupla aljnal a 2. alj MAGASABB; `tol`
+    itt 0,5 ATR."""
+    n = len(c)
+    nagy = np.isfinite(atr) & ((h - l) >= MIN_RANGE_ATR * atr)
+    res = {}
+    for irany, x, y, sw_also in (("long", l, h, True), ("short", h, l, False)):
+        maszk = np.zeros(n, dtype=bool)
+        q = np.full(n, np.nan)
+        sw = np.flatnonzero(_swing(x, k, also=sw_also))
+        sgn = 1.0 if irany == "long" else -1.0
+        for j2 in range(len(sw)):
+            p2 = sw[j2]
+            a2 = atr[p2]
+            if not np.isfinite(a2) or a2 <= 0:
+                continue
+            # a p2-hoz legkozelebbi korabbi swing, ami egyezik es a tavolsag jo
+            p1 = -1
+            for j1 in range(j2 - 1, -1, -1):
+                d = p2 - sw[j1]
+                if d > tav[1]:
+                    break
+                if gyengulo:
+                    # long: a 2. alj magasabb (x=low, sgn=+1); short: a 2. csucs alacsonyabb
+                    delta = sgn * (x[p2] - x[sw[j1]])
+                    egyezik = (delta > 0) and (delta <= tol * a2)
+                else:
+                    egyezik = abs(x[sw[j1]] - x[p2]) <= tol * a2
+                if d >= tav[0] and egyezik:
+                    p1 = sw[j1]
+                    break
+            if p1 < 0:
+                continue
+            # nyakvonal: a kozbenso szakasz szelsoerteke (long: max high)
+            kozott = y[p1 + 1:p2]
+            if len(kozott) == 0:
+                continue
+            N = kozott.max() if irany == "long" else kozott.min()
+            mely = sgn * (N - max(x[p1], x[p2])) if irany == "long" else (min(x[p1], x[p2]) - N)
+            if mely < melyseg * a2:
+                continue
+            # elozmeny: a p1 elotti `elott` gyertya legmagasabb (long) / legalacsonyabb zarasa
+            if p1 - elott < 0:
+                continue
+            ce = c[p1 - elott:p1]
+            if irany == "long" and ce.max() < N:
+                continue
+            if irany == "short" and ce.min() > N:
+                continue
+            # kitores: az elso zaras a nyakvonalon tul p2+k utan, legfeljebb k2-vel p2 utan
+            lo, hi = p2 + k + 1, min(n, p2 + k2 + 1)
+            if lo >= hi:
+                continue
+            cc = c[lo:hi]
+            tul = (cc > N) if irany == "long" else (cc < N)
+            if not tul.any():
+                continue
+            t = lo + int(np.argmax(tul))
+            if not nagy[t]:
+                continue
+            # a p2..t kozott sem zart mar tul (az elso zaras) — cc[:t-lo] mind nem tul, ok
+            # es a p2+1..p2+k kozott sem
+            kz = c[p2 + 1:lo]
+            if len(kz) and ((kz > N).any() if irany == "long" else (kz < N).any()):
+                continue
+            maszk[t] = True
+            egyezes = 1.0 - abs(x[p1] - x[p2]) / (tol * a2)
+            q[t] = 0.5 * _cl(egyezes) + 0.5 * _cl((mely / a2 - melyseg) / 2.0)
+        res[irany] = (maszk, q)
+    return res["long"][0], res["short"][0], res["long"][1], res["short"][1]
 
 
 def pinbar(o, h, l, c, atr, kanoc=PIN_KANOC):
@@ -340,6 +446,14 @@ def _szamol(o, h, l, c, atr=None):
     pb2, pm2, qpb2, qpm2 = pipa_szigoru(o, h, l, c, atr)
     E["gy_pipa2->long"], E["gy_pipa2->short"] = pb2, pm2
     Q["gy_pipa2"] = np.where(pb2, qpb2, qpm2)
+    # 16. DUPLA ALJ / CSUCS — 2026-09-18, kulon eloregisztralva
+    dl, ds, qdl, qds = dupla(o, h, l, c, atr)
+    E["gy_dupla->long"], E["gy_dupla->short"] = dl, ds
+    Q["gy_dupla"] = np.where(dl, qdl, qds)
+    # 17. DUPLA2 — a masodik szelsoertek gyengebb (2. valtozat)
+    dl2, ds2, qdl2, qds2 = dupla(o, h, l, c, atr, tol=0.5, gyengulo=True)
+    E["gy_dupla2->long"], E["gy_dupla2->short"] = dl2, ds2
+    Q["gy_dupla2"] = np.where(dl2, qdl2, qds2)
 
     E = {k: np.where(np.isfinite(v.astype(float)), v, False).astype(bool)
          for k, v in E.items()}
