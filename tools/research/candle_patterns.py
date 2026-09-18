@@ -204,6 +204,9 @@ def lepcso_b(sym: str):
         for a in an:
             ertekel(E[e] & A[a], f"{e} + {a}", 1)
     t = pd.DataFrame(sorok)
+    if t.empty:
+        print("   (nincs ertekelheto jelolt a keresoben)")
+        return None, None
     t["sym"] = sym
     print(f"   {n0} jelolt 0. szinten, {len(t) - n0:,} 1. szinten "
           f"(min. {MIN_N} kotes a keresoben)")

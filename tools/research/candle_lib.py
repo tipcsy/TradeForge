@@ -36,6 +36,11 @@ PIPA_W1 = 5             # a kezdoszint: a legmagasabb zaras a melypont elotti W1
 PIPA_MELYSEG = 1.0      # (P0 - melypont) / ATR legalabb ennyi
 # PIN BAR — ugyanott rogzitve: kanoc >= 2/3 tartomany, a test a masik harmadban
 PIN_KANOC = 2.0 / 3.0
+# PIPA2 (szigoru) — 2026-09-18, a rajzok utan rogzitve: P0 a TELJES ablak legmagasabb
+# zarasa a melypont elott, melyseg >= 1,5 ATR, es az ablak elotti 20 gyertya nem eso
+PIPA2_MELYSEG = 1.5
+PIPA2_ELOTT = 20
+PIPA2_ELOTT_MIN_ATR = -1.0
 
 
 def _prev(a: np.ndarray, k: int = 1) -> np.ndarray:
@@ -124,6 +129,61 @@ def pipa(o, h, l, c, atr, K=PIPA_K, W1=PIPA_W1, melyseg=PIPA_MELYSEG):
                 & (kozott_b <= P0_b) & (jobb_b >= bal_b) & (jobb_b >= 1))
         medve = (ok & nagy & np.isfinite(P0_m) & (mely_m >= melyseg) & (c < P0_m)
                  & (kozott_m >= P0_m) & (jobb_m >= bal_m) & (jobb_m >= 1))
+        q_b = _cl((mely_b - melyseg) / 2.0)
+        q_m = _cl((mely_m - melyseg) / 2.0)
+    return bika, medve, q_b, q_m
+
+
+def pipa_szigoru(o, h, l, c, atr, K=PIPA_K, melyseg=PIPA2_MELYSEG,
+                 elott=PIPA2_ELOTT, elott_min=PIPA2_ELOTT_MIN_ATR):
+    """PIPA2 (szigoru ✓): a kezdoszint az ESES TENYLEGES KEZDETE az ablakon belul.
+
+    Bika, a t gyertyan:
+      m  = a legalacsonyabb low helye a [t-K, t) ablakban
+      P0 = a legmagasabb ZARAS a [t-K, m) szakaszon (helye a) -> bal szar = m-a >= 1
+      (P0 - low[m]) / ATR[t] >= melyseg
+      close[t] > P0, az (m, t) kozotti zarasok egyike sem > P0, jobb szar t-m >= bal
+      az ablak ELOTTI `elott` gyertya netto elmozdulasa (ATR-ben) > elott_min
+      (nem egy mar zuhano piac kozepen)
+    Medve: tukor. Visszaad: (bika, medve, q_bika, q_medve)."""
+    n = len(c)
+    t = np.arange(n)
+    ok = t >= K + elott + 2
+    L = _ablak(l, K)
+    H = _ablak(h, K)
+    CK = _ablak(c, K)                                   # CK[i] = c[i-K .. i-1]
+    pos = np.arange(K)[None, :] + (t - K)[:, None]      # abszolut indexek
+    j_lo = np.nanargmin(np.where(np.isnan(L), np.inf, L), axis=1)
+    j_hi = np.nanargmax(np.where(np.isnan(H), -np.inf, H), axis=1)
+    m_lo = np.where(ok, t - K + j_lo, 0)
+    m_hi = np.where(ok, t - K + j_hi, 0)
+    # P0: a melypont ELOTTI zarasok maximuma (bika) / a csucs elotti minimuma (medve)
+    elotte_b = np.where(pos < m_lo[:, None], CK, -np.inf)
+    elotte_m = np.where(pos > -1, np.where(pos < m_hi[:, None], CK, np.inf), np.inf)
+    a_b = np.argmax(elotte_b, axis=1)
+    a_m = np.argmin(elotte_m, axis=1)
+    P0_b = elotte_b[np.arange(n), a_b]
+    P0_m = elotte_m[np.arange(n), a_m]
+    bal_b = j_lo - a_b
+    bal_m = j_hi - a_m
+    jobb_b = t - m_lo
+    jobb_m = t - m_hi
+    kozott_b = np.where(pos > m_lo[:, None], CK, -np.inf).max(axis=1)
+    kozott_m = np.where(pos > m_hi[:, None], CK, np.inf).min(axis=1)
+    # az ablak elotti `elott` gyertya netto elmozdulasa
+    c_ablak_elott = _prev(c, K + 1)
+    c_regen = _prev(c, K + 1 + elott)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        elmozd = (c_ablak_elott - c_regen) / atr
+        mely_b = (P0_b - l[m_lo]) / atr
+        mely_m = (h[m_hi] - P0_m) / atr
+        nagy = np.isfinite(atr) & ((h - l) >= MIN_RANGE_ATR * atr)
+        bika = (ok & nagy & np.isfinite(P0_b) & (bal_b >= 1) & (mely_b >= melyseg)
+                & (c > P0_b) & (kozott_b <= P0_b) & (jobb_b >= bal_b)
+                & (elmozd > elott_min))
+        medve = (ok & nagy & np.isfinite(P0_m) & (bal_m >= 1) & (mely_m >= melyseg)
+                 & (c < P0_m) & (kozott_m >= P0_m) & (jobb_m >= bal_m)
+                 & (elmozd < -elott_min))
         q_b = _cl((mely_b - melyseg) / 2.0)
         q_m = _cl((mely_m - melyseg) / 2.0)
     return bika, medve, q_b, q_m
@@ -276,6 +336,10 @@ def _szamol(o, h, l, c, atr=None):
     lb, sb, qlb, qsb = pinbar(o, h, l, c, atr)
     E["gy_pinbar->long"], E["gy_pinbar->short"] = lb, sb
     Q["gy_pinbar"] = np.where(lb, qlb, qsb)
+    # 15. PIPA2 (szigoru) — 2026-09-18, a rajzok utan kulon rogzitve
+    pb2, pm2, qpb2, qpm2 = pipa_szigoru(o, h, l, c, atr)
+    E["gy_pipa2->long"], E["gy_pipa2->short"] = pb2, pm2
+    Q["gy_pipa2"] = np.where(pb2, qpb2, qpm2)
 
     E = {k: np.where(np.isfinite(v.astype(float)), v, False).astype(bool)
          for k, v in E.items()}
