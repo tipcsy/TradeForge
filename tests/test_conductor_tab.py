@@ -88,7 +88,14 @@ check("⚠ a ful NEM ir kozvetlenul a run_state/trade_mode-ba",
 # ⚠ MEGERSITES-MINTA: ha a kozos reteg rakerdez, a ful megkerdezi.
 _futtat = _tab.split("def _futtat(")[1].split("\n    def ")[0]
 check("a ful kezeli a `confirm` kort",
-      "res.confirm" in _futtat and "askyesno" in _futtat and "fn(ctx, True)" in _futtat)
+      "res.confirm" in _futtat and "self._confirm(" in _futtat
+      and "fn(ctx, True)" in _futtat)
+# ⚠ ES NEM SAJAT MODALIST NYIT. Az `askyesno` addig ALL, amig ember nem
+# kattint — egy programvezerelt (teszt-) kattintas OROKRE megallna rajta.
+# A kerdezot a dashboard adja be (`confirm=self._confirm`), es a teszt
+# lecserelheti; a fulben csak a gazdatlan eset tartaleka hivja kozvetlenul.
+check("...de a kerdes a BEADOTT kerdezon megy (nem sajat `askyesno`)",
+      "askyesno" not in _futtat and "confirm=None" in _tab)
 
 # ⚠ NEM TESZUNK KI GOMBOT, AMI NEM MUKODIK: az optimalizalas ma csak az OPT
 # gombbal indithato — egy halott „Elfogad" arra tanitana, hogy a ful gombjai

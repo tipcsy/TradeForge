@@ -177,6 +177,19 @@ check("a felulet a SAJAT (allapotsorba iro) mentojet adja at",
 _runstop = _gui.split("def _run_stop")[1].split(chr(10) + "    def ")[0]
 check("a felulet kezeli a `confirm` kort (nem hajtja vegre csendben)",
       "res.confirm" in _runstop and "confirmed=True" in _runstop)
+# ⚠ A MODALIS ABLAK EGY PONTON. Az `askyesno` addig ALL, amig ember nem
+# kattint. Amikor a v3.73.0 a kivezetes-kerdest bevitte a feluletbe, a
+# `test_run_intent` PONT EZEN fagyott le: a fo szal a parbeszedben vart egy
+# kattintasra, amit senki nem adott meg. A kerdes ezert EGY lecserelheto
+# metoduson megy (`DashboardWindow._confirm`) — aki ujra kozvetlenul hivna
+# az `askyesno`-t, ezt a sort torni fogja.
+check("a feluleten EGY megerosites-pont van (`_confirm`)",
+      _gui.count("askyesno(") == 1 and "def _confirm(" in _gui,
+      f"askyesno x{_gui.count('askyesno(')}")
+check("a Karmester ful a beadott kerdezot kapja (nem sajat modalist nyit)",
+      "confirm=self._confirm" in _gui)
+_cond = (ROOT / "dashboard" / "conductor_tab.py").read_text(encoding="utf-8")
+check("...es tenyleg azt hasznalja", "self._confirm(res.confirm" in _cond)
 
 # Es a masik iranyban: a szabalyok TENYLEG a kozos retegben vannak.
 _cc_src = (ROOT / "core" / "console_cmd.py").read_text(encoding="utf-8")

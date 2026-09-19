@@ -61,12 +61,17 @@ class ConductorTab:
 
     `on_changed()` — a hívó frissítse a saját tábláját: egy elfogadott javaslat
     megváltoztathatja a kötés-módot, és a sor azonnal mutassa.
+
+    `confirm(szoveg, cim, parent) -> bool` — az IGEN/NEM kérdés. A dashboard a
+    SAJÁT `_confirm`-jét adja be; ez a fül nem nyit közvetlenül modális ablakot
+    (lásd ott a ⚠-t: egy programvezérelt kattintás örökre megállna rajta).
     """
 
-    def __init__(self, parent, ctx_provider, on_changed=None):
+    def __init__(self, parent, ctx_provider, on_changed=None, confirm=None):
         self.parent = parent
         self._ctx_provider = ctx_provider
         self._on_changed = on_changed or (lambda: None)
+        self._confirm = confirm or self._sajat_confirm
         self._cellak: list = []          # a mátrix pillanatképei (drága)
         self._betoltve = False
         # ⚠ MIKOR RAJZOLUNK ÚJRA. A dashboard köre 30 mp-enként hív; ha minden
@@ -371,14 +376,13 @@ class ConductorTab:
 
         ⚠ Ugyanaz a kör, mint a konzolon és a Telegramon — a szabály nem a
         felületben lakik, csak a kérdés alakja más."""
-        from tkinter import messagebox
         ctx = self._ctx()
         if ctx is None:
             return
         res = fn(ctx, False)
         if getattr(res, "confirm", ""):
-            if not messagebox.askyesno(_t("gui.ctrl.confirm_title"), res.confirm,
-                                       parent=self.parent):
+            if not self._confirm(res.confirm, _t("gui.ctrl.confirm_title"),
+                                 self.parent):
                 return
             res = fn(ctx, True)
         self._visszajelez(res)
@@ -387,6 +391,12 @@ class ConductorTab:
             self._on_changed()
         except Exception:
             log.debug("Karmester fül: a hívó frissítése elbukott", exc_info=True)
+
+    def _sajat_confirm(self, szoveg: str, cim: str = "", parent=None) -> bool:
+        """Tartalék, ha a fül önállóan (dashboard nélkül) áll fel."""
+        from tkinter import messagebox
+        return bool(messagebox.askyesno(cim or _t("gui.ctrl.confirm_title"),
+                                        szoveg, parent=parent or self.parent))
 
     def _visszajelez(self, res):
         sorok = list(getattr(res, "lines", []) or [])

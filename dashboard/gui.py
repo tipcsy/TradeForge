@@ -2824,7 +2824,8 @@ class DashboardWindow:
         from dashboard.conductor_tab import ConductorTab
         self._conductor_tab = ConductorTab(
             cond_frame, ctx_provider=self._cmd_ctx,
-            on_changed=self._apply_filter_sort)
+            on_changed=self._apply_filter_sort,
+            confirm=self._confirm)
 
         bt_frame = tk.Frame(self._notebook, bg=BG_BT)
         self._notebook.add(bt_frame, text=_t("gui.portfolio_backtest"))
@@ -4068,7 +4069,7 @@ class DashboardWindow:
             _gpk_msg.config(text=txt, fg=FG_GREEN)
 
         def _gcsomag_betolt():
-            from tkinter import filedialog, messagebox
+            from tkinter import filedialog
 
             from gates import pack as _gpack
             f = filedialog.askopenfilename(
@@ -4091,22 +4092,20 @@ class DashboardWindow:
                 _gpack_hiba(_t("pack.msg.problems", list="\n• ".join(_valodi)))
                 return
             _felul = bool(gondok)
-            if _felul and not messagebox.askyesno(
-                    _t("gpack.dlg.overwrite.title"),
+            if _felul and not self._confirm(
                     _t("gpack.dlg.overwrite.body", key=man["key"]),
-                    parent=popup):
+                    _t("gpack.dlg.overwrite.title"), parent=popup):
                 return
             # ⚠ A MEGERŐSÍTÉS ELŐTT MEGMUTATJUK, MIT HOZNÁNK BE. A telepítés
             # futtatható Python kódot tesz a gépre — ugyanaz a bizalmi lépés,
             # mint egy `.exe` elindítása.
-            if not messagebox.askyesno(
-                    _t("gpack.dlg.confirm.title"),
+            if not self._confirm(
                     _t("gpack.dlg.confirm.body", key=man["key"],
                        version=man.get("version", "?"), api=man.get("api", "?"),
                        phase=man.get("phase", "?"),
                        by=man.get("created_by", "?"),
                        files="\n  ".join(man["_files"])),
-                    parent=popup):
+                    _t("gpack.dlg.confirm.title"), parent=popup):
                 return
             try:
                 man = _gpack.install(f, overwrite=_felul)
@@ -4184,7 +4183,7 @@ class DashboardWindow:
             _pk_msg.config(text=txt, fg=FG_GREEN)
 
         def _csomag_betolt():
-            from tkinter import filedialog, messagebox
+            from tkinter import filedialog
             from strategy import pack as _pack
             f = filedialog.askopenfilename(
                 parent=popup, title=_t("pack.dlg.open"),
@@ -4211,18 +4210,16 @@ class DashboardWindow:
                               list="\n• ".join(_valodi)))
                 return
             _felul = bool(gondok)
-            if _felul and not messagebox.askyesno(
-                    _t("pack.dlg.overwrite.title"),
+            if _felul and not self._confirm(
                     _t("pack.dlg.overwrite.body", name=man["name"]),
-                    parent=popup):
+                    _t("pack.dlg.overwrite.title"), parent=popup):
                 return
-            if not messagebox.askyesno(
-                    _t("pack.dlg.confirm.title"),
+            if not self._confirm(
                     _t("pack.dlg.confirm.body", name=man["name"],
                        version=man.get("version", "?"), api=man.get("api", "?"),
                        by=man.get("created_by", "?"),
                        files="\n  ".join(man["_files"])),
-                    parent=popup):
+                    _t("pack.dlg.confirm.title"), parent=popup):
                 return
             try:
                 man = _pack.install(f, overwrite=_felul)
@@ -4794,7 +4791,6 @@ class DashboardWindow:
                                      _cc.mode_changes(_qctx, _sym, _wanted,
                                                       _tm.MODE_LIVE)]
 
-            from tkinter import messagebox
             if all_var.get():
                 # MEGERŐSÍTÉS: tételesen kiírjuk, MI és HÁNY páron változik. Enélkül
                 # egy pipa csendben átírná 10 instrumentum kötés-módját.
@@ -4805,15 +4801,13 @@ class DashboardWindow:
                 if _live_switch:
                     _warn = _t("gui.mode.live_warn",
                                names=", ".join(f"{s}/{n}" for s, n in _live_switch))
-                if not messagebox.askyesno(
-                        "Minden instrumentumra",
+                if not self._confirm(
                         _t("gui.bulk.confirm", n=len(others), rows=_ba.summary(changed),
-                        symbols=", ".join(others), warn=_warn),
-                        parent=popup):
+                           symbols=", ".join(others), warn=_warn),
+                        "Minden instrumentumra", parent=popup):
                     return
             elif _live_switch:
-                if not messagebox.askyesno(
-                        _t("gui.ctrl.confirm_title"),
+                if not self._confirm(
                         _t("console.mode.confirm_live", symbol=symbol,
                            names=", ".join(n for _s, n in _live_switch)),
                         parent=popup):
@@ -5033,6 +5027,24 @@ class DashboardWindow:
     # indítás, hangolatlan indulás jelzése, kivezetés-figyelmeztetés). A
     # szabályok mostantól EGY helyen vannak, itt csak a környezet készül el.
 
+    def _confirm(self, szoveg: str, cim: str = "", parent=None) -> bool:
+        """IGEN/NEM kérdés a felhasználónak — EGY helyen az egész felületen.
+
+        ⚠ MIÉRT NEM HÍVJUK KÖZVETLENÜL a `messagebox.askyesno`-t. Az MODÁLIS:
+        addig áll, amíg valaki rá nem kattint. Ha a felületet NEM ember hajtja
+        (teszt, programvezérelt kattintás, jövőbeli karmester-út), a főszál
+        ÖRÖKRE megáll — pontosan ez fagyasztotta le a `test_run_intent`-et,
+        amikor a Stop a kivezetés-figyelmeztetést feltette. A kérdés ezért egy
+        LECSERÉLHETŐ metódus: a teszt felülírja (`w._confirm = lambda *a, **k:
+        True`), és a válasz emberi kattintás nélkül megérkezik.
+
+        Ugyanaz a minta, mint a `SignalsTab` `on_trade`/`price_of` beadott
+        függvényeinél: a külvilág EGY ponton lép be, és ott ki is cserélhető."""
+        from tkinter import messagebox
+        return bool(messagebox.askyesno(cim or _t("gui.ctrl.confirm_title"),
+                                        szoveg,
+                                        parent=parent or self.root))
+
     def _cmd_ctx(self):
         """A közös parancs-réteg környezete (`core.console_cmd.Context`).
 
@@ -5099,9 +5111,7 @@ class DashboardWindow:
         ctx = self._cmd_ctx()
         res = _cc.stop_strategies(ctx, symbol, names)
         if res.confirm:
-            from tkinter import messagebox
-            if not messagebox.askyesno(_t("gui.ctrl.confirm_title"), res.confirm,
-                                       parent=self.root):
+            if not self._confirm(res.confirm):
                 return res
             res = _cc.stop_strategies(ctx, symbol, names, confirmed=True)
         self._set_status(" ".join(res.lines))
@@ -5337,10 +5347,8 @@ class DashboardWindow:
         Csak megállított (STOPPED) párra engedélyezett — optimalizálás alatt sem."""
         if self._display_state(symbol) != "STOPPED":
             return
-        from tkinter import messagebox
-        if not messagebox.askyesno(
-                _t("gui.torles_megerositese"),
-                _t("gui.ctrl.delete_confirm", symbol=symbol)):
+        if not self._confirm(_t("gui.ctrl.delete_confirm", symbol=symbol),
+                             _t("gui.torles_megerositese")):
             return
         self.cfg["pairs"].pop(symbol, None)
         self._save_main_config()
@@ -5663,10 +5671,10 @@ class DashboardWindow:
             warn += (chr(10) + chr(10) + _t("gui2.megjegyzes_ez_a_strategia"))
         if pos is not None and not pos.get("sl"):
             warn = (_t("gui2.figyelem_ennek_a_pozicionak"))
-        if not messagebox.askyesno(
-                _t("gui.pozicio_hozzarendelese"),
+        if not self._confirm(
                 _t("gui.adopt.confirm", ticket=ticket, symbol=symbol,
-                   strategy=strategy_name, warn=warn)):
+                   strategy=strategy_name, warn=warn),
+                _t("gui.pozicio_hozzarendelese")):
             return
         _adopted.adopt(ticket, strategy_name, symbol)
         # A BELÉPÉSKORI kockázat (1 R) rögzítése a kézi pozícióra is — a motor
@@ -5688,10 +5696,8 @@ class DashboardWindow:
 
     def _release_position(self, ticket):
         """A hozzárendelés visszavonása — a motor elengedi a pozíciót."""
-        from tkinter import messagebox
-        if not messagebox.askyesno(
-                _t("gui.hozzarendeles_visszavonasa"),
-                _t("gui.adopt.release", ticket=ticket)):
+        if not self._confirm(_t("gui.adopt.release", ticket=ticket),
+                             _t("gui.hozzarendeles_visszavonasa")):
             return
         _adopted.release(ticket)
         self._pos_tab.refresh()
@@ -5801,9 +5807,8 @@ class DashboardWindow:
 
     # ── Pozíciókezelő handlerek (Pozíciók fül) ──────────────────────────
     def _pos_panic(self, ticket: int):
-        from tkinter import messagebox
-        if not messagebox.askyesno(_t("gui.pozicio_zarasa"),
-                                   _t("gui.close.one", ticket=ticket)):
+        if not self._confirm(_t("gui.close.one", ticket=ticket),
+                             _t("gui.pozicio_zarasa")):
             return
         def _w():
             from core import mt5_connector
@@ -5811,13 +5816,11 @@ class DashboardWindow:
         threading.Thread(target=_w, daemon=True, name="PanicClose").start()
 
     def _pos_close_all(self):
-        from tkinter import messagebox
         positions = getattr(self, "_mt5_cache", {}).get("positions_detail", [])
         if not positions:
             return
-        if not messagebox.askyesno(
-                _t("gui.osszes_pozicio_zarasa"),
-                _t("gui.close.all", n=len(positions))):
+        if not self._confirm(_t("gui.close.all", n=len(positions)),
+                             _t("gui.osszes_pozicio_zarasa")):
             return
         tickets = [p["ticket"] for p in positions]
         def _w():

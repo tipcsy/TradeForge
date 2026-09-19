@@ -124,6 +124,20 @@ if TK_OK:
         },
     }
 
+    # A feltett IGEN/NEM kerdesek szovege (a build() uriti).
+    KERDESEK = []
+
+    # ⚠ A BROKER NEM SZOLHAT BELE A TESZTBE. A `console_cmd._has_position`
+    # tartalekbol a NYITOTT POZICIOKAT is megkerdezi az MT5-tol. A fejlesztoi
+    # gepen fut a terminal, tehat a "nincs nyitott pozicio" eset VALODI GOLD
+    # poziciot talalt, es KIVEZETES lett belole — a teszt a gepfuggo kornyezetet
+    # merte, nem a kodot.
+    try:
+        from core import mt5_connector as _mt5conn
+        _mt5conn.open_positions_detailed = lambda *a, **k: []
+    except Exception:
+        pass              # nincs MT5 → a lekerdezes amugy is kivetelre fut
+
     def build(position_pnl=None):
         import copy
         cfg = copy.deepcopy(BASE)
@@ -132,6 +146,13 @@ if TK_OK:
         G.DashboardWindow._start_bg_poller = lambda self: None
         G.DashboardWindow._poll_mt5 = lambda self: None
         G.DashboardWindow._ensure_pool = lambda self: None
+        # ⚠ A MEGEROSITES MODALIS ABLAK — ember nelkul OROKRE ALLNA. A kerdes
+        # ezert egy lecserelheto metodus (`DashboardWindow._confirm`); itt
+        # feljegyezzuk es IGEN-nel valaszolunk.
+        KERDESEK.clear()
+        G.DashboardWindow._confirm = (
+            lambda self, szoveg, cim="", parent=None:
+            (KERDESEK.append(szoveg), True)[1])
         # ⚠ A VALODI `_save_main_config` a repo config.json-jat irna felul.
         saves = []
         G.DashboardWindow._save_main_config = lambda self: saves.append(1)
@@ -183,6 +204,8 @@ if TK_OK:
         check("az utolso strategia leallitasa utan a par STOPPED",
               w.instrument_state["GOLD"] == "STOPPED",
               w.instrument_state["GOLD"])
+        check("...es pozicio nelkul NEM kerdezett semmit",
+              KERDESEK == [], str(KERDESEK))
     finally:
         if w is not None:
             w.root.destroy()
@@ -191,7 +214,11 @@ if TK_OK:
     try:
         w, cfg, _ = build(position_pnl=12.5)      # NYITOTT pozicioval
         w._handle_run_strategy("GOLD", "wpr_sma")
+        check("nyitott pozicioval az ELSO stop meg nem kerdez",
+              KERDESEK == [], str(KERDESEK))
         w._handle_run_strategy("GOLD", "ml_ai")
+        check("...az UTOLSO stop viszont MEGKERDEZI a felhasznalot",
+              len(KERDESEK) == 1, str(KERDESEK))
         check("nyitott pozicioval KIVEZETES lesz (a motor tovabb kezeli)",
               w.instrument_state["GOLD"] == "CLOSING",
               w.instrument_state["GOLD"])
