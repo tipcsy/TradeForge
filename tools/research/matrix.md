@@ -213,3 +213,141 @@ python tests/test_seq_stat.py
 - **Ez jelzés-minőséget mér, nem portfóliót.** Nincs benne slot-korlát, átfedő
   kötés-kizárás, óra-kapu. A végső jelöltet át kell vinni a
   `trading.backtest.run_pair`-re.
+
+---
+
+## 8. Eredmény — 2026-09-19, helyi futás (Windows, valódi M1 adat)
+
+A számok a fenti 5. szakasz **változatlan** küszöbeivel vannak kiértékelve.
+Naplók: `scratchpad/sl_oracle.log`, `scratchpad/seq_matrix.log`; kivonatok:
+`data/sl_oracle_*.parquet`, `data/seq_*.parquet` (mind gitignore-olt).
+
+### 8.1 Sorrend-mátrix (Ger40, UsaTec, `--szintetikus`)
+
+**1. kérdés — van-e nyelvtan?** A |z|>4 cellák aránya, valódi / szintetikus:
+
+| ablak | Ger40 | UsaTec |
+|---|---|---|
+| 15 perc | 43,9 % / **47,6 %** | 54,3 % / **57,1 %** |
+| 60 perc | 38,0 % / **43,5 %** | 51,3 % / **55,8 %** |
+| 240 perc | **33,2 %** / 19,9 % | **35,0 %** / 25,0 % |
+
+15 és 60 percen a szintetikus piac ugyanannyit vagy többet „talál" → az ottani
+sorrendiség teljes egészében a gyertyák mechanikus átfedése. Csak 240 percen
+van többlet a valódi piacon — de a null 60 perces blokkokból áll, tehát 60
+percnél hosszabb szerkezet konstrukció szerint hiányzik belőle; a többlet
+részben a null tulajdonsága. **A várt IGEN csak a több órás ablakra és gyengén
+áll.**
+
+**2. kérdés — fizet-e a sorrend?** A szkript ítélete mindkét páron
+**TALÁLAT**, mind a három rögzített feltétel teljesül:
+
+| | Ger40 | UsaTec |
+|---|---|---|
+| cella mindkét szakaszon | 12 114 | 15 732 |
+| kereső top-50 holdout deltája | +0,0082 | +0,0094 |
+| véletlen 50 cella | +0,0013 (σ 0,0023), p = 0,003 | +0,0004 (σ 0,0036), p = 0,003 |
+| rangkorreláció (kereső vs holdout) | ρ = +0,12, t = +13,3 | ρ = +0,05, t = +6,3 |
+
+**A rögzített szabály szerint a hipotézis túlélte — az előre leírt várakozás
+(„a 2.-ra NEM") megdőlt.** Ami a számok mellé tartozik (nem küszöb-hangolás,
+a méret):
+
+- A top-50 kereső deltája +0,127 / +0,108 R → holdouton +0,008 / +0,009 R:
+  **93 %-os zsugorodás.** Kisebb, mint a swap egymaga (−0,028…−0,044 R).
+- A top-50 **abszolút** holdout R-je (`R_AB_h`) átlag **−0,026 / −0,022 R**,
+  pozitív cella 10/50 ill. 16/50. A sorrend ad egy keveset a B eseményhez
+  képest, de a kötés így is veszteséges. A 2. szakasz „sikeres SZABÁLY"
+  feltételét (nettó R > 0, t ≥ 2, évek ≥ 60 %, ≥ 3 instrumentum) **egyetlen
+  cella sem teljesíti.**
+- A top-50 nem 50 független jelölt: Ger40-en 20-nak `M15:dupla_alj` az A-ja,
+  7-nek `M5:szorulas`; UsaTec-en 8-nak `M15:dupla_alj`. A rangkorreláció t-je
+  és a véletlen-50 p-je 12–16 ezer *független* cellát feltételez, tehát
+  mindkettő túlbecsült. **Ez a protokoll gyengéje** — a következő fordulóban
+  rögzítendő: A-eseményre (vagy napra) klaszterezett null a top-lista ellen.
+- Ger40-nél a kereső szakasz csak 76 k rácspont (az adat 2021-10-től van), a
+  holdout 224 k: a válogatás gyenge, a kiértékelés erős.
+- Egyetlen cella, ami a kereső top-1 ÉS holdouton is jól áll:
+  `M15:dupla_alj → 60 percen belül M1:pin_bika`, long (Ger40, holdout delta
+  +0,043, n_AB 1117). Ha valaki továbbviszi, a `trading.backtest.run_pair`-en
+  kell megmérni — az abszolút-R kép alapján nettó pozitív nem várható.
+
+### 8.2 Visszatekintő stop-tanulmány (5 instrumentum, 20 000 véletlen belépő × 2 irány)
+
+**Várakozás vs. mért:**
+
+| | várt | mért |
+|---|---|---|
+| `s_min` medián | 0,8–1,2 ATR | **0,90–1,10 ATR** (Ger40 0,93, UsaInd 0,96, UsaTec 0,90, GOLD 1,10, USDJPY 0,98) |
+| `s_min` p90 | > 3 ATR | **3,2–3,9 ATR** |
+| valódi és null `elerheto_R` egybeesik | igen | **majdnem — a valódi mind az 5 páron, minden `s`-en 3–7 %-kal ALACSONYABB** |
+| e-arány (MFE/MAE) | ~1 | **0,86–0,96** (< 1, mert a spread a belépőben van; a README 1,036-ja a stratégia saját belépőire vonatkozott) |
+
+**Új lelet:** a valódi piac egy véletlen belépő után *kevesebbet* kínál 8 óra
+alatt, mint az azonos volatilitású, 60 perces darabokból fűzött null — a több
+órás horizonton **átlaghoz-húzás** van (a valódi 8 órás kilengés kisebb, mint a
+véletlen bolyongásé). GOLD-on a legerősebb: 0,5 ATR-es stopnál valódi −0,50 R
+vs null −0,28 R — a szűk stopot a valódi arany sokkal gyakrabban üti ki.
+
+**Stop-szabályok a fix 1,5 ATR-hez képest.** A (2) feltétel (a KÜLÖNBSÉG
+évenkénti előjele) a szkript kimenetéből nem olvasható ki (lásd 8.3/3), ezért
+a mentett kivonatból külön számolva; a többi oszlop a 4. és 6. riportból.
+
+| szabály | (1) különbség t ≥ 2 | (2) évek ≥ 60 % | (3) ≥ 3 pár | (4) valódi előny > null előny | ítélet |
+|---|---|---|---|---|---|
+| fix 1,0 ATR | 0/5 (t −1,7 … −13,3) | 0/5 | nem | – | **BUKOTT** |
+| fix 2,0 ATR | 3/5 (UsaInd 4,1; GOLD 9,2; USDJPY 5,9; Ger40 1,6; UsaTec 1,3) | 4/5 (Ger40 50 %) | igen | 3/5 (Ger40 ±0; UsaInd ±0) | részben |
+| fix 3,0 ATR | 4/5 (Ger40 2,4; UsaInd 4,1; GOLD 12,2; USDJPY 6,8; **UsaTec 1,97**) | 5/5 (83 / 100 / 60 / 86 / 93 %) | igen | 4/5 (UsaInd −0,009) | **Ger40, GOLD, USDJPY-n mind a 4 teljesül** |
+| szerkezeti (swing mögé + 0,25 ATR) | negatív mindenhol (Ger40 −1,7; GOLD −7,0; 3 páron NaN, lásd 8.3/2) | 0/5 | nem | – | **BUKOTT** |
+| feltételes (tanult `s_min`) | holdout R rosszabb a fix 1,5-nél mind az 5-ön | – | nem | – | **BUKOTT** |
+
+A valódi−null többlet a fix 3,0 ATR-nél (R/kötés, a 6. riport
+`valodi_R`/`null_R` oszlopaiból, 1,5-höz mérve): Ger40 +0,022 vs +0,014
+(+0,008); UsaInd +0,034 vs +0,043 (−0,009); UsaTec +0,017 vs +0,007 (+0,010);
+GOLD +0,087 vs +0,035 (+0,052); USDJPY +0,049 vs +0,033 (+0,016).
+
+**Értelmezés.** A fix 3 ATR formailag átmegy 3 instrumentumon — de pontosan a
+4. szakasz csapdája szerint: a null-piacon ugyanekkora előnye van, a valódi
+többlet 0,01 R nagyságrendű (GOLD 0,05), **és minden szabály nettó negatív**
+(−0,02 … −0,09 R/kötés). A tágabb stop *kevesebbet veszít*, nem nyer: ez
+költség-minimalizálás, nem él. Az alapstop 1,5 ATR → 3 ATR cseréje véletlen
+belépőn nem indokolt; stratégia-belépőn külön mérendő.
+
+**Megjósolható-e az `s_min`?** Igen, meglepően jól: az `atr_arany` és a
+`tart_szel` kvintilis-rangja holdouton **+1,00 mind az 5 páron**, az `ora`
++0,6 … +1,0, az `sma_tav` +0,9 … +1,0. A `tart_poz` gyenge (+0,6, USDJPY
+−0,6). Ettől a *feltételes* stop mégis rosszabb, mert a tanult medián ≈ 1,0 ATR
+→ szűkebb stop → a mechanikus hatás elviszi. **A jóslat él, a belőle épített
+stop nem.**
+
+### 8.3 Összegzés és eszköz-hibák
+
+**Bukott:** fix 1,0 ATR; szerkezeti stop; feltételes stop; az a várakozás,
+hogy 15–60 perces sorrendi nyelvtan van a mechanikus átfedésen túl.
+
+**Formailag túlélte:** a sorrend-mátrix 2. kérdése mindkét páron (+0,008 /
++0,009 R holdout delta) és a fix 3 ATR stop 3 páron — de egyik sem éri el a
+2. szakasz „sikeres szabály" szintjét (nettó pozitív R), és a túlélés a
+protokoll két ismert gyengéjén múlik (cella-függőség; költség/s műtermék).
+
+**Új lelet:** a valódi piac 8 órás horizonton minden páron kevesebbet kínál,
+mint a szerkezet nélküli null → több órás átlaghoz-húzás.
+
+**Eszköz-hibák, amiket a Windows-futás felszínre hozott (javítandó):**
+
+1. `sl_oracle.py` és `seq_matrix.py` cp1250 konzolon elszáll (`⚠`, `≥`,
+   `→`): `UnicodeEncodeError: charmap codec can't encode character U+26A0`.
+   Kerülőút: `PYTHONIOENCODING=utf-8`. Javítás: a szkriptek elejére
+   `sys.stdout.reconfigure(encoding="utf-8", errors="replace")` (a
+   `tests/run_all.py` mintájára).
+2. A `szerkezeti` szabálynál a `kivonat_egyedi` 2–5 sort kihagy (UsaInd 2,
+   UsaTec 5, USDJPY 2) → a költség nincs levonva ÉS a `kulonbseg_t` NaN, a
+   sor összehasonlíthatatlan. A kieső sorokat a referenciából is ki kell venni
+   (párosítás `i`+`dir` szerint), nem az egész sort feladni.
+3. A 4. riport `evek_poz` oszlopa a szabály SAJÁT R-jének évenkénti előjele,
+   nem a referenciához mért különbségé — a (2) feltétel így a kimenetből nem
+   olvasható ki. Kell egy `kulonbseg_evek_poz` oszlop (a `kulonbseg_t`
+   mellé, ugyanabból a párosított különbségből).
+4. Az ítélet (`_itelet`) függetlennek kezeli a cellákat (rangkorreláció t,
+   véletlen-50 p) — lásd 8.1. Nem hiba a kódban, hanem a protokoll gyengéje;
+   a következő rögzített változatban A-eseményre klaszterezett null kell.
