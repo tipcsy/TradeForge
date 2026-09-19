@@ -34,6 +34,7 @@ ad át a `Context`-ben. Így hálózat és terminál nélkül tesztelhető.
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Callable, Optional
@@ -42,6 +43,8 @@ from core import opt_activity as _oa
 from core import run_state as _rs
 from core import trade_mode as _tm
 from core.i18n import t as _t
+
+log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -647,6 +650,33 @@ def cmd_plan(ctx: Context, args: list, confirmed: bool = False) -> Result:
     return Result(_crep.plan_lines(javaslatok))
 
 
+def cmd_report(ctx: Context, args: list, confirmed: bool = False) -> Result:
+    """`report` — a MAI nap + a karmester jelentése. EZ megy este Telegramra.
+
+    ⚠ EGY ESTI ÜZENET, NEM KETTŐ. A napi összefoglaló már ma is megy
+    (`notify.daily_summary_time`), és a `cmd_today` adja a tartalmát. Egy MÁSODIK
+    esti üzenet versenyezne az elsővel a figyelmedért, és a kettő előbb-utóbb
+    mást mondana ugyanarról a napról — ez a projekt visszatérő hibaosztálya. A
+    karmester ezért SZAKASZOKAT ad a meglévő üzenethez.
+
+    ⚠ KÉT „MA" TALÁLKOZIK ITT, és ez szándékos. A `cmd_today` a HELYI napot
+    használja (a felhasználó abban gondolkodik, amikor azt kérdezi, „mi volt
+    ma"), a karmester mérése viszont a BRÓKER napjához tartozik (a napi limit és
+    a szesszió-ablakok is ahhoz igazodnak). A karmester szakasza ezért KIÍRJA,
+    melyik napról beszél — így a kettő nem tud némán elcsúszni."""
+    from conductor import report as _crep
+
+    sorok = list(cmd_today(ctx, []).lines)
+    try:
+        sorok += _crep.daily_lines(
+            ctx.cfg, strategies_of=lambda s: ctx.strategies_of(s) or [])
+    except Exception:
+        # ⚠ A karmester szakasza SOHA nem viheti el a napi összefoglalót: a
+        # kötések és az eredmény akkor is kimennek, ha a mérés elakadt.
+        log.debug("karmester: a napi szakasz kimaradt", exc_info=True)
+    return Result(sorok)
+
+
 def cmd_balance(ctx: Context, args: list, confirmed: bool = False) -> Result:
     a = ctx.account() or {}
     if not a:
@@ -763,6 +793,7 @@ COMMANDS: dict = {
     "why":     cmd_why,
     "health":  cmd_health,
     "plan":    cmd_plan,
+    "report":  cmd_report,
     "balance": cmd_balance,
     "today":   cmd_today,
     "state":   cmd_state,
@@ -784,6 +815,7 @@ _HELP = (
     ("why <pár> [stratégia]", "console.help.why"),
     ("health", "console.help.health"),
     ("plan", "console.help.plan"),
+    ("report", "console.help.report"),
     ("balance", "console.help.balance"),
     ("today", "console.help.today"),
     ("state", "console.help.state"),

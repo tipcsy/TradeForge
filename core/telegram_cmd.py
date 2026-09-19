@@ -44,8 +44,8 @@ log = logging.getLogger(__name__)
 # ⚠ A `why` OLVASÓ parancs (a karmester belépő-telemetriája): nem állít
 # semmit, nem mozgat pénzt — a `pos`/`today` kategóriája. A `mode` EZÉRT
 # NINCS itt: az valódi kötést kapcsolna be egy chatüzenetből.
-ENGEDETT = ("help", "balance", "pos", "today", "why", "health", "plan",
-            "state", "heart", "play", "stop")
+ENGEDETT = ("help", "balance", "pos", "today", "report", "why", "health",
+            "plan", "state", "heart", "play", "stop")
 
 # Meddig él egy megerősítő gomb.
 AJANLAT_MP = 600
@@ -59,8 +59,8 @@ POLL_MP = 25
 # A parancs-menü sorrendje. ⚠ NEM ábécé: a leggyakrabban használt kerül előre,
 # és a két ÁLLÍTÓ parancs (`play`/`stop`) a végére — hogy ne azokra essen a
 # mutatóujj, amikor csak megnézni akarsz valamit.
-MENU_SORREND = ("state", "pos", "today", "why", "health", "plan", "balance",
-                "heart", "help", "play", "stop")
+MENU_SORREND = ("state", "pos", "today", "report", "why", "health", "plan",
+                "balance", "heart", "help", "play", "stop")
 
 
 def parancs_lista(nyelv: str = "") -> list:

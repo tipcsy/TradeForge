@@ -218,9 +218,24 @@ megtörténhetne — most már automatikusan, éjjel.
 
 ## 6. A feladatkörök — hét kalap
 
-### ① Krónikás
-Döntésnapló és napi/heti riport: mi változott, mi kötött, **mi nem, és miért
-nem**. Nulla kockázat, azonnali érték — és az önállóság előfeltétele.
+### ① Krónikás ✅ (v3.77.0 · v3.79.0)
+Döntésnapló és napi riport: mi változott, mi kötött, **mi nem, és miért nem**.
+
+A napi riport **a meglévő esti üzenetbe** épül (`notify.daily_summary_time`),
+nem új csatorna: egy második esti üzenet versenyezne az elsővel, és a kettő
+előbb-utóbb mást mondana ugyanarról a napról. Három szakaszt tesz hozzá —
+mérés (jel → kötés, a fő akadályok, **mely instrumentum volt ébren**), a nap
+leletei, és az aznapi árnyék-javaslatok. Parancs: `report`.
+
+⚠ **A riport a KRÓNIKÁBÓL olvas**, nem futtatja újra az egészségőrt. Ha
+23:00-kor újraszámolna, a MOSTANI állapotot mutatná — ami eltérhet attól, ami
+napközben a krónikába került —, és utólag nem lehetne eldönteni, melyik az igaz.
+Így az üzenet szerkezetileg a krónika kivonata.
+
+⚠ **Zárt piac ≠ álló motor.** A telemetria csak JELRE ír, tehát egy üres napi
+fájl mindkettőt jelentheti — a riport ezt kimondja, nem választ magabiztosan
+(hétvégén tipikusan csak a kripto ad jelet, és a riport ki is írja, melyik
+instrumentum volt ébren).
 
 ### ② Egészségőr ✅ (v3.77.0)
 A projekt visszatérő hibaosztályának automatizált vadászata. **Nem írja újra a
@@ -544,7 +559,7 @@ conductor/
 | Fázis | Tartalom | Kockázat |
 |---|---|---|
 | **F0** ✅ | belépő-telemetria · élő KPI-tár · várt aktivitás · pillanatkép · **„miért nem kötött" jelentés** (v3.75.0–v3.76.0) | nulla (csak mérés) |
-| **F1** | egészségőr ✅ · krónika ✅ (v3.77.0) · életciklus-létra + **árnyék-mód** ✅ (v3.78.0) · napi riport | nulla |
+| **F1** ✅ | egészségőr · krónika (v3.77.0) · életciklus-létra + **árnyék-mód** (v3.78.0) · napi riport (v3.79.0) | nulla |
 | **F2** | javaslatmotor · Karmester fül · optimalizálás-ütemező (L1) | alacsony |
 | **F3** | életciklus-létra · kockázati karmester (L2→L3) | közepes |
 | **F4** | LLM tanácsadó réteg · természetes nyelvű lekérdezés | alacsony (csak javasol) |

@@ -3748,7 +3748,11 @@ def run(cfg: dict, slot_mgr: SlotManager):
         _ctx = _cc.live_context(cfg, ROOT / "config.json")
 
         def _napi_szoveg() -> str:
-            return chr(10).join(_cc.cmd_today(_ctx, []).lines)
+            # ⚠ `cmd_report`, NEM `cmd_today`: az esti üzenet a karmester
+            # szakaszait is viszi (mérés · leletek · árnyék-javaslatok). EGY
+            # üzenet, nem kettő — egy második esti üzenet versenyezne az
+            # elsővel, és a kettő előbb-utóbb mást mondana ugyanarról a napról.
+            return chr(10).join(_cc.cmd_report(_ctx, []).lines)
 
         notify.setup(cfg, health=lambda: health_report(cfg), daily=_napi_szoveg)
         # A BEJÖVŐ oldal is itt indul, hogy a GRAFIKUS és a KONZOLOS futás

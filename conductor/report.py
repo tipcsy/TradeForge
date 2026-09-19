@@ -164,3 +164,95 @@ def plan_lines(javaslatok: list) -> list:
         for p in hold:
             sorok.append(_t("conductor.plan.row", mark=" ", text=p.text or p.code))
     return sorok
+
+
+# ---------------------------------------------------------------------------
+# NAPI RIPORT — a karmester része az esti összefoglalóban
+# ---------------------------------------------------------------------------
+# ⚠ MIÉRT NEM KÜLÖN ÜZENET. A napi összefoglaló MÁR MEGY (`notify`,
+# `daily_summary_time`), és a `console_cmd.cmd_today` adja a tartalmát. Egy
+# MÁSODIK esti üzenet két dolgot rontana el: versenyezne az elsővel a
+# figyelmedért, és a két üzenet előbb-utóbb mást mondana ugyanarról a napról —
+# ez a projekt visszatérő hibaosztálya. Ezért a karmester SZAKASZOKAT ad a
+# meglévő üzenethez, nem új csatornát.
+#
+# ⚠ ÉS MIÉRT A KRÓNIKÁBÓL OLVAS, nem futtatja újra az egészségőrt. Ha 23:00-kor
+# újraszámolna, a MOSTANI állapotot mutatná — ami eltérhet attól, ami napközben
+# a krónikába került. Akkor az üzenet és a nyilvántartás MÁST mondana, és
+# utólag nem lehetne eldönteni, melyik az igaz. Így a kettő szerkezetileg
+# azonos: az üzenet a krónika kivonata.
+
+
+def daily_lines(cfg: dict, *, strategies_of=None, day=None) -> list:
+    """A karmester napi szakaszai: mérés · leletek · árnyék-javaslatok."""
+    from conductor import journal as _j
+    from conductor import telemetry as _tlm
+
+    nap = _tlm.day_key(day)
+    sorok = ["", _t("conductor.daily.head", day=nap)]
+
+    # ── 1. MÉRÉS: jelből mi lett? ────────────────────────────────────────
+    cellak = _tlm.load(nap)
+    jelek = sum(int((r or {}).get("signals") or 0) for r in cellak.values())
+    kotes = sum(int((r or {}).get("entries") or 0) for r in cellak.values())
+    if not cellak:
+        # ⚠ „Nincs adat" ≠ „nem történt semmi". Ha a motor ma nem futott (vagy
+        # most indult), a hiányzó mérést ki kell mondani — különben egy csendes
+        # nap és egy álló rendszer ugyanúgy néz ki.
+        sorok.append(_t("conductor.daily.no_data"))
+    else:
+        sorok.append(_t("conductor.daily.telemetry", signals=jelek, entries=kotes,
+                        pct=_arany(kotes, jelek)))
+        # ⚠ MELY CELLÁK VOLTAK ÉBREN. Hétvégén és ünnepnapon a devizapárok
+        # alszanak, a kripto viszont megy — a puszta „3 jel" ilyenkor
+        # félrevezető, mert úgy néz ki, mintha az egész rendszer csendes volna.
+        # A `core/market_state.py` ugyanezt a leletet írja le a tick korából:
+        # egy zárt piacú pár pontosan úgy néz ki, mint egy nyitott, amelyik épp
+        # nem talál belépőt.
+        _ebren = sorted({c.split("|")[0] for c, r in cellak.items()
+                         if int((r or {}).get("signals") or 0) > 0})
+        sorok.append(_t("conductor.daily.awake", n=len(_ebren),
+                        symbols=", ".join(_ebren) or "-"))
+        akadalyok = {}
+        for r in cellak.values():
+            for k, v in ((r or {}).get("outcomes") or {}).items():
+                if k in _tlm.BLOCKERS:
+                    akadalyok[k] = akadalyok.get(k, 0) + int(v or 0)
+        for kod, db in sorted(akadalyok.items(), key=lambda x: (-x[1], x[0]))[:3]:
+            sorok.append(_t("conductor.daily.blocker", n=db,
+                            pct=_arany(db, jelek),
+                            reason=(_tlm.LABELS[kod] if kod in _tlm.LABELS else kod)))
+        # ⚠ A NÉMA CELLÁK KÜLÖN: az a cella érdekes, amelyik JELZETT, de egyszer
+        # sem kötött — ott van mit megnézni holnap.
+        _nemak = sorted(c for c, r in cellak.items()
+                        if int((r or {}).get("signals") or 0) > 0
+                        and not int((r or {}).get("entries") or 0))
+        if _nemak:
+            sorok.append(_t("conductor.daily.no_entry",
+                            cells=", ".join(x.replace("|", "/") for x in _nemak)))
+
+    # ── 2. LELETEK (a krónikából: amit MA látott) ────────────────────────
+    _lel = _j.read(limit=200, kind=_j.KIND_HEALTH, since_day=nap)
+    if _lel:
+        sorok.append("")
+        sorok.append(_t("conductor.daily.health_head", n=len(_lel)))
+        for e in _lel[:8]:
+            sorok.append(_t("conductor.health.row",
+                            sev=(e.get("sev") or "?").upper(), text=_cimzett(e)))
+        if len(_lel) > 8:
+            sorok.append(_t("conductor.daily.more", n=len(_lel) - 8))
+    else:
+        sorok.append(_t("conductor.daily.health_none"))
+
+    # ── 3. ÁRNYÉK-JAVASLATOK ────────────────────────────────────────────
+    _sh = _j.read(limit=100, kind=_j.KIND_SHADOW, since_day=nap)
+    if _sh:
+        sorok.append("")
+        sorok.append(_t("conductor.daily.shadow_head", n=len(_sh)))
+        for e in _sh[:8]:
+            _human = bool((e.get("data") or {}).get("needs_human"))
+            sorok.append(_t("conductor.plan.row", mark="⚠" if _human else "•",
+                            text=e.get("text") or e.get("code") or ""))
+        if len(_sh) > 8:
+            sorok.append(_t("conductor.daily.more", n=len(_sh) - 8))
+    return sorok
