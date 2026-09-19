@@ -6197,6 +6197,23 @@ class DashboardWindow:
             # (fogaskerék, körös nyíl, állapot-pont) — azok ezért ülnek jól.
             self.lbl_licence.config(text=szoveg, fg=szin)
 
+    # ── A felület HÁTTÉRSZÁLAI — EGY kapcsoló ───────────────────────────
+    def _start_background_threads(self):
+        """A felület összes háttérszála innen indul — és itt is kapcsolható ki.
+
+        ⚠ MIÉRT EGY METÓDUS. A fej nélküli (teszt-) futásokban a szálakat le
+        KELL tiltani: valódi MT5-lekérdezést indítanak, és a process-pool
+        Windowson újra importálja a futó szkriptet. A tesztek eddig HÁROM külön
+        nevet próbáltak lecserélni (`_start_refresh_loops`, `_poll_mt5`) — olyan
+        metódusokat, amik időközben MEGSZŰNTEK a fájlból. A `X._nincs_ilyen =
+        lambda…` nem hibázik: létrehoz egy ÚJ attribútumot, amit soha senki nem
+        hív, a szálak pedig vidáman elindulnak. Néma hiba, a szokásos fajtából.
+
+        Mostantól EGY név van: ha ezt cserélik le, tényleg nem indul semmi."""
+        self._start_bg_poller()
+        self._start_market_data_poll()
+        self._start_watchdog()
+
     # ── Piaci adat háttérszál (egységes) ────────────────────────────────
     def _start_market_data_poll(self):
         if hasattr(self, "_poll_running"):
@@ -6781,9 +6798,7 @@ class DashboardWindow:
             risky_mode.load()                 # induló risky állapot
             from core import rr_state as _rrs0
             _rrs0.load()                      # induló per-pár preset állapot
-            self._start_bg_poller()
-            self._start_market_data_poll()
-            self._start_watchdog()
+            self._start_background_threads()
         self._conn_tick += 1
 
         # Risky állapot periodikus újraolvasása (külső program írhatja)

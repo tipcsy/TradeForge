@@ -109,13 +109,20 @@ if TK_OK:
         cfg = copy.deepcopy(CFG)
         cfg["dashboard"]["layout"] = layout
         _t._FONTS.clear()            # a szingleton az elozo (eldobott) gyokerhez kotodott
-        G.DashboardWindow._start_refresh_loops = lambda self: None
-        G.DashboardWindow._start_bg_poller = lambda self: None
-        G.DashboardWindow._poll_mt5 = lambda self: None
+        # ⚠ EGY kapcsolo a felulet OSSZES hatterszalara (lasd gui.py).
+        G.DashboardWindow._start_background_threads = lambda self: None
         # Az optimalizalo process-poolt sem inditjuk: szkriptbol futtatva a
         # gyerek-processzek ujra importalnak (multiprocessing figyelmeztetes), es
         # a teszthez semmi kozuk.
-        G.DashboardWindow._ensure_pool = lambda self: None
+        # ⚠ A PROCESS-POOL GAZDAJA AZ `OptimizerController`, NEM a
+        # DashboardWindow. A `G.DashboardWindow._ensure_pool = ...` egy NEM
+        # LETEZO metodust cserelt le: uj attributumot hozott letre, amit soha
+        # senki nem hiv — a pool tehat VALOJABAN elindult. Windowson a
+        # `mp.Manager()` spawn-nal UJRA IMPORTALJA a fo modult (= ezt a
+        # teszt-szkriptet), tehat minden gyermekfolyamat LEFUTTATTA az egesz
+        # fajlt — innen a tobbszoros ablak es a „Process-pool nem hozhato
+        # letre" RuntimeError.
+        G.OptimizerController._ensure_pool = lambda self: None
         ds = {s: make_ds(s) for s in cfg["pairs"]}
         w = G.DashboardWindow(cfg, ds, {s: "STOPPED" for s in ds}, {},
                               on_play_pair=None, on_stop_pair=None)

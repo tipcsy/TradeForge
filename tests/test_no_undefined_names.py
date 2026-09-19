@@ -148,6 +148,79 @@ check("minden .py fájl parszolható", not _parse_hiba, "; ".join(_parse_hiba[:3
 check("nincs definiálatlan név a kódbázisban", not _osszes,
       " | ".join(_osszes[:5]))
 
+
+# ── 4. A TESZT NEM LETEZO METODUST CSEREL LE ──────────────────────────────
+# ⚠ A LELET (2026-09-19). Negy GUI-teszt ezt irta:
+#
+#     G.DashboardWindow._ensure_pool = lambda self: None
+#
+# csakhogy `_ensure_pool` az `OptimizerController` metodusa. A sor tehat NEM
+# cserelt le semmit: letrehozott egy UJ attributumot, amit soha senki nem hiv.
+# A process-pool valojaban elindult; Windowson a `mp.Manager()` spawn-nal UJRA
+# IMPORTALJA a fo modult (= a teszt-szkriptet), tehat minden gyermekfolyamat
+# lefuttatta az EGESZ tesztfajlt — tobb GUI-ablak, tobb modalis parbeszed, es
+# egy „Process-pool nem hozhato letre" RuntimeError. Az egyik teszt kommentje
+# szo szerint le is irta, mit AKAR megakadalyozni — kozben nem akadalyozta meg.
+#
+# Ez a projekt visszatero hibaosztalya (NEMA HIBA): ugy nez ki, mintha elvegezne
+# a dolgat. Egy elgepelt vagy athelyezett metodusnev ugyanigy nemul el.
+import ast as _ast
+
+def _osztaly_metodusok(forras: str) -> dict:
+    """{osztalynev: {metodusnevek}} — a fajl sajat definicioibol."""
+    ki = {}
+    for csp in _ast.walk(_ast.parse(forras)):
+        if isinstance(csp, _ast.ClassDef):
+            ki[csp.name] = {t.name for t in csp.body
+                            if isinstance(t, (_ast.FunctionDef, _ast.AsyncFunctionDef))}
+            ki[csp.name] |= {c.targets[0].id for c in csp.body
+                             if isinstance(c, _ast.Assign) and len(c.targets) == 1
+                             and isinstance(c.targets[0], _ast.Name)}
+    return ki
+
+_TULAJ = {}          # osztalynev -> {metodusok}  (a felulet moduljaibol)
+for _modul in ("dashboard/gui.py", "dashboard/conductor_tab.py"):
+    _TULAJ.update(_osztaly_metodusok((ROOT / _modul).read_text(encoding="utf-8")))
+check("van mihez merni (a felulet osztalyai megvannak)",
+      {"DashboardWindow", "OptimizerController"} <= set(_TULAJ),
+      str(sorted(_TULAJ)[:5]))
+
+def _osztaly_nev(csp):
+    """`G.DashboardWindow` / `DashboardWindow` -> 'DashboardWindow', kulonben None."""
+    if isinstance(csp, _ast.Attribute):
+        return csp.attr
+    if isinstance(csp, _ast.Name):
+        return csp.id
+    return None
+
+_gyanus = []
+for _p in sorted((ROOT / "tests").glob("*.py")):
+    try:
+        _fa = _ast.parse(_p.read_text(encoding="utf-8"))
+    except (SyntaxError, UnicodeDecodeError):
+        continue                       # a 3. blokk ezt mar jelentette
+    for _csp in _ast.walk(_fa):
+        # a) X.Osztaly.metodus = ...
+        _celok = []
+        if isinstance(_csp, _ast.Assign):
+            _celok = [t for t in _csp.targets if isinstance(t, _ast.Attribute)]
+        # b) setattr(X.Osztaly, "metodus", ...)
+        elif (isinstance(_csp, _ast.Call) and isinstance(_csp.func, _ast.Name)
+              and _csp.func.id == "setattr" and len(_csp.args) >= 2
+              and isinstance(_csp.args[1], _ast.Constant)
+              and isinstance(_csp.args[1].value, str)):
+            _o = _osztaly_nev(_csp.args[0])
+            if _o in _TULAJ and _csp.args[1].value not in _TULAJ[_o]:
+                _gyanus.append(f"{_p.name}:{_csp.lineno}  {_o}.{_csp.args[1].value}")
+            continue
+        for _t in _celok:
+            _o = _osztaly_nev(_t.value)
+            if _o in _TULAJ and _t.attr not in _TULAJ[_o]:
+                _gyanus.append(f"{_p.name}:{_t.lineno}  {_o}.{_t.attr}")
+
+check("a tesztek csak LETEZO metodust cserelnek le a felulet osztalyain",
+      not _gyanus, " | ".join(_gyanus[:5]))
+
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")
 sys.exit(0 if all(results) else 1)
