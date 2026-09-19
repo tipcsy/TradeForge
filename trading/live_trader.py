@@ -3762,9 +3762,10 @@ def run(cfg: dict, slot_mgr: SlotManager):
     # limit, a szesszió-ablakok és a kapuk is ahhoz igazodnak — a modul maga
     # MT5-mentes, ezért kívülről kapja meg.
     try:
+        from conductor import config as _ccfg, journal as _cjrn
         _tlm.set_day_provider(mt5_connector.server_today)
-        _tlm.prune(int(((cfg.get("conductor") or {}).get("telemetry") or {})
-                       .get("keep_days", 90)))
+        _tlm.prune(int(_ccfg.telemetry(cfg)["keep_days"]))
+        _cjrn.prune(int(_ccfg.journal(cfg)["keep_days"]))
     except Exception:
         # A mérés SOHA nem állíthatja meg a kereskedést.
         log.debug("karmester-telemetria: az indítás kimaradt", exc_info=True)
@@ -4072,6 +4073,7 @@ def run(cfg: dict, slot_mgr: SlotManager):
     _threading.Thread(target=_viz_worker, daemon=True, name="TradeForgeViz").start()
 
     _last_srv_off = 0.0     # a szerver-eltolás utolsó frissítése (napi limit napja)
+    _last_health  = 0.0     # a karmester-egészségőr utolsó átvizsgálása
 
     # Config-frissesség: a `pv1_point` és a swap PILLANATKÉP-értékek, amik a bróker
     # oldalán elmozdulhatnak. Az él MT5-ből frissít, a BACKTESZT viszont a configból
@@ -4095,6 +4097,27 @@ def run(cfg: dict, slot_mgr: SlotManager):
             # A karmester-telemetria kiírása, ha eljött az ideje (időzített,
             # atomikus — a körre nem mérhető költség).
             _tlm.tick()
+            # ── EGÉSZSÉGŐR (F1) — ÓRÁNKÉNT, nem körönként ────────────────
+            # ⚠ A KÖLTSÉG MIATT. Az átvizsgálás fájlokat olvas (config-leletek,
+            # mentett paraméterkészletek, a kereskedési napló), és a motor
+            # szálán fut — a GIL miatt a kör munkaidejéből venne el. Óránként
+            # elhanyagolható, körönként mérhető lenne. A leletek úgyis
+            # naponta egyszer kerülnek a krónikába.
+            if time.time() - _last_health >= 3600:
+                _last_health = time.time()
+                try:
+                    from conductor.policies import health as _chealth
+                    from strategy import enabled_strategy_names as _ensn_h
+                    _lel = _chealth.findings(
+                        cfg, strategies_of=lambda s: _ensn_h(cfg, s) or [])
+                    _uj = _chealth.journal_new(cfg, _lel)
+                    if _uj:
+                        log.info("karmester: %d új lelet a krónikában "
+                                 "(összesen %d áll fenn)", _uj, len(_lel))
+                except Exception:
+                    # ⚠ A MÉRÉS SOHA NEM ÁLLÍTHATJA MEG A KERESKEDÉST.
+                    log.debug("karmester-egészségőr: a kör kimaradt",
+                              exc_info=True)
             # ── Kapcsolat-felügyelet ─────────────────────────────────────────
             # Ha nincs használható MT5-kapcsolat, ezt a kört KIHAGYJUK (és az
             # `ensure_connected` a háttérben újrakapcsolódik, növekvő várakozással).

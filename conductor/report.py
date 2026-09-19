@@ -101,3 +101,34 @@ def _aktivitas_sorok(snap: dict) -> list:
             # stratégián. Egy szám indoklás nélkül itt többet árt, mint használ.
             ki.append(_t("conductor.why.thin", n=n))
     return ki
+
+
+def health_lines(leletek: list) -> list:
+    """Az egészségőr leletei emberi sorokként, súlyosság szerint.
+
+    ⚠ A „NINCS LELET" NEM „MINDEN RENDBEN". A frissesség-ellenőrzés MT5-kapcsolat
+    nélkül a saját szerződése szerint ÜRES listát ad, és az üres lista
+    megkülönböztethetetlen a „minden friss"-től. Ezt a jelentés kimondja —
+    különben egy zöld pipa takarná el, hogy senki nem nézett oda."""
+    if not leletek:
+        return [_t("conductor.health.none")]
+    sorok = [_t("conductor.health.head", n=len(leletek))]
+    for f in leletek:
+        sorok.append(_t("conductor.health.row", sev=(f.get("sev") or "?").upper(),
+                        text=_cimzett(f)))
+    return sorok
+
+
+def _cimzett(f: dict) -> str:
+    """A lelet szövege a CELLA megnevezésével.
+
+    ⚠ MIÉRT KELL. A `core/overview.py` leletei cella-szintűek, de a szövegük nem
+    nevezi meg a cellát — a felületen ez rendben van (a sor mellett áll), egy
+    listában viszont a „Az optimalizálás 201 napja futott." önmagában
+    használhatatlan: nem derül ki, MELYIKÉ. Ha a szöveg már tartalmazza a
+    szimbólumot (a saját leleteink így írják), nem ismételjük meg."""
+    szoveg = f.get("text") or f.get("code") or ""
+    sym, strat = f.get("symbol"), f.get("strategy")
+    if not sym or sym in szoveg:
+        return szoveg
+    return f"{sym}/{strat}: {szoveg}" if strat else f"{sym}: {szoveg}"

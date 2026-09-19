@@ -236,6 +236,23 @@
     "telemetry": {
       "_comment_keep": "Hany napig tartjuk meg a napi telemetria-fajlokat. 0 = nincs takaritas. Egy nap ~nehany KB.",
       "keep_days": 90
+    },
+    "health": {
+      "_comment": "EGESZSEGOR (F1): a NEMA bajok vadaszata — nem hiba, hanem olyan allapot, ami rendben NEZ KI, kozben nem. Oránkent fut a motorban, a leleteket naponta egyszer a kronikaba irja (data/conductor/decisions.jsonl).",
+      "_comment_repeat": "Hany naponta kerul a kronikaba UGYANAZ a fennallo lelet. 0 = minden korben (zajos).",
+      "repeat_days": 1,
+      "_comment_dried": "ELSZARADAS: az elo aktivitas a mentett meres ennyi toredeke alatt lelet (0,25 = a negyedet sem hozza), es csak ennyi elo nap utan.",
+      "dried_up_ratio": 0.25,
+      "dried_up_min_days": 14,
+      "_comment_gate": "KAPU-FAL: egy kapu a napi jelek ennyi reszet blokkolta ES egy kotes sem lett, legalabb ennyi jelnel.",
+      "gate_wall_ratio": 0.8,
+      "gate_wall_min_signals": 3,
+      "_comment_silent": "NEMA SOROZAT: ennyi OLYAN nap utan lelet, amikor a motor futott (mas cellanak volt jele), de ennek a cellanak egy sem. 0 = kikapcsolva.",
+      "silent_days": 5
+    },
+    "journal": {
+      "_comment": "KRONIKA: mit latott (es kesobb mit tett) a karmester. Append-only JSONL.",
+      "keep_days": 365
     }
   }
 }

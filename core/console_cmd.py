@@ -602,6 +602,28 @@ def cmd_why(ctx: Context, args: list, confirmed: bool = False) -> Result:
     return Result(sorok)
 
 
+def cmd_health(ctx: Context, args: list, confirmed: bool = False) -> Result:
+    """`health` — a NÉMA bajok: mi néz ki rendben, közben nem?
+
+    ⚠ A LELETEK NEM ITT SZÜLETNEK. A karmester egészségőre
+    (`conductor/policies/health.py`) fogja össze a meglévő detektorokat
+    (`config_check`, `config_freshness`, `overview`) és a mérésből jövő
+    leleteket — itt csak megjelenítjük. Egy külön „konzolos ellenőrzés" az első
+    config-változásnál mást mondana, mint a felület."""
+    from conductor.policies import health as _h
+    from conductor import report as _crep
+
+    leletek = _h.findings(ctx.cfg,
+                          strategies_of=lambda s: ctx.strategies_of(s) or [])
+    # A fennálló leletek a KRÓNIKÁBA is bekerülnek (naponta egyszer) — így a
+    # „mióta áll fenn?" kérdés utólag megválaszolható.
+    try:
+        _h.journal_new(ctx.cfg, leletek)
+    except Exception:
+        pass
+    return Result(_crep.health_lines(leletek), ok=not leletek)
+
+
 def cmd_balance(ctx: Context, args: list, confirmed: bool = False) -> Result:
     a = ctx.account() or {}
     if not a:
@@ -716,6 +738,7 @@ COMMANDS: dict = {
     "stop":    cmd_stop,
     "mode":    cmd_mode,
     "why":     cmd_why,
+    "health":  cmd_health,
     "balance": cmd_balance,
     "today":   cmd_today,
     "state":   cmd_state,
@@ -735,6 +758,7 @@ _HELP = (
     ("stop <pár> [stratégia]", "console.help.stop"),
     ("mode <pár> [strat] live|signal", "console.help.mode"),
     ("why <pár> [stratégia]", "console.help.why"),
+    ("health", "console.help.health"),
     ("balance", "console.help.balance"),
     ("today", "console.help.today"),
     ("state", "console.help.state"),

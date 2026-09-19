@@ -94,7 +94,14 @@ def hour_profile(test_summary: dict, allowed_hours) -> list:
 
 def warnings(cfg: dict, symbol: str, strategy_name: str, data: dict,
              state: str = "", mode: str = "") -> list:
-    """A NÉMA bajok listája: `[{sev, text}, …]`, súlyosság szerint rendezve."""
+    """A NÉMA bajok listája: `[{sev, code, text}, …]`, súlyosság szerint rendezve.
+
+    ⚠ A `code` A STABIL AZONOSÍTÓ, a `text` csak a kijelzés. A felületnek elég
+    volt a mondat, de a karmester egészségőre ISMÉTLŐDÉST szűr (ugyanaz a lelet
+    ne kerüljön a krónikába minden körben), és ahhoz nyelvfüggetlen kulcs kell.
+    Ugyanez a szabály fogta meg a `core/quality.py` minősítéseit: ott a magyar
+    szó volt a rangsor kulcsa is, és angolra fordítva a tábla NÉMÁN rossz
+    sorrendet mutatott."""
     from core import gates as _gt
 
     out = []
@@ -109,6 +116,7 @@ def warnings(cfg: dict, symbol: str, strategy_name: str, data: dict,
     # sem áll semmi, ami elárulná.
     if not has_params:
         out.append({"sev": SEV_RISK if state == "live" else SEV_WARN,
+                    "code": "default_params",
                     "text": _t("ov.default_params",
                                suffix=(_t("ov.default_params.live")
                                        if state == "live" else "."))})
@@ -119,7 +127,7 @@ def warnings(cfg: dict, symbol: str, strategy_name: str, data: dict,
     # észrevétlen félreértés.
     _opt, _man = _ts(data.get("optimized_at")), _ts(data.get("manually_edited_at"))
     if _man and (not _opt or _man > _opt):
-        out.append({"sev": SEV_WARN,
+        out.append({"sev": SEV_WARN, "code": "manual_edit",
                     "text": _t("ov.manual_edit")})
 
     # ⚠ Kapu-eltérés: ha az optimalizálás más kapu-beállítással futott, mint ami
@@ -127,7 +135,7 @@ def warnings(cfg: dict, symbol: str, strategy_name: str, data: dict,
     saved_gates = data.get("exec_gates")
     now_gates = bool((cfg.get("optimizer") or {}).get("exec_gates", True))
     if saved_gates is not None and bool(saved_gates) != now_gates:
-        out.append({"sev": SEV_RISK,
+        out.append({"sev": SEV_RISK, "code": "gate_mismatch",
                     "text": _t(
                         "ov.gate_mismatch",
                         then=_t("ov.with_gates" if saved_gates
@@ -139,7 +147,7 @@ def warnings(cfg: dict, symbol: str, strategy_name: str, data: dict,
     # az optimalizáló ÉPPEN azok alapján választotta a nyertest. (Holdout-mérés:
     # a szennyezett OOS-számok 2,51×-esre fújtak.)
     if ts.get("trades"):
-        out.append({"sev": SEV_INFO,
+        out.append({"sev": SEV_INFO, "code": "not_independent",
                     "text": _t("ov.not_independent")})
 
     # ⚠ 100% FÖLÖTTI visszaesés: a mentett minősítésben ilyen szám azt jelenti,
@@ -153,28 +161,28 @@ def warnings(cfg: dict, symbol: str, strategy_name: str, data: dict,
     except (TypeError, ValueError):
         _mdd = None
     if _mdd is not None and _mdd >= 1.0:
-        out.append({"sev": SEV_RISK,
+        out.append({"sev": SEV_RISK, "code": "ruined",
                     "text": _t("ov.ruined", pct=f"{_mdd * 100:.0f}")})
 
     n = int(ts.get("trades") or 0)
     if 0 < n < 30:
-        out.append({"sev": SEV_WARN,
+        out.append({"sev": SEV_WARN, "code": "few_trades",
                     "text": _t("ov.few_trades", n=n)})
 
     age = _age_days(data.get("optimized_at"))
     if age is not None and age > 60:
-        out.append({"sev": SEV_WARN,
+        out.append({"sev": SEV_WARN, "code": "opt_age",
                     "text": _t("ov.opt_age", days=f"{age:.0f}")})
 
     if state == "live" and mode == "signal":
-        out.append({"sev": SEV_INFO,
+        out.append({"sev": SEV_INFO, "code": "signal_only",
                     "text": _t("ov.signal_only")})
 
     # Egyetlen kapu sincs bekapcsolva → minden jel átmegy.
     try:
         eff = _gt.effects_for(cfg or {}, symbol, strategy_name)
         if all(e == _gt.EFFECT_NONE for e in eff.values()):
-            out.append({"sev": SEV_WARN,
+            out.append({"sev": SEV_WARN, "code": "no_gates",
                         "text": _t("ov.no_gates")})
     except Exception:
         pass

@@ -222,11 +222,25 @@ megtörténhetne — most már automatikusan, éjjel.
 Döntésnapló és napi/heti riport: mi változott, mi kötött, **mi nem, és miért
 nem**. Nulla kockázat, azonnali érték — és az önállóság előfeltétele.
 
-### ② Egészségőr
-A projekt visszatérő hibaosztályának automatizált vadászata: némán hatástalan
-kapu, elévült `pv1_point`, ujjlenyomat-eltérés a mentett paraméter és az élő
-között, lock-ütközés, zárt piac, elakadt optimalizálás. Súlyozott eszkaláció
-(napló → dashboard → Telegram → freeze).
+### ② Egészségőr ✅ (v3.77.0)
+A projekt visszatérő hibaosztályának automatizált vadászata. **Nem írja újra a
+meglévő detektorokat**, hanem összefogja őket (`config_check`,
+`config_freshness`, `overview`), és hozzáteszi, amit csak a mérésből lehet tudni:
+
+| Lelet | Mit fog meg |
+|---|---|
+| `dried_up` | fut, nem blokkolja semmi, nem is veszít — csak nem köt (a mentett várakozás töredékét hozza) |
+| `gate_wall.<kapu>` | egy kapu a napi jelek ~mindegyikét blokkolta, és egy kötés sem lett |
+| `silent_days` | N olyan napja nincs jel, **amikor a motor futott** (hétvége és leállás nem számít) |
+| `source_error.<forrás>` | egy ellenőrzés NEM futott le — a mérés hiánya is lelet |
+
+Óránként fut a motorban; a leletek naponta egyszer a **krónikába** kerülnek
+(`data/conductor/decisions.jsonl`), így a „mióta áll fenn?" utólag
+megválaszolható. Parancs: `health` (a konzolon, a TUI-n és Telegramon is).
+
+⚠ A jelentés SOSEM mondja, hogy „minden rendben": a `config_freshness`
+MT5-kapcsolat nélkül üres listát ad, és az üres lista megkülönböztethetetlen a
+„minden friss"-től. Csak annyit állít, hogy NINCS LELET.
 
 ### ③ Életciklus-kapus
 A promóciós létra, írott feltételekkel:
@@ -505,7 +519,7 @@ conductor/
 | Fázis | Tartalom | Kockázat |
 |---|---|---|
 | **F0** ✅ | belépő-telemetria · élő KPI-tár · várt aktivitás · pillanatkép · **„miért nem kötött" jelentés** (v3.75.0–v3.76.0) | nulla (csak mérés) |
-| **F1** | egészségőr · napi riport · krónika · **árnyék-mód** | nulla |
+| **F1** | egészségőr ✅ · krónika ✅ (v3.77.0) · napi riport · **árnyék-mód** | nulla |
 | **F2** | javaslatmotor · Karmester fül · optimalizálás-ütemező (L1) | alacsony |
 | **F3** | életciklus-létra · kockázati karmester (L2→L3) | közepes |
 | **F4** | LLM tanácsadó réteg · természetes nyelvű lekérdezés | alacsony (csak javasol) |
