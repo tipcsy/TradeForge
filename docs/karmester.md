@@ -544,9 +544,28 @@ determinisztikus marad.
   ⚠ Telegramon a postaláda **csak olvasható**. Az `accept` valódi kötést
   kapcsolhatna be egy chatüzenetből — az a `notify.answer_trading` kategóriája
   (külön opt-in, gombos megerősítéssel), nem egy parancs-listás döntés.
-* **Mátrix** — a `12 × 5` rács egy képen, cellánként az életciklus-állapottal és
-  a legsúlyosabb figyelmeztetéssel. *Ez váltja ki azt, amit ma fejben tartasz.*
-* **Krónika** — mit tett a karmester, visszavonás gombbal.
+* **Mátrix** ✅ — a `12 × 5` rács egy képen, cellánként az életciklus-fokkal és
+  a leletek számával. *Ez váltja ki azt, amit ma fejben tartasz.*
+* **Krónika** ✅ — mit tett a karmester, visszavonás gombbal.
+
+A fül (`dashboard/conductor_tab.py`, v3.81.0) **nem tud semmit**: se házirendet,
+se küszöböt, se végrehajtást. Egyetlen seamet kap — a `DashboardWindow._cmd_ctx`
+által előállított `console_cmd.Context`-et —, és minden döntés a közös
+parancsrétegen megy. Egy „felületi másolat" a szabályokból az első
+config-változásnál elcsúszna, és a fül magabiztosan hazudna.
+
+Két dolog, ami a felületi valóságból következett:
+
+* **Két frissítés, két költség.** A dashboard köre 30 másodpercenként fut; a
+  házirendek újraszámolása (cellánként fájlokkal) ott mérhető lassulást okozna
+  a felület szálán — a projekt ezt egyszer már megmérte (7,64 → 0,31 mp/kör).
+  A periodikus `refresh()` ezért csak a postaláda- és krónika-fájlt olvassa; a
+  teljes átvizsgálás a **⟳ Átvizsgálás** gombon (és az első megnyitáson) megy.
+* **Csak változáskor rajzolunk újra.** A két állapotfájl módosulási ideje a
+  kapu. Enélkül a fül 30 másodpercenként villogna, a görgetés visszaugrana
+  olvasás közben, és egy épp megnyomott gomb kicsúszhatna az ujjad alól. Saját
+  döntés után viszont kényszerített újrarajzolás kell: a másodperc-felbontású
+  mtime kiszűrné a saját hatásunkat.
 
 Telegramon ugyanez, a `telegram_cmd.ENGEDETT` engedélyező lista bővítésével,
 a meglévő gombos megerősítés-mintával.
@@ -584,7 +603,7 @@ conductor/
 |---|---|---|
 | **F0** ✅ | belépő-telemetria · élő KPI-tár · várt aktivitás · pillanatkép · **„miért nem kötött" jelentés** (v3.75.0–v3.76.0) | nulla (csak mérés) |
 | **F1** ✅ | egészségőr · krónika (v3.77.0) · életciklus-létra + **árnyék-mód** (v3.78.0) · napi riport (v3.79.0) | nulla |
-| **F2** | **javaslat-postaláda** ✅ (v3.80.0) · Karmester fül · optimalizálás-ütemező (L1) | alacsony |
+| **F2** | **javaslat-postaláda** ✅ (v3.80.0) · **Karmester fül** ✅ (v3.81.0) · optimalizálás-ütemező (L1) | alacsony |
 | **F3** | életciklus-létra · kockázati karmester (L2→L3) | közepes |
 | **F4** | LLM tanácsadó réteg · természetes nyelvű lekérdezés | alacsony (csak javasol) |
 | **F5** | portfólió-elosztás, slot-keret | magas — utoljára |

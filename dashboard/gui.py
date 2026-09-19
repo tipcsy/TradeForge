@@ -2814,6 +2814,18 @@ class DashboardWindow:
             max_age_hours=self._signal_max_age_hours,
             open_of=self._signal_open_of)
 
+        # ── KARMESTER fül (docs/karmester.md) ────────────────────────────
+        # ⚠ A FÜL NEM TUD SEMMIT: se házirendet, se küszöböt, se végrehajtást —
+        # minden a `conductor/` csomagban van, és a döntés a KÖZÖS
+        # parancs-rétegen megy (ugyanazon az úton, mint a konzol és a Telegram).
+        # Ezért egyetlen seamet kap: a `Context`-et előállító függvényt.
+        cond_frame = tk.Frame(self._notebook, bg=BG)
+        self._notebook.add(cond_frame, text=_t("gui.karmester"))
+        from dashboard.conductor_tab import ConductorTab
+        self._conductor_tab = ConductorTab(
+            cond_frame, ctx_provider=self._cmd_ctx,
+            on_changed=self._apply_filter_sort)
+
         bt_frame = tk.Frame(self._notebook, bg=BG_BT)
         self._notebook.add(bt_frame, text=_t("gui.portfolio_backtest"))
         self._bt_tab = PortfolioBacktestTab(bt_frame, cfg, mono_font, small_font, header_font)
@@ -6923,6 +6935,16 @@ class DashboardWindow:
                 self._closed_tab.refresh()
             except Exception:
                 pass
+
+        # Karmester fül — ⚠ OLCSÓ frissítés (postaláda + krónika fájlolvasás).
+        # A házirendek újraszámolása a fül „Átvizsgálás" gombján megy: itt,
+        # a felület körében mérhető lassulást okozna (a projekt ezt egyszer
+        # már megmérte: 7,64 → 0,31 mp/kör).
+        if hasattr(self, "_conductor_tab"):
+            try:
+                self._conductor_tab.refresh()
+            except Exception:
+                log.debug("A Karmester fül frissítése elbukott", exc_info=True)
 
         # ⚠ A NAPLÓ NE CSAK LÉTEZZEN — LÁTSZÓDJON. Egy fájl, amibe senki nem néz
         # bele, majdnem annyira néma, mint a semmi. Ha bármi ERROR/CRITICAL
