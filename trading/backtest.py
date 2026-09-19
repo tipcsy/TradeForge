@@ -35,6 +35,7 @@ from core.risk_manager import (calc_lot, calc_effective_slots,
                                fits_budget as _rm_fits)
 from core import risky_mode
 from core import trade_costs as _costs
+from core import epoch as _epoch
 from strategy import get_strategy, get_strategy_by_name
 
 logging.basicConfig(
@@ -959,7 +960,7 @@ def _build_tf_align_evaluator(cfg, symbol, strategy_name, df_m1,
             tf = int(tf)
             closes = (close_m1 if tf <= 1
                       else close_m1.resample(f"{tf}min").last().dropna())
-            open_unix = (closes.index.view("int64") // 1_000_000_000).astype(_np.int64)
+            open_unix = _epoch.sec(closes.index)
             bars_by_tf[tf] = (open_unix, closes.to_numpy(dtype=float))
             if len(closes) < sma:
                 # Az él ilyenkor BLOKKOLNA (nincs elég gyertya az SMA-hoz), ezért a
@@ -1128,8 +1129,12 @@ def _epoch_ns(idx):
 
     ⚠ NANOSZEKUNDUM, nem másodperc: a másodpercre kerekítés egy nem egész
     másodperces idősík-deltánál NÉMÁN elcsúsztatná a gyertyahatárt. A `Timedelta`
-    `.value`-ja is ns, tehát a kettő ugyanabban a mértékegységben marad."""
-    return idx.values.astype("int64")
+    `.value`-ja is ns, tehát a kettő ugyanabban a mértékegységben marad.
+
+    ⚠ ÉS NEM `idx.values.astype("int64")`: az az index SAJÁT felbontását adja,
+    ami a pandas 3-ban mikroszekundum is lehet — a `_delta_ns`-hez mérve 1000x
+    eltérés, némán, nulla jelzéssel. Lásd `core/epoch.py`."""
+    return _epoch.ns(idx)
 
 
 def _row_at(cols, arr, index, i):

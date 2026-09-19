@@ -414,8 +414,9 @@ def mark_blocked(recs: list, bars, strategy: str = "") -> int:
     recs.sort(key=lambda r: int(r["t"]))
     for r in recs:                       # újraszámolás: a régi jelölés nem él túl
         r.pop("skip", None)
+    from core import epoch as _epoch     # lusta import: a modul indulási ideje
     try:
-        _t = np.asarray(bars.index.asi8, dtype="int64") // 1_000_000_000
+        _t = _epoch.sec(bars.index)
         hi = np.asarray(bars["high"], dtype=float)
         lo = np.asarray(bars["low"], dtype=float)
     except Exception:
