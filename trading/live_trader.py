@@ -3770,6 +3770,8 @@ def run(cfg: dict, slot_mgr: SlotManager):
         _tlm.set_day_provider(mt5_connector.server_today)
         _tlm.prune(int(_ccfg.telemetry(cfg)["keep_days"]))
         _cjrn.prune(int(_ccfg.journal(cfg)["keep_days"]))
+        from conductor import inbox as _cibx0
+        _cibx0.prune(int(_ccfg.inbox(cfg)["keep_days"]))
     except Exception:
         # A mérés SOHA nem állíthatja meg a kereskedést.
         log.debug("karmester-telemetria: az indítás kimaradt", exc_info=True)
@@ -4133,6 +4135,17 @@ def run(cfg: dict, slot_mgr: SlotManager):
                     if _uj_j:
                         log.info("karmester (árnyék): %d új javaslat a "
                                  "krónikában", _uj_j)
+                    # ── POSTALÁDA (F2): a javaslatok VÁRAKOZNAK a döntésedre ──
+                    # ⚠ A MOTOR NEM DÖNT: a tételek `pending` állapotban állnak,
+                    # amíg az `accept`/`reject`/`defer` paranccsal (vagy a
+                    # felületen) nem döntesz róluk. A beolvasztás azért kell itt,
+                    # hogy a javaslat akkor is várjon rád, ha aznap egyszer sem
+                    # kérdezel rá.
+                    from conductor import inbox as _cibx
+                    _st = _cibx.sync(cfg, _jav)
+                    if _st.get("new"):
+                        log.info("karmester: %d új javaslat a postaládában "
+                                 "(`inbox`)", _st["new"])
                 except Exception:
                     # ⚠ A MÉRÉS SOHA NEM ÁLLÍTHATJA MEG A KERESKEDÉST.
                     log.debug("karmester-egészségőr: a kör kimaradt",

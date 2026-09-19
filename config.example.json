@@ -261,6 +261,16 @@
       "_comment_stale": "A mentett keszlet ennyi nap utan avult -> ujraoptimalizalas javaslat.",
       "stale_params_days": 60
     },
+    "inbox": {
+      "_comment": "JAVASLAT-POSTALADA (F2): a karmester javaslatai varnak a dontesedre. Parancsok: `inbox` · `accept <id>` · `reject <id>` · `defer <id>` · `undo <id>`. ⚠ A motor NEM dont: a tetelek `pending` allapotban allnak.",
+      "_comment_expire": "A javaslat ennyi nap utan maganak kiesik. Ez a MASODIK vedvonal: az elso az, hogy az elfogadas pillanataban ujraszamoljuk, igaz-e meg.",
+      "expire_days": 7,
+      "_comment_reject": "AZ ELVETESNEK MEG KELL MARADNIA: ha az elvetett javaslat masnap ujraszuletne, az elvetes semmit nem jelentene.",
+      "reject_cooldown_days": 14,
+      "defer_days": 3,
+      "_comment_keep": "A LEZART tetelek takaritasa (a TORTENET a kronikaban van).",
+      "keep_days": 30
+    },
     "journal": {
       "_comment": "KRONIKA: mit latott (es kesobb mit tett) a karmester. Append-only JSONL.",
       "keep_days": 365

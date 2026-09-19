@@ -677,6 +677,108 @@ def cmd_report(ctx: Context, args: list, confirmed: bool = False) -> Result:
     return Result(sorok)
 
 
+# ---------------------------------------------------------------------------
+# JAVASLAT-POSTALÁDA (a karmester F2 fázisa)
+# ---------------------------------------------------------------------------
+# ⚠ MIÉRT ITT, ÉS NEM A KARMESTERBEN. A döntés VÉGREHAJTÁSA ugyanazon az úton
+# megy, mint a kézi `play`/`stop`/`mode` — a karmester nem lehet negyedik írási
+# út. Itt tehát csak a PARANCS-alak van; a szabályok a `conductor/`-ban.
+
+
+def _inbox_sync(ctx: Context):
+    """A friss javaslatok beolvasztása a postaládába. Visszaad: a statisztika."""
+    from conductor import inbox as _ib
+    from conductor.policies import health as _h, lifecycle as _lc
+
+    _sof = lambda s: ctx.strategies_of(s) or []
+    lel = _h.findings(ctx.cfg, strategies_of=_sof)
+    jav = _lc.proposals(ctx.cfg, strategies_of=_sof, health_findings=lel)
+    return _ib.sync(ctx.cfg, jav)
+
+
+def _inbox_tetel(ctx: Context, args: list, parancs: str):
+    """`(tétel, hibás_Result)` — a közös azonosító-feloldás a négy döntéshez."""
+    from conductor import inbox as _ib
+
+    if not args:
+        return None, Result([_t("conductor.inbox.usage", cmd=parancs)], ok=False)
+    e = _ib.get(args[0])
+    if not e:
+        return None, Result([_t("conductor.inbox.unknown", id=args[0])], ok=False)
+    return e, None
+
+
+def cmd_inbox(ctx: Context, args: list, confirmed: bool = False) -> Result:
+    """`inbox` — a karmester nyitott javaslatai, azonosítóval."""
+    from conductor import inbox as _ib
+    from conductor import report as _crep
+
+    stat = {}
+    try:
+        stat = _inbox_sync(ctx)
+    except Exception:
+        # ⚠ A friss javaslatok hiánya nem viheti el a MÁR MEGLÉVŐ postaládát:
+        # a nyitott ügyekről akkor is dönteni kell, ha a házirend most elakadt.
+        log.debug("karmester: a postaláda frissítése kimaradt", exc_info=True)
+    return Result(_crep.inbox_lines(_ib.items(_ib.PENDING), stat=stat))
+
+
+def cmd_accept(ctx: Context, args: list, confirmed: bool = False) -> Result:
+    """`accept <id>` — javaslat elfogadása ÉS végrehajtása.
+
+    ⚠ AZ ELFOGADÁS NEM VAKON HAJT VÉGRE: a `conductor.actions` újraszámolja a
+    javaslatot, és csak akkor lép, ha a házirend MA IS ugyanazt mondja."""
+    from conductor import actions as _act
+    from conductor import inbox as _ib
+
+    e, hiba = _inbox_tetel(ctx, args, "accept")
+    if hiba:
+        return hiba
+    if e.get("state") != _ib.PENDING:
+        return Result([_t("conductor.inbox.not_pending", id=e["id"],
+                          state=e.get("state"))], ok=False)
+    return _act.apply(ctx, e, confirmed=confirmed, by="human")
+
+
+def cmd_reject(ctx: Context, args: list, confirmed: bool = False) -> Result:
+    """`reject <id>` — elvetés. A javaslat egy ideig NEM születik újra."""
+    from conductor import config as _ccfg
+    from conductor import inbox as _ib
+
+    e, hiba = _inbox_tetel(ctx, args, "reject")
+    if hiba:
+        return hiba
+    _ib.set_state(e["id"], _ib.REJECTED, ctx.cfg, by="human")
+    return Result([_t("conductor.inbox.rejected", text=e.get("text") or e["id"],
+                      days=int(_ccfg.inbox(ctx.cfg)["reject_cooldown_days"]))])
+
+
+def cmd_defer(ctx: Context, args: list, confirmed: bool = False) -> Result:
+    """`defer <id>` — „most nem": a javaslat néhány napra félrekerül."""
+    from conductor import config as _ccfg
+    from conductor import inbox as _ib
+
+    e, hiba = _inbox_tetel(ctx, args, "defer")
+    if hiba:
+        return hiba
+    _ib.set_state(e["id"], _ib.DEFERRED, ctx.cfg, by="human")
+    return Result([_t("conductor.inbox.deferred", text=e.get("text") or e["id"],
+                      days=int(_ccfg.inbox(ctx.cfg)["defer_days"]))])
+
+
+def cmd_undo(ctx: Context, args: list, confirmed: bool = False) -> Result:
+    """`undo <id>` — egy VÉGREHAJTOTT javaslat visszavonása.
+
+    ⚠ A VISSZAVONÁS IS AKCIÓ: egy visszaminősítés visszavonása VALÓDI KÖTÉST
+    kapcsol vissza, ezért ugyanazon a megerősítés-mintán megy."""
+    from conductor import actions as _act
+
+    e, hiba = _inbox_tetel(ctx, args, "undo")
+    if hiba:
+        return hiba
+    return _act.undo(ctx, e, confirmed=confirmed, by="human")
+
+
 def cmd_balance(ctx: Context, args: list, confirmed: bool = False) -> Result:
     a = ctx.account() or {}
     if not a:
@@ -794,6 +896,11 @@ COMMANDS: dict = {
     "health":  cmd_health,
     "plan":    cmd_plan,
     "report":  cmd_report,
+    "inbox":   cmd_inbox,
+    "accept":  cmd_accept,
+    "reject":  cmd_reject,
+    "defer":   cmd_defer,
+    "undo":    cmd_undo,
     "balance": cmd_balance,
     "today":   cmd_today,
     "state":   cmd_state,
@@ -816,6 +923,11 @@ _HELP = (
     ("health", "console.help.health"),
     ("plan", "console.help.plan"),
     ("report", "console.help.report"),
+    ("inbox", "console.help.inbox"),
+    ("accept <id>", "console.help.accept"),
+    ("reject <id>", "console.help.reject"),
+    ("defer <id>", "console.help.defer"),
+    ("undo <id>", "console.help.undo"),
     ("balance", "console.help.balance"),
     ("today", "console.help.today"),
     ("state", "console.help.state"),

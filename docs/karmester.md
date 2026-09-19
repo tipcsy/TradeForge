@@ -517,9 +517,33 @@ determinisztikus marad.
 
 **„Karmester" fül / nézet**, mind a három felületen ugyanabból az állapotból:
 
-* **Postaláda** — javaslat-kártyák: *mit, miért, mi a bizonyíték, mi a visszaút*
-  → Elfogad / Elvet / Elhalaszt. A `core/signal_offer.py` lejárat- és
-  egyszer-használhatóság-mintája itt is érvényes.
+* **Postaláda** ✅ (v3.80.0) — javaslat-kártyák: *mit, miért, mi a bizonyíték,
+  mi a visszaút* → Elfogad / Elvet / Elhalaszt. A `core/signal_offer.py`
+  lejárat- és egyszer-használhatóság-mintája itt is érvényes; a parancsréteg
+  felől: `inbox` · `accept <id>` · `reject <id>` · `defer <id>` · `undo <id>`.
+
+  Négy szabály, ami kóddá vált benne:
+
+  1. **A javaslat nem parancs.** Az elfogadás pillanatában a házirend
+     ÚJRASZÁMOLJA a javaslatot, és csak akkor lép, ha ma is ugyanazt mondja.
+     Egy tegnapi „minősítsd vissza" egy azóta megjavult cellán kárt tenne — és
+     az ilyen, időközben elavult döntés a legnehezebben észrevehető hiba:
+     minden lépés helyesnek *látszik*, csak épp egy régi világra vonatkozik.
+     A lejárat csak a második védvonal.
+  2. **Az elvetésnek meg kell maradnia.** Ha az elvetett javaslat másnap
+     újraszületne, az elvetés semmit nem jelentene — a postaláda pedig arra
+     tanítana, hogy hagyd figyelmen kívül.
+  3. **Minden akció rögzíti az előző állapotot.** A visszaút a tételbe és a
+     krónikába is bekerül; a visszavonás maga is akció (egy visszaminősítés
+     visszavonása valódi kötést kapcsol vissza — ugyanaz a megerősítés-minta).
+  4. **Amihez nincs végrehajtási út, arra nem teszünk úgy, mintha lenne.** Az
+     optimalizálás ma csak a felületen indítható (`OptimizerController`), fej
+     nélküli sor nincs — az ilyen tétel TANÁCSKÉNT jelenik meg, és az elfogadás
+     megmondja, hol végezhető el.
+
+  ⚠ Telegramon a postaláda **csak olvasható**. Az `accept` valódi kötést
+  kapcsolhatna be egy chatüzenetből — az a `notify.answer_trading` kategóriája
+  (külön opt-in, gombos megerősítéssel), nem egy parancs-listás döntés.
 * **Mátrix** — a `12 × 5` rács egy képen, cellánként az életciklus-állapottal és
   a legsúlyosabb figyelmeztetéssel. *Ez váltja ki azt, amit ma fejben tartasz.*
 * **Krónika** — mit tett a karmester, visszavonás gombbal.
@@ -560,7 +584,7 @@ conductor/
 |---|---|---|
 | **F0** ✅ | belépő-telemetria · élő KPI-tár · várt aktivitás · pillanatkép · **„miért nem kötött" jelentés** (v3.75.0–v3.76.0) | nulla (csak mérés) |
 | **F1** ✅ | egészségőr · krónika (v3.77.0) · életciklus-létra + **árnyék-mód** (v3.78.0) · napi riport (v3.79.0) | nulla |
-| **F2** | javaslatmotor · Karmester fül · optimalizálás-ütemező (L1) | alacsony |
+| **F2** | **javaslat-postaláda** ✅ (v3.80.0) · Karmester fül · optimalizálás-ütemező (L1) | alacsony |
 | **F3** | életciklus-létra · kockázati karmester (L2→L3) | közepes |
 | **F4** | LLM tanácsadó réteg · természetes nyelvű lekérdezés | alacsony (csak javasol) |
 | **F5** | portfólió-elosztás, slot-keret | magas — utoljára |

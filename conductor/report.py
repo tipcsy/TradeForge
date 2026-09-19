@@ -256,3 +256,35 @@ def daily_lines(cfg: dict, *, strategies_of=None, day=None) -> list:
         if len(_sh) > 8:
             sorok.append(_t("conductor.daily.more", n=len(_sh) - 8))
     return sorok
+
+
+def inbox_lines(tetelek: list, *, stat: dict = None) -> list:
+    """A postaláda nyitott tételei — azonosítóval, hogy dönteni lehessen róluk.
+
+    ⚠ AZ AZONOSÍTÓ NEM DÍSZ. Egy szöveges „igen" két egyidejű javaslatnál
+    kétértelmű volna, és épp rossz cellán csinálna valamit — ez a
+    `core/signal_offer.py` tanulsága, ott gombbal, itt rövid kóddal oldva.
+
+    ⚠ ÉS MEGKÜLÖNBÖZTETJÜK, AMIT NEM TUDUNK VÉGREHAJTANI. Az optimalizálás ma
+    csak a felületen indítható; az ilyen tétel TANÁCSKÉNT jelenik meg, nem
+    elfogadható javaslatként. Egy lista, amiben a végrehajthatatlan ugyanúgy néz
+    ki, mint a végrehajtható, arra tanít, hogy ne bízz benne."""
+    from conductor import actions as _act
+
+    if not tetelek:
+        return [_t("conductor.inbox.none")]
+    sorok = [_t("conductor.inbox.head", n=len(tetelek))]
+    if stat and (stat.get("new") or stat.get("expired")):
+        sorok.append(_t("conductor.inbox.new", n=stat.get("new") or 0,
+                        expired=stat.get("expired") or 0))
+    for e in tetelek:
+        szoveg = e.get("text") or e.get("code") or ""
+        if not _act.can_execute(e.get("action")):
+            sorok.append(_t("conductor.inbox.advice", id=e.get("id"), text=szoveg))
+            continue
+        # ⚠ A PÉNZT BEKAPCSOLÓ javaslat megjelölve — a terv szerint ez emberi
+        # jóváhagyáshoz kötött, autonómia-szinttől függetlenül.
+        sorok.append(_t("conductor.inbox.row", id=e.get("id"),
+                        mark="⚠" if e.get("needs_human") else "•", text=szoveg))
+    sorok.append(_t("conductor.inbox.hint"))
+    return sorok

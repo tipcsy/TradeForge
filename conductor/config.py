@@ -58,6 +58,20 @@ DEFAULTS = {
         # Az ELSZÁRADÁS küszöbeit az egészségőr adja (`health.dried_up_*`) — ott
         # van egy helyen, hogy a lelet és a döntés ne mondhasson mást.
     },
+    "inbox": {
+        # A javaslat ennyi nap után magától kiesik. ⚠ Ez a MÁSODIK védvonal: az
+        # elsődleges az, hogy az elfogadás pillanatában újra ellenőrizzük,
+        # igaz-e még (lásd `conductor/actions.py`).
+        "expire_days": 7,
+        # ⚠ AZ ELVETÉSNEK MEG KELL MARADNIA. Ha az elvetett javaslat másnap
+        # újraszületne, az elvetés semmit nem jelentene — a postaláda pedig arra
+        # tanítana, hogy hagyd figyelmen kívül.
+        "reject_cooldown_days": 14,
+        # Az elhalasztás („most nem") ennyi napra teszi félre.
+        "defer_days": 3,
+        # A LEZÁRT tételek takarítása (a TÖRTÉNET a krónikában van).
+        "keep_days": 30,
+    },
     "journal": {
         "keep_days": 365,
         # A krónika visszaolvasásakor legfeljebb ennyi sort nézünk (a duplikátum-
@@ -108,6 +122,11 @@ def telemetry(cfg: dict) -> dict:
 def lifecycle(cfg: dict) -> dict:
     """Az életciklus-létra küszöbei."""
     return _blokk(cfg, "lifecycle")
+
+
+def inbox(cfg: dict) -> dict:
+    """A javaslat-postaláda küszöbei."""
+    return _blokk(cfg, "inbox")
 
 
 def journal(cfg: dict) -> dict:
