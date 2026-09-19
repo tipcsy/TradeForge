@@ -146,9 +146,13 @@ check("...de KIIRJA, hogy alapertelmezettel indul",
 _gui = (ROOT / "dashboard" / "gui.py").read_text(encoding="utf-8")
 check("...es a felulet ezen a retegen indit",
       "_cc.start_strategies(" in _gui)
-# A strategia-engedelyezettseg kapuja MEGMARAD: az mas kerdes.
-check("az engedelyezettseg kapuja megmaradt",
-      "if not self._strategy_enabled(symbol, name):" in _start)
+# ⚠ A strategia-engedelyezettseg kapuja MEGMARAD — csak ATKOLTOZOTT a KOZOS
+# parancs-retegbe (v3.73.0). Korabban a felulet sajat masolata volt; igy a
+# konzol/TUI/Telegram is ugyanugy megtagadja a nem engedelyezett strategiat.
+check("az engedelyezettseg kapuja megmaradt (a kozos retegben)",
+      "if n not in engedett:" in _start)
+check("...es a felulet NEM tartja a sajat masolatat",
+      "if not self._strategy_enabled(symbol, name):" not in _gui)
 
 # Az Attekintes figyelmeztetese: elesben SULYOSABB.
 from core import overview as ov

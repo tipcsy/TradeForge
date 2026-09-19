@@ -146,7 +146,14 @@ check("ismeretlen kimenet: nem dob, de nem is szamolja",
       tl.record("X", "y", "BUY", "nincsilyen", day=NAP) is False)
 _elotte = dict(tl.cell("GOLD", "csilla", NAP))
 _rossz_dir = cp.DIR
-cp.DIR = Path("/dev/null/nemletezik")       # irhatatlan
+# ⚠ HORDOZHATO „IRHATATLAN" UTVONAL. Az elso valtozat `/dev/null/...`-t
+# hasznalt — az Windowson egy sima `C:\dev\null\...` mappa, amit a `mkdir`
+# VIDAMAN letrehoz, tehat a teszt ott nem azt merte, amit allitott. Egy LETEZO
+# FAJL alatti utvonalra viszont MINDKET rendszeren elbukik a mappa-keszites.
+_fajl = TMP_FAJL = cp.DIR.parent / "ez_egy_fajl.txt"
+_fajl.parent.mkdir(parents=True, exist_ok=True)
+_fajl.write_text("x", encoding="utf-8")
+cp.DIR = _fajl / "nemletezik"
 try:
     check("irhatatlan mappa: a rogzites NEM dob", 
           tl.record("GOLD", "csilla", "BUY", tl.NO_SLOT, bar_ts=99, day=NAP) is True)

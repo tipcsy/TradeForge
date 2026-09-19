@@ -348,10 +348,18 @@ n = notify.Notifier(notify.Config(enabled=True, token="T", chat_ids=("1",),
 n._idozitett()
 check("⚠ hibás tartalom-előállítás sem dob", True)
 
-# A napi összefoglaló UGYANABBÓL a `cmd_today`-ből épül, mint a `/today`.
+# A napi összefoglaló a KÖZÖS parancs-rétegből épül, mint a `/today`.
+# ⚠ v3.79.0 ÓTA a `cmd_report`-on át: az esti üzenet a karmester szakaszait is
+# viszi (mérés · leletek · árnyék-javaslatok). A SZABÁLY viszont változatlan —
+# EGY forrás: a `cmd_report` maga a `cmd_today`-re épül, tehát a 23:00-kor
+# kapott üzenet és a kézzel lekérdezett `/today` nem mondhat mást ugyanarról a
+# napról. Egy második, külön épülő esti üzenet pont ezt törné el.
 _lt = (ROOT / "trading" / "live_trader.py").read_text(encoding="utf-8")
-check("⚠ az esti üzenet a KÖZÖS `cmd_today`-ből jön",
-      "cmd_today(_ctx" in _lt and "daily=_napi_szoveg" in _lt)
+_cc_src = (ROOT / "core" / "console_cmd.py").read_text(encoding="utf-8")
+check("⚠ az esti üzenet a KÖZÖS parancs-rétegből jön",
+      "_cc.cmd_report(_ctx" in _lt and "daily=_napi_szoveg" in _lt)
+check("⚠ ...és a `cmd_report` a `cmd_today`-re épül (egy forrás)",
+      "cmd_today(ctx, []).lines" in _cc_src)
 check("⚠ ...és a Telegram-parancsok UGYANAZT a környezetet kapják",
       _lt.count("_cc.live_context(") == 1 and "_tgc.setup(cfg, _ctx)" in _lt)
 
