@@ -50,7 +50,7 @@ log = logging.getLogger(__name__)
 # kimarad: egy felig hasznalhato postalada (latod, de nem donthetsz) zavarobb,
 # mint egy tisztan olvaso nezet.
 ENGEDETT = ("help", "balance", "pos", "today", "report", "why", "health",
-            "plan", "inbox", "state", "heart", "play", "stop")
+            "plan", "inbox", "optq", "state", "heart", "play", "stop")
 
 # Meddig él egy megerősítő gomb.
 AJANLAT_MP = 600
@@ -64,8 +64,8 @@ POLL_MP = 25
 # A parancs-menü sorrendje. ⚠ NEM ábécé: a leggyakrabban használt kerül előre,
 # és a két ÁLLÍTÓ parancs (`play`/`stop`) a végére — hogy ne azokra essen a
 # mutatóujj, amikor csak megnézni akarsz valamit.
-MENU_SORREND = ("state", "pos", "today", "report", "inbox", "why", "health",
-                "plan", "balance", "heart", "help", "play", "stop")
+MENU_SORREND = ("state", "pos", "today", "report", "inbox", "optq", "why",
+                "health", "plan", "balance", "heart", "help", "play", "stop")
 
 
 def parancs_lista(nyelv: str = "") -> list:

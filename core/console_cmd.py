@@ -779,6 +779,25 @@ def cmd_undo(ctx: Context, args: list, confirmed: bool = False) -> Result:
     return _act.undo(ctx, e, confirmed=confirmed, by="human")
 
 
+def cmd_optq(ctx: Context, args: list, confirmed: bool = False) -> Result:
+    """`optq [cancel <id>]` — a fej nélküli optimalizálás-sor.
+
+    ⚠ A SOR HAJTÁSA A MOTORÉ (óránként), nem ezé a parancsé: egy alprocessz
+    indítása egy lekérdezés mellékhatásaként meglepetés volna. Itt csak
+    megnézzük, mi van benne — és kivehetünk belőle egy várakozó tételt."""
+    from conductor import optqueue as _q
+    from conductor import report as _crep
+
+    if args and str(args[0]).lower() == "cancel":
+        if len(args) < 2:
+            return Result([_t("conductor.inbox.usage", cmd="optq cancel")],
+                          ok=False)
+        if _q.cancel(args[1]):
+            return Result([_t("conductor.optq.cancelled", id=args[1])])
+        return Result([_t("conductor.optq.cancel_failed", id=args[1])], ok=False)
+    return Result(_crep.optq_lines(_q.items()))
+
+
 def cmd_balance(ctx: Context, args: list, confirmed: bool = False) -> Result:
     a = ctx.account() or {}
     if not a:
@@ -901,6 +920,7 @@ COMMANDS: dict = {
     "reject":  cmd_reject,
     "defer":   cmd_defer,
     "undo":    cmd_undo,
+    "optq":    cmd_optq,
     "balance": cmd_balance,
     "today":   cmd_today,
     "state":   cmd_state,
@@ -928,6 +948,7 @@ _HELP = (
     ("reject <id>", "console.help.reject"),
     ("defer <id>", "console.help.defer"),
     ("undo <id>", "console.help.undo"),
+    ("optq [cancel <id>]", "console.help.optq"),
     ("balance", "console.help.balance"),
     ("today", "console.help.today"),
     ("state", "console.help.state"),

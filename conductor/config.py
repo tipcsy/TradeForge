@@ -72,6 +72,19 @@ DEFAULTS = {
         # A LEZÁRT tételek takarítása (a TÖRTÉNET a krónikában van).
         "keep_days": 30,
     },
+    "optqueue": {
+        # ⚠ ALAPBÓL EGY. Az optimalizálás órákig tartó, CPU-nehéz munka, és az
+        # ÉLŐ MOTOR MELLETT fut: hat párhuzamos futás elvenné a gépet a
+        # kereskedés elől. (Az `optimizer.max_parallel_optimizers` a felület
+        # saját sora — ez a karmesteré.)
+        "max_parallel": 1,
+        # Ennyi óra után egy „fut" tételt elveszettnek nyilvánítunk, ha a motor
+        # újraindult közben (nincs meg a processz-fogantyú). Egy örökké „fut"
+        # sor rosszabb, mint egy bevallott hiány.
+        "stale_hours": 12,
+        # A LEZÁRT tételek megtartása.
+        "keep_days": 14,
+    },
     "journal": {
         "keep_days": 365,
         # A krónika visszaolvasásakor legfeljebb ennyi sort nézünk (a duplikátum-
@@ -127,6 +140,11 @@ def lifecycle(cfg: dict) -> dict:
 def inbox(cfg: dict) -> dict:
     """A javaslat-postaláda küszöbei."""
     return _blokk(cfg, "inbox")
+
+
+def optqueue(cfg: dict) -> dict:
+    """A fej nélküli optimalizálás-sor küszöbei."""
+    return _blokk(cfg, "optqueue")
 
 
 def journal(cfg: dict) -> dict:

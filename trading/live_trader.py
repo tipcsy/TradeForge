@@ -3772,6 +3772,8 @@ def run(cfg: dict, slot_mgr: SlotManager):
         _cjrn.prune(int(_ccfg.journal(cfg)["keep_days"]))
         from conductor import inbox as _cibx0
         _cibx0.prune(int(_ccfg.inbox(cfg)["keep_days"]))
+        from conductor import optqueue as _coptq0
+        _coptq0.prune(int(_ccfg.optqueue(cfg)["keep_days"]))
     except Exception:
         # A mérés SOHA nem állíthatja meg a kereskedést.
         log.debug("karmester-telemetria: az indítás kimaradt", exc_info=True)
@@ -4146,6 +4148,17 @@ def run(cfg: dict, slot_mgr: SlotManager):
                     if _st.get("new"):
                         log.info("karmester: %d új javaslat a postaládában "
                                  "(`inbox`)", _st["new"])
+                    # ── OPTIMALIZÁLÁS-SOR hajtása (F2) ──────────────────
+                    # ⚠ ALPROCESSZBEN, NEM ITT. Az optimalizálás órákig tartó,
+                    # CPU-nehéz munka; a motor szálán a kereskedés körideje
+                    # nyúlna meg. A sor csak INDÍT és LEARAT — mindkettő
+                    # ezredmásodperces.
+                    from conductor import optqueue as _coptq
+                    _qs = _coptq.drain(
+                        cfg, strategies_of=lambda s: _ensn_h(cfg, s) or [])
+                    if _qs.get("started") or _qs.get("finished"):
+                        log.info("karmester-optimalizálás: %d indult, %d "
+                                 "befejeződött", _qs["started"], _qs["finished"])
                 except Exception:
                     # ⚠ A MÉRÉS SOHA NEM ÁLLÍTHATJA MEG A KERESKEDÉST.
                     log.debug("karmester-egészségőr: a kör kimaradt",

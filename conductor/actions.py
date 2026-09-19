@@ -24,12 +24,14 @@ A terv invariánsa: ami megtörtént, visszavonható. A visszaút a postaláda
 tételébe kerül (`undo`), és a krónikába is — így egy reggeli „mi történt éjjel?"
 után egy paranccsal visszaállítható az előző állapot.
 
-── AMIHEZ MÉG NINCS VÉGREHAJTÁSI ÚT ───────────────────────────────────────
-Az optimalizálás indítása ma CSAK a grafikus felületen létezik
-(`dashboard.gui.OptimizerController.request_optimize`) — fej nélküli sor nincs.
-Az ilyen javaslatot a postaláda TANÁCSKÉNT mutatja, és az elfogadás
-MEGMONDJA, hol indítható. ⚠ Nem teszünk úgy, mintha végrehajtottuk volna: egy
-hamis siker rosszabb, mint a hiányzó funkció.
+── A VÉGREHAJTÁSI UTAK ────────────────────────────────────────────────────
+    set_mode_live / set_mode_signal → `core.console_cmd.set_trade_mode`
+    queue_optimize                  → `conductor.optqueue` (fej nélküli sor)
+
+⚠ AMIHEZ NINCS ÚT, ARRA NEM TESZÜNK ÚGY, MINTHA LENNE. Ha egy akcióhoz nincs
+végrehajtó, az elfogadás MEGMONDJA, hol végezhető el — egy hamis siker rosszabb,
+mint a hiányzó funkció. (A `queue_optimize` v3.82.0 előtt pont ilyen volt: az
+optimalizálás csak a grafikus felületről indult.)
 """
 
 from __future__ import annotations
@@ -48,7 +50,7 @@ log = logging.getLogger(__name__)
 _MODE_OF = {SET_MODE_LIVE: "live", SET_MODE_SIGNAL: "signal"}
 
 # Amihez van fej nélküli végrehajtási út.
-EXECUTABLE = tuple(_MODE_OF)
+EXECUTABLE = tuple(_MODE_OF) + (QUEUE_OPTIMIZE,)
 
 
 def can_execute(action: str) -> bool:
@@ -114,6 +116,9 @@ def apply(ctx, entry: dict, *, confirmed: bool = False, by: str = "human"):
                               now=mai or "-")], ok=False)
 
     sym, strat = entry["symbol"], entry["strategy"]
+    if action == QUEUE_OPTIMIZE:
+        return _optimalizalast_sorba(ctx, entry, by=by)
+
     elozo = _tm.mode_of(ctx.cfg, sym, strat)
     res = _cc.set_trade_mode(ctx, sym, [strat], _MODE_OF[action],
                              confirmed=confirmed)
@@ -135,6 +140,38 @@ def apply(ctx, entry: dict, *, confirmed: bool = False, by: str = "human"):
     return res
 
 
+def _optimalizalast_sorba(ctx, entry: dict, *, by: str = "human"):
+    """`queue_optimize` — a fej nélküli sorba tesszük.
+
+    ⚠ A SOR NEM INDÍT AZONNAL. Ha a cella ÉPP KERESKEDIK, a kérés `blocked`
+    állapotban várakozik, az okával együtt — a futás végén ugyanis a stratégia
+    paraméterfájlja íródna felül az alól a cella alól, amelyik vele kereskedik.
+    Ezt KIMONDJUK, nem csendben halasztjuk: különben azt hinnéd, elindult."""
+    from core import console_cmd as _cc
+    from conductor import optqueue as _q
+
+    sym, strat = entry["symbol"], entry["strategy"]
+    _sof = lambda s: ctx.strategies_of(s) or []
+    azon = _q.enqueue(ctx.cfg, sym, strat, source=f"inbox:{entry.get('id')}")
+    if azon is None:
+        return _cc.Result([_t("conductor.act.already_queued", symbol=sym,
+                              strategy=strat)], ok=False)
+
+    ok = _q.blocked_reason(ctx.cfg, sym, strat, _sof)
+    sorok = [_t("conductor.act.queued", symbol=sym, strategy=strat, id=azon)]
+    if ok:
+        sorok.append(_t(f"conductor.optq.blocked.{ok}", symbol=sym,
+                        strategy=strat))
+    undo = {"kind": "optqueue", "queue_id": azon}
+    _inbox.set_state(entry["id"], _inbox.ACCEPTED, ctx.cfg, by=by, undo=undo)
+    _j.write(_j.KIND_ACTION, entry.get("code") or QUEUE_OPTIMIZE,
+             entry.get("text") or "", sev="info", symbol=sym, strategy=strat,
+             data={"by": by, "undo": undo, "inbox_id": entry["id"],
+                   "evidence": entry.get("evidence") or {}})
+    sorok.append(_t("conductor.act.undo_hint", id=entry["id"]))
+    return _cc.Result(sorok)
+
+
 def undo(ctx, entry: dict, *, confirmed: bool = False, by: str = "human"):
     """Egy VÉGREHAJTOTT tétel visszavonása. Visszaad: `console_cmd.Result`.
 
@@ -144,7 +181,28 @@ def undo(ctx, entry: dict, *, confirmed: bool = False, by: str = "human"):
     from core import console_cmd as _cc
 
     u = entry.get("undo") or {}
-    if entry.get("state") != _inbox.ACCEPTED or u.get("kind") != "trade_mode":
+    if entry.get("state") != _inbox.ACCEPTED:
+        return _cc.Result([_t("conductor.act.no_undo", id=entry.get("id") or "-")],
+                          ok=False)
+
+    if u.get("kind") == "optqueue":
+        # ⚠ CSAK A VÁRAKOZÓT vesszük ki. Egy MÁR FUTÓ optimalizálást nem
+        # szakítunk félbe innen: azt a saját stop-markere állítja le
+        # (`params_store.stop_marker`), és a félbeszakított futás állapotát a
+        # sor learatása rendezi.
+        from conductor import optqueue as _q
+        if not _q.cancel(u.get("queue_id")):
+            return _cc.Result([_t("conductor.act.undo_running")], ok=False)
+        _j.write(_j.KIND_ACTION, f"undo:{entry.get('code')}",
+                 _t("conductor.act.undone", text=entry.get("text") or ""),
+                 sev="info", symbol=entry.get("symbol"),
+                 strategy=entry.get("strategy"),
+                 data={"by": by, "inbox_id": entry.get("id")})
+        _inbox.set_state(entry["id"], _inbox.REJECTED, ctx.cfg, by=by)
+        return _cc.Result([_t("conductor.act.undone",
+                              text=entry.get("text") or "")])
+
+    if u.get("kind") != "trade_mode":
         return _cc.Result([_t("conductor.act.no_undo", id=entry.get("id") or "-")],
                           ok=False)
 

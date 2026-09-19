@@ -288,3 +288,31 @@ def inbox_lines(tetelek: list, *, stat: dict = None) -> list:
                         mark="⚠" if e.get("needs_human") else "•", text=szoveg))
     sorok.append(_t("conductor.inbox.hint"))
     return sorok
+
+
+def optq_lines(tetelek: list) -> list:
+    """Az optimalizálás-sor — állapottal és az OKKAL.
+
+    ⚠ A BLOKKOLT TÉTEL OKA KÖTELEZŐ. Egy sor, amiben valami „csak áll", és nem
+    derül ki, miért, pontosan az a néma állapot, ami miatt ez az egész mérő
+    réteg elkészült. Itt az ok tipikusan az, hogy a cella ÉPP KERESKEDIK —
+    olyankor előbb le kell állítani."""
+    from conductor import optqueue as _q
+
+    if not tetelek:
+        return [_t("conductor.optq.none")]
+    sorok = [_t("conductor.optq.head", n=len(tetelek))]
+    for e in tetelek:
+        _ok = e.get("reason") or ""
+        extra = ""
+        if e.get("state") == _q.BLOCKED and _ok:
+            extra = _t(f"conductor.optq.blocked.{_ok}", symbol=e.get("symbol"),
+                       strategy=e.get("strategy")).strip()
+        elif _ok:
+            extra = _t(f"conductor.optq.reason.{_ok}")
+        sorok.append(_t("conductor.optq.row", id=e.get("id"),
+                        state=_t(f"conductor.optq.state.{e.get('state')}"),
+                        symbol=e.get("symbol"), strategy=e.get("strategy"),
+                        extra=extra))
+    sorok.append(_t("conductor.optq.hint"))
+    return sorok

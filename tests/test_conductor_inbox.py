@@ -186,32 +186,28 @@ finally:
     act.still_valid = _eredeti
 
 
-# ══ 5. AMIHEZ NINCS VEGREHAJTASI UT ════════════════════════════════════
-# ⚠ Az optimalizalas ma CSAK a feluleten indithato (OptimizerController) — fej
-# nelkuli sor nincs. Egy hamis siker rosszabb, mint a hianyzo funkcio.
+# ══ 5. MINDEN AKCIONAK VAN VEGREHAJTASI UTJA (v3.82.0 ota) ═════════════
+# ⚠ EZ VALTOZOTT. Az optimalizalas korabban CSAK a feluleten indulhatott
+# (OptimizerController), ezert a `queue_optimize` javaslat TANACS volt: az
+# elfogadas oszinten elutasitott, es megmondta, hol vegezheto el. A fej nelkuli
+# sor (conductor/optqueue.py) ota vegrehajthato — a „nincs vegrehajto" ag
+# viszont MEGMARAD a kodban, mert a kovetkezo uj akcional ujra kelleni fog.
 check("a mod-valtasnak van vegrehajtoja", act.can_execute(pr.SET_MODE_LIVE)
       and act.can_execute(pr.SET_MODE_SIGNAL))
-check("⚠ az optimalizalasnak NINCS", not act.can_execute(pr.QUEUE_OPTIMIZE))
-# ⚠ A `reset_for_test` csak a MEMORIAT uriti — a fajl megmarad, es a kovetkezo
-# betoltes visszaolvassa. Ez helyes (a postalada perzisztens), ezert a tetelt
-# AKCIO szerint keressuk, nem sorszam szerint.
-ib.reset_for_test()
-ib.sync(_cfg(), [pr.Proposal(action=pr.QUEUE_OPTIMIZE, symbol="GOLD",
-                             strategy="csilla", reason="untuned",
-                             text="hangolatlan")])
-_opt = [e for e in ib.items(ib.PENDING) if e["action"] == pr.QUEUE_OPTIMIZE]
-check("a nem vegrehajthato javaslat is bekerul a postaladaba", len(_opt) == 1,
-      str([e["action"] for e in ib.items(ib.PENDING)]))
-_opt_id = _opt[0]["id"]
-_r = cc.dispatch(ctx, f"accept {_opt_id}")
-check("...az elfogadas OSZINTEN elutasit", not _r.ok)
+check("az optimalizalasnak MOSTANTOL van", act.can_execute(pr.QUEUE_OPTIMIZE))
+
+# ⚠ ES A HAMIS SIKER TOVABBRA IS TILOS: egy akcio, amihez nincs vegrehajto, nem
+# tehet ugy, mintha megtortent volna — megmondja, hol vegezheto el.
+_r = act.apply(ctx, {"id": "x", "action": "nincsilyen", "symbol": "GOLD",
+                     "strategy": "csilla"})
+check("⚠ ismeretlen akciora OSZINTEN elutasit", not _r.ok, str(_r.lines))
 check("...es megmondja, HOL vegezheto el",
       "felületen" in chr(10).join(_r.lines), str(_r.lines))
-check("...a tetel nyitott marad", ib.get(_opt_id)["state"] == ib.PENDING)
-# A listaban TANACSKENT jelenik meg, nem elfogadhato javaslatkent.
+_nincs = [{"id": "x", "action": "nincsilyen", "symbol": "GOLD",
+           "strategy": "csilla", "text": "ismeretlen", "needs_human": False}]
 check("a listaban TANACSKENT latszik",
-      any("tanács" in x for x in rep.inbox_lines(_opt)),
-      chr(10).join(rep.inbox_lines(_opt)))
+      any("tanács" in x for x in rep.inbox_lines(_nincs)),
+      chr(10).join(rep.inbox_lines(_nincs)))
 
 
 # ══ 6. VISSZAVONAS ═════════════════════════════════════════════════════
@@ -243,7 +239,11 @@ check("nem vegrehajtott tetel nem vonhato vissza",
 
 
 # ══ 7. LEJARAT ═════════════════════════════════════════════════════════
+# ⚠ TISZTA LAP: a `reset_for_test` csak a MEMORIAT uriti — az elozo blokk
+# elvetett tetele a FAJLBAN marad, es az elvetes (helyesen) eltemeti a
+# javaslatot, tehat a `sync` nem szulne ujra. A blokk igy onmagaban all.
 ib.reset_for_test()
+(cp.DIR / "inbox.json").unlink(missing_ok=True)
 _naplo(ROMLO)
 cc._inbox_sync(ctx)
 _e = ib.items(ib.PENDING)[0]

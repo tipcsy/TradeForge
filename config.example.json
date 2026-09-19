@@ -271,6 +271,15 @@
       "_comment_keep": "A LEZART tetelek takaritasa (a TORTENET a kronikaban van).",
       "keep_days": 30
     },
+    "optqueue": {
+      "_comment": "FEJ NELKULI OPTIMALIZALAS-SOR (F2): a karmester sajat, penzt NEM erinto akcioja. A meglevo belepesi pontot inditja ALPROCESSZKENT (`main.py optimize <SYM> --strategy <S>`), mert az optimalizalas orakig tarto, CPU-nehez munka. Parancs: `optq`.",
+      "_comment_block": "⚠ KERESKEDO CELLAT NEM OPTIMALIZAL: a futas vegen a parameterfajlja irodna felul alatta. Ilyenkor a keres `blocked` allapotban var — eloszor allitsd le a cellat (Stop).",
+      "_comment_parallel": "ALAPBOL EGY: az ELO MOTOR MELLETT fut, tobb parhuzamos futas elvenne a gepet a kereskedes elol. (Az optimizer.max_parallel_optimizers a felulet sajat sora.)",
+      "max_parallel": 1,
+      "_comment_stale": "Ennyi ora utan egy „fut” tetelt elveszettnek nyilvanitunk, ha a motor ujraindult kozben. Egy orokke „fut” sor rosszabb, mint egy bevallott hiany.",
+      "stale_hours": 12,
+      "keep_days": 14
+    },
     "journal": {
       "_comment": "KRONIKA: mit latott (es kesobb mit tett) a karmester. Append-only JSONL.",
       "keep_days": 365

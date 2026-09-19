@@ -298,7 +298,34 @@ Az F1-ben mindez **árnyék-mód**: a házirend javaslatot ad, a javaslat a
 krónikába kerül (`kind="shadow"`, a döntést hozó SZÁMOKKAL együtt), és semmi nem
 hajtódik végre. Parancs: `plan`.
 
-### ④ Optimalizálás-ütemező
+### ④ Optimalizálás-ütemező — a sor megvan ✅ (v3.82.0)
+
+Az optimalizálás indítása eddig **csak a grafikus felületen** létezett
+(`OptimizerController`): a konzolos és a fej nélküli (VM, SSH) futás egyáltalán
+nem tudott optimalizálást kérni. A `conductor/optqueue.py` ezt adja meg —
+és ezzel a `queue_optimize` javaslat végrehajthatóvá vált.
+
+* **Alprocesszben, nem szálon.** Az optimalizálás órákig tartó, CPU-nehéz
+  munka; a motor szálán a kereskedés körideje nyúlna meg. A sor a MEGLÉVŐ
+  belépési pontot indítja (`main.py optimize <SYM> --strategy <S>`), tehát
+  nincs második optimalizáló-implementáció, és a `core/opt_lock.py`
+  (processzek közötti zár) pontosan erre való.
+* **⚠ Kereskedő cellát nem optimalizál.** A futás végén a paraméterfájlja
+  íródna felül az alól a cella alól, amelyik épp vele kereskedik — ez a felület
+  szabálya, és itt ugyanaz a képlet dönt (`run_state.live_strategies`). A
+  „csak jelzés" módú cella is ilyen: ott a papír-bizonyíték gyűlik. A blokkolt
+  kérés **nem vész el és nem fut le csendben**: `blocked` állapotban várakozik,
+  az okával együtt.
+* **Alapból egy párhuzamos futás.** Az élő motor mellett fut; hat párhuzamos
+  optimalizálás elvenné a gépet a kereskedés elől.
+* **Adatletöltés nincs** — a lemezen lévő előzményből dolgozik (amit az
+  `data.gap_fill_on_start` tart frissen). Ha nincs adat, a job hibával áll le,
+  és ez a sorban látszik.
+
+Parancs: `optq` (és `optq cancel <id>`). A hajtás a **motoré** (óránként): egy
+alprocessz indítása egy lekérdezés mellékhatásaként meglepetés volna.
+
+### ④/b Ami még hátra van az ütemezőből
 Ki avult el, kinek kevés a bizonyítéka, kinél csúszott el a kapu-beállítás →
 prioritási sor a `max_parallel_optimizers` keretén belül, éjszakára időzítve.
 
@@ -537,9 +564,8 @@ determinisztikus marad.
      krónikába is bekerül; a visszavonás maga is akció (egy visszaminősítés
      visszavonása valódi kötést kapcsol vissza — ugyanaz a megerősítés-minta).
   4. **Amihez nincs végrehajtási út, arra nem teszünk úgy, mintha lenne.** Az
-     optimalizálás ma csak a felületen indítható (`OptimizerController`), fej
-     nélküli sor nincs — az ilyen tétel TANÁCSKÉNT jelenik meg, és az elfogadás
-     megmondja, hol végezhető el.
+     ilyen tétel TANÁCSKÉNT jelenik meg, és az elfogadás megmondja, hol
+     végezhető el. *(Az optimalizálás v3.82.0-ig pont ilyen volt — lásd lent.)*
 
   ⚠ Telegramon a postaláda **csak olvasható**. Az `accept` valódi kötést
   kapcsolhatna be egy chatüzenetből — az a `notify.answer_trading` kategóriája
@@ -603,7 +629,7 @@ conductor/
 |---|---|---|
 | **F0** ✅ | belépő-telemetria · élő KPI-tár · várt aktivitás · pillanatkép · **„miért nem kötött" jelentés** (v3.75.0–v3.76.0) | nulla (csak mérés) |
 | **F1** ✅ | egészségőr · krónika (v3.77.0) · életciklus-létra + **árnyék-mód** (v3.78.0) · napi riport (v3.79.0) | nulla |
-| **F2** | **javaslat-postaláda** ✅ (v3.80.0) · **Karmester fül** ✅ (v3.81.0) · optimalizálás-ütemező (L1) | alacsony |
+| **F2** ✅ | **javaslat-postaláda** (v3.80.0) · **Karmester fül** (v3.81.0) · **fej nélküli optimalizálás-sor** (v3.82.0) | alacsony |
 | **F3** | életciklus-létra · kockázati karmester (L2→L3) | közepes |
 | **F4** | LLM tanácsadó réteg · természetes nyelvű lekérdezés | alacsony (csak javasol) |
 | **F5** | portfólió-elosztás, slot-keret | magas — utoljára |
