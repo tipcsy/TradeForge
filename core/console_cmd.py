@@ -693,7 +693,7 @@ def _inbox_sync(ctx: Context):
     _sof = lambda s: ctx.strategies_of(s) or []
     lel = _h.findings(ctx.cfg, strategies_of=_sof)
     jav = _lc.proposals(ctx.cfg, strategies_of=_sof, health_findings=lel)
-    return _ib.sync(ctx.cfg, jav)
+    return _ib.sync(ctx.cfg, jav, strategies_of=_sof)
 
 
 def _inbox_tetel(ctx: Context, args: list, parancs: str):

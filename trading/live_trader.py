@@ -4144,7 +4144,8 @@ def run(cfg: dict, slot_mgr: SlotManager):
                     # hogy a javaslat akkor is várjon rád, ha aznap egyszer sem
                     # kérdezel rá.
                     from conductor import inbox as _cibx
-                    _st = _cibx.sync(cfg, _jav)
+                    _st = _cibx.sync(cfg, _jav,
+                                     strategies_of=lambda s: _ensn_h(cfg, s) or [])
                     if _st.get("new"):
                         log.info("karmester: %d új javaslat a postaládában "
                                  "(`inbox`)", _st["new"])

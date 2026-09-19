@@ -162,7 +162,7 @@ class ConductorTab:
             _sof = lambda s: ctx.strategies_of(s) or []
             lel = _h.findings(ctx.cfg, strategies_of=_sof)
             jav = _lc.proposals(ctx.cfg, strategies_of=_sof, health_findings=lel)
-            _ib.sync(ctx.cfg, jav)
+            _ib.sync(ctx.cfg, jav, strategies_of=_sof)
             # A mátrixhoz a fokot és a legsúlyosabb leletet tesszük el.
             self._cellak = []
             for sn in _snap.cells(ctx.cfg, strategies_of=_sof):

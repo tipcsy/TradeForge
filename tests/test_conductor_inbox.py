@@ -275,11 +275,63 @@ check("azonosito nelkul hasznalatot ir", not cc.dispatch(ctx, "accept").ok)
 
 # ══ 9. A MOTOR: gyujt, de NEM dont ═════════════════════════════════════
 _lt = (ROOT / "trading" / "live_trader.py").read_text(encoding="utf-8")
-check("a motor beolvasztja a javaslatokat a postaladaba", "_cibx.sync(cfg, _jav)" in _lt)
+check("a motor beolvasztja a javaslatokat a postaladaba", "_cibx.sync(cfg, _jav" in _lt)
+# ⚠ ES ATADJA A STRATEGIA-LISTAT is: enelkul a postalada nem tudna megallapitani,
+# hogy egy tetel alol ELTUNT-e a cella (lasd a 10. blokkot).
+check("...a motor strategia-listaval egyutt", "_cibx.sync(cfg, _jav" in _lt
+      and "strategies_of=lambda s: _ensn_h(cfg, s) or []" in _lt)
 # ⚠ A MOTOR NEM DONT: a tetelek `pending` allapotban allnak, amig nem dontesz.
 check("⚠ a motor NEM fogad el es NEM hajt vegre",
       "actions.apply" not in _lt and "_cibx.set_state" not in _lt)
 check("indulaskor a postalada is takarodik", "_cibx0.prune(" in _lt)
+
+
+
+# ══ 10. ARVA TETEL: a cella megszunt a javaslat alatt ═══════════════════
+# ⚠ A LELET (a felhasznalotol): „mi van akkor, ha egy strategiat kozben
+# kiveszek? Mi lesz az uzenetekkel?" A valasz eddig az volt, hogy ULNEK a
+# listan a lejaratukig (alapbol egy hetig), egy cellara hivatkozva, ami mar
+# nincs. Elfogadni ezeket eddig sem lehetett (az `actions.still_valid`
+# elbukik rajtuk) — de egy lista, amiben tArgytalan tetelek allnak, arra
+# tanit, hogy a postaladat nem kell komolyan venni.
+ib.reset_for_test()
+_naplo(ROMLO)
+_st = cc._inbox_sync(_ctx())
+check("van mit arvan hagyni", _st["new"] == 1 and len(ib.items(ib.PENDING)) == 1,
+      str(_st))
+
+# A strategiat levesszuk a parrol — a motor listaja ures lesz ra.
+_ctx_nelkul = cc.Context(cfg=_cfg(), save_config=lambda: True, positions=list,
+                         close_position=lambda t: False, account=dict,
+                         dashboard={}, instrument_state={},
+                         strategies_of=lambda s: [])
+_st2 = cc._inbox_sync(_ctx_nelkul)
+check("⚠ a tetel AZONNAL targytalan lesz (nem var a lejaratra)",
+      _st2.get("obsolete") == 1, str(_st2))
+check("...es kikerul a nyitottak kozul", not ib.items(ib.PENDING))
+check("...de a nyoma megmarad, a sajat allapotaval",
+      len(ib.items(ib.OBSOLETE)) == 1)
+
+# ⚠ A BIZONYTALANSAG NEM MEGSZUNES: ha a strategia-listat nem tudjuk feloldani,
+# NEM temetunk. Inkabb maradjon egy folosleges tetel, mint hogy egy atmeneti
+# hiba (importhiba, elszallo feloldas) kiuritse a postaladat.
+ib.reset_for_test()
+cc._inbox_sync(_ctx())
+_elott = len(ib.items(ib.PENDING))
+ib.sync(_cfg(), [])                       # strategies_of NELKUL
+check("⚠ strategia-lista nelkul NEM minositunk targytalanna",
+      len(ib.items(ib.PENDING)) == _elott and _elott == 1)
+
+def _robban(_s):
+    raise RuntimeError("a feloldas elszallt")
+_st3 = ib.sync(_cfg(), [], strategies_of=_robban)
+check("...es egy ELSZALLO feloldas sem temet",
+      _st3.get("obsolete") == 0 and len(ib.items(ib.PENDING)) == 1, str(_st3))
+
+# Ha maga az INSTRUMENTUM tunik el a configbol, az is megszunes.
+_st4 = ib.sync({"pairs": {}}, [], strategies_of=lambda s: ["csilla"])
+check("a torolt INSTRUMENTUM tetelei is targytalanok",
+      _st4.get("obsolete") == 1 and not ib.items(ib.PENDING), str(_st4))
 
 
 print()

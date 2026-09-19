@@ -68,6 +68,32 @@ def cell(cfg: dict, symbol: str, strategy: str, *, strategies_of=None,
     }
 
 
+def letezik(cfg: dict, symbol: str, strategy: str, *, strategies_of=None) -> bool:
+    """VAN-E MÉG ilyen cella? — egy helyen megválaszolva.
+
+    ⚠ MIÉRT KELL KÜLÖN KÉRDÉS. A mátrix mindig a configból SZÁMOLÓDIK, tehát egy
+    eltávolított stratégia sora magától eltűnik belőle. A postaláda és az
+    optimalizálás-sor viszont SAJÁT, TARTÓS állapotot őriz egy
+    `(instrumentum, stratégia)` cellára — és az ott marad akkor is, ha a cella
+    közben megszűnt. Az eredmény egy javaslat olyan stratégiára, amit tegnap
+    levettél a párról: elfogadni nem lehet (az újraérvényesítés elbukik), de ott
+    ül a listában, és azt tanítja, hogy a postaládát nem kell komolyan venni.
+
+    ⚠ A BIZONYTALANSÁG NEM MEGSZŰNÉS. Ha a stratégia-listát nem tudjuk feloldani
+    (nincs `strategies_of`, vagy elszáll), IGAZAT adunk vissza: inkább maradjon
+    egy fölösleges tétel, mint hogy egy átmeneti hiba eltemesse a valódi
+    javaslatokat. A törlés visszafordíthatatlan, a zaj nem."""
+    p = (cfg.get("pairs") or {}).get(symbol)
+    if not isinstance(p, dict):
+        return False                      # az instrumentum maga sincs meg
+    if strategies_of is None:
+        return True
+    try:
+        return strategy in (strategies_of(symbol) or [])
+    except Exception:
+        return True
+
+
 def cells(cfg: dict, pairs=None, *, strategies_of=None, day=None,
           days: int = DEFAULT_WINDOW_DAYS) -> list:
     """MINDEN cella pillanatképe — EGY naplóolvasásból.

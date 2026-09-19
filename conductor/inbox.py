@@ -43,8 +43,9 @@ REJECTED = "rejected"    # elvetve (a türelmi idő alatt nem születik újra)
 DEFERRED = "deferred"    # elhalasztva egy dátumig
 EXPIRED  = "expired"     # magától elévült
 FAILED   = "failed"      # elfogadtad, de a végrehajtás nem sikerült
+OBSOLETE = "obsolete"    # a CELLA szűnt meg alatta (levetted a stratégiát)
 
-STATES = (PENDING, ACCEPTED, REJECTED, DEFERRED, EXPIRED, FAILED)
+STATES = (PENDING, ACCEPTED, REJECTED, DEFERRED, EXPIRED, FAILED, OBSOLETE)
 # Amiből még lehet PENDING (a türelmi idő / halasztás lejártával).
 _ELTEMETETT = (REJECTED, DEFERRED)
 
@@ -115,20 +116,39 @@ def _save_locked() -> bool:
 # ÖSSZEFÉSÜLÉS a friss javaslatokkal
 # ---------------------------------------------------------------------------
 
-def sync(cfg: dict, javaslatok: list) -> dict:
-    """A friss javaslatok beolvasztása. Visszaad: `{"new": n, "expired": n}`.
+def sync(cfg: dict, javaslatok: list, *, strategies_of=None) -> dict:
+    """A friss javaslatok beolvasztása. Visszaad: `{"new": n, "expired": n,
+    "obsolete": n}`.
 
     ⚠ AMI MÁR NYITOTT ÜGY, NEM SZÜLETIK ÚJRA. Egy fennálló helyzet (pl.
     „elszáradt a GOLD/csilla") minden körben újra javaslattá válna — a postaláda
-    egy nap alatt olvashatatlan lenne, és pont az veszne el benne, ami új."""
+    egy nap alatt olvashatatlan lenne, és pont az veszne el benne, ami új.
+
+    ⚠ AMI ALATT MEGSZŰNT A CELLA, AZ NEM VÁR TOVÁBB. Ha egy stratégiát leveszel
+    a párról (vagy törlöd az instrumentumot), a rá vonatkozó nyitott tételek
+    ÁRVÁN maradnak: a javaslat egy olyan cellára mutat, ami már nincs.
+    Elfogadni ezeket eddig sem lehetett (az `actions.still_valid` elbukik
+    rajtuk), de a lejáratukig — alapból egy hétig — ott ültek a listán. Ez
+    mostantól AZONNAL `obsolete`: a döntésed nem kell hozzá, a cella döntött.
+    A `strategies_of` hiányában nem minősítünk (lásd `snapshot.letezik`)."""
     from conductor import config as _ccfg
     from conductor.proposals import HOLD
+
+    from conductor import snapshot as _snap
 
     k = _ccfg.inbox(cfg)
     _load()
     most = _now()
-    uj = lejart = 0
+    uj = lejart = megszunt = 0
     with _lock:
+        # 0. ÁRVÁK: a cella megszűnt a tétel alatt.
+        for e in _state.values():
+            if e.get("state") not in (PENDING,) + _ELTEMETETT:
+                continue
+            if not _snap.letezik(cfg, e.get("symbol"), e.get("strategy"),
+                                 strategies_of=strategies_of):
+                e["state"] = OBSOLETE
+                megszunt += 1
         # 1. Lejárat és a temetés feloldása — MINDIG, a friss javaslatoktól
         #    függetlenül (különben egy elhalasztott ügy sosem jönne vissza).
         for e in _state.values():
@@ -169,9 +189,9 @@ def sync(cfg: dict, javaslatok: list) -> dict:
             }
             nyitott.add(_fp(e))
             uj += 1
-        if uj or lejart:
+        if uj or lejart or megszunt:
             _save_locked()
-    return {"new": uj, "expired": lejart}
+    return {"new": uj, "expired": lejart, "obsolete": megszunt}
 
 
 # ---------------------------------------------------------------------------

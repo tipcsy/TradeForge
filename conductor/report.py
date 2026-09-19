@@ -277,6 +277,12 @@ def inbox_lines(tetelek: list, *, stat: dict = None) -> list:
     if stat and (stat.get("new") or stat.get("expired")):
         sorok.append(_t("conductor.inbox.new", n=stat.get("new") or 0,
                         expired=stat.get("expired") or 0))
+    # ⚠ A TÁRGYTALANNÁ VÁLT TÉTELT KIMONDJUK. Ha egy javaslat azért tűnt el a
+    # listáról, mert a cella megszűnt alatta (levetted a stratégiát), azt látni
+    # kell: egy némán fogyatkozó postaláda ugyanolyan rossz, mint egy némán
+    # növekvő.
+    if stat and stat.get("obsolete"):
+        sorok.append(_t("conductor.inbox.obsolete", n=stat.get("obsolete")))
     for e in tetelek:
         szoveg = e.get("text") or e.get("code") or ""
         if not _act.can_execute(e.get("action")):

@@ -98,9 +98,19 @@ _cfg_sig = _cfg(run="live")
 _cfg_sig["pairs"]["GOLD"]["strategy_mode"] = {"csilla": "signal"}
 check("⚠ a papir (csak jelzes) modu cella is blokkolt",
       oq.blocked_reason(_cfg_sig, "GOLD", "csilla", _SOF) == "cell_live")
-# A NEM engedelyezett strategia nem „fut" — ott nincs mit felteni.
-check("a nem engedelyezett strategia nem blokkol",
-      oq.blocked_reason(_cfg(run="live"), "GOLD", "csilla", lambda s: []) == "")
+# ⚠ A NEM (MAR) ENGEDELYEZETT STRATEGIA: NEM „szabad ut", hanem MEGSZUNT CELLA.
+# Korabban ures stringet adtunk — vagyis INDITHATONAK mondtuk: a „kereskedik-e?"
+# szabaly nemmel felelt (nincs az engedelyezett listan), es semmi mas nem nezte,
+# hogy a cella letezik-e meg. Egy orakig tarto, CPU-nehez optimalizalas futott
+# volna egy cellara, amit mar nem hasznalsz.
+check("⚠ a mar nem engedelyezett cella MEGSZUNTKENT blokkol",
+      oq.blocked_reason(_cfg(run="live"), "GOLD", "csilla", lambda s: [])
+      == "cell_gone")
+check("...a torolt INSTRUMENTUM is",
+      oq.blocked_reason({"pairs": {}}, "GOLD", "csilla", _SOF) == "cell_gone")
+# ⚠ A BIZONYTALANSAG NEM MEGSZUNES: strategia-lista nelkul nem minositunk.
+check("...strategia-lista nelkul viszont NEM mondjuk megszuntnek",
+      oq.blocked_reason(_cfg(run="stopped"), "GOLD", "csilla", None) == "")
 # Ha mar fut rajta optimalizalas (barhonnan), nem inditunk masodikat.
 oa.set_state("GOLD", "csilla", oa.RUNNING)
 try:
@@ -160,8 +170,14 @@ check("alapbol EGY parhuzamos futas", ccfg.optqueue({})["max_parallel"] == 1)
 _tiszta()
 for _s in ("A", "B", "C"):
     oq.enqueue(_cfg(), _s, "csilla")
-_cfg3 = {"pairs": {}, "conductor": {"optqueue": {"max_parallel": 2}}}
-_st = oq.drain(_cfg3, strategies_of=lambda s: [])
+# ⚠ VALODI CELLAKKAL. A fixture korabban ures `pairs`-t es ures strategia-listat
+# adott — azzal ma mind a harom tetel MEGSZUNT CELLAKENT esne ki, es a keretet
+# nem is mernenk. A keret merese csak letezo, leallitott cellakon ertelmes.
+_cfg3 = {"pairs": {s: {"enabled": True, "strategies": ["csilla"],
+                       "run_state": {"csilla": "stopped"}}
+                   for s in ("A", "B", "C")},
+         "conductor": {"optqueue": {"max_parallel": 2}}}
+_st = oq.drain(_cfg3, strategies_of=_SOF)
 check("a keret betartva (2)", _st["started"] == 2, str(_st))
 check("...a harmadik sorban marad",
       sum(1 for e in oq.items() if e["state"] == oq.QUEUED) == 1)
@@ -276,6 +292,31 @@ check("...a MEGLEVO CLI belepesi ponton",
       '"optimize", symbol' in _oq and '"--strategy", strategy' in _oq)
 check("...es nem importal optimalizalot",
       "run_optimizer" not in _oq and "optimize_job" not in _oq)
+
+
+
+# ══ 8. ARVA TETEL: a cella megszunt a sorban allas alatt ════════════════
+# ⚠ A LELET (a felhasznalotol): „mi van, ha egy strategiat kozben kiveszek?"
+# A sorban allo optimalizalas EL IS INDULT VOLNA ra.
+_tiszta()
+oq.enqueue(_cfg(run="stopped"), "GOLD", "csilla")
+check("a tetel sorban all", oq.items()[0]["state"] == oq.QUEUED)
+_st = oq.drain(_cfg(run="stopped"), strategies_of=lambda s: [])
+check("⚠ a megszunt cella tetele VISSZAVONVA (nem indul el)",
+      _st.get("dropped") == 1 and _st.get("started") == 0, str(_st))
+_e = oq.items()[0]
+check("...a sajat allapotaval es okaval",
+      _e["state"] == oq.DROPPED and _e["reason"] == "cell_gone",
+      f"{_e['state']}/{_e.get('reason')}")
+# ⚠ EZ NEM BLOKKOLAS: a blokkolt tetel arra var, hogy az akadaly elmuljon. A
+# megszunt cella nem jon vissza magatol — egy orokke „blokkolva" allo sor csak
+# gyulne, es elfedne a valodi akadalyokat.
+check("...es NEM szamit nyitottnak (a takaritas elviheti)",
+      oq.DROPPED not in oq._NYITOTT)
+# A jelentes ki is mondja, miert.
+_sorok = chr(10).join(rep.optq_lines(oq.items()))
+check("a jelentes megnevezi a megszunt cellat",
+      "megsz" in _sorok.lower() or "gone" in _sorok.lower(), _sorok[:120])
 
 
 print()

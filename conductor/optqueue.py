@@ -56,8 +56,9 @@ BLOCKED = "blocked"    # nem indítható (pl. a cella kereskedik) — az ok ott 
 RUNNING = "running"    # fut (alprocessz)
 DONE    = "done"       # lefutott, rendben
 FAILED  = "failed"     # lefutott, hibával (vagy elveszett az állapota)
+DROPPED = "dropped"    # a CELLA szűnt meg alatta — visszavontuk, el sem indult
 
-STATES = (QUEUED, BLOCKED, RUNNING, DONE, FAILED)
+STATES = (QUEUED, BLOCKED, RUNNING, DONE, FAILED, DROPPED)
 _NYITOTT = (QUEUED, BLOCKED, RUNNING)
 
 _lock = threading.RLock()
@@ -179,8 +180,17 @@ def blocked_reason(cfg: dict, symbol: str, strategy: str,
     felül az alól a cella alól, amelyik épp vele kereskedik. A képlet a MOTORÉ
     (`run_state.live_strategies`): engedélyezett ÉS szándék=live — a „csak
     jelzés" módú cella is ilyen, ott a papír-bizonyíték gyűlik."""
+    from conductor import snapshot as _snap
     from core import opt_activity as _oa
     from core import run_state as _rs
+
+    # ⚠ A CELLA MEGSZŰNÉSE AZ ELSŐ KÉRDÉS. Egy sorban álló optimalizálás egy
+    # olyan stratégiára, amit közben levettél a párról, EL IS INDULT VOLNA: a
+    # „kereskedik-e?" szabály ilyenkor nemmel felel (nem szerepel az engedélyezett
+    # listán), és semmi más nem nézte, hogy a cella létezik-e még. Órákig tartó
+    # CPU-munka futott volna egy cellára, amit már nem használsz.
+    if not _snap.letezik(cfg, symbol, strategy, strategies_of=strategies_of):
+        return "cell_gone"
 
     try:
         engedett = list(strategies_of(symbol) or []) if strategies_of else []
@@ -206,13 +216,13 @@ def _parancs(symbol: str, strategy: str) -> list:
 def drain(cfg: dict, *, strategies_of=None) -> dict:
     """A sor hajtása: befejezettek learatása + indíthatók indítása.
 
-    Visszaad: `{"started": n, "finished": n, "blocked": n}`.
+    Visszaad: `{"started": n, "finished": n, "blocked": n, "dropped": n}`.
     ⚠ SOHA NEM DOB: a sor hajtása a motor körében fut."""
     try:
         return _drain(cfg, strategies_of)
     except Exception as ex:                                  # pragma: no cover
         log.warning("conductor.optqueue: a sor hajtása elszállt: %s", ex)
-        return {"started": 0, "finished": 0, "blocked": 0}
+        return {"started": 0, "finished": 0, "blocked": 0, "dropped": 0}
 
 
 def _drain(cfg: dict, strategies_of) -> dict:
@@ -221,7 +231,7 @@ def _drain(cfg: dict, strategies_of) -> dict:
 
     k = _ccfg.optqueue(cfg)
     _load()
-    stat = {"started": 0, "finished": 0, "blocked": 0}
+    stat = {"started": 0, "finished": 0, "blocked": 0, "dropped": 0}
     with _lock:
         # ── 1. LEARATÁS ─────────────────────────────────────────────────
         for e in list(_state.values()):
@@ -261,6 +271,16 @@ def _drain(cfg: dict, strategies_of) -> dict:
                          if x.get("state") in (QUEUED, BLOCKED)),
                         key=lambda x: str(x.get("requested_at") or "")):
             ok = blocked_reason(cfg, e["symbol"], e["strategy"], strategies_of)
+            if ok == "cell_gone":
+                # ⚠ EZ NEM BLOKKOLÁS, HANEM VÉG. A blokkolt tétel arra vár, hogy
+                # az akadály elmúljon (leállítod a cellát, lefut a másik job).
+                # A megszűnt cella viszont nem jön vissza magától — egy örökké
+                # „blokkolva" álló sor csak gyűlne, és elfedné a valódi
+                # akadályokat. Lezárjuk, és megmondjuk, miért.
+                e["state"], e["reason"] = DROPPED, "cell_gone"
+                e["finished_at"] = _iso(_now())
+                stat["dropped"] += 1
+                continue
             if ok:
                 if e.get("state") != BLOCKED or e.get("reason") != ok:
                     e["state"], e["reason"] = BLOCKED, ok
