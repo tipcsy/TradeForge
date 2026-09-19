@@ -4114,6 +4114,21 @@ def run(cfg: dict, slot_mgr: SlotManager):
                     if _uj:
                         log.info("karmester: %d új lelet a krónikában "
                                  "(összesen %d áll fenn)", _uj, len(_lel))
+                    # ── ÁRNYÉK-MÓD (F1): mit TENNE a karmester? ──────────
+                    # ⚠ VÉGREHAJTÁS NÉLKÜL. A javaslatok a krónikába kerülnek,
+                    # hogy utólag mérhető legyen, jók lettek volna-e — a terv
+                    # szerint az önállóság (L2+) csak ezután adható meg.
+                    # ⚠ AZ EGÉSZSÉGŐR LELETEIT KAPJA MEG: a kockázati lelet
+                    # megállítja a pénzt bekapcsoló léptetést, az elszáradás
+                    # pedig visszaminősítést vált ki — a küszöb EGY helyen van.
+                    from conductor.policies import lifecycle as _clife
+                    _jav = _clife.proposals(
+                        cfg, strategies_of=lambda s: _ensn_h(cfg, s) or [],
+                        health_findings=_lel)
+                    _uj_j = _clife.shadow(cfg, _jav)
+                    if _uj_j:
+                        log.info("karmester (árnyék): %d új javaslat a "
+                                 "krónikában", _uj_j)
                 except Exception:
                     # ⚠ A MÉRÉS SOHA NEM ÁLLÍTHATJA MEG A KERESKEDÉST.
                     log.debug("karmester-egészségőr: a kör kimaradt",

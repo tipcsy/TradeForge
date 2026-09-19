@@ -132,3 +132,35 @@ def _cimzett(f: dict) -> str:
     if not sym or sym in szoveg:
         return szoveg
     return f"{sym}/{strat}: {szoveg}" if strat else f"{sym}: {szoveg}"
+
+
+def plan_lines(javaslatok: list) -> list:
+    """Az életciklus-létra javaslatai emberi sorokként.
+
+    ⚠ A „NINCS TEENDŐ" IS VÁLASZ, de KÜLÖN blokkban: a kérdés az, hogy MI
+    VÁLTOZNA — ha a holdok a javaslatok közé keverednének, egy 60 cellás
+    mátrixban a három valódi javaslat elveszne a sorok között.
+
+    ⚠ ÉS KIMONDJUK, HOGY EZ ÁRNYÉK-MÓD. Egy javaslatlista, amiről nem derül ki,
+    hogy nem hajtódott végre, rosszabb a semminél: a felhasználó azt hinné, a
+    rendszer már lépett."""
+    from conductor.proposals import HOLD
+
+    if not javaslatok:
+        return [_t("conductor.plan.none")]
+    lepes = [p for p in javaslatok if p.action != HOLD]
+    hold = [p for p in javaslatok if p.action == HOLD]
+
+    sorok = [_t("conductor.plan.shadow"), ""]
+    sorok.append(_t("conductor.plan.head", n=len(lepes)))
+    for p in lepes:
+        # ⚠ A PÉNZT BEKAPCSOLÓ javaslat MEGJELÖLVE: a terv szerint ez emberi
+        # jóváhagyáshoz kötött, autonómia-szinttől függetlenül.
+        sorok.append(_t("conductor.plan.row", mark="⚠" if p.needs_human else "•",
+                        text=p.text or p.code))
+    if hold:
+        sorok.append("")
+        sorok.append(_t("conductor.plan.hold_head", n=len(hold)))
+        for p in hold:
+            sorok.append(_t("conductor.plan.row", mark=" ", text=p.text or p.code))
+    return sorok

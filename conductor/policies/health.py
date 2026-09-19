@@ -111,6 +111,15 @@ def _dried_up(sn: dict, k: dict) -> list:
     elszáradt cella pontosan úgy néz ki, mint amelyik épp nem talál belépőt."""
     if not sn.get("running"):
         return []
+    # ⚠ PAPÍR MÓDBAN NINCS KÖTÉS — SZÁNDÉKOSAN. A „csak jelzés" módú cella
+    # élő kötésszáma definíció szerint nulla, tehát az aktivitás-arány mindig 0
+    # volna: a lelet MINDEN papír cellára tüzelne, örökre. Ez nemcsak zaj lenne,
+    # hanem KÁROS is: az életciklus-létra a kockázati leletek miatt sosem
+    # léptetné élőre azt a cellát, amelyik épp a bizonyítékot gyűjti — vagyis a
+    # mérés a saját céljával fordulna szembe. A papír aktivitását a létra a
+    # JELEKBŐL méri (`lifecycle._paper`), nem innen.
+    if sn.get("mode") == "signal":
+        return []
     v = sn.get("expected") or {}
     d = sn.get("divergence") or {}
     ar = d.get("activity_ratio")

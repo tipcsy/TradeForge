@@ -242,21 +242,46 @@ megválaszolható. Parancs: `health` (a konzolon, a TUI-n és Telegramon is).
 MT5-kapcsolat nélkül üres listát ad, és az üres lista megkülönböztethetetlen a
 „minden friss"-től. Csak annyit állít, hogy NINCS LELET.
 
-### ③ Életciklus-kapus
+### ③ Életciklus-kapus ✅ (v3.78.0, árnyék-módban)
 A promóciós létra, írott feltételekkel:
 
 ```
-backtest OK → OOS OK → SIGNAL mód (≥N jelzés, ≥M nap)
-   → LIVE felezett mérettel (≥50 valódi kötés)
-      → LIVE teljes méret
+STOPPED ──► UNTUNED ──► PAPER ──► LIVE
+            (nincs      (csak     (valódi
+             készlet)    jelzés)   kötés)
+               ▲            ▲         │
+               └────────────┴─────────┘
+                   visszaminősítés
 ```
-
-A visszaút **automatikus**: az élő↔várt eltérés küszöb fölött, X nap alatt Y R
-veszteség, vagy elszáradás (nulla kötés a várt aktivitás töredékén) →
-visszaminősítés `signal`-ba, nem törlés.
 
 *Ez a feladatkör teszi a mátrixot kézben tarthatóvá: minden cella egy
 életciklus-ÁLLAPOTBAN van, nem egy sor egymástól független kapcsolóban.*
+
+| Lépés | Feltétel |
+|---|---|
+| `UNTUNED` → optimalizálás | nincs mentett készlet (a cella fut tovább az alapértékekkel) |
+| `PAPER` → `LIVE` | N jel M olyan napon, amikor a motor futott + mentett OOS minősítés + **nincs KOCKÁZATI lelet** → **mindig emberi jóváhagyás** |
+| `LIVE` → `PAPER` | elszáradás, vagy romlás (PF a küszöb alatt) **elég bizonyítékkal** |
+| `LIVE` → optimalizálás | a mentett készlet avult (a kereskedés megy tovább) |
+
+**Három dolog, amit a terv eredeti szövegéhez képest a valóság átírt:**
+
+1. **Nincs külön „felezett élő" fok.** A kockázatcsökkentő preset
+   (`core/rr_state.py`) **instrumentum-szintű**, nem cella-szintű: egy páron a
+   `wpr_sma`-t nem lehet felezni úgy, hogy az `ml_ai` teljes mérettel menjen.
+   Egy kitalált fok olyan állapotot ígérne, amit a rendszer nem tud előállítani.
+2. **A papír AKTIVITÁST bizonyít, nyereségességet nem.** A „csak jelzés" módú
+   sorok a `trades.csv`-ben P&L nélküliek. Aki papírból következtet hozamra, a
+   backtestjét méri újra, csak lassabban. Ezért a `PAPER → LIVE` lépés három
+   feltételt köt össze (aktivitás + mentett OOS + tiszta egészség), és mindig
+   emberi.
+3. **A kis mintából nem minősítünk vissza.** 15 kötésen egy 1,10-es PF-ű
+   stratégia a minták 4,5%-ában PF>3-at mutat — és ugyanennyire tud lefelé is
+   tévedni. A romlás-szabály `demote_min_trades` alatt nem szólal meg.
+
+Az F1-ben mindez **árnyék-mód**: a házirend javaslatot ad, a javaslat a
+krónikába kerül (`kind="shadow"`, a döntést hozó SZÁMOKKAL együtt), és semmi nem
+hajtódik végre. Parancs: `plan`.
 
 ### ④ Optimalizálás-ütemező
 Ki avult el, kinek kevés a bizonyítéka, kinél csúszott el a kapu-beállítás →
@@ -519,7 +544,7 @@ conductor/
 | Fázis | Tartalom | Kockázat |
 |---|---|---|
 | **F0** ✅ | belépő-telemetria · élő KPI-tár · várt aktivitás · pillanatkép · **„miért nem kötött" jelentés** (v3.75.0–v3.76.0) | nulla (csak mérés) |
-| **F1** | egészségőr ✅ · krónika ✅ (v3.77.0) · napi riport · **árnyék-mód** | nulla |
+| **F1** | egészségőr ✅ · krónika ✅ (v3.77.0) · életciklus-létra + **árnyék-mód** ✅ (v3.78.0) · napi riport | nulla |
 | **F2** | javaslatmotor · Karmester fül · optimalizálás-ütemező (L1) | alacsony |
 | **F3** | életciklus-létra · kockázati karmester (L2→L3) | közepes |
 | **F4** | LLM tanácsadó réteg · természetes nyelvű lekérdezés | alacsony (csak javasol) |

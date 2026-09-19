@@ -43,6 +43,21 @@ DEFAULTS = {
         # (a fájlban más celláknak volt jele), de ennek a cellának egy sem.
         "silent_days": 5,
     },
+    "lifecycle": {
+        # PAPÍR → ÉLŐ: ennyi jel kell a „csak jelzés" módban…
+        "paper_min_signals": 30,
+        # …ennyi OLYAN napon, amikor a motor futott (lásd `telemetry.window`).
+        "paper_min_days": 10,
+        # ÉLŐ → PAPÍR: ennyi valódi kötés alatt nem minősítünk vissza — a kis
+        # mintából hozott visszaminősítés zajra reagálna (core/quality.py mérése).
+        "demote_min_trades": 50,
+        # …és csak ez alatti profit factornál.
+        "demote_pf": 1.0,
+        # A mentett készlet ennyi nap után avult (az `overview` 60 napnál szól).
+        "stale_params_days": 60,
+        # Az ELSZÁRADÁS küszöbeit az egészségőr adja (`health.dried_up_*`) — ott
+        # van egy helyen, hogy a lelet és a döntés ne mondhasson mást.
+    },
     "journal": {
         "keep_days": 365,
         # A krónika visszaolvasásakor legfeljebb ennyi sort nézünk (a duplikátum-
@@ -88,6 +103,11 @@ def health(cfg: dict) -> dict:
 
 def telemetry(cfg: dict) -> dict:
     return _blokk(cfg, "telemetry")
+
+
+def lifecycle(cfg: dict) -> dict:
+    """Az életciklus-létra küszöbei."""
+    return _blokk(cfg, "lifecycle")
 
 
 def journal(cfg: dict) -> dict:

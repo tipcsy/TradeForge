@@ -291,6 +291,50 @@ def why_not(symbol: str, strategy: str, day=None) -> list:
     return ki
 
 
+def window(symbol: str, strategy: str, days: int = 30, day=None) -> dict:
+    """Egy cella telemetriája TÖBB napra összegezve.
+
+    Visszaad: `{signals, entries, engine_days, signal_days, outcomes,
+    gates_blocked}`.
+
+    ⚠ AZ `engine_days` A LÉNYEG, NEM A NAPTÁRI NAP. Hétvégén, ünnepnapon és
+    leállás alatt MINDEN cella néma — ha a nevezőbe naptári napok kerülnének, egy
+    tökéletesen dolgozó cella is „ritkán jelzőnek" látszana. Egy nap akkor
+    számít, ha aznap BÁRMELYIK cellának volt jele: akkor a motor futott és a
+    piac nyitva volt."""
+    from datetime import date as _date, timedelta as _td
+
+    mai = day_key(day)
+    try:
+        y, m, d = (int(x) for x in mai.split("-"))
+        kezd = _date(y, m, d)
+    except Exception:
+        return {"signals": 0, "entries": 0, "engine_days": 0, "signal_days": 0,
+                "outcomes": {}, "gates_blocked": {}}
+
+    cella = _cell(symbol, strategy)
+    ki = {"signals": 0, "entries": 0, "engine_days": 0, "signal_days": 0,
+          "outcomes": {}, "gates_blocked": {}}
+    for i in range(max(1, int(days))):
+        napi = load((kezd - _td(days=i)).strftime("%Y-%m-%d"))
+        if not napi:
+            continue                       # a motor nem futott ezen a napon
+        ki["engine_days"] += 1
+        r = napi.get(cella)
+        if not r:
+            continue
+        n = int(r.get("signals") or 0)
+        ki["signals"] += n
+        ki["entries"] += int(r.get("entries") or 0)
+        if n:
+            ki["signal_days"] += 1
+        for kulcs, forras in (("outcomes", "outcomes"),
+                              ("gates_blocked", "gates_blocked")):
+            for k, v in (r.get(forras) or {}).items():
+                ki[kulcs][k] = ki[kulcs].get(k, 0) + int(v or 0)
+    return ki
+
+
 def prune(keep_days: int = 90) -> int:
     """A régi napi fájlok törlése. Visszaad: hány fájlt törölt.
 

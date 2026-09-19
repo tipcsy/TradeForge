@@ -250,6 +250,17 @@
       "_comment_silent": "NEMA SOROZAT: ennyi OLYAN nap utan lelet, amikor a motor futott (mas cellanak volt jele), de ennek a cellanak egy sem. 0 = kikapcsolva.",
       "silent_days": 5
     },
+    "lifecycle": {
+      "_comment": "ELETCIKLUS-LETRA (F1, ARNYEK-MOD): STOPPED -> UNTUNED -> PAPER -> LIVE. A karmester JAVASLATOT ad es a kronikaba irja; NEM hajt vegre semmit. A `plan` paranccsal nezheted meg.",
+      "_comment_paper": "PAPIR -> ELO: ennyi jel kell a „csak jelzes” modban, ennyi OLYAN napon, amikor a motor futott. ⚠ A papir AKTIVITAST bizonyit, nyeresegesseget nem (a jelzes-soroknak nincs P&L-je) — ezert a leptetes MINDIG emberi jovahagyas.",
+      "paper_min_signals": 30,
+      "paper_min_days": 10,
+      "_comment_demote": "ELO -> PAPIR: ennyi valodi kotes ALATT nem minositunk vissza (a kis mintabol hozott dontes zajra reagalna), es csak ez alatti profit factornal.",
+      "demote_min_trades": 50,
+      "demote_pf": 1.0,
+      "_comment_stale": "A mentett keszlet ennyi nap utan avult -> ujraoptimalizalas javaslat.",
+      "stale_params_days": 60
+    },
     "journal": {
       "_comment": "KRONIKA: mit latott (es kesobb mit tett) a karmester. Append-only JSONL.",
       "keep_days": 365

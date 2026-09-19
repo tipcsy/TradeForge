@@ -624,6 +624,29 @@ def cmd_health(ctx: Context, args: list, confirmed: bool = False) -> Result:
     return Result(_crep.health_lines(leletek), ok=not leletek)
 
 
+def cmd_plan(ctx: Context, args: list, confirmed: bool = False) -> Result:
+    """`plan` — az életciklus-létra javaslatai (ÁRNYÉK-MÓD: nem hajt végre semmit).
+
+    ⚠ A JAVASLAT NEM AKCIÓ. A karmester az F1 fázisban csak LEÍRJA, mit tenne; a
+    végrehajtás emberi (a `mode` paranccsal vagy a felületen). A javaslatok a
+    krónikába is bekerülnek, hogy utólag mérhető legyen, jók lettek volna-e — a
+    terv szerint az önállóság csak ezután adható meg."""
+    from conductor.policies import health as _h, lifecycle as _lc
+    from conductor import report as _crep
+
+    _sof = lambda s: ctx.strategies_of(s) or []
+    leletek = _h.findings(ctx.cfg, strategies_of=_sof)
+    javaslatok = _lc.proposals(ctx.cfg, strategies_of=_sof,
+                               health_findings=leletek)
+    try:
+        _lc.shadow(ctx.cfg, javaslatok)
+    except Exception:
+        # ⚠ A krónika hiánya nem viheti el a választ — de a javaslat attól még
+        # érvényes, és a felhasználó LÁTJA.
+        pass
+    return Result(_crep.plan_lines(javaslatok))
+
+
 def cmd_balance(ctx: Context, args: list, confirmed: bool = False) -> Result:
     a = ctx.account() or {}
     if not a:
@@ -739,6 +762,7 @@ COMMANDS: dict = {
     "mode":    cmd_mode,
     "why":     cmd_why,
     "health":  cmd_health,
+    "plan":    cmd_plan,
     "balance": cmd_balance,
     "today":   cmd_today,
     "state":   cmd_state,
@@ -759,6 +783,7 @@ _HELP = (
     ("mode <pár> [strat] live|signal", "console.help.mode"),
     ("why <pár> [stratégia]", "console.help.why"),
     ("health", "console.help.health"),
+    ("plan", "console.help.plan"),
     ("balance", "console.help.balance"),
     ("today", "console.help.today"),
     ("state", "console.help.state"),
