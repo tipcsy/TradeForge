@@ -71,6 +71,9 @@ import argparse
 import numpy as np
 import pandas as pd
 
+import core.applog as _applog
+_applog.harden_console()   # cp1250 konzol: a ⚠ / ≥ / → ne dobjon UnicodeEncodeError-t
+
 import lab
 import seq_events as SE
 import seq_stat as ST

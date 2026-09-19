@@ -333,21 +333,23 @@ protokoll két ismert gyengéjén múlik (cella-függőség; költség/s műterm
 **Új lelet:** a valódi piac 8 órás horizonton minden páron kevesebbet kínál,
 mint a szerkezet nélküli null → több órás átlaghoz-húzás.
 
-**Eszköz-hibák, amiket a Windows-futás felszínre hozott (javítandó):**
+**Eszköz-hibák, amiket a Windows-futás felszínre hozott** (1–3 javítva a
+következő commitban, 4 a protokoll következő fordulójára marad):
 
-1. `sl_oracle.py` és `seq_matrix.py` cp1250 konzolon elszáll (`⚠`, `≥`,
+1. ✔ `sl_oracle.py` és `seq_matrix.py` cp1250 konzolon elszállt (`⚠`, `≥`,
    `→`): `UnicodeEncodeError: charmap codec can't encode character U+26A0`.
-   Kerülőút: `PYTHONIOENCODING=utf-8`. Javítás: a szkriptek elejére
-   `sys.stdout.reconfigure(encoding="utf-8", errors="replace")` (a
-   `tests/run_all.py` mintájára).
-2. A `szerkezeti` szabálynál a `kivonat_egyedi` 2–5 sort kihagy (UsaInd 2,
-   UsaTec 5, USDJPY 2) → a költség nincs levonva ÉS a `kulonbseg_t` NaN, a
-   sor összehasonlíthatatlan. A kieső sorokat a referenciából is ki kell venni
-   (párosítás `i`+`dir` szerint), nem az egész sort feladni.
-3. A 4. riport `evek_poz` oszlopa a szabály SAJÁT R-jének évenkénti előjele,
-   nem a referenciához mért különbségé — a (2) feltétel így a kimenetből nem
-   olvasható ki. Kell egy `kulonbseg_evek_poz` oszlop (a `kulonbseg_t`
-   mellé, ugyanabból a párosított különbségből).
+   Javítás: `core.applog.harden_console()` a többi `tools/` eszköz mintájára
+   (a leképezhetetlen karakter `?` lesz, a program nem áll meg).
+2. ✔ A `szerkezeti` szabálynál a `kivonat_egyedi` 2–5 sort kihagyott (nincs
+   igazolt swing → NaN stop) → a költség nem volt levonva ÉS a `kulonbseg_t`
+   NaN lett. Javítás: a kieső belépők ELŐRE kikerülnek a költségből és a
+   referenciából is, a különbség a többi soron párosítva mérődik. Ettől a
+   szerkezeti sor UsaTec-en −0,051 → **−0,066 R** (költséggel), a különbség
+   t-je **−2,70** — a BUKOTT ítélet nem változik, csak most számszerű.
+3. ✔ A 4. riport `evek_poz` oszlopa a szabály SAJÁT R-jének évenkénti
+   előjele volt, a (2) feltételhez a különbségé kell. Új oszlop:
+   `kulonbseg_evek_poz` (ugyanabból a párosított különbségből, mint a
+   `kulonbseg_t`). A 8.2 táblázat (2) oszlopa ezzel egyezik.
 4. Az ítélet (`_itelet`) függetlennek kezeli a cellákat (rangkorreláció t,
    véletlen-50 p) — lásd 8.1. Nem hiba a kódban, hanem a protokoll gyengéje;
    a következő rögzített változatban A-eseményre klaszterezett null kell.

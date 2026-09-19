@@ -66,6 +66,9 @@ import argparse
 import numpy as np
 import pandas as pd
 
+import core.applog as _applog
+_applog.harden_console()   # cp1250 konzol: a ⚠ / ≥ / → ne dobjon UnicodeEncodeError-t
+
 import lab
 import seq_stat as ST
 import sl_paths as SP
@@ -259,23 +262,33 @@ def r4_szabalyok(sym: str, m1, atr, K: pd.DataFrame, h: int,
     sorok = []
     ref_r = None
     for nev, s_arr in szabalyok.items():
-        E = SP.kivonat_egyedi(m1, atr, K["i"].to_numpy(int), d, s_arr, h)
+        # ⚠ A `kivonat_egyedi` kihagyja azokat a sorokat, ahol a stop NaN vagy
+        # ≤ 0 (a szerkezeti stopnál 2–5 belépő páronként: nincs igazolt swing).
+        # Az első futásban (2026-09-19) ilyenkor a költség-tömbök elcsúsztak
+        # volna, ezért a sor költség NÉLKÜL és `kulonbseg_t` nélkül ment ki —
+        # összehasonlíthatatlanul. Most a kieső belépőket ELŐRE kivesszük a
+        # költségből ÉS a referenciából is, így minden szabály ugyanazokon a
+        # belépőkön, párosítva mérődik.
+        ok = np.isfinite(s_arr) & (s_arr > 0)
+        E = SP.kivonat_egyedi(m1, atr, K["i"].to_numpy(int)[ok], d[ok],
+                              np.asarray(s_arr, float)[ok], h)
         if E.empty:
             continue
+        if len(E) != int(ok.sum()) or not np.array_equal(
+                E["i"].to_numpy(int), K["i"].to_numpy(int)[ok]):
+            print(f"   ⚠ {nev}: a kivonat nem illeszkedik a belépőkre "
+                  f"({len(E)} vs {int(ok.sum())}) — a sor kihagyva")
+            continue
+        if not ok.all():
+            print(f"   ({nev}: {int((~ok).sum())} belépőn nincs stop-távolság, "
+                  f"a párosított különbség a többi {int(ok.sum()):,} soron)")
         s_e = E["s"].to_numpy(float)
         stop_b = E["stop_bar"].to_numpy(int)
         utott = stop_b < h
         r_brutto = np.where(utott, -1.0, E["zaro"].to_numpy(float) / s_e)
         kilep = np.minimum(stop_b, h)
-        # ⚠ a költség tömbjei a K SORRENDJÉHEZ igazodnak: ha a `kivonat_egyedi`
-        # bármelyik sort kihagyta, az illesztés elcsúszna — inkább szóljunk.
-        if len(E) != len(K):
-            print(f"   ⚠ {nev}: {len(K) - len(E)} sor kiesett, a költség "
-                  f"NINCS levonva ebben a sorban")
-            kolt = 0.0
-        else:
-            kolt = k.r(s_e, kilep)
-        r = r_brutto - kolt
+        k_e = k if ok.all() else Koltseg(sym, K[ok].reset_index(drop=True), h)
+        r = r_brutto - k_e.r(s_e, kilep)
         st = _sor(r, E)
         hold = ~np.asarray(pd.DatetimeIndex(E["ido"])
                            < pd.Timestamp(VAGAS, tz=pd.DatetimeIndex(E["ido"]).tz))
@@ -287,16 +300,24 @@ def r4_szabalyok(sym: str, m1, atr, K: pd.DataFrame, h: int,
                "R_holdout": st_h["R"],
                "evek_poz": st["evek_poz"], "n": st["n"]}
         if ref_r is None:
+            # a referencia (fix 1,5 ATR) minden belépőn értelmezett -> teljes
             ref_r = r
             sor["kulonbseg_t"] = np.nan
+            sor["kulonbseg_evek_poz"] = np.nan
         else:
-            sor["kulonbseg_t"] = (_sor(r - ref_r, E)["t_nap"]
-                                  if len(r) == len(ref_r) else np.nan)
+            # ugyanazokon a belépőkön, párosítva: a referencia a kieső sorok
+            # nélkül. Az `evek_poz` fent a szabály SAJÁT R-jére vonatkozik; az
+            # elfogadás (2) feltétele a KÜLÖNBSÉG évenkénti előjele — ez az.
+            kul = r - ref_r[ok]
+            sor["kulonbseg_t"] = _sor(kul, E)["t_nap"]
+            sor["kulonbseg_evek_poz"] = _sor(kul, E)["evek_poz"]
         sorok.append(sor)
     t = pd.DataFrame(sorok)
     print(t.to_string(index=False, float_format=lambda v: f"{v:9.3f}"))
     print("   `kulonbseg_t`: a fix referenciához mért KÜLÖNBSÉG napra "
           "klaszterezett t-je (ugyanazokon a belépőkön, párosítva)")
+    print("   `kulonbseg_evek_poz`: az évek hányadában pozitív ez a különbség "
+          "— az elfogadás (2) feltétele; az `evek_poz` a szabály saját R-jéé")
     print("   ⚠ a `feltételes` szabály a KERESŐ szakaszon tanult — rá NÉZVE "
           "csak az `R_holdout` oszlop érvényes;")
     print("     a fix szabályoknál a két oszlop különbsége csak a két "
