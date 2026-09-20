@@ -798,6 +798,80 @@ def cmd_optq(ctx: Context, args: list, confirmed: bool = False) -> Result:
     return Result(_crep.optq_lines(_q.items()))
 
 
+def set_no_optimize(ctx: Context, symbol: str, strategy: str,
+                    ertek, *, save: bool = True) -> Result:
+    """A cella (vagy `symbol=None` esetén a STRATÉGIA) kizárása az
+    optimalizálásból. `ertek`: `True` · `False` · `None` (= kövesse az alapot).
+
+    ⚠ EGY ÍRÁSI ÚT. A felület pipája, a konzol parancsa és a Telegram ugyanitt
+    ír — különben megismételnénk azt a hibát, amit a `run_state`-nél és a
+    kötés-módnál már egyszer megfizettünk."""
+    from conductor import optout as _oo
+
+    nev = str(strategy or "").strip()
+    if not nev:
+        return Result([_t("conductor.noopt.usage")], ok=False)
+    if symbol is None:
+        valt = _oo.set_strategia(ctx.cfg, nev, ertek)
+        cimke = _t("conductor.noopt.scope_strategy", strategy=nev)
+    else:
+        if nev not in (ctx.strategies_of(symbol) or []):
+            # ⚠ NEM ÍRUNK olyan cellára, ami nincs: a bejegyzés árván maradna a
+            # configban, és később senki nem értené, honnan való.
+            return Result([_t("conductor.noopt.unknown_cell", symbol=symbol,
+                              strategy=nev)], ok=False)
+        valt = _oo.set_cella(ctx.cfg, symbol, nev, ertek)
+        cimke = _t("conductor.noopt.scope_cell", symbol=symbol, strategy=nev)
+    if not valt:
+        return Result([_t("conductor.noopt.unchanged", what=cimke)])
+    mentve = ctx.save_config() if save else True
+    kulcs = ("conductor.noopt.set_on" if ertek is True else
+             "conductor.noopt.set_off" if ertek is False else
+             "conductor.noopt.set_auto")
+    sorok = [_t(kulcs, what=cimke)]
+    if symbol is not None and ertek is None:
+        # A törlés után az ALAP lép életbe — mondjuk is meg, mi lett belőle.
+        sorok.append(_t("conductor.noopt.effective", what=cimke,
+                        state=_t("conductor.noopt.state_on"
+                                 if _oo.no_optimize(ctx.cfg, symbol, nev)
+                                 else "conductor.noopt.state_off")))
+    if save and not mentve:
+        sorok.append(_t("console.not_saved"))
+    return Result(sorok, ok=(mentve if save else True))
+
+
+def cmd_noopt(ctx: Context, args: list, confirmed: bool = False) -> Result:
+    """`noopt` · `noopt <pár> <strat> on|off|auto` · `noopt <strat> on|off`
+
+    A KIZÁRÁS TARTÓS DÖNTÉS, nem egy javaslat elvetése: a kizárt cellára a
+    karmester nem javasol optimalizálást, és a sorba sem kerülhet be."""
+    from conductor import optout as _oo
+    from conductor import report as _crep
+
+    _sof = lambda s: ctx.strategies_of(s) or []
+    if not args:
+        return Result(_crep.noopt_lines(_oo.kizartak(ctx.cfg, strategies_of=_sof)))
+
+    _ERTEK = {"on": True, "ki": True, "igen": True, "true": True,
+              "off": False, "be": False, "nem": False, "false": False,
+              "auto": None, "alap": None}
+    szo = str(args[-1]).lower()
+    if szo not in _ERTEK:
+        return Result([_t("conductor.noopt.usage")], ok=False)
+    ertek = _ERTEK[szo]
+    tobbi = list(args[:-1])
+    if len(tobbi) == 2:
+        sym = _resolve_symbol(ctx, tobbi[0])
+        if sym is None:
+            return Result([_t("console.unknown_pair", symbol=tobbi[0])], ok=False)
+        return set_no_optimize(ctx, sym, tobbi[1], ertek)
+    if len(tobbi) == 1:
+        # ⚠ STRATÉGIA-SZINT: itt az `auto` a bejegyzés TÖRLÉSE (nincs mihez
+        # visszaesni), a cellákon pedig ettől kezdve megint az alap (`False`) él.
+        return set_no_optimize(ctx, None, tobbi[0], ertek)
+    return Result([_t("conductor.noopt.usage")], ok=False)
+
+
 def cmd_balance(ctx: Context, args: list, confirmed: bool = False) -> Result:
     a = ctx.account() or {}
     if not a:
@@ -921,6 +995,7 @@ COMMANDS: dict = {
     "defer":   cmd_defer,
     "undo":    cmd_undo,
     "optq":    cmd_optq,
+    "noopt":   cmd_noopt,
     "balance": cmd_balance,
     "today":   cmd_today,
     "state":   cmd_state,
@@ -949,6 +1024,7 @@ _HELP = (
     ("defer <id>", "console.help.defer"),
     ("undo <id>", "console.help.undo"),
     ("optq [cancel <id>]", "console.help.optq"),
+    ("noopt [<pár>] <strat> on|off|auto", "console.help.noopt"),
     ("balance", "console.help.balance"),
     ("today", "console.help.today"),
     ("state", "console.help.state"),

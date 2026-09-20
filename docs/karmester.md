@@ -719,3 +719,62 @@ bárki más) sem tudja majd véletlenül kihagyni.
 
 Az invariánst a `tests/test_command_layer_single_source.py` őrzi: forrás-szinten
 is elbukik, ha a felület újra saját írási utat nyit.
+
+## 17. Amit NEM bántunk: kizárás az optimalizálásból (v3.83.1)
+
+> A lelet a használatból jött: *„van olyan, amit nem fogok optimalizálni"*.
+
+A karmester **mér**, és a mérésből következik a javaslat. Egy hangolatlan cella
+minden körben „optimalizáld" javaslatot kap, az avult készlet ugyanúgy. Ha ezt
+te sosem fogadod el, a javaslat **nem semleges**: megtanít arra, hogy a
+postaládát át lehet lapozni — és akkor a mellette álló FONTOS javaslat is
+elvész. Ezért kell egy **tartós** nem.
+
+**A kizárás nem elvetés.** Az elvetés egy KONKRÉT javaslatról mond nemet, és a
+türelmi idő (`inbox.reject_cooldown_days`) után visszatér. A kizárás a
+*cellához* tartozik: a javaslat létre sem jön, és a sorba be sem kerülhet.
+
+### Két szint, mert a valóság is kétszintű
+
+```
+1. CELLA:      pairs.<SYM>.no_optimize.<stratégia>     ← ha van, EZ dönt
+2. STRATÉGIA:  conductor.no_optimize.<stratégia>       ← az alapértelmezés
+3. egyik sincs → False (optimalizálható)
+```
+
+A cella-szintű `false` tehát **visszakapcsolja**, amit a stratégia-szintű `true`
+kizárt. Ezért kell megkülönböztetni a „nincs bejegyzés" és a „kifejezetten
+`false`" esetet: az első követi az alapot, a második felülírja. Egy `bool()`
+vagy egy `x or alap` ezt elmosná — a `False` hamis, tehát a **kikapcsolás
+kapcsolna be** valamit. Ez a projekt visszatérő néma hibája; a
+`conductor/optout.py` ezért `None`-t ad vissza a „nincs bejegyzés"-re, és az
+értelmezhetetlen értékre **szól**, nem találgat.
+
+### Hol látszik
+
+| Hely | Mit csinál |
+|---|---|
+| Karmester fül, mátrix | `⊘` pipa cellánként; az oszlopfejen a stratégia szintje. A halvány `⊘` **örökölt**. |
+| `noopt` parancs | lista · `noopt <pár> <strat> on\|off\|auto` · `noopt <strat> on\|off` |
+| `plan` | a kizárt cellára `hold`, és **kimondja**, hogy a te döntésed miatt hallgat |
+| `optq` | a már sorban álló tétel `blocked`, okkal — a pipa levételével újraindul |
+
+**Egy írási út**: a felület pipája, a konzol és a Telegram is a
+`console_cmd.set_no_optimize`-on megy (a Telegramon a parancs **nincs
+engedélyezve** — a `mode`-hoz hasonlóan: egy chatüzenetből nem állítunk olyat,
+aminek a következménye hónapokig fennáll).
+
+### A kizárás AKADÁLY, a megszűnés VÉG
+
+Két hasonló helyzetet szándékosan **másképp** kezelünk:
+
+- **kizárt cella** → a sorban álló tétel `blocked`: megvár, amíg meggondolod
+  magad (a pipa levételével azonnal indítható).
+- **megszűnt cella** (levetted a stratégiát a párról) → `dropped`, a postaládában
+  `obsolete`: nem jön vissza magától, tehát egy örökké „blokkolva" álló sor csak
+  gyűlne, és elfedné a valódi akadályokat.
+
+⚠ **A bizonytalanság egyik sem.** Ha a stratégia-listát nem tudjuk feloldani,
+a cellát LÉTEZŐNEK vesszük (`snapshot.letezik`): inkább maradjon egy fölösleges
+tétel, mint hogy egy átmeneti hiba kiürítse a postaládát. A törlés
+visszafordíthatatlan, a zaj nem.

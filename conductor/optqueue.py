@@ -127,7 +127,15 @@ def _save_locked() -> bool:
 
 def enqueue(cfg: dict, symbol: str, strategy: str, *, source: str = "") -> "str | None":
     """Egy `(instrumentum, stratégia)` optimalizálás kérése. Visszaad: az azonosító,
-    vagy `None`, ha MÁR sorban áll (a kérés akkor sem vész el — ott van)."""
+    vagy `None`, ha MÁR sorban áll (a kérés akkor sem vész el — ott van), illetve
+    ha a cella KI VAN ZÁRVA az optimalizálásból (`conductor.optout`)."""
+    from conductor import optout as _oo
+
+    # ⚠ A KIZÁRT CELLA BE SEM KERÜL. Máshol is elbukna (`blocked_reason`), de
+    # egy sor, ami azonnal „blokkolva" állapotban születik, csak zaj: a kizárás
+    # a TE tartós döntésed, nem átmeneti akadály.
+    if _oo.no_optimize(cfg, symbol, strategy):
+        return None
     _load()
     with _lock:
         for e in _state.values():
@@ -191,6 +199,13 @@ def blocked_reason(cfg: dict, symbol: str, strategy: str,
     # CPU-munka futott volna egy cellára, amit már nem használsz.
     if not _snap.letezik(cfg, symbol, strategy, strategies_of=strategies_of):
         return "cell_gone"
+
+    # ⚠ A KIZÁRÁS AKADÁLY, NEM VÉG. A cella létezik, és a pipa levételével
+    # bármikor indíthatóvá válik — ezért NEM `dropped`, hanem blokkolt: a
+    # korábban kért tétel megvár, amíg meggondolod magad.
+    from conductor import optout as _oo
+    if _oo.no_optimize(cfg, symbol, strategy):
+        return "no_optimize"
 
     try:
         engedett = list(strategies_of(symbol) or []) if strategies_of else []

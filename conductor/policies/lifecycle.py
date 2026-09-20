@@ -232,7 +232,33 @@ def proposal_for(sn: dict, cfg: dict, health_findings=None) -> Proposal:
              if f.get("symbol") == sn["symbol"]
              and f.get("strategy") == sn["strategy"]
              and (f.get("sev") == SEV_RISK or f.get("code") == "dried_up")}
-    return _SZABALY[fok](sn, k, kodok)
+    return _kizaras_szurove(_SZABALY[fok](sn, k, kodok), cfg)
+
+
+def _kizaras_szurove(p: Proposal, cfg: dict) -> Proposal:
+    """A KIZÁRT cella optimalizálás-javaslata `hold`-dá szelídül.
+
+    ⚠ EGY HELYEN, NEM KETTŐBEN. Az optimalizálást két szabály javasolhatja (a
+    hangolatlan cella és az avult készlet); a kizárást mindkettőnél külön
+    figyelni két helyen élő szabály volna — a projekt visszatérő hibája. Itt a
+    javaslat MÁR elkészült, és egyetlen kapun megy át.
+
+    ⚠ ÉS NEM NÉMÁN. A „nem javaslok semmit" nem ugyanaz, mint a „nincs mit
+    javasolni": a cella attól még hangolatlan vagy avult, csak épp TE döntöttél
+    úgy, hogy ezt nem bántjuk. A terv szerint a karmester minden döntése
+    számonkérhető — ideértve azt is, amit a te korábbi döntésed miatt NEM tesz."""
+    from conductor import optout as _oo
+
+    if p.action != QUEUE_OPTIMIZE:
+        return p
+    if not _oo.no_optimize(cfg, p.symbol, p.strategy):
+        return p
+    return Proposal(action=HOLD, symbol=p.symbol, strategy=p.strategy,
+                    reason="no_optimize",
+                    from_stage=p.from_stage, to_stage=p.from_stage,
+                    text=_t(f"conductor.plan.noopt.{p.reason}",
+                            symbol=p.symbol, strategy=p.strategy),
+                    evidence=dict(p.evidence or {}))
 
 
 def proposals(cfg: dict, *, strategies_of=None, health_findings=None,

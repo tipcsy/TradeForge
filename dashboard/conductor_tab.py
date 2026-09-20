@@ -73,6 +73,9 @@ class ConductorTab:
         self._on_changed = on_changed or (lambda: None)
         self._confirm = confirm or self._sajat_confirm
         self._cellak: list = []          # a mátrix pillanatképei (drága)
+        # ⚠ A tk `Variable`-öket ÉLETBEN kell tartani: ha a Python elengedi
+        # őket, a pipa NÉMÁN elfelejti az értékét.
+        self._noopt_valtozok: list = []
         self._betoltve = False
         # ⚠ MIKOR RAJZOLUNK ÚJRA. A dashboard köre 30 mp-enként hív; ha minden
         # körben ledobnánk és újraépítenénk a kártyákat, a fül VILLOGNA, a
@@ -272,12 +275,29 @@ class ConductorTab:
         szimbolumok = sorted({c["sn"]["symbol"] for c in self._cellak})
         racs = {(c["sn"]["symbol"], c["sn"]["strategy"]): c for c in self._cellak}
 
+        # ⚠ A KIZÁRÁS ÁLLAPOTA A CONFIGBÓL JÖN, RAJZOLÁSKOR. Nem tesszük el a
+        # pillanatképbe: a pipa a te TARTÓS döntésed, és azonnal látszódnia kell,
+        # ha máshonnan (konzolról, Telegramról) írták át.
+        from conductor import optout as _oo
+        _ctx = self._ctx()
+        _cfg = getattr(_ctx, "cfg", None) if _ctx is not None else None
+
         tbl = tk.Frame(self._box_matrix, bg=BG)
         tbl.pack(fill="x", padx=8)
         tk.Label(tbl, text="", bg=BG, width=12).grid(row=0, column=0)
+        self._noopt_valtozok = []          # ⚠ a tk `Variable`-öket ÉLETBEN kell tartani
         for j, n in enumerate(strategiak, start=1):
-            tk.Label(tbl, text=n, bg=BG, fg=FG_GRAY, font=self._small,
-                     width=14, anchor="w").grid(row=0, column=j, padx=2)
+            fej = tk.Frame(tbl, bg=BG)
+            fej.grid(row=0, column=j, padx=2, sticky="w")
+            tk.Label(fej, text=n, bg=BG, fg=FG_GRAY, font=self._small,
+                     anchor="w").pack(side="left")
+            if _cfg is not None:
+                # ⚠ AZ OSZLOP FEJE = A STRATÉGIA SZINTJE. Itt egy kattintással
+                # minden páron kizárod (vagy visszaengeded) — a cellák ezt
+                # írhatják felül. A két szint így LÁTHATÓAN különbözik: fej =
+                # alapértelmezés, cella = kivétel.
+                self._noopt_gomb(fej, _cfg, None, n,
+                                 bool(_oo.strategia_ertek(_cfg, n)), False)
         for i, sym in enumerate(szimbolumok, start=1):
             tk.Label(tbl, text=sym, bg=BG, fg=FG_WHITE, font=self._small,
                      width=12, anchor="w").grid(row=i, column=0, sticky="w")
@@ -288,13 +308,48 @@ class ConductorTab:
                              font=self._small, width=14,
                              anchor="w").grid(row=i, column=j, padx=2)
                     continue
+                cella = tk.Frame(tbl, bg=BG)
+                cella.grid(row=i, column=j, padx=2, sticky="w")
                 # ⚠ A FOK ÉS A LELET EGY CELLÁBAN: a „fut"-ból önmagában nem
                 # derül ki, hogy közben valami nincs rendben vele.
                 cimke = _t("cond.tab.cell", stage=_t(f"cond.stage.{c['fok']}"),
                            marks=("⚠" * min(3, c.get("leletek") or 0)))
-                tk.Label(tbl, text=cimke, bg=BG,
+                tk.Label(cella, text=cimke, bg=BG,
                          fg=_FOK_SZIN.get(c["fok"], FG_GRAY), font=self._small,
-                         width=14, anchor="w").grid(row=i, column=j, padx=2)
+                         width=11, anchor="w").pack(side="left")
+                if _cfg is not None:
+                    self._noopt_gomb(
+                        cella, _cfg, sym, n, _oo.no_optimize(_cfg, sym, n),
+                        _oo.forras(_cfg, sym, n) == _oo.FORRAS_STRATEGIA)
+        if _cfg is not None:
+            tk.Label(self._box_matrix, text=_t("cond.tab.noopt.legend"), bg=BG,
+                     fg=FG_GRAY_DIM, font=self._small,
+                     anchor="w").pack(fill="x", padx=8, pady=(4, 0))
+
+    def _noopt_gomb(self, szulo, cfg, symbol, strategy, be: bool, orokolt: bool):
+        """Egy „ne optimalizáld" pipa. `symbol=None` → a STRATÉGIA szintje.
+
+        ⚠ AMIT KATTINTASZ, AZT KAPOD. A pipa a HATÁLYOS értéket mutatja, de a
+        kattintás mindig a SAJÁT szintjére ír: a cellán a cella bejegyzését
+        állítja, az oszlopfejen a stratégiáét. Ha a jelölés örökölt (a stratégia
+        alapértelmezéséből jön), halványabb — különben azt hinnéd, ezen a cellán
+        állítottad be, és hiába keresnéd, hol kapcsold vissza."""
+        v = tk.BooleanVar(value=bool(be))
+        self._noopt_valtozok.append(v)
+        gomb = tk.Checkbutton(
+            szulo, variable=v, bg=BG, activebackground=BG,
+            fg=(FG_GRAY_DIM if orokolt else FG_YELLOW), selectcolor=BG,
+            highlightthickness=0, bd=0, padx=0, pady=0, text="⊘",
+            font=self._small,
+            command=lambda: self._noopt_allit(symbol, strategy, bool(v.get())))
+        gomb.pack(side="left")
+        return gomb
+
+    def _noopt_allit(self, symbol, strategy, ertek: bool):
+        """A KÖZÖS parancs-rétegen át — ugyanaz az út, mint a `noopt` parancsé."""
+        from core import console_cmd as _cc
+        self._futtat(lambda ctx, megerosit: _cc.set_no_optimize(
+            ctx, symbol, strategy, ertek))
 
     # ── krónika ──────────────────────────────────────────────────────────
     def _rajzol_kronika(self):

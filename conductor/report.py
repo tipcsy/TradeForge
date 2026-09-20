@@ -296,6 +296,22 @@ def inbox_lines(tetelek: list, *, stat: dict = None) -> list:
     return sorok
 
 
+def noopt_lines(kizartak: list) -> list:
+    """A KIZÁRT cellák listája — és az, HONNAN jön a kizárás.
+
+    ⚠ A FORRÁS NEM MELLÉKES. Egy stratégia-szintű kizárás minden páron hat; ha a
+    lista csak a cellát mutatná, egy fél év múlva nem értenéd, miért van kizárva
+    egy pár, amin sosem állítottál semmit."""
+    if not kizartak:
+        return [_t("conductor.noopt.none")]
+    sorok = [_t("conductor.noopt.head", n=len(kizartak))]
+    for sym, strat, forras in kizartak:
+        sorok.append(_t("conductor.noopt.row", symbol=sym, strategy=strat,
+                        source=_t(f"conductor.noopt.source.{forras or 'cell'}")))
+    sorok.append(_t("conductor.noopt.hint"))
+    return sorok
+
+
 def optq_lines(tetelek: list) -> list:
     """Az optimalizálás-sor — állapottal és az OKKAL.
 
