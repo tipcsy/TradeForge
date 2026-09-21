@@ -2054,6 +2054,15 @@ def _pos_risk_ccy_of(ticket: int, pos=None, pair_cfg: dict | None = None) -> flo
     return 0.0
 
 
+class _KarmesterKi(Exception):
+    """Belső jelzés: a karmester L-1, az indulás-blokk nem fut tovább.
+
+    ⚠ MIÉRT KIVÉTEL, ÉS NEM `if`. A blokk hat egymást követő lépésből áll, és
+    mindet ugyanaz a `try` védi; egy `if`-ekkel tördelt változat ugyanazt a
+    feltételt hatszor ismételné — és a hetedik lépésnél valaki elfelejtené.
+    """
+
+
 def _signal_bar_ts(df_lo, strategy, params) -> tuple:
     """A JELET azonosító gyertya ideje → `(bar_ts, jel_gyertya_mp)`.
 
@@ -3766,14 +3775,26 @@ def run(cfg: dict, slot_mgr: SlotManager):
     # limit, a szesszió-ablakok és a kapuk is ahhoz igazodnak — a modul maga
     # MT5-mentes, ezért kívülről kapja meg.
     try:
+        from conductor import autonomy as _cau
         from conductor import config as _ccfg, journal as _cjrn
         _tlm.set_day_provider(mt5_connector.server_today)
+        # ⚠ L-1-EN EL SEM INDUL. A terv első szabálya: „nem figyel, nem ír, nem
+        # riportol". A takarítás is írás — kikapcsolt állapotban a karmester a
+        # saját fájljaihoz sem nyúl.
+        if not _cau.barmi_aktiv(cfg):
+            _tlm.set_enabled(False)
+            log.info("karmester: KIKAPCSOLVA (L-1) — nem mér, nem javasol, "
+                     "nem riportol")
+            raise _KarmesterKi
+        _tlm.set_enabled(_cau.enged(cfg, _cau.MEASURE))
         _tlm.prune(int(_ccfg.telemetry(cfg)["keep_days"]))
         _cjrn.prune(int(_ccfg.journal(cfg)["keep_days"]))
         from conductor import inbox as _cibx0
         _cibx0.prune(int(_ccfg.inbox(cfg)["keep_days"]))
         from conductor import optqueue as _coptq0
         _coptq0.prune(int(_ccfg.optqueue(cfg)["keep_days"]))
+    except _KarmesterKi:
+        pass                    # kikapcsolva — ez nem hiba, hanem a te döntésed
     except Exception:
         # A mérés SOHA nem állíthatja meg a kereskedést.
         log.debug("karmester-telemetria: az indítás kimaradt", exc_info=True)
@@ -4104,6 +4125,17 @@ def run(cfg: dict, slot_mgr: SlotManager):
             last_cycle_ts = time.time()
             # A karmester-telemetria kiírása, ha eljött az ideje (időzített,
             # atomikus — a körre nem mérhető költség).
+            # ⚠ A KAPCSOLÓ KÖRÖNKÉNT. A terv ígérete: a kill-switch fájl a
+            # KÖVETKEZŐ cikluson belül hat (≤ 5 mp). Ezért kérdezzük itt, és nem
+            # csak induláskor — egy `touch data/conductor/off` SSH-n is megáll.
+            # Egy `Path.exists()` mikroszekundumos; a kör másodperces.
+            try:
+                from conductor import autonomy as _cau_t
+                _karm_be = _cau_t.barmi_aktiv(cfg)
+                _tlm.set_enabled(_karm_be and _cau_t.enged(cfg, _cau_t.MEASURE))
+            except Exception:
+                _karm_be = False
+                log.debug("karmester: a fok nem olvasható", exc_info=True)
             _tlm.tick()
             # ── EGÉSZSÉGŐR (F1) — ÓRÁNKÉNT, nem körönként ────────────────
             # ⚠ A KÖLTSÉG MIATT. Az átvizsgálás fájlokat olvas (config-leletek,
@@ -4111,14 +4143,17 @@ def run(cfg: dict, slot_mgr: SlotManager):
             # szálán fut — a GIL miatt a kör munkaidejéből venne el. Óránként
             # elhanyagolható, körönként mérhető lenne. A leletek úgyis
             # naponta egyszer kerülnek a krónikába.
-            if time.time() - _last_health >= 3600:
+            if _karm_be and time.time() - _last_health >= 3600:
                 _last_health = time.time()
                 try:
+                    from conductor import autonomy as _cau
                     from conductor.policies import health as _chealth
                     from strategy import enabled_strategy_names as _ensn_h
                     _lel = _chealth.findings(
                         cfg, strategies_of=lambda s: _ensn_h(cfg, s) or [])
-                    _uj = _chealth.journal_new(cfg, _lel)
+                    # ⚠ L0 (MEGFIGYELŐ): mér és naplóz — de nem javasol.
+                    _uj = (_chealth.journal_new(cfg, _lel)
+                           if _cau.enged(cfg, _cau.MEASURE) else 0)
                     if _uj:
                         log.info("karmester: %d új lelet a krónikában "
                                  "(összesen %d áll fenn)", _uj, len(_lel))
@@ -4130,10 +4165,14 @@ def run(cfg: dict, slot_mgr: SlotManager):
                     # megállítja a pénzt bekapcsoló léptetést, az elszáradás
                     # pedig visszaminősítést vált ki — a küszöb EGY helyen van.
                     from conductor.policies import lifecycle as _clife
-                    _jav = _clife.proposals(
+                    # A cellánkénti fok-szűrés a `proposals`-ban van (EGY
+                    # helyen); itt csak azt nézzük, van-e egyáltalán jogunk
+                    # javasolni.
+                    _jav = (_clife.proposals(
                         cfg, strategies_of=lambda s: _ensn_h(cfg, s) or [],
                         health_findings=_lel)
-                    _uj_j = _clife.shadow(cfg, _jav)
+                        if _cau.enged(cfg, _cau.PROPOSE) else [])
+                    _uj_j = _clife.shadow(cfg, _jav) if _jav else 0
                     if _uj_j:
                         log.info("karmester (árnyék): %d új javaslat a "
                                  "krónikában", _uj_j)
@@ -4144,8 +4183,9 @@ def run(cfg: dict, slot_mgr: SlotManager):
                     # hogy a javaslat akkor is várjon rád, ha aznap egyszer sem
                     # kérdezel rá.
                     from conductor import inbox as _cibx
-                    _st = _cibx.sync(cfg, _jav,
-                                     strategies_of=lambda s: _ensn_h(cfg, s) or [])
+                    _st = (_cibx.sync(cfg, _jav,
+                                      strategies_of=lambda s: _ensn_h(cfg, s) or [])
+                           if _cau.enged(cfg, _cau.INBOX) else {})
                     if _st.get("new"):
                         log.info("karmester: %d új javaslat a postaládában "
                                  "(`inbox`)", _st["new"])
@@ -4154,9 +4194,13 @@ def run(cfg: dict, slot_mgr: SlotManager):
                     # CPU-nehéz munka; a motor szálán a kereskedés körideje
                     # nyúlna meg. A sor csak INDÍT és LEARAT — mindkettő
                     # ezredmásodperces.
+                    # ⚠ AMIT TE FOGADTÁL EL, AZT L1-EN IS VÉGREHAJTJUK: a sor
+                    # a TE döntésed keze, nem a karmester önállósága. Az
+                    # önálló DÖNTÉS az F3/b (`AUTO`), az más kapu.
                     from conductor import optqueue as _coptq
-                    _qs = _coptq.drain(
+                    _qs = (_coptq.drain(
                         cfg, strategies_of=lambda s: _ensn_h(cfg, s) or [])
+                        if _cau.enged(cfg, _cau.EXECUTE) else {})
                     if _qs.get("started") or _qs.get("finished"):
                         log.info("karmester-optimalizálás: %d indult, %d "
                                  "befejeződött", _qs["started"], _qs["finished"])

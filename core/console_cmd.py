@@ -587,6 +587,10 @@ def cmd_why(ctx: Context, args: list, confirmed: bool = False) -> Result:
     ⚠ A PARANCS-RÉTEGBEN VAN, tehát a konzol, a TUI és a Telegram UGYANAZT a
     választ kapja, mint a felület. Egy jelentés, ami felületenként mást mond,
     rosszabb a hiányzónál."""
+    # ⚠ KIKAPCSOLVA: nem hallgatunk, megmondjuk (lásd `_karmester_ki`).
+    _ki = _karmester_ki(ctx)
+    if _ki is not None:
+        return _ki
     if not args:
         return Result([_t("console.why.usage")], ok=False)
     sym = _resolve_symbol(ctx, args[0])
@@ -613,6 +617,10 @@ def cmd_health(ctx: Context, args: list, confirmed: bool = False) -> Result:
     (`config_check`, `config_freshness`, `overview`) és a mérésből jövő
     leleteket — itt csak megjelenítjük. Egy külön „konzolos ellenőrzés" az első
     config-változásnál mást mondana, mint a felület."""
+    # ⚠ KIKAPCSOLVA: nem hallgatunk, megmondjuk (lásd `_karmester_ki`).
+    _ki = _karmester_ki(ctx)
+    if _ki is not None:
+        return _ki
     from conductor.policies import health as _h
     from conductor import report as _crep
 
@@ -634,6 +642,10 @@ def cmd_plan(ctx: Context, args: list, confirmed: bool = False) -> Result:
     végrehajtás emberi (a `mode` paranccsal vagy a felületen). A javaslatok a
     krónikába is bekerülnek, hogy utólag mérhető legyen, jók lettek volna-e — a
     terv szerint az önállóság csak ezután adható meg."""
+    # ⚠ KIKAPCSOLVA: nem hallgatunk, megmondjuk (lásd `_karmester_ki`).
+    _ki = _karmester_ki(ctx)
+    if _ki is not None:
+        return _ki
     from conductor.policies import health as _h, lifecycle as _lc
     from conductor import report as _crep
 
@@ -667,6 +679,11 @@ def cmd_report(ctx: Context, args: list, confirmed: bool = False) -> Result:
     from conductor import report as _crep
 
     sorok = list(cmd_today(ctx, []).lines)
+    # ⚠ A KIKAPCSOLT KARMESTER NEM RIPORTOL — de a NAPI ÖSSZEFOGLALÓ megy
+    # tovább. A kötések és az eredmény nem a karmester szakaszai; azokat egy
+    # kikapcsolás nem veheti el.
+    if _karmester_ki(ctx) is not None:
+        return Result(sorok)
     try:
         sorok += _crep.daily_lines(
             ctx.cfg, strategies_of=lambda s: ctx.strategies_of(s) or [])
@@ -710,6 +727,10 @@ def _inbox_tetel(ctx: Context, args: list, parancs: str):
 
 def cmd_inbox(ctx: Context, args: list, confirmed: bool = False) -> Result:
     """`inbox` — a karmester nyitott javaslatai, azonosítóval."""
+    # ⚠ KIKAPCSOLVA: nem hallgatunk, megmondjuk (lásd `_karmester_ki`).
+    _ki = _karmester_ki(ctx)
+    if _ki is not None:
+        return _ki
     from conductor import inbox as _ib
     from conductor import report as _crep
 
@@ -728,6 +749,10 @@ def cmd_accept(ctx: Context, args: list, confirmed: bool = False) -> Result:
 
     ⚠ AZ ELFOGADÁS NEM VAKON HAJT VÉGRE: a `conductor.actions` újraszámolja a
     javaslatot, és csak akkor lép, ha a házirend MA IS ugyanazt mondja."""
+    # ⚠ KIKAPCSOLVA: nem hallgatunk, megmondjuk (lásd `_karmester_ki`).
+    _ki = _karmester_ki(ctx)
+    if _ki is not None:
+        return _ki
     from conductor import actions as _act
     from conductor import inbox as _ib
 
@@ -742,6 +767,10 @@ def cmd_accept(ctx: Context, args: list, confirmed: bool = False) -> Result:
 
 def cmd_reject(ctx: Context, args: list, confirmed: bool = False) -> Result:
     """`reject <id>` — elvetés. A javaslat egy ideig NEM születik újra."""
+    # ⚠ KIKAPCSOLVA: nem hallgatunk, megmondjuk (lásd `_karmester_ki`).
+    _ki = _karmester_ki(ctx)
+    if _ki is not None:
+        return _ki
     from conductor import config as _ccfg
     from conductor import inbox as _ib
 
@@ -755,6 +784,10 @@ def cmd_reject(ctx: Context, args: list, confirmed: bool = False) -> Result:
 
 def cmd_defer(ctx: Context, args: list, confirmed: bool = False) -> Result:
     """`defer <id>` — „most nem": a javaslat néhány napra félrekerül."""
+    # ⚠ KIKAPCSOLVA: nem hallgatunk, megmondjuk (lásd `_karmester_ki`).
+    _ki = _karmester_ki(ctx)
+    if _ki is not None:
+        return _ki
     from conductor import config as _ccfg
     from conductor import inbox as _ib
 
@@ -771,6 +804,10 @@ def cmd_undo(ctx: Context, args: list, confirmed: bool = False) -> Result:
 
     ⚠ A VISSZAVONÁS IS AKCIÓ: egy visszaminősítés visszavonása VALÓDI KÖTÉST
     kapcsol vissza, ezért ugyanazon a megerősítés-mintán megy."""
+    # ⚠ KIKAPCSOLVA: nem hallgatunk, megmondjuk (lásd `_karmester_ki`).
+    _ki = _karmester_ki(ctx)
+    if _ki is not None:
+        return _ki
     from conductor import actions as _act
 
     e, hiba = _inbox_tetel(ctx, args, "undo")
@@ -785,6 +822,10 @@ def cmd_optq(ctx: Context, args: list, confirmed: bool = False) -> Result:
     ⚠ A SOR HAJTÁSA A MOTORÉ (óránként), nem ezé a parancsé: egy alprocessz
     indítása egy lekérdezés mellékhatásaként meglepetés volna. Itt csak
     megnézzük, mi van benne — és kivehetünk belőle egy várakozó tételt."""
+    # ⚠ KIKAPCSOLVA: nem hallgatunk, megmondjuk (lásd `_karmester_ki`).
+    _ki = _karmester_ki(ctx)
+    if _ki is not None:
+        return _ki
     from conductor import optqueue as _q
     from conductor import report as _crep
 
@@ -870,6 +911,126 @@ def cmd_noopt(ctx: Context, args: list, confirmed: bool = False) -> Result:
         # visszaesni), a cellákon pedig ettől kezdve megint az alap (`False`) él.
         return set_no_optimize(ctx, None, tobbi[0], ertek)
     return Result([_t("conductor.noopt.usage")], ok=False)
+
+
+# ---------------------------------------------------------------------------
+# AUTONÓMIA-LÉTRA ÉS KIKAPCSOLÓ
+# ---------------------------------------------------------------------------
+
+def _karmester_ki(ctx: Context) -> "Result | None":
+    """`Result`, ha a karmester KI van kapcsolva — különben `None`.
+
+    ⚠ MIÉRT NEM HALLGATUNK. Egy kikapcsolt karmester lekérdezésére üres listát
+    adni a legrosszabb válasz: pont úgy néz ki, mintha minden rendben volna
+    („nincs lelet, nincs javaslat"). Megmondjuk, hogy ki van kapcsolva, és
+    azt is, hol lehet visszakapcsolni."""
+    from conductor import autonomy as _au
+
+    if _au.barmi_aktiv(ctx.cfg):
+        return None
+    honnan = _t("conductor.autonomy.by_file" if _au.off_by_file()
+                else "conductor.autonomy.by_config")
+    return Result([_t("conductor.autonomy.is_off", how=honnan),
+                   _t("conductor.autonomy.turn_on_hint")], ok=False)
+
+
+def set_autonomy(ctx: Context, symbol, strategy, szint,
+                 *, save: bool = True) -> Result:
+    """A fok állítása. `symbol=None` → az ALAPÉRTÉK; különben hatókör-felülírás
+    (`szint=None` → a felülírás törlése)."""
+    from conductor import autonomy as _au
+
+    if symbol is None:
+        if szint is None or szint not in _au.SZINTEK:
+            return Result([_t("conductor.autonomy.usage")], ok=False)
+        valt = _au.set_default(ctx.cfg, szint)
+        cimke = _t("conductor.autonomy.scope_default")
+    else:
+        if strategy and strategy not in (ctx.strategies_of(symbol) or []):
+            return Result([_t("conductor.noopt.unknown_cell", symbol=symbol,
+                              strategy=strategy)], ok=False)
+        valt = _au.set_override(ctx.cfg, symbol, strategy, szint)
+        cimke = (_t("conductor.noopt.scope_cell", symbol=symbol,
+                    strategy=strategy) if strategy else symbol)
+    if not valt:
+        return Result([_t("conductor.noopt.unchanged", what=cimke)])
+    mentve = ctx.save_config() if save else True
+    if szint is None:
+        sorok = [_t("conductor.autonomy.cleared", what=cimke)]
+    else:
+        sorok = [_t("conductor.autonomy.set", what=cimke,
+                    level=_szint_cimke(szint))]
+    # ⚠ AMI ÉRVÉNYES, AZT MONDJUK KI. A felülírás TÖRLÉSE után a TÁGABB fok lép
+    # életbe — ha csak annyit írnánk ki, hogy „törölve", nem tudnád, mi lett.
+    # (Egy kifejezett beállításnál ez ugyanaz a sor volna kétszer.)
+    if symbol is not None and szint is None:
+        sorok.append(_t("conductor.autonomy.effective", what=cimke,
+                        level=_szint_cimke(_au.level(ctx.cfg, symbol, strategy))))
+    if save and not mentve:
+        sorok.append(_t("console.not_saved"))
+    return Result(sorok, ok=(mentve if save else True))
+
+
+def _szint_cimke(szint: int) -> str:
+    """`L3 — Korlátozott önálló` alakban. ⚠ A SZÁM IS OTT VAN: a config
+    számot vár, és a felirat fordul — a kettő együtt köti össze a kettőt."""
+    from conductor import autonomy as _au
+
+    nev = _t(f"conductor.autonomy.level.{_au.kod(szint)}")
+    jel = ""
+    # ⚠ NEM HAZUDUNK ÖNÁLLÓSÁGOT. Amíg a gépi végrehajtás (F3/b) nincs meg, az
+    # L2+ ugyanazt teszi, mint az L1 — ezt a felirat KIMONDJA.
+    if szint >= _au.ASSISTED:
+        jel = " " + _t("conductor.autonomy.not_yet_auto")
+    return f"L{szint} — {nev}{jel}"
+
+
+def cmd_karmester(ctx: Context, args: list, confirmed: bool = False) -> Result:
+    """`karmester` · `karmester off|on` · `karmester <fok>` ·
+    `karmester <pár> [stratégia] <fok>|auto`"""
+    from conductor import autonomy as _au
+    from conductor import report as _crep
+
+    if not args:
+        return Result(_crep.autonomy_lines(ctx.cfg))
+
+    elso = str(args[0]).lower()
+    # ── A KILL SWITCH ───────────────────────────────────────────────────
+    if elso in ("off", "ki", "on", "be"):
+        ki = elso in ("off", "ki")
+        if not _au.set_off_file(ki):
+            # ⚠ A SIKERTELEN KIKAPCSOLÁST KI KELL MONDANI. Egy „kikapcsolva"
+            # felirat egy futó karmester felett a lehető legrosszabb hazugság.
+            return Result([_t("conductor.autonomy.switch_failed")], ok=False)
+        if ki:
+            return Result([_t("conductor.autonomy.off_done"),
+                           _t("conductor.autonomy.off_keeps_state")])
+        return Result([_t("conductor.autonomy.on_done",
+                          level=_szint_cimke(_au.level(ctx.cfg)))])
+
+    def _fok(sz):
+        if str(sz).lower() in ("auto", "alap", "-"):
+            return "auto"
+        t = str(sz).upper().lstrip("L")
+        try:
+            v = int(t)
+        except ValueError:
+            return None
+        return v if v in _au.SZINTEK else None
+
+    v = _fok(args[-1])
+    if v is None:
+        return Result([_t("conductor.autonomy.usage")], ok=False)
+    tobbi = list(args[:-1])
+    if not tobbi:
+        if v == "auto":
+            return Result([_t("conductor.autonomy.usage")], ok=False)
+        return set_autonomy(ctx, None, None, v)
+    sym = _resolve_symbol(ctx, tobbi[0])
+    if sym is None:
+        return Result([_t("console.unknown_pair", symbol=tobbi[0])], ok=False)
+    strat = tobbi[1] if len(tobbi) > 1 else None
+    return set_autonomy(ctx, sym, strat, None if v == "auto" else v)
 
 
 def cmd_balance(ctx: Context, args: list, confirmed: bool = False) -> Result:
@@ -995,6 +1156,7 @@ COMMANDS: dict = {
     "defer":   cmd_defer,
     "undo":    cmd_undo,
     "optq":    cmd_optq,
+    "karmester": cmd_karmester,
     "noopt":   cmd_noopt,
     "balance": cmd_balance,
     "today":   cmd_today,
@@ -1025,6 +1187,7 @@ _HELP = (
     ("undo <id>", "console.help.undo"),
     ("optq [cancel <id>]", "console.help.optq"),
     ("noopt [<pár>] <strat> on|off|auto", "console.help.noopt"),
+    ("karmester [off|on|<fok>]", "console.help.karmester"),
     ("balance", "console.help.balance"),
     ("today", "console.help.today"),
     ("state", "console.help.state"),

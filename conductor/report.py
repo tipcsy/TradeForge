@@ -296,6 +296,48 @@ def inbox_lines(tetelek: list, *, stat: dict = None) -> list:
     return sorok
 
 
+def autonomy_lines(cfg: dict) -> list:
+    """A karmester FOKA — és ami abból következik.
+
+    ⚠ NEM ELÉG A SZÁMOT KIÍRNI. „L1" önmagában nem mond semmit annak, aki nem
+    a tervet olvassa; a sor ezért megmondja, MIT tesz és MIT NEM tesz ezen a
+    fokon. És kiírja a kikapcsoló állapotát is — a legfontosabb kérdésre („fut
+    egyáltalán?") nem szabad következtetni kelljen."""
+    from conductor import autonomy as _au
+
+    sorok = [_t("conductor.autonomy.head")]
+    fajl = _au.off_by_file()
+    sorok.append(_t("conductor.autonomy.switch",
+                    state=_t("conductor.autonomy.switch_off" if fajl
+                             else "conductor.autonomy.switch_on")))
+    alap = _au.default_level(cfg)
+    sorok.append(_t("conductor.autonomy.default_row",
+                    level=f"L{alap}",
+                    name=_t(f"conductor.autonomy.level.{_au.kod(alap)}")))
+    if fajl:
+        # ⚠ A FÁJL FELÜLÍR MINDENT — ha ezt nem mondanánk ki, a config-beli
+        # „L3" sor azt sugallná, hogy a karmester dolgozik.
+        sorok.append(_t("conductor.autonomy.file_wins"))
+    ov = ((cfg.get("conductor") or {}).get("autonomy") or {}).get("overrides")
+    if isinstance(ov, dict) and ov:
+        sorok.append(_t("conductor.autonomy.overrides_head", n=len(ov)))
+        for kulcs in sorted(ov):
+            _v = ov[kulcs]
+            sorok.append(_t("conductor.autonomy.override_row", scope=kulcs,
+                            level=f"L{_v}"))
+    # Mit tesz MA ezen a fokon?
+    hatalyos = _au.level(cfg)
+    for kep, kulcs in ((_au.MEASURE, "measure"), (_au.PROPOSE, "propose"),
+                       (_au.EXECUTE, "execute"), (_au.AUTO, "auto")):
+        jel = "✓" if hatalyos >= _au.MIN_SZINT[kep] else "–"
+        sorok.append(_t("conductor.autonomy.cap_row", mark=jel,
+                        what=_t(f"conductor.autonomy.cap.{kulcs}")))
+    if hatalyos >= _au.ASSISTED:
+        sorok.append(_t("conductor.autonomy.not_yet_auto_line"))
+    sorok.append(_t("conductor.autonomy.hint"))
+    return sorok
+
+
 def noopt_lines(kizartak: list) -> list:
     """A KIZÁRT cellák listája — és az, HONNAN jön a kizárás.
 

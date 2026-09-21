@@ -268,8 +268,15 @@ def proposals(cfg: dict, *, strategies_of=None, health_findings=None,
     pontosan ez a kérdés."""
     from conductor import snapshot as _snap
 
+    from conductor import autonomy as _au
+
     ki = []
     for sn in _snap.cells(cfg, strategies_of=strategies_of, day=day, days=days):
+        # ⚠ A FOK CELLÁNKÉNT DÖNT. „A GOLD-ot csak figyeld, a többit vezényeld"
+        # — ez a terv szerinti per-cella autonómia, és itt lép életbe: L0-n
+        # (megfigyelő) a cella MÉRVE van, de javaslat nem születik rá.
+        if not _au.enged(cfg, _au.PROPOSE, sn["symbol"], sn["strategy"]):
+            continue
         try:
             ki.append(proposal_for(sn, cfg, health_findings))
         except Exception as ex:

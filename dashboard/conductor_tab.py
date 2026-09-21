@@ -96,6 +96,16 @@ class ConductorTab:
         top.pack(fill="x", padx=10, pady=(8, 2))
         tk.Label(top, text=_t("cond.tab.title"), bg=BG, fg=FG_WHITE,
                  font=self._header).pack(side="left")
+        # ⚠ A LEGFONTOSABB KÉRDÉSRE NE KELLJEN KÖVETKEZTETNI: fut-e egyáltalán?
+        # A fok és a kikapcsoló a fül FEJLÉCÉBEN van, nem egy almenüben — egy
+        # kapcsoló, amit keresni kell, vészhelyzetben nem kapcsoló.
+        self._lbl_fok = tk.Label(top, text="—", bg=BG, fg=FG_GRAY,
+                                 font=self._small)
+        self._lbl_fok.pack(side="left", padx=12)
+        self._btn_kapcsolo = tk.Button(
+            top, text="—", bg=BG_HEADER, fg=FG_WHITE, relief="flat",
+            font=self._small, padx=10, command=self._kapcsol)
+        self._btn_kapcsolo.pack(side="left")
         tk.Button(top, text=_t("cond.tab.reload"), bg=BG_HEADER, fg=FG_WHITE,
                   relief="flat", font=self._small, padx=10,
                   command=self.reload).pack(side="right", padx=4)
@@ -121,10 +131,16 @@ class ConductorTab:
 
     # ── frissítés ────────────────────────────────────────────────────────
     def _allapot_ideje(self):
-        """A postaláda és a krónika módosulási ideje — a rajzolás kapuja."""
+        """A postaláda, a krónika és a KIKAPCSOLÓ módosulási ideje — a rajzolás
+        kapuja.
+
+        ⚠ A KIKAPCSOLÓ IS IDE TARTOZIK. Máshonnan is átbillenthető (konzolról,
+        `touch data/conductor/off`-fal, SSH-n) — ha a fül nem figyelné, a fejléc
+        „BEKAPCSOLVA"-t mutatna egy álló karmester fölött. Pont az a hazugság,
+        ami miatt ez az egész kapcsoló megépült."""
         from conductor import paths as _p
         ki = []
-        for ut in (_p.DIR / "inbox.json", _p.journal_file()):
+        for ut in (_p.DIR / "inbox.json", _p.journal_file(), _p.off_switch()):
             try:
                 ki.append(ut.stat().st_mtime if ut.exists() else 0.0)
             except OSError:
@@ -147,6 +163,7 @@ class ConductorTab:
             if not force and most == self._mtime:
                 return
             self._mtime = most
+            self._rajzol_fejlec()
             self._rajzol_inbox()
             self._rajzol_kronika()
         except Exception:
@@ -180,9 +197,43 @@ class ConductorTab:
             log.warning("Karmester fül: az átvizsgálás elbukott", exc_info=True)
             self._lbl_info.config(text=_t("cond.tab.error"))
         self._mtime = self._allapot_ideje()
+        self._rajzol_fejlec()
         self._rajzol_inbox()
         self._rajzol_matrix()
         self._rajzol_kronika()
+
+    # ── autonómia-fok és kikapcsoló ──────────────────────────────────────
+    def _rajzol_fejlec(self):
+        """A fok és a kapcsoló állapota. ⚠ A CONFIGBÓL ÉS A FÁJLBÓL, minden
+        rajzolásnál — a kikapcsoló máshonnan is átállítható (konzol, `touch`),
+        és a fülnek akkor is az IGAZAT kell mutatnia."""
+        from conductor import autonomy as _au
+
+        ctx = self._ctx()
+        cfg = getattr(ctx, "cfg", None) if ctx is not None else None
+        if cfg is None:
+            return
+        try:
+            ki = _au.off_by_file() or not _au.barmi_aktiv(cfg)
+            szint = _au.level(cfg)
+            self._lbl_fok.config(
+                text=_t("cond.tab.level", level=f"L{szint}",
+                        name=_t(f"conductor.autonomy.level.{_au.kod(szint)}")),
+                fg=(FG_RED if ki else FG_GRAY))
+            self._btn_kapcsolo.config(
+                text=_t("cond.tab.switch_on" if ki else "cond.tab.switch_off"))
+        except Exception:
+            log.debug("Karmester fül: a fok nem olvasható", exc_info=True)
+
+    def _kapcsol(self):
+        """A kill-switch fájl átbillentése — a KÖZÖS parancs-rétegen át."""
+        from conductor import autonomy as _au
+        from core import console_cmd as _cc
+
+        ki_most = _au.off_by_file()
+        self._futtat(lambda ctx, megerosit: _cc.dispatch(
+            ctx, "karmester " + ("on" if ki_most else "off")))
+        self._rajzol_fejlec()
 
     # ── postaláda ────────────────────────────────────────────────────────
     def _rajzol_inbox(self):

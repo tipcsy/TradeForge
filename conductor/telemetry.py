@@ -89,11 +89,30 @@ _seen: dict = {}            # "SYM|strat" -> (nap, bar_ts, irány)  — dedup
 _dirty: set = set()         # mely NAPOK változtak a legutóbbi kiírás óta
 _last_flush = 0.0
 _day_provider = None        # a hívó adhat KERESKEDÉSI napot (lásd set_day_provider)
+# ⚠ AZ AUTONÓMIA-FOK KAPUJA. L-1-en („kikapcsolt") a karmester nem figyel —
+# ideértve a mérést is. A kaput NEM itt oldjuk fel: a modul nem ismeri a
+# configot (tiszta mérő réteg), a hívó állítja körönként EGYSZER. Így a
+# `record()` forró útján nincs se config-olvasás, se fájlkérdezés.
+_engedve = True
 
 
 # ---------------------------------------------------------------------------
 # A NAP
 # ---------------------------------------------------------------------------
+
+def set_enabled(be: bool) -> None:
+    """A mérés ki/be — a hívó (motor) állítja az autonómia-fokból, körönként.
+
+    ⚠ NEM ÜRÍTI, AMI MÁR MEGVAN. A kikapcsolás a JÖVŐRE szól: a már mért nap
+    a lemezen marad. A visszamenőleges törlés adatvesztés volna, és a
+    kikapcsolás nem arról szól, hogy eltüntessük a múltat."""
+    global _engedve
+    _engedve = bool(be)
+
+
+def enabled() -> bool:
+    return _engedve
+
 
 def set_day_provider(fn) -> None:
     """A „mai nap" forrása — a motor a BRÓKER napját adja be
@@ -143,6 +162,8 @@ def record(symbol: str, strategy: str, direction: str, outcome: str,
 
     ⚠ SOHA NEM DOB. A mérés nem állíthatja meg a kereskedést — minden hiba a
     naplóba megy, és a motor megy tovább."""
+    if not _engedve:
+        return False
     try:
         return _record(symbol, strategy, direction, outcome,
                        gates_blocked, gates_reduced, bar_ts, day)

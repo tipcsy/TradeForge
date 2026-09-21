@@ -778,3 +778,66 @@ Két hasonló helyzetet szándékosan **másképp** kezelünk:
 a cellát LÉTEZŐNEK vesszük (`snapshot.letezik`): inkább maradjon egy fölösleges
 tétel, mint hogy egy átmeneti hiba kiürítse a postaládát. A törlés
 visszafordíthatatlan, a zaj nem.
+
+## 18. Az autonómia-létra és a kikapcsoló MEGVAN (v3.84.0)
+
+> A lelet: a `paths.off_switch()` docstringje azt állította, hogy *„a szál minden
+> ciklus elején megnézi"* — közben az egész kódbázisban **egyetlen** hivatkozás
+> volt rá: a saját definíciója. A kapcsoló, amit a 8. szakasz a karmester első
+> feltételének nevez, nem létezett.
+
+`conductor/autonomy.py` — a létra (`-1 … 4`), a feloldás és a kikapcsoló.
+
+### A feloldás sorrendje
+
+```
+1. KILL-SWITCH FÁJL (data/conductor/off)  → L-1, MINDENHOL, azonnal
+2. CELLA:          conductor.autonomy.overrides["<SYM>.<stratégia>"]
+3. INSTRUMENTUM:   conductor.autonomy.overrides["<SYM>"]
+4. ALAPÉRTÉK:      conductor.autonomy.default
+```
+
+A kill-switch fájl azért van **felül**, mert az az egyetlen út, ami akkor is
+járható, amikor a config nem írható vagy a felület nem válaszol: egy
+`touch data/conductor/off` SSH-n is megy, és a motor a **következő körben**
+(≤ 5 mp) megáll vele.
+
+### Mit kapuz a fok — ma
+
+| Képesség | Kell hozzá | Mit jelent |
+|---|---|---|
+| `measure` | L0 | telemetria, egészség-leletek, krónika |
+| `propose` | L1 | életciklus-javaslatok (árnyék-mód) |
+| `inbox` | L1 | a javaslatok postaládába gyűjtése |
+| `report` | L1 | a napi riport karmester-szakaszai |
+| `execute` | L1 | **amit TE fogadtál el** (opt-sor hajtása) |
+| `auto` | L2 | gépi döntés emberi jóváhagyás nélkül — **még nincs megépítve** |
+
+A `propose` **cellánként** dől el (`lifecycle.proposals`), a többi globálisan.
+Így igaz a terv ígérete: *„a GOLD-ot csak figyeld, a többit vezényeld"*.
+
+### ⚠ Két dolog, amit nem hazudunk
+
+1. **Az alapérték ma L1, nem L3.** A terv végállapota L3 — de az önállóságot
+   akkor adjuk meg, amikor (a) van gépi végrehajtás, és (b) az árnyék-mód
+   bizonyítékából **látod**, hogy a létra jól kalibrált. A config `default: 3`
+   már ma is beállítható; a kiírás viszont hozzáteszi, hogy a gépi végrehajtás
+   még nem készült el, és a karmester ma tanácsadóként működik. Egy „L3"
+   felirat, ami mögött semmi nincs, ugyanaz a néma hiba, mint a nem hívott
+   kapcsoló volt.
+2. **A sikertelen kikapcsolás nem „sikeres".** Ha a fájl nem írható,
+   `set_off_file` hamisat ad, és a parancs kimondja: *a karmester NEM állt le*.
+
+### Ami kikapcsolva is megy
+
+A **napi összefoglaló** (kötések, eredmény) nem a karmester szakasza — egy
+kikapcsolás nem veheti el. A karmester-szakaszok viszont kimaradnak belőle, és
+a `plan` / `health` / `inbox` / `optq` / `why` **megmondja**, hogy ki van
+kapcsolva: egy üres lista pont úgy nézne ki, mintha minden rendben volna.
+
+És a `karmester` parancs **kikapcsolva is válaszol** — különben nem lehetne
+visszakapcsolni.
+
+⚠ **Kikapcsoláskor a beállított állapotok maradnak.** A visszaállítás maga is
+cselekvés; kikapcsolt állapotban nem cselekszünk. A visszagörgetés külön,
+tudatos parancs (`undo`).
