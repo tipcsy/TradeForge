@@ -1,7 +1,8 @@
 __pycache__/
 *.pyc
 data/optimized_params/
-data/
+data/*
+!data/forward/
 tananyag/
 .venv/
 venv/
