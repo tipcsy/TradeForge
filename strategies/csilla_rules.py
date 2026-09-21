@@ -231,10 +231,19 @@ def hi_events(hi: pd.DataFrame, lv: pd.DataFrame, trend: pd.Series,
 # ── az M1 belépők egy eseményhez ─────────────────────────────────────────────
 def lo_entries(ev: dict, start: int, end: int, h, l, c, atr1, pc, pv, k,
                mode: str, P: dict) -> list[dict]:
-    """[{i, sl_abs, level, piv, b}] — a visszahúzódás-törések az [start, end]
+    """[{i, sl_abs, level, piv, b}] — a visszahúzódás-belépők az [start, end]
     ablakban. `pc`/`pv` az M1 pivotjai (a pivot baron), `k` a félablak (az
     igazolás késése). `sl_abs`: az M1-alapú (első mérés) stop — a hívó
-    felülírhatja."""
+    felülírhatja.
+
+    `mode`:
+      `break`   — az M1 gyertya a zászló csúcsán TÚL zár (a törés gyertyáján);
+      `retest`  — a törés után az első visszaérés a tört szintre;
+      `fordulo` — a zászló csúcsa utáni első IGAZOLT ellenoldali M1-swing (long:
+                  völgy) — a visszahúzódás fordulója; belépő az igazolás
+                  gyertyáján (a pivot + k), stop a forduló-swing mögött.
+                  (2026-09-22: a felhasználó kérte a `break` mellé, mindkettő
+                  mérve; `b` = −1, mert nincs törés.)"""
     d = ev["dir"]
     out = []
     i = start
@@ -249,6 +258,25 @@ def lo_entries(ev: dict, start: int, end: int, h, l, c, atr1, pc, pv, k,
         if piv < 0:
             break
         lvl = h[piv] if d > 0 else l[piv]
+        if mode == "fordulo":
+            ent = fj = -1
+            for t in range(i, end + 1):
+                j = t - k                      # ez a bar MOST igazolódik swingnek
+                if j > piv and ((d > 0 and pv[j]) or (d < 0 and pc[j])):
+                    ent, fj = t, j
+                    break
+            if ent < 0:
+                break
+            a = atr1[ent]
+            if np.isfinite(a) and a > 0:
+                if d > 0:
+                    sl_abs = c[ent] - (l[fj] - P["buffer_atr"] * a)
+                else:
+                    sl_abs = (h[fj] + P["buffer_atr"] * a) - c[ent]
+                sl_abs = max(sl_abs, P["min_sl_atr"] * a)
+                out.append(dict(i=ent, sl_abs=sl_abs, level=lvl, piv=piv, b=-1))
+            i = ent + 1
+            continue
         b = -1
         for t in range(i, end + 1):
             if (d > 0 and c[t] > lvl) or (d < 0 and c[t] < lvl):

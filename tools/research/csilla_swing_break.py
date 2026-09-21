@@ -16,14 +16,27 @@ A SZABÁLY (egy szabály; a „folytatás" és a „fordulat" csak címke rajta)
        ellentétes → „fordulat", egyik sem → „nincs".
 
     2. ALACSONY TF (alap M1): a magas gyertya ZÁRÁSA utáni első alacsony
-       bartól, legfeljebb `max_wait` alacsony baron át:
+       bartól, az ESEMÉNY ABLAKÁN át. Az ablak (`--ablak`):
+         `fix`       — legfeljebb `max_wait` magas gyertyányi idő (az első,
+                       09-14-i olvasat);
+         `szerkezet` — (2026-09-22, a felhasználó szabálya) amíg a MAGAS TF
+                       szerkezete nem mond mást: egy magas gyertya VISSZAZÁR a
+                       tört szint rossz oldalán (elbukott kitörés), VAGY jön a
+                       következő magas törés (ellenirányú = trendforduló,
+                       azonos irányú = az új esemény átveszi). Nincs óra-korlát.
+       A belépő az ablakon belül:
          a) legyen egy igazolt alacsony-TF swing az irány oldalán (felfelé
             törésnél swing-csúcs) — ez a visszahúzódás („zászló");
          b) egy alacsony gyertya ezen a swingen TÚL zár → ez a törés.
        BELÉPŐ:
-         `break`  — a törő gyertya zárásán;
-         `retest` — a törés után az első gyertya, amelyik VISSZAÉR a tört
-                    szintre (low ≤ szint + tol·ATR), de fölötte zár.
+         `break`   — a törő gyertya zárásán;
+         `retest`  — a törés után az első gyertya, amelyik VISSZAÉR a tört
+                     szintre (low ≤ szint + tol·ATR), de fölötte zár;
+         `fordulo` — (2026-09-22) a zászló csúcsa utáni első IGAZOLT
+                     ellenoldali alacsony-TF swing — a visszahúzódás
+                     fordulója; belépő az igazolás gyertyáján, stop a
+                     forduló-swing mögött. A `break` és a `fordulo` EGYÜTT
+                     jelölt: a jobbiknak is át kell mennie a küszöbön.
        STOP: a visszahúzódás szélső pontja (a swing és a törés közti
        legalacsonyabb low) mínusz `buffer_atr`·ATR(alacsony); padló
        `min_sl_atr`·ATR, hogy ne legyen nulla-stop.
@@ -92,7 +105,7 @@ DEFAULTS = dict(
     fib_ext=1.382,          # a jegyzet célára
     be_at_r=1.0,            # BE „amilyen gyorsan lehet" — 1R (mérhető, nem 0)
     trail_r=2.0,            # csak a `none` célárnál
-    max_hold_days=2,
+    max_hold_days=2,        # H1 felső TF-nél 5 (`--max-hold`): a fibo-cél messzebb van
 )
 
 T_MIN, EV_POZ_MIN, INSTR_MIN = 2.0, 0.60, 3
@@ -176,13 +189,33 @@ def run_symbol(sym: str, P: dict, mode: str, tp_mode: str,
     start_i = np.searchsorted(lo.index, hi_close_i, side="left")
     wait_lo = P["max_wait"] * P["hi_tf"] // P["lo_tf"]
     P = {**P, "max_wait_lo": wait_lo}
+    # SZERKEZETI ablak: az esemény az első olyan magas gyertya ZÁRÁSÁIG él, ami
+    # (a) visszazár a tört szint rossz oldalán, vagy (b) a következő eseményt
+    # adja. Az a gyertya maga még benne van (a zárásáig nem tudjuk, mit hoz),
+    # ezért a vége a zárása ELŐTTI utolsó alacsony bar — így a következő
+    # esemény kezdetével nem fed át.
+    end_i = None
+    if P.get("ablak") == "szerkezet":
+        hc = hi["close"].to_numpy(float)
+        end_i = []
+        for q, e in enumerate(evs):
+            nxt = evs[q + 1]["i"] if q + 1 < len(evs) else len(hi)
+            seg = hc[e["i"] + 1:nxt]
+            bad = np.flatnonzero(seg < e["level"] if e["dir"] > 0 else seg > e["level"])
+            e_hi = e["i"] + 1 + int(bad[0]) if len(bad) else nxt
+            if e_hi >= len(hi):
+                end_i.append(len(lo) - 1)
+            else:
+                end_i.append(int(np.searchsorted(lo.index, zaras[e_hi], side="left")) - 1)
 
     rows = []
     n = len(c)
-    for e, s in zip(evs, start_i):
+    for q, (e, s) in enumerate(zip(evs, start_i)):
         if s >= n:
             continue
-        end = min(n - 1, s + wait_lo)
+        end = min(n - 1, s + wait_lo) if end_i is None else min(n - 1, end_i[q])
+        if end < s:
+            continue
         for x in lo_entries(e, int(s), end, h, l, c, atr, pc, pv, P["k_lo"],
                             mode, P):
             sl_pts = x["sl_abs"] / ps
@@ -259,14 +292,19 @@ def main():
     ap.add_argument("--session", action="store_true",
                     help="csak a likvid ablakban nyitott belépők (tájékoztató)")
     ap.add_argument("--csak", nargs="*", default=None,
-                    help="csak ezek a változatok, pl. break/fibo retest/none")
+                    help="csak ezek a változatok, pl. break/fibo fordulo/none")
+    ap.add_argument("--ablak", choices=("fix", "szerkezet"), default="fix",
+                    help="az esemény ablaka: fix max_wait, vagy a magas TF szerkezete zárja")
+    ap.add_argument("--max-hold", type=int, default=DEFAULTS["max_hold_days"],
+                    help="max tartás napban (H1 felső TF-nél 5)")
     a = ap.parse_args()
-    P = {**DEFAULTS, "hi_tf": a.hi, "lo_tf": a.lo, "k_hi": a.k_hi, "k_lo": a.k_lo}
+    P = {**DEFAULTS, "hi_tf": a.hi, "lo_tf": a.lo, "k_hi": a.k_hi, "k_lo": a.k_lo,
+         "ablak": a.ablak, "max_hold_days": a.max_hold}
     pd.set_option("display.width", 250)
     print(f"TF-pár M{P['hi_tf']} → M{P['lo_tf']}, k_hi={P['k_hi']} k_lo={P['k_lo']}, "
-          f"session={a.session}\n")
+          f"ablak={a.ablak}, max_hold={a.max_hold} nap, session={a.session}\n")
 
-    valtozatok = [(m, t) for m in ("break", "retest") for t in ("fibo", "none")]
+    valtozatok = [(m, t) for m in ("break", "fordulo", "retest") for t in ("fibo", "none")]
     if a.csak:
         valtozatok = [tuple(v.split("/")) for v in a.csak]
     ossz = []
