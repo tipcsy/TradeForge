@@ -741,7 +741,22 @@ def cmd_inbox(ctx: Context, args: list, confirmed: bool = False) -> Result:
         # ⚠ A friss javaslatok hiánya nem viheti el a MÁR MEGLÉVŐ postaládát:
         # a nyitott ügyekről akkor is dönteni kell, ha a házirend most elakadt.
         log.debug("karmester: a postaláda frissítése kimaradt", exc_info=True)
-    return Result(_crep.inbox_lines(_ib.items(_ib.PENDING), stat=stat))
+    tetelek = _ib.items(_ib.PENDING)
+    # ⚠ BEKAPCSOLT GÉPI VÉGREHAJTÁSNÁL MEGMONDJUK, MIÉRT ÁLL MÉG ITT. Egy tétel,
+    # ami a gép hatókörében van, de mégsem hajtódott végre, magyarázat nélkül
+    # gyanúsan néz ki — pedig lehet, hogy csak a türelmi idő tart még.
+    gov = {}
+    try:
+        from conductor import autonomy as _au
+        from conductor import governor as _gov
+        if _au.enged(ctx.cfg, _au.AUTO):
+            for _e in tetelek:
+                _szabad, _ok = _gov.allowed(ctx.cfg, _e, positions=ctx.positions)
+                if not _szabad:
+                    gov[_e.get("id")] = _ok
+    except Exception:
+        log.debug("karmester: a burok-indokok kimaradtak", exc_info=True)
+    return Result(_crep.inbox_lines(tetelek, stat=stat, gov_reasons=gov))
 
 
 def cmd_accept(ctx: Context, args: list, confirmed: bool = False) -> Result:

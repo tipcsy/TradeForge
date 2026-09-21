@@ -841,3 +841,78 @@ visszakapcsolni.
 ⚠ **Kikapcsoláskor a beállított állapotok maradnak.** A visszaállítás maga is
 cselekvés; kikapcsolt állapotban nem cselekszünk. A visszagörgetés külön,
 tudatos parancs (`undo`).
+
+## 19. A gépi végrehajtás MEGVAN — F3/b (v3.85.0)
+
+A karmester mostantól **meg is teszi**, amit javasol — de csak azon belül, amit
+a burok enged. `conductor/governor.py` (a burok) + `conductor/auto.py` (a kéz).
+
+### Melyik akció melyik foktól gépi
+
+| Akció | Fok | Miért ott |
+|---|---|---|
+| `set_mode_signal` | **L2** | kockázatCSÖKKENTŐ **és** visszafordítható: a pénz kikapcsol, a visszaút egy parancs |
+| `queue_optimize` | **L3** | nem mozgat pénzt, de a paraméterkészlet felülírása **nem vonható vissza** (nincs mentés a régiről) |
+| `set_mode_live` | **soha** | a **pénzt bekapcsoló** lépés emberi jóváhagyáshoz kötött — `needs_human`, és **L4 sem oldja fel** |
+
+### A kapuk, ebben a sorrendben
+
+```
+1. needs_human    → a pénzt bekapcsoló lépés sosem gépi
+2. not_machine    → az akciónak nincs gépi osztálya
+3. level          → a CELLA foka nem éri el az akció szintjét
+4. config_warn    → a config_check WARN írás-tiltó (a terv invariánsa)
+5. position_open  → nyitott pozíció a páron
+6. cooldown       → ezen a cellán túl frissen lépett a gép
+7. daily_quota    → a napi keret elfogyott
+```
+
+A sorrend szándékos: a leginkább **végleges** elutasítástól halad a leginkább
+**átmeneti** felé. Ha a kvóta lenne elöl, egy soha-nem-gépi akciónál is azt
+látnád, hogy „elfogyott a keret", és holnap hiába várnád.
+
+⚠ **Fail closed minden bizonytalanságnál.** Ha a pozíciókat nem lehet
+lekérdezni, ha a `config_check` elszáll, ha a burok-ellenőrzés maga hibázik —
+**nem lépünk**. Amit nem tudunk ellenőrizni, azt nem hajtjuk végre magunktól.
+
+### Amit a gép soha nem tesz meg
+
+1. **Nem válaszol helyetted megerősítés-kérdésre.** Ha a közös réteg
+   `Result.confirm`-ot ad vissza, a gép **nem** ismétli meg `confirmed=True`-val.
+   Az a kérdés pont azért van ott, hogy ember válaszoljon rá.
+2. **Nem veti el a javaslatot a nevedben.** Amit a burok megállít, az
+   `pending` marad: holnap végrehajtható lehet, és ha addig te döntesz róla, az
+   a te döntésed.
+3. **Nem ír közvetlenül állapotot.** Ugyanazt az `actions.apply`-t hívja, amit
+   az „Elfogad" gomb — csak `by="conductor"` megjelöléssel. Egy második
+   végrehajtási út előbb-utóbb elcsúszna az elsőtől, és pont a pénz útján.
+
+### A burok (`conductor.autonomy` blokk)
+
+| Kulcs | Alap | Mit véd |
+|---|---|---|
+| `max_changes_per_day` | 6 | egy elszálló visszacsatolási hurok |
+| `cooldown_hours_per_cell` | 72 | az oda-vissza kapcsolgatás (a mérésnek idő kell) |
+| `no_change_while_position_open` | true | futó ügylet közben ne változzon a cella szabálya |
+| `undo_window_hours` | 24 | meddig mutatjuk kiemelten, amit a gép tett |
+| `allow_irreversible` | false | a vissza nem vonható akciók — L4 sem oldja fel |
+
+⚠ **A `max_changes_per_day: 0` KORLÁTLAN**, nem „semmi" — ezt a terv mondja ki
+(L4-en 0 = korlátlan). Ez pont fordítva van, mint ahol a 0 „kikapcsolva" (pl.
+`noopt`), ezért a `karmester` kiírása **névvel** mondja ki, hogy nincs plafon.
+
+⚠ **A kvóta és a türelmi idő a KRÓNIKÁBÓL számolódik**, nem egy külön
+számlálóból. Egy számláló a motor újraindulásakor lenullázódna, és a kvóta
+némán újraindulna vele. A kézi lépés nem számít bele: a türelmi idő a **gépre**
+vonatkozik.
+
+### Amit látsz belőle
+
+- Az esti üzenet külön szakasza: *„A karmester MAGÁTÓL tett lépései (utolsó 24
+  óra)"* — a visszavonás azonosítójával. Ha nem tett semmit, **nincs szakasz**
+  (nem „0 db").
+- Az `inbox` megmondja, **miért** áll még ott egy tétel: *„a gép nem teszi meg:
+  a türelmi idő még tart ezen a cellán"*. A tétlenség oka ugyanolyan válasz,
+  mint a lépés.
+- A `karmester` kiírja a napi keret állását, a türelmi időt és a
+  pozíció-szabályt.

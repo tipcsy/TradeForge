@@ -255,10 +255,20 @@ def daily_lines(cfg: dict, *, strategies_of=None, day=None) -> list:
                             text=e.get("text") or e.get("code") or ""))
         if len(_sh) > 8:
             sorok.append(_t("conductor.daily.more", n=len(_sh) - 8))
+
+    # ── 4. AMIT A KARMESTER MAGÁTÓL TETT ────────────────────────────────
+    # ⚠ EZ AZ ESTI ÜZENET LEGFONTOSABB SZAKASZA, ha a gépi végrehajtás be van
+    # kapcsolva: ebből tudod meg, mi történt a hátad mögött — és ebből tudsz
+    # visszalépni. A terv szerint L4-en ez FONTOSABB, nem kevésbé.
+    _auto = auto_lines(cfg)
+    if _auto:
+        sorok.append("")
+        sorok += _auto
     return sorok
 
 
-def inbox_lines(tetelek: list, *, stat: dict = None) -> list:
+def inbox_lines(tetelek: list, *, stat: dict = None,
+                gov_reasons: dict = None) -> list:
     """A postaláda nyitott tételei — azonosítóval, hogy dönteni lehessen róluk.
 
     ⚠ AZ AZONOSÍTÓ NEM DÍSZ. Egy szöveges „igen" két egyidejű javaslatnál
@@ -292,8 +302,41 @@ def inbox_lines(tetelek: list, *, stat: dict = None) -> list:
         # jóváhagyáshoz kötött, autonómia-szinttől függetlenül.
         sorok.append(_t("conductor.inbox.row", id=e.get("id"),
                         mark="⚠" if e.get("needs_human") else "•", text=szoveg))
+        # ⚠ MIÉRT NEM TETTE MEG A GÉP? Bekapcsolt gépi végrehajtásnál ez a
+        # legtöbbet kérdezett dolog — és ha nem mondjuk meg, a felhasználó azt
+        # hiszi, a karmester „nem vette észre". A tétlenség OKA ugyanolyan
+        # válasz, mint a lépés: ez a projekt alapszabálya.
+        _ok = (gov_reasons or {}).get(e.get("id"))
+        if _ok:
+            sorok.append(_t("conductor.inbox.not_auto",
+                            reason=_t(f"conductor.gov.reason.{_ok}")))
     sorok.append(_t("conductor.inbox.hint"))
     return sorok
+
+
+def auto_lines(cfg: dict) -> list:
+    """AMIT A KARMESTER MAGÁTÓL TETT — a visszavonási ablakon belül.
+
+    ⚠ EZ A LEGFONTOSABB SOR EGY ÖNÁLLÓ RENDSZERBEN. Reggel ebből tudod meg, mi
+    történt éjjel; enélkül az önállóság annyit jelentene, hogy a rendszer a
+    hátad mögött dolgozik. A terv invariánsa: L4-en ez FONTOSABB, nem kevésbé.
+
+    ⚠ ÉS OTT A VISSZAVONÁS AZONOSÍTÓJA. Egy lista arról, mi történt, amiből nem
+    lehet visszalépni, csak szorongást ad."""
+    from conductor import config as _ccfg
+    from conductor import governor as _gov
+
+    ora = float(_ccfg.autonomy(cfg)["undo_window_hours"])
+    sorok = _gov.machine_actions(cfg, hours=ora)
+    if not sorok:
+        return []                     # ⚠ Nincs sor = nincs szakasz (nem „0 db").
+    ki = [_t("conductor.auto.head", n=len(sorok), hours=int(ora))]
+    for s in sorok:
+        azon = (s.get("data") or {}).get("inbox_id") or ""
+        ki.append(_t("conductor.auto.row", time=str(s.get("ts") or "")[11:16],
+                     text=s.get("text") or s.get("code") or "", id=azon))
+    ki.append(_t("conductor.auto.undo_hint"))
+    return ki
 
 
 def autonomy_lines(cfg: dict) -> list:
@@ -332,8 +375,28 @@ def autonomy_lines(cfg: dict) -> list:
         jel = "✓" if hatalyos >= _au.MIN_SZINT[kep] else "–"
         sorok.append(_t("conductor.autonomy.cap_row", mark=jel,
                         what=_t(f"conductor.autonomy.cap.{kulcs}")))
+    # ⚠ A BUROK IS IDE TARTOZIK. A fok azt mondja meg, kell-e emberi pipa; a
+    # burok azt, meddig mehet el a gép. Aki csak a fokot látja, azt hiszi,
+    # mindent tud — pedig a kvóta az, ami egy elszálló hurkot megállít.
     if hatalyos >= _au.ASSISTED:
-        sorok.append(_t("conductor.autonomy.not_yet_auto_line"))
+        from conductor import config as _ccfg
+        from conductor import governor as _gov
+
+        k = _ccfg.autonomy(cfg)
+        q = _gov.quota_state(cfg)
+        sorok.append(_t("conductor.autonomy.quota",
+                        used=q["used"],
+                        limit=(_t("conductor.autonomy.unlimited")
+                               if q["unlimited"] else q["limit"])))
+        sorok.append(_t("conductor.autonomy.cooldown",
+                        hours=int(k["cooldown_hours_per_cell"])))
+        if k["no_change_while_position_open"]:
+            sorok.append(_t("conductor.autonomy.no_change_open"))
+        # ⚠ A KORLÁTLAN KVÓTÁT NÉVVEL MONDJUK KI. A `0` a tervben „korlátlant"
+        # jelent — ez pont fordítva van, mint ahol a 0 „kikapcsolva" (pl.
+        # `noopt`), ezért némán nem maradhat.
+        if q["unlimited"]:
+            sorok.append(_t("conductor.autonomy.unlimited_warn"))
     sorok.append(_t("conductor.autonomy.hint"))
     return sorok
 

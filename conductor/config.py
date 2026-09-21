@@ -85,6 +85,34 @@ DEFAULTS = {
         # A LEZÁRT tételek megtartása.
         "keep_days": 14,
     },
+    "autonomy": {
+        # ── A BUROK (F3/b) ───────────────────────────────────────────────
+        # ⚠ EZ AZ, AMI L4-EN IS A HELYÉN MARAD. Az autonómia-fok azt mondja
+        # meg, kell-e emberi pipa; a burok azt, MEDDIG mehet el a gép. A
+        # kettő nem ugyanaz: egy elszálló visszacsatolási hurkot nem a fok
+        # állít meg, hanem a kvóta.
+        #
+        # Hány GÉPI változtatás lehet EGY NAP, összesen. ⚠ Nem cellánként:
+        # egy rossz nap hat cellán hat változás — az már nem finomhangolás,
+        # hanem átrendezés, és arról tudnod kell.
+        "max_changes_per_day": 6,
+        # Egy CELLÁN ennyi óráig nem nyúlunk újra. ⚠ A mérésnek idő kell:
+        # egy visszaminősítés után a papír-bizonyíték napokban gyűlik, nem
+        # órákban. Enélkül a karmester oda-vissza kapcsolgatna.
+        "cooldown_hours_per_cell": 72,
+        # ⚠ NYITOTT POZÍCIÓ MELLETT NEM VÁLTOZTATUNK. A mód-váltás a BELÉPŐKRE
+        # hat, a nyitott pozíciót a motor végigkezeli — de egy futó ügylet
+        # közben átírni a cella szabályait olyan döntés, amit ember hozzon.
+        "no_change_while_position_open": True,
+        # Ennyi órán át KIEMELTEN mutatjuk a gépi lépést, hogy vissza tudd
+        # vonni. ⚠ A visszavonás ezután is lehetséges (amíg a postaláda tétele
+        # megvan) — ez az ABLAK arról szól, mit teszünk a szemed elé.
+        "undo_window_hours": 24,
+        # ⚠ A VISSZA NEM VONHATÓ akciók külön kapcsolón — L4 SEM oldja fel
+        # magától. Ma nincs ilyen akció a készletben; a kapcsoló azért van itt,
+        # hogy amikor lesz, ne kelljen új fogalmat bevezetni hozzá.
+        "allow_irreversible": False,
+    },
     "journal": {
         "keep_days": 365,
         # A krónika visszaolvasásakor legfeljebb ennyi sort nézünk (a duplikátum-
@@ -149,3 +177,14 @@ def optqueue(cfg: dict) -> dict:
 
 def journal(cfg: dict) -> dict:
     return _blokk(cfg, "journal")
+
+
+def autonomy(cfg: dict) -> dict:
+    """A BUROK: kvóta, türelmi idő, pozíció-szabály, visszavonási ablak.
+
+    ⚠ A FOKOT NEM ITT OLVASSUK. A `conductor.autonomy.default` és az
+    `overrides` a `conductor/autonomy.py`-é (ott van a feloldás sorrendje); ez
+    a szótár csak a KORLÁTOKAT adja. Ugyanabban a config-blokkban laknak, mert
+    együtt kell olvasni őket — de a fok egy LÉTRA, a korlát egy SZÁM, és a
+    kettőt külön kell tudni elrontani."""
+    return _blokk(cfg, "autonomy")

@@ -3752,6 +3752,11 @@ def run(cfg: dict, slot_mgr: SlotManager):
     # a konzolos parancssor UGYANAZT a `console_cmd.Context`-et használja: így az
     # esti üzenet és a kézzel lekérdezett `/today` nem mondhat mást ugyanarról a
     # napról.
+    # ⚠ EGY KÖRNYEZET AZ EGÉSZ FUTÁSRA. A napi üzenet, a Telegram-parancsok és
+    # a karmester gépi lépése UGYANAZT a `Context`-et használja. Előre `None`,
+    # mert az alábbi blokk elbukhat (MT5, licenc) — a karmester onnan tudja,
+    # hogy nincs mivel dolgoznia, és nem épít magának egy MÁSODIKAT.
+    _ctx = None
     try:
         from core import console_cmd as _cc, notify, telegram_cmd as _tgc
         _ctx = _cc.live_context(cfg, ROOT / "config.json")
@@ -4194,6 +4199,19 @@ def run(cfg: dict, slot_mgr: SlotManager):
                     # CPU-nehéz munka; a motor szálán a kereskedés körideje
                     # nyúlna meg. A sor csak INDÍT és LEARAT — mindkettő
                     # ezredmásodperces.
+                    # ── GÉPI VÉGREHAJTÁS (F3/b) ────────────────────────
+                    # ⚠ A BEOLVASZTÁS UTÁN, A SOR HAJTÁSA ELŐTT. A frissen
+                    # született javaslat még ebben a körben végrehajtható, és
+                    # ha optimalizálás lett belőle, a sor mindjárt el is
+                    # indítja — egy kör késés itt egy ÓRA késés volna.
+                    # ⚠ A fokot és a burkot a `governor` nézi TÉTELENKÉNT; itt
+                    # csak azt kérdezzük, van-e egyáltalán gépi mandátum.
+                    if _cau.enged(cfg, _cau.AUTO) and _ctx is not None:
+                        from conductor import auto as _cauto
+                        _as = _cauto.run(_ctx)
+                        if _as.get("done"):
+                            log.info("karmester (GÉPI): %d lépés végrehajtva",
+                                     _as["done"])
                     # ⚠ AMIT TE FOGADTÁL EL, AZT L1-EN IS VÉGREHAJTJUK: a sor
                     # a TE döntésed keze, nem a karmester önállósága. Az
                     # önálló DÖNTÉS az F3/b (`AUTO`), az más kapu.
