@@ -43,3 +43,5 @@ rust/tfbt/target/
 
 # a session-atmeneti futasnaplok (opt_full.log, tests.log) helye
 scratchpad/
+data/forward/*.log
+data/forward/csilla_status.json

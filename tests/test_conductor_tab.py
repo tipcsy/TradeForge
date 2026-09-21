@@ -144,6 +144,12 @@ if _root is not None:
     tl.FLUSH_SEC = 0.0
     import core.params_store as ps
     ps.PARAMS_DIR = TMP / "params"
+    # a napi feladatok allapota is ideiglenes helyre (a ful olvassa; a valodit
+    # a teszt SOHA ne erintse)
+    from core import daily_jobs as _dj
+    _dj.STATE_FILE = TMP / "daily_jobs.json"
+    _dj._BASE = TMP
+    _dj.reset_for_test()
     (ps.PARAMS_DIR / "csilla").mkdir(parents=True, exist_ok=True)
     NOW = dt.datetime.now(dt.timezone.utc)
     with open(_CSV, "w", newline="", encoding="utf-8") as f:
@@ -179,6 +185,15 @@ if _root is not None:
         check("az atvizsgalas feltolti a postaladat", len(ib.items(ib.PENDING)) == 1,
               str(len(ib.items(ib.PENDING))))
         check("...es a matrixot", len(tab._cellak) == 1, str(len(tab._cellak)))
+        # A FORWARD-DOBOZ: cimke + ket gomb + az allas sorai (a hibat a rajzolo
+        # log.debug-ba nyeli, ezert itt a WIDGETEKET nezzuk).
+        _fw = tab._box_forward.winfo_children()
+        _gombok = [w for w in (_fw[0].winfo_children() if _fw else [])
+                   if isinstance(w, tk.Button)]
+        check("a forward-doboz felepul: fejsor + 2 gomb + allas-sorok",
+              len(_fw) >= 3 and len(_gombok) == 2, f"widgetek={len(_fw)} gombok={len(_gombok)}")
+        check("...a 'Futtat most' aktiv (nem fut semmi)",
+              any(str(g.cget("state")) == "normal" for g in _gombok))
         check("a cella foka `live`", tab._cellak[0]["fok"] == "live")
 
         _id = ib.items(ib.PENDING)[0]["id"]

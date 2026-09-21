@@ -120,6 +120,13 @@
     "licence_warn_days": 14,
     "_comment_notify_times": "`heartbeat_times`: eletjel-uzenetek idopontjai (ures lista = nincs). `daily_summary_time`: a napi zaras-osszefoglalo ideje, HELYI ido (ures = nincs). ⚠ Ha a csendes oraba esik, reggel jon meg -- a halasztott kotesekkel egyutt."
   },
+  "_comment_daily_jobs": "NAPI FELADATOK, amiket a motor naponta egyszer, a megadott HELYI ido utan alprocesszben futtat (core/daily_jobs.py). Alapbol MIND bekapcsolva a sajat idejen; ide csak az ELTERES kerul. `csilla_forward`: a Csilla-sav forward-naplo frissitese (`main.py forward --all`, ~1-2 perc, MT5 kell a gyertya-potlashoz). Allapot: `forward` parancs / Karmester ful; naplo: data/forward/csilla_forward.log.",
+  "daily_jobs": {
+    "csilla_forward": {
+      "enabled": true,
+      "time": "22:30"
+    }
+  },
   "gates": {
     "_comment": "BELÉPŐ-KAPUK és a HATÁSUK, per (instrumentum × stratégia). A hatás: 'block' (nincs belépő) | 'reduce' (belép, de FELEZETT mérettel) | 'none' (a kapu nem szól bele). Öröklés (a legszűkebb nyer): pairs.<SYM>.gates.<kapu>.<stratégia> → pairs.<SYM>.gates.<kapu>.default → gates.<kapu>.<stratégia> → gates.<kapu>.default → beépített. A v1.97.0 óta a MOTOR is eszerint dönt (él + backtest + portfólió-backtest); korábban minden bekapcsolt kapu kemény blokk volt, a 'reduce' pedig csak kijelzés.",
     "_comment_market": "A piac-kapu akkor 'bukik', ha az aktuális besorolás benne van az 'adverse' listában (core/regime.py kategóriái: clean_bull, clean_bear, volatile_bull, volatile_bear, ranging, dead, uncertain, transition). Alap: dead + uncertain. Ez CSAK akkor számít, ha a piac-kapu hatását 'block'/'reduce'-ra állítod — alapból 'none'. FIGYELEM: a hatás beállítása önmagában kevés — a páron KI IS KELL VÁLASZTANI egy piac-előszűrőt (pairs.<SYM>.market_strategy), különben a kapunak nincs mit mérnie, és sosem tüzel. A config-ellenőrző szól, ha ez az állapot előáll.",

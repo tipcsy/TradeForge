@@ -48,7 +48,15 @@ Használat (naponta, a session után):
     python tools/csilla_forward.py --evaluate      # lezárult kötések kiértékelése
     python tools/csilla_forward.py --report        # állás az előre rögzített küszöbökhöz
     python tools/csilla_forward.py --all           # mindhárom egymás után
+    python main.py forward --all                   # ugyanaz a keret alparancsaként
 Napló: data/forward/csilla_signals.csv (git-ben követve, hogy ne vesszen el).
+
+⚠ A NAPI FUTÁS A PROGRAMÉ (2026-09-22). Az első hét megmutatta, hogy a „naponta,
+kézzel" nem fut: a napló 09-15-től egy sorral állt. A `core/daily_jobs.py` a
+motorból indítja alprocesszben (`main.py forward --all`) naponta egyszer, a
+beállított idő után; a dashboard Karmester-fülén és a `forward run` parancsból
+kézzel is indítható. A `--report` az állást a `csilla_status.json`-ba is kiírja —
+a felület és az esti riport EBBŐL olvas, nem számol újra.
 """
 from __future__ import annotations
 
@@ -69,6 +77,7 @@ import csilla_levels as cl                       # noqa: E402
 
 START = pd.Timestamp("2026-09-15 00:00", tz="UTC")     # a forward kezdete (szerver-idő)
 JOURNAL = ROOT / "data" / "forward" / "csilla_signals.csv"
+STATUS_JSON = ROOT / "data" / "forward" / "csilla_status.json"   # a felületnek
 PRIMARY = {"Ger40": (8, 11), "UsaTec": (15, 18), "GOLD": (15, 18)}
 ALL_SYMS = cl.SYMS
 STOP_ATR = 1.5
@@ -193,10 +202,46 @@ def _t(x):
     return x.mean() / (x.std(ddof=1) / np.sqrt(len(x))) if len(x) > 2 and x.std() > 0 else 0.0
 
 
+def summary(j: pd.DataFrame | None = None) -> dict:
+    """Az állás SZÁMOKBAN — ebből ír a riport, és ez megy a `csilla_status.json`-ba.
+    `verdict`: `kill` (a leállító küszöb teljesült) · `running` (n < küszöb) ·
+    `holding` (n ≥ küszöb, de nem bukott)."""
+    j = _load_journal() if j is None else j
+    c = j[j.status == "closed"]
+    p = c[c.primary == True]                                                   # noqa: E712
+    def _blokk(d):
+        return dict(n=int(len(d)), r_mean=(float(d.R.mean()) if len(d) else None),
+                    r_sum=(float(d.R.sum()) if len(d) else 0.0), t=float(_t(d.R)) if len(d) else 0.0,
+                    win=(float((d.R > 0).mean()) if len(d) else None))
+    if len(p) >= KILL_N and p.R.mean() < KILL_R:
+        verdict = "kill"
+    elif len(p) < KILL_N:
+        verdict = "running"
+    else:
+        verdict = "holding"
+    return dict(updated_at=pd.Timestamp.now().isoformat(timespec="seconds"),
+                started=f"{START:%Y-%m-%d}", signals=int(len(j)), closed=int(len(c)),
+                open=int((j.status == "open").sum()), skipped=int((j.status == "kihagyva").sum()),
+                primary=_blokk(p), secondary=_blokk(c), kill_n=KILL_N, kill_r=KILL_R,
+                to_kill=max(0, KILL_N - int(len(p))), verdict=verdict)
+
+
+def write_status(j: pd.DataFrame | None = None) -> dict:
+    d = summary(j)
+    try:
+        STATUS_JSON.parent.mkdir(parents=True, exist_ok=True)
+        STATUS_JSON.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+    except Exception as ex:
+        # ⚠ NEM NÉMA: a felület ebből olvas; ha nem íródik, a riport mondja meg.
+        print(f"   ! az állapot-fájl nem íródott ({STATUS_JSON.name}): {ex!r}")
+    return d
+
+
 def report():
     pd.set_option("display.width", 200)
     j = _load_journal()
     c = j[j.status == "closed"]
+    write_status(j)
     print(f"\n════ CSILLA-SÁV FORWARD — {pd.Timestamp.now():%Y-%m-%d} (indult {START:%Y-%m-%d}) ════")
     print(f"napló: {len(j)} jelzés · lezárt {len(c)} · nyitott {int((j.status == 'open').sum())} "
           f"· kihagyva {int((j.status == 'kihagyva').sum())}")
@@ -219,14 +264,14 @@ def report():
         print(f"   fut: n={len(p)}, R={p.R.mean():+.3f}, t={_t(p.R):+.2f} (kell ≥ 2)")
 
 
-def main():
+def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--update", action="store_true")
     ap.add_argument("--no-mt5", action="store_true", help="update MT5-frissítés nélkül")
     ap.add_argument("--evaluate", action="store_true")
     ap.add_argument("--report", action="store_true")
     ap.add_argument("--all", action="store_true")
-    a = ap.parse_args()
+    a = ap.parse_args(argv)
     if a.all or a.update:
         update(with_mt5=not a.no_mt5)
     if a.all or a.evaluate:

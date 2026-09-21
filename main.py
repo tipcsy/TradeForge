@@ -16,6 +16,8 @@ Parancsok:
   python main.py install <f>  — stratégia-csomag telepítése (⚠ kódot hoz be)
   python main.py pack-gate <kulcs>    — kapu becsomagolása `.tfg` fájlba
   python main.py install-gate <f>     — kapu-csomag telepítése (⚠ kódot hoz be)
+  python main.py forward --all        — a Csilla-sáv forward-napló frissítése
+                                        (a motor naponta magától futtatja)
 
 Az `optimize` pár × STRATÉGIA szinten dolgozik. Stratégia megadása nélkül minden
 páron a SAJÁT engedélyezett stratégiái futnak (pairs.<sym>.strategies) — ugyanaz a
@@ -414,6 +416,16 @@ def cmd_notify_test():
     return 1
 
 
+def cmd_forward(argv=None):
+    """A Csilla-sáv FORWARD-tesztje: adat-pótlás + jelzések + kiértékelés + riport.
+
+    ⚠ EZ AZ ÚT AZ ALPROCESSZÉ. A `core/daily_jobs.py` naponta ezt indítja
+    (`main.py forward --all`), és a dashboard gombja / a `forward run` parancs
+    is — az EXE-ben a `tools/` szkript közvetlen hívása nem volna elérhető."""
+    from tools.csilla_forward import main as _fw
+    return _fw(argv if argv is not None else ["--all"])
+
+
 def cmd_lab(argv=None):
     """Kezi laboratorium — chart-ablak (2. lepcso).
 
@@ -613,6 +625,7 @@ COMMANDS = {
     "install":   (cmd_install,    "argv"),
     "pack-gate":    (cmd_pack_gate,    "argv"),
     "install-gate": (cmd_install_gate, "argv"),
+    "forward":      (cmd_forward,      "argv"),
 }
 
 

@@ -36,6 +36,15 @@ test from 2026-09-15 (`tools/csilla_forward.py`) with a pre-registered kill
 threshold (n ≥ 60 and R < −0.10). Small targets, early breakeven, trailing and
 position building were all measured: none turns the 8-pair result positive.
 
+The forward journal is updated **by the program** (v3.87.0): once a day after
+the configured time (`daily_jobs.csilla_forward.time`, default 22:30 local)
+the engine runs `main.py forward --all` in a subprocess; run it by hand with the
+"▶ Run now" button on the Conductor tab or the `forward run` command, and read
+the status with `forward` or in the evening report. The first week showed that
+"daily, by hand" does not run — hence the move into the program. The pair
+reading (H1→M1, H1→M15, structural window, turn entry) was measured on
+2026-09-22 and failed — section 12 of the measurement note.
+
 Level parameters (`k_d1`, `k_w1`, `ttl_*`) define what a "significant level"
 is and are not tuned during the forward test. Deep M15 warm-up (~1 year, for
 the W1 levels); the context is cached per pair.

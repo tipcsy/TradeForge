@@ -4142,6 +4142,18 @@ def run(cfg: dict, slot_mgr: SlotManager):
                 _karm_be = False
                 log.debug("karmester: a fok nem olvasható", exc_info=True)
             _tlm.tick()
+            # ── NAPI FELADATOK (pl. a Csilla-sáv forward-napló) ───────────
+            # ⚠ NEM A KARMESTERÉ, ezért nem a fokától függ. Alprocesszt indít
+            # naponta egyszer a beállított idő után, és learatja — a körre
+            # nem mérhető költség (`core/daily_jobs.py`). A fájl-olvasás egyszer
+            # van (a modul az állapotot memóriában tartja).
+            try:
+                from core import daily_jobs as _djobs
+                for _dj_nev in _djobs.tick(cfg):
+                    log.info("napi feladat indult: %s", _dj_nev)
+            except Exception:
+                # ⚠ A feladat SOHA nem állíthatja meg a kereskedést.
+                log.debug("napi feladatok: a kör kimaradt", exc_info=True)
             # ── EGÉSZSÉGŐR (F1) — ÓRÁNKÉNT, nem körönként ────────────────
             # ⚠ A KÖLTSÉG MIATT. Az átvizsgálás fájlokat olvas (config-leletek,
             # mentett paraméterkészletek, a kereskedési napló), és a motor

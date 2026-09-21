@@ -122,6 +122,13 @@ class ConductorTab:
         holder, self._inner, _ = scrollable(p)
         holder.pack(fill="both", expand=True, padx=10, pady=(0, 8))
 
+        # ── NAPI FELADATOK (a Csilla-sáv forward-napló) ─────────────────
+        # ⚠ MIÉRT ITT. A felhasználó kérése (2026-09-22): a forward-teszt napi
+        # futását a PROGRAM végezze, „akár naponta, akár nyomógombra". A gomb
+        # a KÖZÖS parancs-rétegen megy (`forward run`), az állapot a futás által
+        # írt `csilla_status.json`-ból jön — a fül nem számol újra semmit.
+        self._box_forward = tk.Frame(self._inner, bg=BG)
+        self._box_forward.pack(fill="x", pady=(0, 10))
         self._box_inbox = tk.Frame(self._inner, bg=BG)
         self._box_inbox.pack(fill="x", pady=(0, 10))
         self._box_matrix = tk.Frame(self._inner, bg=BG)
@@ -139,8 +146,10 @@ class ConductorTab:
         „BEKAPCSOLVA"-t mutatna egy álló karmester fölött. Pont az a hazugság,
         ami miatt ez az egész kapcsoló megépült."""
         from conductor import paths as _p
+        from core import daily_jobs as _dj
         ki = []
-        for ut in (_p.DIR / "inbox.json", _p.journal_file(), _p.off_switch()):
+        for ut in (_p.DIR / "inbox.json", _p.journal_file(), _p.off_switch(),
+                   _dj.STATE_FILE):
             try:
                 ki.append(ut.stat().st_mtime if ut.exists() else 0.0)
             except OSError:
@@ -164,6 +173,7 @@ class ConductorTab:
                 return
             self._mtime = most
             self._rajzol_fejlec()
+            self._rajzol_forward()
             self._rajzol_inbox()
             self._rajzol_kronika()
         except Exception:
@@ -198,6 +208,7 @@ class ConductorTab:
             self._lbl_info.config(text=_t("cond.tab.error"))
         self._mtime = self._allapot_ideje()
         self._rajzol_fejlec()
+        self._rajzol_forward()
         self._rajzol_inbox()
         self._rajzol_matrix()
         self._rajzol_kronika()
@@ -234,6 +245,61 @@ class ConductorTab:
         self._futtat(lambda ctx, megerosit: _cc.dispatch(
             ctx, "karmester " + ("on" if ki_most else "off")))
         self._rajzol_fejlec()
+
+    # ── napi feladatok: a forward-napló ──────────────────────────────────
+    def _rajzol_forward(self):
+        """Az állás sorai (a közös `forward_lines`-ból) + „Futtat most" + „Napló"."""
+        from core import console_cmd as _cc
+        from core import daily_jobs as _dj
+
+        for w in self._box_forward.winfo_children():
+            w.destroy()
+        ctx = self._ctx()
+        cfg = getattr(ctx, "cfg", None) if ctx is not None else None
+        if cfg is None:
+            return
+        fej = tk.Frame(self._box_forward, bg=BG)
+        fej.pack(fill="x", pady=(0, 4))
+        tk.Label(fej, text=_t("cond.tab.forward"), bg=BG, fg=FG_WHITE,
+                 font=self._header, anchor="w").pack(side="left")
+        try:
+            fut = _dj.status(cfg, "csilla_forward")["status"] == _dj.RUNNING
+        except Exception:
+            fut = False
+        tk.Button(fej, text=_t("cond.tab.forward_log"), bg=BG_HEADER, fg=FG_WHITE,
+                  relief="flat", font=self._small, padx=8,
+                  command=self._forward_naplo).pack(side="right", padx=4)
+        tk.Button(fej, text=_t("cond.tab.forward_run"), bg=BTN_PLAY_BG, fg=FG_WHITE,
+                  relief="flat", font=self._small, padx=8,
+                  state=("disabled" if fut else "normal"),
+                  command=self._forward_run).pack(side="right", padx=4)
+        try:
+            sorok = _cc.forward_lines(cfg)[1:]          # a fejsor a címke
+        except Exception:
+            log.debug("Karmester fül: a forward állása nem olvasható", exc_info=True)
+            sorok = [_t("cond.tab.error")]
+        for sor in sorok:
+            tk.Label(self._box_forward, text=sor, bg=BG, fg=FG_GRAY, font=self._small,
+                     anchor="w", justify="left", wraplength=900).pack(fill="x", padx=8)
+
+    def _forward_run(self):
+        from core import console_cmd as _cc
+        self._futtat(lambda ctx, megerosit: _cc.dispatch(ctx, "forward run"))
+
+    def _forward_naplo(self):
+        """A feladat naplójának vége egy külön ablakban — hogy egy bukott futás
+        OKA is látható legyen, ne csak a „failed" címke."""
+        from core import daily_jobs as _dj
+        w = tk.Toplevel(self.parent)
+        w.title(_t("cond.tab.forward_log"))
+        w.configure(bg=BG)
+        txt = tk.Text(w, bg=BG, fg=FG_GRAY, font=self._small, width=110, height=32,
+                      relief="flat", wrap="none")
+        txt.pack(fill="both", expand=True, padx=8, pady=8)
+        sorok = _dj.log_tail("csilla_forward", 200) or [_t("forward.no_log")]
+        txt.insert("1.0", chr(10).join(sorok))
+        txt.see("end")
+        txt.config(state="disabled")
 
     # ── postaláda ────────────────────────────────────────────────────────
     def _rajzol_inbox(self):

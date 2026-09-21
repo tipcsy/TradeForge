@@ -44,6 +44,15 @@ bizonyíték. Ezért **forward papírkereskedés** 2026-09-15-től
 R < −0,10). A kicsi célár, a korai BE, a csúszó stop és a pozícióépítés
 mind mérve: egyik sem fordítja pozitívba a 8 páros eredményt.
 
+A forward-napló frissítését **a program végzi** (v3.87.0): a motor naponta
+egyszer, a beállított idő után (`daily_jobs.csilla_forward.time`, alap 22:30,
+helyi idő) alprocesszben futtatja a `main.py forward --all`-t; kézzel a
+Karmester fül „▶ Futtat most" gombjával vagy a `forward run` parancssal
+indítható, az állás a `forward` parancsból és az esti riportból olvasható.
+Az első hét megmutatta, hogy a „naponta, kézzel" nem fut — ezért kerül a
+programba. A páros olvasat (H1→M1, H1→M15, szerkezeti ablak, forduló-belépő)
+2026-09-22-én mérve és bukott — a mérés-jegyzet 12. szakasza.
+
 ## Paraméterek
 
 A szint-paraméterek (`k_d1`, `k_w1`, `ttl_*`) a „jelentős szint" definíciója —
