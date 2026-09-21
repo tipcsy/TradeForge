@@ -138,6 +138,7 @@ from core.indicator_engine import (atr as _atr_ind, resample_ohlc as _resample,
                                    wpr as _wpr_ind)
 from core.risk_manager import calc_sl_tp_points
 from core import gate_bands as _gbands
+from core import epoch as _epoch
 from gates import spread_gate
 from gates import vol_baseline as _volb
 from strategy import visual as viz
@@ -255,8 +256,10 @@ def _signal_columns(lo, params: dict):
     w = _wpr_ind(sg["high"], sg["low"], sg["close"], per).to_numpy(dtype=float)
     c = sg["close"].to_numpy(dtype=float)
 
-    close_ns = (sg.index + pd.Timedelta(minutes=tf)).asi8      # AMIKOR lezár
-    dec_ns   = (lo.index + pd.Timedelta(minutes=1)).asi8       # az M1 döntése
+    # ⚠ `core.epoch.ns` és nem `.asi8`: a két index felbontása elvileg eltérhet
+    # (pandas >= 2.0), és akkor a `searchsorted` némán rossz barra illesztene.
+    close_ns = _epoch.ns(sg.index + pd.Timedelta(minutes=tf))   # AMIKOR lezár
+    dec_ns   = _epoch.ns(lo.index + pd.Timedelta(minutes=1))    # az M1 döntése
     idx = np.searchsorted(close_ns, dec_ns, side="right") - 1
     ok  = idx >= 0
     safe = np.clip(idx, 0, len(sg) - 1)

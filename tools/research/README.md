@@ -44,12 +44,29 @@ felfedezés napján. A t-statisztika nem.
 | `shield.py` | kockázatcsökkentés (BE, trailing) hatása |
 | `build_pyramid.py` | **pozícióépítés** a `core/position_build.py` szabályaival |
 | `sizing.py` | **feltételes méretezés** — kvintilis-elemzés + súlyozott eredmény |
+| `seq_stat.py` | **közös statisztika**: napra klaszterezett t, évenkénti jel, eltolásos null |
+| `seq_events.py` | **esemény-szótár** idősíkonként (doji, dupla csúcs, swing-törés…) |
+| `seq_matrix.py` | **sorrend-mátrix**: „mi után mi jön" — van-e nyelvtan, és fizet-e |
+| `sl_paths.py` | pálya-kivonat (MFE/MAE/`s_min`) + **null-piac** (blokk-bootstrap) |
+| `sl_oracle.py` | **visszatekintő stop-tanulmány**: hová tegyük az SL-t a max TP-ért |
+
+Az öt utóbbi terve, fogalmai és előre rögzített elfogadási feltételei:
+**[`matrix.md`](matrix.md)**. Röviden, amiért külön protokollt kaptak:
+
+- a mérce nem a nulla, hanem **maga a B esemény** (a sorrend hozzáadott értéke);
+- minden t **napra klaszterezett** — az átfedő kötések miatt a sima t akár
+  √96 ≈ 10-szeresen túlbecsüli a bizonyítékot;
+- a nullhipotézis **körkörös eltolás** és **blokk-bootstrap piac**, nem
+  függetlenség: ami egy azonos volatilitású, szerkezet nélküli piacon is
+  kijön, az nem szerkezet.
 
 Futtatás a projekt gyökeréből:
 
 ```bash
 python tools/research/mae_mfe.py
 python tools/research/sizing.py
+python tools/research/seq_matrix.py --symbols Ger40 UsaTec --szintetikus
+python tools/research/sl_oracle.py --symbols Ger40 GOLD
 ```
 
 ---
