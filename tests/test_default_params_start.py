@@ -133,16 +133,26 @@ check("...es NAPLOZZA, hogy alapertelmezessel fut",
 
 
 # ── 4. A FELULET: nincs tobbe tiltas, de LATSZIK az allapot ──────────────
-_gui = (ROOT / "dashboard" / "gui.py").read_text(encoding="utf-8")
-_start = _gui.split("def _start_strategy")[1].split(chr(10) + "    def ")[0]
+# ⚠ A SZABALY A KOZOS PARANCS-RETEGBEN van, nem a feluleten: a hangolatlan
+# indulas jelzeset eddig CSAK a felulet irta ki, a konzol/TUI/Telegram nemán
+# inditott. Most mindharom ugyanazt mondja.
+_ccsrc = (ROOT / "core" / "console_cmd.py").read_text(encoding="utf-8")
+_start = _ccsrc.split("def start_strategies")[1].split(chr(10) + "def ")[0]
 check("a Play MAR NEM tagadja meg parameter hianyaban",
       "előbb futtasd az OPT-ot" not in _start, _start[:120])
 check("...de KIIRJA, hogy alapertelmezettel indul",
-      "gui.ctrl.default_params" in _start
-      and _says("gui.ctrl.default_params", "ALAPÉRTELMEZETT paramétereivel"))
-# A strategia-engedelyezettseg kapuja MEGMARAD: az mas kerdes.
-check("az engedelyezettseg kapuja megmaradt",
-      "if not self._strategy_enabled(symbol, name):" in _start)
+      "console.play.default_params" in _start
+      and _says("console.play.default_params", "ALAPÉRTELMEZETT paramétereivel"))
+_gui = (ROOT / "dashboard" / "gui.py").read_text(encoding="utf-8")
+check("...es a felulet ezen a retegen indit",
+      "_cc.start_strategies(" in _gui)
+# ⚠ A strategia-engedelyezettseg kapuja MEGMARAD — csak ATKOLTOZOTT a KOZOS
+# parancs-retegbe (v3.73.0). Korabban a felulet sajat masolata volt; igy a
+# konzol/TUI/Telegram is ugyanugy megtagadja a nem engedelyezett strategiat.
+check("az engedelyezettseg kapuja megmaradt (a kozos retegben)",
+      "if n not in engedett:" in _start)
+check("...es a felulet NEM tartja a sajat masolatat",
+      "if not self._strategy_enabled(symbol, name):" not in _gui)
 
 # Az Attekintes figyelmeztetese: elesben SULYOSABB.
 from core import overview as ov

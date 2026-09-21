@@ -141,8 +141,23 @@ check("⚠ a kézi belépő ugyanazt a `_execute_entry`-t hívja",
       f"{_src.count('_execute_entry(')} előfordulás (1 def + 2 hívó)")
 check("⚠ ...és zár védi a kettős nyitástól",
       "_MANUAL_LOCK" in _src and "with _MANUAL_LOCK" in _src)
+# ⚠ EZT A SORRENDET A KÉZI BELÉPŐN BELÜL KELL MÉRNI. A korábbi változat a
+# TELJES fájlban kereste a két szöveg ELSŐ előfordulását — és amint a motor
+# saját belépője `_execute_entry(` helyett `_ticket = _execute_entry(`-re
+# változott (a telemetriának tudnia kell, született-e ticket), a keresés a
+# MOTOR sorát találta meg elsőként, ami természetesen a kézi ág `lezar` hívása
+# ELŐTT áll a fájlban. A teszt elbukott, miközben a mért szabály sértetlen
+# volt: egy ÁTNEVEZETT VÁLTOZÓ buktatta meg, nem a viselkedés.
+import ast as _ast
+_fa = _ast.parse(_src)
+_manual = next((n for n in _ast.walk(_fa)
+                if isinstance(n, _ast.FunctionDef) and n.name == "manual_entry"), None)
+check("megvan a kézi belépő (`manual_entry`)", _manual is not None)
+_mtest = "" if _manual is None else "\n".join(
+    _src.splitlines()[_manual.lineno - 1:_manual.end_lineno])
 check("⚠ az ajánlatot a MEGBÍZÁS ELŐTT fogyasztjuk el",
-      _src.index("REGISTRY.lezar(o.id") < _src.index("ticket = _execute_entry("))
+      "REGISTRY.lezar(o.id" in _mtest and "_execute_entry(" in _mtest
+      and _mtest.index("REGISTRY.lezar(o.id") < _mtest.index("_execute_entry("))
 
 # ── 7. A KAPUK (MT5 nélkül, cserélt nyilvántartással) ────────────────────
 from trading import live_trader as lt

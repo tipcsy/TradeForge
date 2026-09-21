@@ -122,8 +122,8 @@ if TK_OK:
     from dashboard import theme as _th
     from trading.live_trader import PairDashboardState as _PDS
     _th._FONTS.clear()
-    _G.DashboardWindow._start_bg_poller = lambda self: None
-    _G.DashboardWindow._poll_mt5 = lambda self: None
+    # ⚠ EGY kapcsolo a felulet OSSZES hatterszalara (lasd gui.py).
+    _G.DashboardWindow._start_background_threads = lambda self: None
     _G.OptimizerController._ensure_pool = lambda self: None
     _G.DashboardWindow._save_main_config = lambda self: True
     # ⚠ A ⚙ mentes-aga a VALODI `ROOT/config.json`-ba ir (`write_config_file`) —

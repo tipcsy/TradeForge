@@ -53,6 +53,7 @@ from gates import vol_baseline as _vol_baseline
 from core import gate_bands as _gate_bands_mod
 from core import symbol_policy as _sym_policy
 from core import opt_activity as _opt_activity
+from conductor import telemetry as _tlm
 from core.indicator_engine import atr as atr_indicator
 from core.risk_manager import (calc_lot, calc_effective_slots, SlotManager,
                                calc_swing_sl_tp_points, slot_weight)
@@ -2053,6 +2054,42 @@ def _pos_risk_ccy_of(ticket: int, pos=None, pair_cfg: dict | None = None) -> flo
     return 0.0
 
 
+class _KarmesterKi(Exception):
+    """Belső jelzés: a karmester L-1, az indulás-blokk nem fut tovább.
+
+    ⚠ MIÉRT KIVÉTEL, ÉS NEM `if`. A blokk hat egymást követő lépésből áll, és
+    mindet ugyanaz a `try` védi; egy `if`-ekkel tördelt változat ugyanazt a
+    feltételt hatszor ismételné — és a hetedik lépésnél valaki elfelejtené.
+    """
+
+
+def _signal_bar_ts(df_lo, strategy, params) -> tuple:
+    """A JELET azonosító gyertya ideje → `(bar_ts, jel_gyertya_mp)`.
+
+    ⚠ MIÉRT A JEL-GYERTYÁRA KEREKÍTÜNK, NEM A VÉGREHAJTÁSIRA. A `bollinger` H1-en
+    dönt (`signal_tf_min=60`), az M1 „pusztán kézbesíti" — az M1-alapú
+    azonosítóból EGYETLEN jelre 60 esemény lett, percenként egy. Élesben mérve
+    (GOLD BUY): 18:00, 18:01, 18:02, 18:03, 18:04 — mind ugyanaz a szetup. A
+    `wpr_sma` 0-t ad vissza (ott az M1 HOZZA a döntést), tehát az ő viselkedése
+    bitre változatlan.
+
+    ⚠ KÉT FOGYASZTÓJA VAN, ÉS UGYANAZT KELL LÁTNIUK: az MQL5 riasztás-azonosító
+    (`alert-id`) és a karmester belépő-telemetriája. Ha a telemetria a saját
+    másolatát számolná, egy H1-es stratégia 60×-os súllyal jelenne meg egy
+    M1-eshez képest — és a karmester ebből vonna le következtetést."""
+    try:
+        bar_ts = int(df_lo.index[-2].timestamp())
+    except Exception:
+        bar_ts = int(time.time())
+    try:
+        sig_sec = int(strategy.signal_bar_seconds(params) or 0)
+    except Exception:
+        sig_sec = 0
+    if sig_sec > 0:
+        bar_ts = (bar_ts // sig_sec) * sig_sec
+    return bar_ts, sig_sec
+
+
 def _execute_entry(symbol: str, strategy_name: str, direction: str, lot: float,
                    sl_price: float, tp_price: float, sl_points: float,
                    magic: int, risk_ccy: float, pv1_point: float,
@@ -2946,17 +2983,36 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
                or bool(getattr(state, "disabled_closing", False)))
 
     if signal != "NONE":
-        _block = (_t("block.closing")
-                  if closing else
-                  _t("block.already_open") if already_open else
-                  _policy_block if _policy_block else
+        # ⚠ ELŐBB A KÓD, A SZÖVEG ABBÓL. Korábban ez a lánc közvetlenül a
+        # FORDÍTOTT mondatot adta — a karmester telemetriájának ugyanezt a
+        # precedenciát kellett volna másodszor is leírnia, és a két lánc az első
+        # új oknál elcsúszott volna. A kód a stabil azonosító (lásd
+        # `conductor/telemetry.py`), a mondat csak a kijelzés.
+        _why = (_tlm.CLOSING if closing else
+                _tlm.ALREADY_OPEN if already_open else
+                _tlm.POLICY if _policy_block else
+                _tlm.DAILY_LIMIT if daily_limit_hit else
+                _tlm.NO_ATR if atr_val is None else
+                _tlm.NO_SLOT if not slot_mgr.can_open() else
+                _tlm.GATE if not _gates_ok else None)
+        _block = (_policy_block if _why == _tlm.POLICY else
+                  _t("block.closing") if _why == _tlm.CLOSING else
+                  _t("block.already_open") if _why == _tlm.ALREADY_OPEN else
                   _t("block.daily_limit", pnl=f"{_day_pnl:+.2f}",
-                     limit=f"{daily_limit:.0f}")
-                  if daily_limit_hit else
-                  _t("block.no_atr") if atr_val is None else
-                  _t("block.no_slot") if not slot_mgr.can_open() else
+                     limit=f"{daily_limit:.0f}") if _why == _tlm.DAILY_LIMIT else
+                  _t("block.no_atr") if _why == _tlm.NO_ATR else
+                  _t("block.no_slot") if _why == _tlm.NO_SLOT else
                   _t("block.gate", reason=_gates.block_reason(_gate_dec))
-                  if not _gates_ok else None)
+                  if _why == _tlm.GATE else None)
+        # A KARMESTER MÉRÉSE (F0): a kimaradt belépő okát eddig csak a napló
+        # őrizte, ahonnan másnap eltűnt. A kötéssel végződő ágakat lentebb
+        # rögzítjük — ott derül ki a VALÓDI kimenet (korreláció, jelzés-mód,
+        # bróker-elutasítás).
+        _bar_ts, _sig_sec = _signal_bar_ts(df_lo, strategy, params)
+        if _why:
+            _tlm.record(symbol, strategy.name, signal, _why,
+                        gates_blocked=_gate_dec["blocked"],
+                        gates_reduced=_gate_dec["reduced"], bar_ts=_bar_ts)
         if _block:
             log.info("⏭ %s %s jel — belépő KIHAGYVA: %s", symbol, signal, _block)
         elif _gate_dec["reduced"]:
@@ -2983,6 +3039,8 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
             # rendezve dolgozza fel a párokat —, a korrelált újat blokkoljuk.
             log.info("K-blokk: %s belépés kihagyva (azonos kitettség: %s)",
                      symbol, ", ".join(conflict))
+            _tlm.record(symbol, strategy.name, signal, _tlm.CORRELATION,
+                        gates_reduced=_gate_dec["reduced"], bar_ts=_bar_ts)
         else:
             ctf = risk_trading_cfg
             if conflict and cmode == correlation.HALF:
@@ -3003,6 +3061,8 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
             if plan is None:
                 log.info("⏭ %s %s jel — belépő KIHAGYVA: a stratégia nem adott "
                          "érvényes SL/TP méretet (hi_row/indikátor hiány).", symbol, signal)
+                _tlm.record(symbol, strategy.name, signal, _tlm.NO_PLAN,
+                            bar_ts=_bar_ts)
                 return
             sl_points, tp_points = plan
             # SL-módszer: `swing20` → az utolsó N M1 gyertya swingjéből (ATR helyett):
@@ -3142,26 +3202,12 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
                 if _tmode.is_signal_only({"pairs": {symbol: pair_cfg}},
                                          symbol, strategy.name):
                     # Az alert-id a JELET azonosítja, hogy az MQL5 dedupálhasson:
-                    # a döntést hozó (zárt) alacsony-idősíkú gyertya ideje — ez
-                    # ugyanaz a bar, amit a jelzéslogika is használ (iloc[-2]).
-                    try:
-                        _bt = int(df_lo.index[-2].timestamp())
-                    except Exception:
-                        _bt = int(time.time())
-                    # ⚠ A JEL-GYERTYÁRA kerekítünk, nem a végrehajtásira. A
-                    # `bollinger` H1-en dönt (`signal_tf_min=60`), az M1 „pusztán
-                    # kézbesíti" — az M1-alapú azonosítóból egyetlen jelre 60
-                    # riasztás lett, percenként egy. Élesben mérve (GOLD BUY):
-                    # 18:00, 18:01, 18:02, 18:03, 18:04 — mind ugyanaz a szetup.
-                    # A `wpr_sma` 0-t ad vissza (ott az M1 HOZZA a döntést),
-                    # tehát a viselkedése bitre változatlan.
-                    try:
-                        _sig_sec = int(strategy.signal_bar_seconds(params) or 0)
-                    except Exception:
-                        _sig_sec = 0
-                    if _sig_sec > 0:
-                        _bt = (_bt // _sig_sec) * _sig_sec
-                    _aid = f"{symbol}|{strategy.name}|{signal}|{_bt}"
+                    # a döntést hozó (zárt) gyertya ideje. A számítás a
+                    # `_signal_bar_ts`-ben van — UGYANAZT látja a karmester
+                    # telemetriája is (lásd ott a H1/M1 60×-os csapdát).
+                    _aid = f"{symbol}|{strategy.name}|{signal}|{_bar_ts}"
+                    _tlm.record(symbol, strategy.name, signal, _tlm.SIGNAL_ONLY,
+                                gates_reduced=_gate_dec["reduced"], bar_ts=_bar_ts)
                     request_alert(
                         symbol, strategy.name, _aid,
                         _t("alert.signal", symbol=symbol, side=signal,
@@ -3214,10 +3260,17 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
                     })
                     return
 
-                _execute_entry(
+                _ticket = _execute_entry(
                     symbol, strategy.name, signal, lot, sl_price, tp_price,
                     sl_points, magic, _risk_ccy,
                     _sizing_cfg.get("pv1_point", 0.0), open_price, slot_mgr)
+                # ⚠ A KIMENET a ticketből dől el, nem a szándékból: a fedezet-
+                # ellenőrzés és a bróker elutasítása is IDE fut be (`None`). Ha a
+                # telemetria a hívás tényét számolná kötésnek, a jelentés
+                # kötéseket mutatna ott, ahol egy sem született.
+                _tlm.record(symbol, strategy.name, signal,
+                            _tlm.ENTERED if _ticket else _tlm.EXEC_FAILED,
+                            gates_reduced=_gate_dec["reduced"], bar_ts=_bar_ts)
 
 
 # ---------------------------------------------------------------------------
@@ -3294,6 +3347,14 @@ def manual_entry(offer_id: str, drift_confirmed: bool = False) -> tuple:
         ticket = _execute_entry(o.symbol, o.strategy, o.direction, o.lot,
                                 sl, tp, o.sl_points, o.magic, o.risk_ccy,
                                 o.pv1_point, ar, _run_slot_mgr)
+    # ⚠ A KÉZI BELÉPŐ IS BELÉPŐ. A telemetria a CELLA kötéseit számolja, nem a
+    # motor szándékait: ha a Telegram-gombbal nyílt pozíció kimaradna belőle, a
+    # „hány jelből lett kötés" arány hazudna azon a páron, ahol épp a válaszos
+    # kötést használod. Jel-gyertya nincs (a döntés EMBERI, perceken át élhet az
+    # ajánlat), ezért nincs ismétlődés-védelem — egy ajánlat úgyis egyszer
+    # használható (`signal_offer`).
+    _tlm.record(o.symbol, o.strategy, o.direction,
+                _tlm.ENTERED if ticket else _tlm.EXEC_FAILED)
     if not ticket:
         # ⚠ A napló megmondja, MI akadt el (fedezet, bróker-elutasítás); a
         # felhasználónak itt annyi kell, hogy NEM nyílt pozíció.
@@ -3691,12 +3752,21 @@ def run(cfg: dict, slot_mgr: SlotManager):
     # a konzolos parancssor UGYANAZT a `console_cmd.Context`-et használja: így az
     # esti üzenet és a kézzel lekérdezett `/today` nem mondhat mást ugyanarról a
     # napról.
+    # ⚠ EGY KÖRNYEZET AZ EGÉSZ FUTÁSRA. A napi üzenet, a Telegram-parancsok és
+    # a karmester gépi lépése UGYANAZT a `Context`-et használja. Előre `None`,
+    # mert az alábbi blokk elbukhat (MT5, licenc) — a karmester onnan tudja,
+    # hogy nincs mivel dolgoznia, és nem épít magának egy MÁSODIKAT.
+    _ctx = None
     try:
         from core import console_cmd as _cc, notify, telegram_cmd as _tgc
         _ctx = _cc.live_context(cfg, ROOT / "config.json")
 
         def _napi_szoveg() -> str:
-            return chr(10).join(_cc.cmd_today(_ctx, []).lines)
+            # ⚠ `cmd_report`, NEM `cmd_today`: az esti üzenet a karmester
+            # szakaszait is viszi (mérés · leletek · árnyék-javaslatok). EGY
+            # üzenet, nem kettő — egy második esti üzenet versenyezne az
+            # elsővel, és a kettő előbb-utóbb mást mondana ugyanarról a napról.
+            return chr(10).join(_cc.cmd_report(_ctx, []).lines)
 
         notify.setup(cfg, health=lambda: health_report(cfg), daily=_napi_szoveg)
         # A BEJÖVŐ oldal is itt indul, hogy a GRAFIKUS és a KONZOLOS futás
@@ -3704,6 +3774,35 @@ def run(cfg: dict, slot_mgr: SlotManager):
         _tgc.setup(cfg, _ctx)
     except Exception:
         log.debug("értesítés/telegram: nem indult el", exc_info=True)
+    # ── KARMESTER-TELEMETRIA (F0) — CSAK MÉRÉS ──────────────────────────
+    # A „miért nem kötött?" válaszához a belépő-kísérletek kimenetelét napi
+    # bontásban gyűjtjük (`data/conductor/telemetry/`). A NAP a BRÓKERÉ: a napi
+    # limit, a szesszió-ablakok és a kapuk is ahhoz igazodnak — a modul maga
+    # MT5-mentes, ezért kívülről kapja meg.
+    try:
+        from conductor import autonomy as _cau
+        from conductor import config as _ccfg, journal as _cjrn
+        _tlm.set_day_provider(mt5_connector.server_today)
+        # ⚠ L-1-EN EL SEM INDUL. A terv első szabálya: „nem figyel, nem ír, nem
+        # riportol". A takarítás is írás — kikapcsolt állapotban a karmester a
+        # saját fájljaihoz sem nyúl.
+        if not _cau.barmi_aktiv(cfg):
+            _tlm.set_enabled(False)
+            log.info("karmester: KIKAPCSOLVA (L-1) — nem mér, nem javasol, "
+                     "nem riportol")
+            raise _KarmesterKi
+        _tlm.set_enabled(_cau.enged(cfg, _cau.MEASURE))
+        _tlm.prune(int(_ccfg.telemetry(cfg)["keep_days"]))
+        _cjrn.prune(int(_ccfg.journal(cfg)["keep_days"]))
+        from conductor import inbox as _cibx0
+        _cibx0.prune(int(_ccfg.inbox(cfg)["keep_days"]))
+        from conductor import optqueue as _coptq0
+        _coptq0.prune(int(_ccfg.optqueue(cfg)["keep_days"]))
+    except _KarmesterKi:
+        pass                    # kikapcsolva — ez nem hiba, hanem a te döntésed
+    except Exception:
+        # A mérés SOHA nem állíthatja meg a kereskedést.
+        log.debug("karmester-telemetria: az indítás kimaradt", exc_info=True)
     risky_mode.load()                      # induló risky állapot
     last_risky_reload = time.time()
     risky_reload_sec  = cfg.get("trading", {}).get("risky_reload_sec", 3600)
@@ -4008,6 +4107,7 @@ def run(cfg: dict, slot_mgr: SlotManager):
     _threading.Thread(target=_viz_worker, daemon=True, name="TradeForgeViz").start()
 
     _last_srv_off = 0.0     # a szerver-eltolás utolsó frissítése (napi limit napja)
+    _last_health  = 0.0     # a karmester-egészségőr utolsó átvizsgálása
 
     # Config-frissesség: a `pv1_point` és a swap PILLANATKÉP-értékek, amik a bróker
     # oldalán elmozdulhatnak. Az él MT5-ből frissít, a BACKTESZT viszont a configból
@@ -4028,6 +4128,104 @@ def run(cfg: dict, slot_mgr: SlotManager):
             # halad-e. A kör végére tenni hiba volna: egy félbeszakadt körnél
             # sosem frissülne, és a motor holtnak látszana, miközben dolgozik.
             last_cycle_ts = time.time()
+            # A karmester-telemetria kiírása, ha eljött az ideje (időzített,
+            # atomikus — a körre nem mérhető költség).
+            # ⚠ A KAPCSOLÓ KÖRÖNKÉNT. A terv ígérete: a kill-switch fájl a
+            # KÖVETKEZŐ cikluson belül hat (≤ 5 mp). Ezért kérdezzük itt, és nem
+            # csak induláskor — egy `touch data/conductor/off` SSH-n is megáll.
+            # Egy `Path.exists()` mikroszekundumos; a kör másodperces.
+            try:
+                from conductor import autonomy as _cau_t
+                _karm_be = _cau_t.barmi_aktiv(cfg)
+                _tlm.set_enabled(_karm_be and _cau_t.enged(cfg, _cau_t.MEASURE))
+            except Exception:
+                _karm_be = False
+                log.debug("karmester: a fok nem olvasható", exc_info=True)
+            _tlm.tick()
+            # ── EGÉSZSÉGŐR (F1) — ÓRÁNKÉNT, nem körönként ────────────────
+            # ⚠ A KÖLTSÉG MIATT. Az átvizsgálás fájlokat olvas (config-leletek,
+            # mentett paraméterkészletek, a kereskedési napló), és a motor
+            # szálán fut — a GIL miatt a kör munkaidejéből venne el. Óránként
+            # elhanyagolható, körönként mérhető lenne. A leletek úgyis
+            # naponta egyszer kerülnek a krónikába.
+            if _karm_be and time.time() - _last_health >= 3600:
+                _last_health = time.time()
+                try:
+                    from conductor import autonomy as _cau
+                    from conductor.policies import health as _chealth
+                    from strategy import enabled_strategy_names as _ensn_h
+                    _lel = _chealth.findings(
+                        cfg, strategies_of=lambda s: _ensn_h(cfg, s) or [])
+                    # ⚠ L0 (MEGFIGYELŐ): mér és naplóz — de nem javasol.
+                    _uj = (_chealth.journal_new(cfg, _lel)
+                           if _cau.enged(cfg, _cau.MEASURE) else 0)
+                    if _uj:
+                        log.info("karmester: %d új lelet a krónikában "
+                                 "(összesen %d áll fenn)", _uj, len(_lel))
+                    # ── ÁRNYÉK-MÓD (F1): mit TENNE a karmester? ──────────
+                    # ⚠ VÉGREHAJTÁS NÉLKÜL. A javaslatok a krónikába kerülnek,
+                    # hogy utólag mérhető legyen, jók lettek volna-e — a terv
+                    # szerint az önállóság (L2+) csak ezután adható meg.
+                    # ⚠ AZ EGÉSZSÉGŐR LELETEIT KAPJA MEG: a kockázati lelet
+                    # megállítja a pénzt bekapcsoló léptetést, az elszáradás
+                    # pedig visszaminősítést vált ki — a küszöb EGY helyen van.
+                    from conductor.policies import lifecycle as _clife
+                    # A cellánkénti fok-szűrés a `proposals`-ban van (EGY
+                    # helyen); itt csak azt nézzük, van-e egyáltalán jogunk
+                    # javasolni.
+                    _jav = (_clife.proposals(
+                        cfg, strategies_of=lambda s: _ensn_h(cfg, s) or [],
+                        health_findings=_lel)
+                        if _cau.enged(cfg, _cau.PROPOSE) else [])
+                    _uj_j = _clife.shadow(cfg, _jav) if _jav else 0
+                    if _uj_j:
+                        log.info("karmester (árnyék): %d új javaslat a "
+                                 "krónikában", _uj_j)
+                    # ── POSTALÁDA (F2): a javaslatok VÁRAKOZNAK a döntésedre ──
+                    # ⚠ A MOTOR NEM DÖNT: a tételek `pending` állapotban állnak,
+                    # amíg az `accept`/`reject`/`defer` paranccsal (vagy a
+                    # felületen) nem döntesz róluk. A beolvasztás azért kell itt,
+                    # hogy a javaslat akkor is várjon rád, ha aznap egyszer sem
+                    # kérdezel rá.
+                    from conductor import inbox as _cibx
+                    _st = (_cibx.sync(cfg, _jav,
+                                      strategies_of=lambda s: _ensn_h(cfg, s) or [])
+                           if _cau.enged(cfg, _cau.INBOX) else {})
+                    if _st.get("new"):
+                        log.info("karmester: %d új javaslat a postaládában "
+                                 "(`inbox`)", _st["new"])
+                    # ── OPTIMALIZÁLÁS-SOR hajtása (F2) ──────────────────
+                    # ⚠ ALPROCESSZBEN, NEM ITT. Az optimalizálás órákig tartó,
+                    # CPU-nehéz munka; a motor szálán a kereskedés körideje
+                    # nyúlna meg. A sor csak INDÍT és LEARAT — mindkettő
+                    # ezredmásodperces.
+                    # ── GÉPI VÉGREHAJTÁS (F3/b) ────────────────────────
+                    # ⚠ A BEOLVASZTÁS UTÁN, A SOR HAJTÁSA ELŐTT. A frissen
+                    # született javaslat még ebben a körben végrehajtható, és
+                    # ha optimalizálás lett belőle, a sor mindjárt el is
+                    # indítja — egy kör késés itt egy ÓRA késés volna.
+                    # ⚠ A fokot és a burkot a `governor` nézi TÉTELENKÉNT; itt
+                    # csak azt kérdezzük, van-e egyáltalán gépi mandátum.
+                    if _cau.enged(cfg, _cau.AUTO) and _ctx is not None:
+                        from conductor import auto as _cauto
+                        _as = _cauto.run(_ctx)
+                        if _as.get("done"):
+                            log.info("karmester (GÉPI): %d lépés végrehajtva",
+                                     _as["done"])
+                    # ⚠ AMIT TE FOGADTÁL EL, AZT L1-EN IS VÉGREHAJTJUK: a sor
+                    # a TE döntésed keze, nem a karmester önállósága. Az
+                    # önálló DÖNTÉS az F3/b (`AUTO`), az más kapu.
+                    from conductor import optqueue as _coptq
+                    _qs = (_coptq.drain(
+                        cfg, strategies_of=lambda s: _ensn_h(cfg, s) or [])
+                        if _cau.enged(cfg, _cau.EXECUTE) else {})
+                    if _qs.get("started") or _qs.get("finished"):
+                        log.info("karmester-optimalizálás: %d indult, %d "
+                                 "befejeződött", _qs["started"], _qs["finished"])
+                except Exception:
+                    # ⚠ A MÉRÉS SOHA NEM ÁLLÍTHATJA MEG A KERESKEDÉST.
+                    log.debug("karmester-egészségőr: a kör kimaradt",
+                              exc_info=True)
             # ── Kapcsolat-felügyelet ─────────────────────────────────────────
             # Ha nincs használható MT5-kapcsolat, ezt a kört KIHAGYJUK (és az
             # `ensure_connected` a háttérben újrakapcsolódik, növekvő várakozással).
@@ -4307,6 +4505,14 @@ def run(cfg: dict, slot_mgr: SlotManager):
         except Exception as e:
             log.error("Hiba a fő ciklusban: %s", e, exc_info=True)
             _STOP.wait(30)
+
+    # ⚠ AZ UTOLSÓ PERC IS SZÁMÍT. A telemetria időzítve ír; leállításkor a
+    # legutóbbi mérések még a memóriában ülhetnek — és épp a leállás ELŐTTI
+    # percek érdekesek, amikor a felhasználó azt kérdezi, mi történt.
+    try:
+        _tlm.flush()
+    except Exception:
+        log.debug("karmester-telemetria: a záró kiírás kimaradt", exc_info=True)
 
 
 # ---------------------------------------------------------------------------

@@ -106,8 +106,17 @@ if HAS_TK:
                               "min_lot": 0.01, "lot_step": 0.01,
                               "strategies": ["wpr_sma"]}}}
     _t._FONTS.clear()
-    for _m in ("_start_refresh_loops", "_start_bg_poller", "_poll_mt5", "_ensure_pool"):
-        setattr(G.DashboardWindow, _m, lambda self: None)
+    # ⚠ EGY kapcsolo a felulet OSSZES hatterszalara (lasd gui.py).
+    G.DashboardWindow._start_background_threads = lambda self: None
+    # ⚠ A PROCESS-POOL GAZDAJA AZ `OptimizerController`, NEM a
+    # DashboardWindow. A `G.DashboardWindow._ensure_pool = ...` egy NEM
+    # LETEZO metodust cserelt le: uj attributumot hozott letre, amit soha
+    # senki nem hiv — a pool tehat VALOJABAN elindult. Windowson a
+    # `mp.Manager()` spawn-nal UJRA IMPORTALJA a fo modult (= ezt a
+    # teszt-szkriptet), tehat minden gyermekfolyamat LEFUTTATTA az egesz
+    # fajlt — innen a tobbszoros ablak es a „Process-pool nem hozhato
+    # letre" RuntimeError.
+    G.OptimizerController._ensure_pool = lambda self: None
     G.DashboardWindow._save_main_config = lambda self: True
 
     w = None

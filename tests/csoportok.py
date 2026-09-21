@@ -37,7 +37,7 @@ TESZT_DIR = ROOT / "tests"
 
 # A projekt saját csomagjai — csak ezeket követjük (a numpy/pandas nem érdekes).
 CSOMAGOK = ("core", "trading", "strategy", "strategies", "gates",
-            "dashboard", "ml", "tools", "tests")
+            "dashboard", "ml", "tools", "tests", "conductor")
 
 # ── A NÉVVEL ELLÁTOTT CSOPORTOK ───────────────────────────────────────────
 # Egy csoport = modul-előtagok halmaza. Egy teszt ANNYI csoportba tartozik,
@@ -85,6 +85,11 @@ CSOPORTOK = {
                   "core.console_cmd", "core.console_tui", "core.signal_offer"),
     "licenc": ("core.licence", "core.licence_gate"),
     "naplo": ("core.applog",),
+    # ⚠ A KARMESTER (docs/karmester.md) SAJÁT csoport, nem a „motor" része: a
+    # motorban FUT (egy processz, külön szál), de MÁS a kérdése — a motor
+    # kereskedik, a karmester méri és dönt róla. Aki a mérést átírja, nem
+    # feltétlenül nyúlt a kereskedéshez, és fordítva.
+    "karmester": ("conductor.",),
 }
 
 # ⚠ A SEMLEGES MODUL NEM CSOPORTKÉPZŐ. A `core.applog`-ot 93 teszt importálja a

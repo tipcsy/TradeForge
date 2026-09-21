@@ -462,8 +462,8 @@ if TK_OK:
     import dashboard.gui as G
     from trading.live_trader import PairDashboardState
     _theme._FONTS.clear()
-    G.DashboardWindow._start_bg_poller = lambda self: None
-    G.DashboardWindow._poll_mt5 = lambda self: None
+    # ⚠ EGY kapcsolo a felulet OSSZES hatterszalara (lasd gui.py).
+    G.DashboardWindow._start_background_threads = lambda self: None
     G.OptimizerController._ensure_pool = lambda self: None
     G.DashboardWindow._save_main_config = lambda self: None
     cfgc = {"strategy": {"name": "wpr_sma"},

@@ -156,6 +156,15 @@ def main() -> int:
     no_live = "--no-live-data" in args
     if no_live:
         args.remove("--no-live-data")
+    # ⚠ IDŐKORLÁT FÁJLONKÉNT. Enélkül EGY beragadt teszt megállítja az egész
+    # csomagot — és a legrosszabb módon: a futtató a gyerek kimenetét
+    # PUFFERELI, tehát a képernyőn csak az előző fájl PASS sora látszik, és
+    # semmi nem árulja el, MELYIK fájlban és HOL állt meg. Egy Ctrl+C sem
+    # segít: a gyerek visszakövetési nyoma a pufferben vész el. A korlát
+    # lejártakor a gyerekre LŐÜNK, a részleges kimenetet KIÍRJUK, és a csomag
+    # megy tovább — a többi teszt eredménye többet ér, mint a várakozás.
+    _ido = _ertek(args, "--idokorlat")
+    timeout_sec = float(_ido[0]) if _ido else 900.0
     kert = _ertek(args, "--csoport")
     kihagy = _ertek(args, "--kihagy")
     erinti = _ertek(args, "--erinti")
@@ -232,10 +241,24 @@ def main() -> int:
         # kodolasi hibaval bukna. Itt fentrol rendezzuk, minden teszthez.
         import os
         env = dict(os.environ, PYTHONIOENCODING="utf-8")
-        r = subprocess.run([sys.executable, str(f)], cwd=str(ROOT), env=env,
-                           capture_output=True, text=True,
-                           encoding="utf-8", errors="replace")
-        out = (r.stdout or "") + (r.stderr or "")
+        _kifutott = False
+        try:
+            r = subprocess.run([sys.executable, str(f)], cwd=str(ROOT), env=env,
+                               capture_output=True, text=True,
+                               encoding="utf-8", errors="replace",
+                               timeout=(timeout_sec if timeout_sec > 0 else None))
+            out = (r.stdout or "") + (r.stderr or "")
+            _rc = r.returncode
+        except subprocess.TimeoutExpired as _te:
+            # ⚠ A RÉSZLEGES KIMENET A LEGÉRTÉKESEBB: abból derül ki, MELYIK
+            # állításig jutott el a teszt — vagyis hol akadt meg.
+            _kifutott = True
+            _rc = -1
+            out = ((_te.stdout or "") if isinstance(_te.stdout, str)
+                   else (_te.stdout or b"").decode("utf-8", "replace"))
+            out += ((_te.stderr or "") if isinstance(_te.stderr, str)
+                    else (_te.stderr or b"").decode("utf-8", "replace"))
+        r = None
         # Az utolsó „n/m teszt PASS" sor az összesítő
         line = next((ln for ln in reversed(out.splitlines()) if "teszt PASS" in ln), "")
         n = m = 0
@@ -246,7 +269,7 @@ def main() -> int:
                 pass
         total += m
         passed += n
-        ok = (r.returncode == 0)
+        ok = (_rc == 0) and not _kifutott
         # ⚠ AZONNAL ellenőrzünk, hogy a BŰNÖS teszt neve derüljön ki — a végén
         # már csak azt tudnánk, hogy „valamelyik".
         _now = _fingerprint()
@@ -254,8 +277,15 @@ def main() -> int:
             if _h != _before[_rel] and _rel not in _dirty:
                 _dirty[_rel] = f.name
                 _before[_rel] = _h            # hogy a többi tesztre ne áradjon
-        print(f"{'PASS' if ok else 'FAIL'}  {f.name:<32} {n}/{m}"
+        _cimke = "TIME" if _kifutott else ("PASS" if ok else "FAIL")
+        print(f"{_cimke}  {f.name:<32} {n}/{m}"
+              + (f"   ⚠ IDŐTÚLLÉPÉS ({timeout_sec:.0f} mp) — beragadt"
+                 if _kifutott else "")
               + ("   ⚠ ÍRTA AZ ÉLES ÁLLAPOTOT" if f.name in _dirty.values() else ""))
+        if _kifutott:
+            # Az UTOLSÓ néhány sor: eddig jutott el a teszt.
+            for ln in out.strip().splitlines()[-5:]:
+                print(f"        {ln}")
         if not ok:
             failed.append(f.name)
             # A bukott ÁLLÍTÁSOK sorai — enélkül újra kellene futtatni kézzel

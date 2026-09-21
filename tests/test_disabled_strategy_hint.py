@@ -139,17 +139,16 @@ else:
 # ── 4. A KAPU MAGA valtozatlan ───────────────────────────────────────────
 # A javitas NEM az, hogy bekapcsoljuk a strategiat mindenhol: az nemán mas
 # kereskedest jelentene. A kapu marad, csak mostantol beszel.
-import inspect
-from dashboard import gui as _gui
-_src = inspect.getsource(_gui.DashboardWindow._start_strategy)
-if _src:
-    check("a Play tovabbra is megtagadja a nem engedelyezettet",
-          "if not self._strategy_enabled(symbol, name):" in _src)
-    check("...es megmondja, hol lehet bekapcsolni",
-          "gui.ctrl.not_enabled" in _src
-          and _says("gui.ctrl.not_enabled", "beállításainál"), "")
-else:
-    check("ures forras (kihagyva)", True)
+# ⚠ A KAPU A KOZOS PARANCS-RETEGBEN van (`console_cmd.start_strategies`) —
+# igy a felulet, a konzol, a TUI es a Telegram ugyanazt tagadja meg. (A teszt
+# ezert SZOVEGKENT olvassa: nem kell hozza tkinter-gyoker.)
+_ccsrc = (ROOT / "core" / "console_cmd.py").read_text(encoding="utf-8")
+_src = _ccsrc.split("def start_strategies")[1].split(chr(10) + "def ")[0]
+check("a Play tovabbra is megtagadja a nem engedelyezettet",
+      "if n not in engedett:" in _src)
+check("...es megmondja, hol lehet bekapcsolni",
+      "console.play.not_enabled" in _src
+      and _says("console.play.not_enabled", "beállításainál"), "")
 
 
 print()

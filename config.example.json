@@ -230,5 +230,59 @@
       "sess_end": 24,
       "description": "GER40 Cash"
     }
+  },
+  "conductor": {
+    "_comment": "KARMESTER (docs/karmester.md). Jelenleg az F0 fazis: CSAK MERES — nem dont, nem javasol, nem ir configot. A telemetria a belepo-kiserletek kimenetelet gyujti napi bontasban (data/conductor/telemetry/), hogy a „miert nem kotott ma?” kerdesre legyen valasz.",
+    "telemetry": {
+      "_comment_keep": "Hany napig tartjuk meg a napi telemetria-fajlokat. 0 = nincs takaritas. Egy nap ~nehany KB.",
+      "keep_days": 90
+    },
+    "health": {
+      "_comment": "EGESZSEGOR (F1): a NEMA bajok vadaszata — nem hiba, hanem olyan allapot, ami rendben NEZ KI, kozben nem. Oránkent fut a motorban, a leleteket naponta egyszer a kronikaba irja (data/conductor/decisions.jsonl).",
+      "_comment_repeat": "Hany naponta kerul a kronikaba UGYANAZ a fennallo lelet. 0 = minden korben (zajos).",
+      "repeat_days": 1,
+      "_comment_dried": "ELSZARADAS: az elo aktivitas a mentett meres ennyi toredeke alatt lelet (0,25 = a negyedet sem hozza), es csak ennyi elo nap utan.",
+      "dried_up_ratio": 0.25,
+      "dried_up_min_days": 14,
+      "_comment_gate": "KAPU-FAL: egy kapu a napi jelek ennyi reszet blokkolta ES egy kotes sem lett, legalabb ennyi jelnel.",
+      "gate_wall_ratio": 0.8,
+      "gate_wall_min_signals": 3,
+      "_comment_silent": "NEMA SOROZAT: ennyi OLYAN nap utan lelet, amikor a motor futott (mas cellanak volt jele), de ennek a cellanak egy sem. 0 = kikapcsolva.",
+      "silent_days": 5
+    },
+    "lifecycle": {
+      "_comment": "ELETCIKLUS-LETRA (F1, ARNYEK-MOD): STOPPED -> UNTUNED -> PAPER -> LIVE. A karmester JAVASLATOT ad es a kronikaba irja; NEM hajt vegre semmit. A `plan` paranccsal nezheted meg.",
+      "_comment_paper": "PAPIR -> ELO: ennyi jel kell a „csak jelzes” modban, ennyi OLYAN napon, amikor a motor futott. ⚠ A papir AKTIVITAST bizonyit, nyeresegesseget nem (a jelzes-soroknak nincs P&L-je) — ezert a leptetes MINDIG emberi jovahagyas.",
+      "paper_min_signals": 30,
+      "paper_min_days": 10,
+      "_comment_demote": "ELO -> PAPIR: ennyi valodi kotes ALATT nem minositunk vissza (a kis mintabol hozott dontes zajra reagalna), es csak ez alatti profit factornal.",
+      "demote_min_trades": 50,
+      "demote_pf": 1.0,
+      "_comment_stale": "A mentett keszlet ennyi nap utan avult -> ujraoptimalizalas javaslat.",
+      "stale_params_days": 60
+    },
+    "inbox": {
+      "_comment": "JAVASLAT-POSTALADA (F2): a karmester javaslatai varnak a dontesedre. Parancsok: `inbox` · `accept <id>` · `reject <id>` · `defer <id>` · `undo <id>`. ⚠ A motor NEM dont: a tetelek `pending` allapotban allnak.",
+      "_comment_expire": "A javaslat ennyi nap utan maganak kiesik. Ez a MASODIK vedvonal: az elso az, hogy az elfogadas pillanataban ujraszamoljuk, igaz-e meg.",
+      "expire_days": 7,
+      "_comment_reject": "AZ ELVETESNEK MEG KELL MARADNIA: ha az elvetett javaslat masnap ujraszuletne, az elvetes semmit nem jelentene.",
+      "reject_cooldown_days": 14,
+      "defer_days": 3,
+      "_comment_keep": "A LEZART tetelek takaritasa (a TORTENET a kronikaban van).",
+      "keep_days": 30
+    },
+    "optqueue": {
+      "_comment": "FEJ NELKULI OPTIMALIZALAS-SOR (F2): a karmester sajat, penzt NEM erinto akcioja. A meglevo belepesi pontot inditja ALPROCESSZKENT (`main.py optimize <SYM> --strategy <S>`), mert az optimalizalas orakig tarto, CPU-nehez munka. Parancs: `optq`.",
+      "_comment_block": "⚠ KERESKEDO CELLAT NEM OPTIMALIZAL: a futas vegen a parameterfajlja irodna felul alatta. Ilyenkor a keres `blocked` allapotban var — eloszor allitsd le a cellat (Stop).",
+      "_comment_parallel": "ALAPBOL EGY: az ELO MOTOR MELLETT fut, tobb parhuzamos futas elvenne a gepet a kereskedes elol. (Az optimizer.max_parallel_optimizers a felulet sajat sora.)",
+      "max_parallel": 1,
+      "_comment_stale": "Ennyi ora utan egy „fut” tetelt elveszettnek nyilvanitunk, ha a motor ujraindult kozben. Egy orokke „fut” sor rosszabb, mint egy bevallott hiany.",
+      "stale_hours": 12,
+      "keep_days": 14
+    },
+    "journal": {
+      "_comment": "KRONIKA: mit latott (es kesobb mit tett) a karmester. Append-only JSONL.",
+      "keep_days": 365
+    }
   }
 }

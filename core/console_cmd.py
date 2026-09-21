@@ -34,12 +34,17 @@ ad át a `Context`-ben. Így hálózat és terminál nélkül tesztelhető.
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
+from core import opt_activity as _oa
 from core import run_state as _rs
+from core import trade_mode as _tm
 from core.i18n import t as _t
+
+log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -84,6 +89,11 @@ class Context:
     # tudnak eltérő képet adni ugyanarról a napról.
     today_rows: Callable[[], list] = list
     cycle_sec: float = 10.0
+    # A mentett paraméterkészlet megléte: `"tuned"` | `"default"` | `""` (nem tudjuk).
+    # ⚠ FÜGGVÉNYKÉNT, mert a `live_trader.params_source` MT5-öt importáló modulban
+    # lakik — a parancs-réteg viszont MT5-mentes marad. Aki nem köti be, annál a
+    # hangolatlan indulás jelzése egyszerűen elmarad (nem hazudik, csak hallgat).
+    params_source: Callable[[str, str], str] = lambda s, n: ""
 
 
 # ---------------------------------------------------------------------------
@@ -283,37 +293,132 @@ def cmd_close(ctx: Context, args: list, confirmed: bool = False) -> Result:
     return Result(sorok, ok=(hiba == 0))
 
 
+# ---------------------------------------------------------------------------
+# INDÍTÁS / LEÁLLÍTÁS — a szabályok EGY helyen, felülettől függetlenül
+# ---------------------------------------------------------------------------
+# ⚠ MIÉRT VAN A PARANCS MÖGÖTT KÜLÖN FÜGGVÉNY. A `cmd_play`/`cmd_stop` SZÖVEGET
+# bont (`play EURUSD wpr_sma`); a grafikus felület viszont már tudja, melyik
+# cellára kattintottak — neki nincs mit parszolnia. Amíg csak parancs volt, a
+# GUI a saját másolatát írta meg, és a két oldal EL IS CSÚSZOTT:
+#
+#   • az OPTIMALIZÁLÁS alatti indítást a felület tiltotta, a konzol/TUI/Telegram
+#     engedte — pedig a futás végén a stratégia paraméterfájlja íródik felül;
+#   • a hangolatlan (alapértelmezett paraméteres) indulást a felület kiírta, a
+#     parancs-réteg nem — ugyanaz a néma állapot, amit a projekt máshol
+#     következetesen kigyomlál;
+#   • a KIVEZETÉS-figyelmeztetésre a parancs rákérdezett, a felület nem.
+#
+# A szabály ezért itt lakik, a parancs pedig már csak argumentumot bont.
+
+
+def start_strategies(ctx: Context, symbol: str, names: list) -> Result:
+    """A megadott stratégiák indítása ezen a páron (a szándék `live`).
+
+    Két dolgot utasít el — MINDKETTŐT INDOKKAL, mert a néma `return` a hívónak
+    sikernek látszik:
+
+      • ami NINCS engedélyezve a páron: a motor a `_enabled & _intent` szorzatot
+        futtatja, tehát a szándék `live`-ban ragadna, miközben sosem futna;
+      • amin ÉPP OPTIMALIZÁLÁS fut: a futás végén a paraméterfájlja íródna felül
+        az alól a stratégia alól, amelyik közben kereskedik.
+
+    ⚠ MENTETT KÉSZLET NÉLKÜL IS INDULHAT — a stratégia SAJÁT alapértékeivel
+    (`live_trader.default_params`). Egy tiltás egy ÚJ stratégiát minden páron
+    használhatatlanná tenne, amíg le nem fut rá egy több órás optimalizálás.
+    De nem is némán: kiírjuk, hogy hangolatlanul indul."""
+    engedett = ctx.strategies_of(symbol) or []
+    kert = [n for n in (names or []) if n]
+    if not kert:
+        return Result([_t("console.play.no_strategy", symbol=symbol)], ok=False)
+
+    sorok, indult = [], []
+    for n in kert:
+        if n not in engedett:
+            sorok.append(_t("console.play.not_enabled", symbol=symbol, name=n))
+            continue
+        if _oa.busy(symbol, n):
+            sorok.append(_t("console.play.opt_running", symbol=symbol, name=n))
+            continue
+        # ⚠ A KAPUK AZ ÁLLAPOT-ÍRÁS ELŐTT vannak — különben a `run_state` egy
+        # olyan stratégiára ragadna `live`-ban, amit a motor nem futtat.
+        _rs.set_state(ctx.cfg, symbol, n, _rs.LIVE)
+        indult.append(n)
+        try:
+            if ctx.params_source(symbol, n) == "default":
+                sorok.append(_t("console.play.default_params", symbol=symbol, name=n))
+        except Exception:
+            # A jelzés hiánya nem ok arra, hogy az indítás elbukjon.
+            pass
+    if not indult:
+        return Result(sorok, ok=False)
+
+    mentve = ctx.save_config()
+    if ctx.instrument_state.get(symbol) != "LIVE":
+        ctx.instrument_state[symbol] = "LIVE"
+    sorok.append(_t("console.play.started", symbol=symbol, names=", ".join(indult)))
+    if not mentve:
+        # ⚠ A stratégia MOST elindul (a motor ugyanabból a dictből olvas), de a
+        # SZÁNDÉK nem perzisztált — újraindítás után nem folytatódna.
+        sorok.append(_t("console.not_saved"))
+    return Result(sorok, ok=mentve)
+
+
+def stop_strategies(ctx: Context, symbol: str, names: list,
+                    confirmed: bool = False) -> Result:
+    """A megadott stratégiák leállítása ezen a páron (a szándék `stopped`).
+
+    ⚠ A „MARADT-E MÉG ÉLŐ STRATÉGIA?" KÉRDÉST A MOTOR LISTÁJÁBÓL kell
+    megválaszolni (`ctx.strategies_of` → `pairs.<sym>.strategies`), nem a
+    megjelenített listából. 2026-08-23-án az `available_strategies` blokkban a
+    bollinger `false` volt (nem kapott oszlopot), a párokon viszont ENGEDÉLYEZVE
+    volt és FUTOTT: a megjelenítési listát nézve a Stop arra jutott, hogy nem
+    maradt élő stratégia, a szimbólumot STOPPED-re tette, és a motor a bollingert
+    is leállította — három páron, egyetlen kattintásból.
+
+    ⚠ KIVEZETÉS: ha ez volt az utolsó élő stratégia ÉS van nyitott pozíció, a pár
+    nem STOPPED lesz, hanem CLOSING — a motor tovább kezeli a pozíciót (BE,
+    trailing, kiszállás), de új belépőt nem nyit. Ezt a hívónak MEG KELL
+    KÉRDEZNIE: `Result.confirm` jön vissza, és a parancsot `confirmed=True`-val
+    kell megismételni."""
+    kert = [n for n in (names or []) if n]
+    if not kert:
+        # ⚠ Ne jelentsünk sikeres leállítást, ha nem volt mit leállítani —
+        # a „leállítva — -" sor azt sugallná, hogy történt valami.
+        return Result([_t("console.play.no_strategy", symbol=symbol)], ok=False)
+
+    marad = [n for n in _live_strats(ctx, symbol) if n not in kert]
+    nyitott = _has_position(ctx, symbol)
+    if not marad and nyitott and not confirmed:
+        return Result(confirm=_t("console.stop.confirm_closing", symbol=symbol))
+
+    for n in kert:
+        _rs.set_state(ctx.cfg, symbol, n, _rs.STOPPED)
+    mentve = ctx.save_config()
+    sorok = [_t("console.stop.stopped", symbol=symbol, names=", ".join(kert) or "-")]
+    if marad:
+        sorok.append(_t("console.stop.still_live", names=", ".join(marad)))
+    elif nyitott:
+        ctx.instrument_state[symbol] = "CLOSING"
+        sorok.append(_t("console.stop.closing", symbol=symbol))
+    else:
+        ctx.instrument_state[symbol] = "STOPPED"
+        sorok.append(_t("console.stop.pair_stopped", symbol=symbol))
+    if not mentve:
+        # ⚠ A leállítás MOST érvényes, de a szándék nem perzisztált —
+        # újraindítás után a stratégia visszaindulna.
+        sorok.append(_t("console.not_saved"))
+    return Result(sorok, ok=mentve)
+
+
 def cmd_play(ctx: Context, args: list, confirmed: bool = False) -> Result:
     if not args:
         return Result([_t("console.play.usage")], ok=False)
     sym = _resolve_symbol(ctx, args[0])
     if sym is None:
         return Result([_t("console.unknown_pair", symbol=args[0])], ok=False)
-    engedett = ctx.strategies_of(sym) or []
-    kert = [args[1]] if len(args) > 1 else list(engedett)
-    if not kert:
-        return Result([_t("console.play.no_strategy", symbol=sym)], ok=False)
-
-    sorok, indult = [], []
-    for n in kert:
-        # ⚠ A NEM ENGEDÉLYEZETT stratégia NEM indítható — különben a szándék
-        # `live`-ban ragadna, miközben a motor sosem futtatná.
-        if n not in engedett:
-            sorok.append(_t("console.play.not_enabled", symbol=sym, name=n))
-            continue
-        _rs.set_state(ctx.cfg, sym, n, _rs.LIVE)
-        indult.append(n)
-    if not indult:
-        return Result(sorok, ok=False)
-    mentve = ctx.save_config()
-    if ctx.instrument_state.get(sym) != "LIVE":
-        ctx.instrument_state[sym] = "LIVE"
-    sorok.append(_t("console.play.started", symbol=sym, names=", ".join(indult)))
-    if not mentve:
-        # ⚠ A stratégia MOST elindul (a motor ugyanabból a dictből olvas), de a
-        # SZÁNDÉK nem perzisztált — újraindítás után nem folytatódna.
-        sorok.append(_t("console.not_saved"))
-    return Result(sorok, ok=mentve)
+    # Stratégia nélkül: a pár ÖSSZES engedélyezett stratégiája.
+    names = [args[1]] if len(args) > 1 else list(ctx.strategies_of(sym) or [])
+    return start_strategies(ctx, sym, names)
 
 
 def cmd_stop(ctx: Context, args: list, confirmed: bool = False) -> Result:
@@ -322,38 +427,625 @@ def cmd_stop(ctx: Context, args: list, confirmed: bool = False) -> Result:
     sym = _resolve_symbol(ctx, args[0])
     if sym is None:
         return Result([_t("console.unknown_pair", symbol=args[0])], ok=False)
-    engedett = ctx.strategies_of(sym) or []
-    kert = [args[1]] if len(args) > 1 else list(engedett)
+    names = [args[1]] if len(args) > 1 else list(ctx.strategies_of(sym) or [])
+    return stop_strategies(ctx, sym, names, confirmed=confirmed)
+
+
+# ---------------------------------------------------------------------------
+# KÖTÉS-MÓD (valódi kötés ↔ csak jelzés)
+# ---------------------------------------------------------------------------
+# ⚠ EZ A LEGDRÁGÁBB KAPCSOLÓ A RENDSZERBEN. A `signal` → `live` váltás után a
+# motor a KÖVETKEZŐ jelnél VALÓDI MEGBÍZÁST küld a számlára. Eddig egyetlen
+# helyen lehetett átállítani (a beállítás-ablak legördülője), tehát nem volt két
+# forrás — de épp ezért nem is volt SEMMILYEN közös szabály mögötte:
+#
+#   • egyetlen instrumentum mentésénél a felület MEG SEM KÉRDEZTE, hogy most
+#     kapcsoltál be valódi kötést (a „minden instrumentumra" ág kérdezett csak);
+#   • a nem engedélyezett stratégián beállított mód némán hatástalan;
+#   • a nyitott pozíció sorsáról (a motor tovább kezeli) sehol nem esett szó.
+#
+# A karmesternek EZ lesz a legfontosabb akciója (`signal` ↔ `live` léptetés az
+# életciklus-létrán), ezért a szabály ide került — egy helyre, ahol a felület, a
+# konzol és a karmester is ugyanazon megy át.
+#
+# ⚠ A TELEGRAM SZÁNDÉKOSAN NEM KAPJA MEG. A `telegram_cmd.ENGEDETT` engedélyező
+# lista — a `close` és a `quit` sincs benne. Egy chatüzenetből bekapcsolható
+# valódi kötés ugyanabba a kategóriába tartozik.
+
+
+def _tarolt_mod(cfg: dict, symbol: str, name: str):
+    """A configban TÉNYLEGESEN tárolt nyers érték (vagy `None`, ha nincs).
+
+    A `trade_mode.mode_of` értelmez (mindent `live`-nak olvas, amit nem ismer);
+    ide az kell, ami ODA VAN ÍRVA — ebből derül ki az érvénytelen maradék."""
+    pc = (cfg.get("pairs") or {}).get(symbol)
+    per = pc.get("strategy_mode") if isinstance(pc, dict) else None
+    return per.get(name) if isinstance(per, dict) else None
+
+
+def mode_changes(ctx: Context, symbol: str, names: list, mode: str) -> list:
+    """Mely stratégiák módja VÁLTOZNA meg ténylegesen → `[(név, régi_mód)]`.
+
+    TISZTA: nem ír semmit. A hívó ebből építi a megerősítő kérdést — és ebből
+    tudja, hogy van-e egyáltalán mit kérdezni (a már `live` módú stratégiára
+    rákérdezni zaj)."""
+    out = []
+    for n in (names or []):
+        if not n:
+            continue
+        regi = _tm.mode_of(ctx.cfg, symbol, n)
+        if regi != mode:
+            out.append((n, regi))
+    return out
+
+
+def set_trade_mode(ctx: Context, symbol: str, names: list, mode: str,
+                   confirmed: bool = False, save: bool = True) -> Result:
+    """A kötés-mód beállítása `(pár × stratégia)` szinten.
+
+    `mode`: ``"live"`` (valódi megbízás) vagy ``"signal"`` (csak jelzés).
+
+    ⚠ A `live` IRÁNY MEGERŐSÍTÉST KÉR — de csak akkor, ha tényleg VÁLTOZIK
+    valami. Ugyanaz a minta, mint a kivezetéssel járó `stop`-nál: `Result.confirm`
+    jön vissza, a hívó megkérdezi, és `confirmed=True`-val megismétli. A `signal`
+    irány nem kérdez: az a biztonságos oldal.
+
+    ⚠ `save=False`: a hívó VÁLLALJA a perzisztálást. A beállítás-ablak több sort
+    alkalmaz egyszerre, akár tíz instrumentumra, és a végén ment EGYSZER — ott egy
+    beágyazott mentés nemcsak fölösleges írás lenne, hanem egy félbeszakadt
+    tömeges alkalmazást is lemezre vinne. Ilyenkor az `ok` csak az ÍRÁSRA
+    vonatkozik, a `console.not_saved` sor pedig elmarad."""
+    if mode not in _tm.MODES:
+        return Result([_t("console.mode.unknown", mode=mode)], ok=False)
+
+    kert = [n for n in (names or []) if n]
     if not kert:
-        # ⚠ Ne jelentsünk sikeres leállítást, ha nem volt mit leállítani —
-        # a „leállítva — -" sor azt sugallná, hogy történt valami.
-        return Result([_t("console.play.no_strategy", symbol=sym)], ok=False)
+        return Result([_t("console.play.no_strategy", symbol=symbol)], ok=False)
 
-    # Mi maradna élőben, ha ezeket leállítjuk?
-    marad = [n for n in _live_strats(ctx, sym) if n not in kert]
-    nyitott = _has_position(ctx, sym)
-    # ⚠ KIVEZETÉS: ha ez volt az utolsó élő stratégia ÉS van nyitott pozíció, a
-    # pár nem STOPPED lesz, hanem CLOSING — a motor tovább kezeli a pozíciót
-    # (BE, trailing, kiszállás), de új belépőt nem nyit. A felhasználónak ezt
-    # tudnia kell, mielőtt igent mond.
-    if not marad and nyitott and not confirmed:
-        return Result(confirm=_t("console.stop.confirm_closing", symbol=sym))
+    valtozo = mode_changes(ctx, symbol, kert, mode)
 
+    # ⚠ ÉRVÉNYTELEN MARADÉK-ÉRTÉK. A `mode_of` MINDEN ismeretlen értéket `live`-nak
+    # olvas (biztonságos alapértelmezés), tehát egy elgépelt `"Signal"` a configban
+    # NEM okoz hibát — csak épp ott áll egy sor, ami valódi eltérést sugall,
+    # miközben a motor figyelmen kívül hagyja. Pontosan az a néma állapot, amit a
+    # `set_mode` takarítása (a `live` TÖRLI a kulcsot) megelőz — csak oda kell
+    # engedni, akkor is, ha a mód „nem változik".
+    szemet = [n for n in kert if _tarolt_mod(ctx.cfg, symbol, n)
+              not in (None, _tm.MODE_SIGNAL)]
+    if not valtozo and not szemet:
+        return Result([_t("console.mode.nochange", symbol=symbol,
+                          names=", ".join(kert), mode=_tm.LABELS.get(mode, mode))])
+
+    # ⚠ CSAK A VÁLTOZÓKRA kérdezünk rá, és csak a PÉNZT BEKAPCSOLÓ irányban.
+    # ⚠ CSAK VALÓDI VÁLTÁSRA kérdezünk: ha `valtozo` üres (pl. csak takarítás
+    # miatt jutottunk idáig), nincs mit megerősíteni — egy üres kérdés zaj.
+    if mode == _tm.MODE_LIVE and valtozo and not confirmed:
+        return Result(confirm=_t("console.mode.confirm_live", symbol=symbol,
+                                 names=", ".join(n for n, _ in valtozo)))
+
+    engedett = ctx.strategies_of(symbol) or []
+    sorok = []
+    # ⚠ AZ ÍRÁS MINDEN KÉRT STRATÉGIÁRA MEGY, nem csak a változókra. A
+    # `trade_mode.set_mode` idempotens ÉS takarít is (`live`-nál TÖRLI a kulcsot,
+    # hogy a `strategy_mode` jelenléte mindig valódi eltérést jelentsen). Ha csak
+    # a „változókra" hívnánk, egy érvénytelen maradék-érték (amit a `mode_of`
+    # amúgy is `live`-nak olvas) bennragadna a fájlban — pont az a néma
+    # állapot, amit a takarítás megelőz. A `valtozo` csak a KÉRDÉSHEZ és a
+    # JELENTÉSHEZ kell.
     for n in kert:
-        _rs.set_state(ctx.cfg, sym, n, _rs.STOPPED)
-    mentve = ctx.save_config()
-    sorok = [_t("console.stop.stopped", symbol=sym, names=", ".join(kert) or "-")]
-    if marad:
-        sorok.append(_t("console.stop.still_live", names=", ".join(marad)))
-    elif nyitott:
-        ctx.instrument_state[sym] = "CLOSING"
-        sorok.append(_t("console.stop.closing", symbol=sym))
+        _tm.set_mode(ctx.cfg, symbol, n, mode)
+    for n, _regi in valtozo:
+        # ⚠ NEM TILTÁS, CSAK JELZÉS: a nem engedélyezett stratégián a beállítás
+        # eltárolódik és később érvényes lesz — de MOST nem csinál semmit. A néma
+        # hatástalanság rosszabb, mint a hiányzó beállítás (lásd config_check).
+        if n not in engedett:
+            sorok.append(_t("console.mode.not_enabled", symbol=symbol, name=n))
+    if valtozo:
+        sorok.append(_t("console.mode.set", symbol=symbol,
+                        names=", ".join(n for n, _ in valtozo),
+                        mode=_tm.LABELS.get(mode, mode)))
     else:
-        ctx.instrument_state[sym] = "STOPPED"
-        sorok.append(_t("console.stop.pair_stopped", symbol=sym))
+        # Csak takarítás történt — a mód nem változott, de a config igen.
+        sorok.append(_t("console.mode.cleaned", symbol=symbol,
+                        names=", ".join(szemet)))
+    # ⚠ A MÓD CSAK AZ ÚJ BELÉPŐKRE VONATKOZIK. A „csak jelzés" ellenőrzése a
+    # motorban a BELÉPŐ útján ül (`live_trader`): egy már nyitott pozíciót a
+    # motor tovább kezel (breakeven, trailing, kiszállási jel). Aki `signal`-ra
+    # vált, könnyen hiszi, hogy ezzel „kikapcsolta" a párt — nem.
+    if _has_position(ctx, symbol):
+        sorok.append(_t("console.mode.open_position", symbol=symbol))
+
+    if not save:
+        return Result(sorok)
+    mentve = ctx.save_config()
     if not mentve:
         sorok.append(_t("console.not_saved"))
     return Result(sorok, ok=mentve)
+
+
+def cmd_mode(ctx: Context, args: list, confirmed: bool = False) -> Result:
+    """`mode <pár> [stratégia] <live|signal>`"""
+    if len(args) < 2:
+        return Result([_t("console.mode.usage")], ok=False)
+    sym = _resolve_symbol(ctx, args[0])
+    if sym is None:
+        return Result([_t("console.unknown_pair", symbol=args[0])], ok=False)
+    mode = str(args[-1]).lower()
+    # Stratégia nélkül: a pár ÖSSZES engedélyezett stratégiája — mint a play/stop.
+    names = [args[1]] if len(args) > 2 else list(ctx.strategies_of(sym) or [])
+    return set_trade_mode(ctx, sym, names, mode, confirmed=confirmed)
+
+
+def cmd_why(ctx: Context, args: list, confirmed: bool = False) -> Result:
+    """`why <pár> [stratégia]` — miért nem kötött ma?
+
+    ⚠ EZ A KÉRDÉS EDDIG MEGVÁLASZOLHATATLAN VOLT. Egy nem kötő cella pontosan
+    úgy néz ki, mint amelyik épp nem talál belépőt. A választ a karmester
+    belépő-telemetriája adja (`conductor/telemetry.py`) — a motor a mérést
+    menet közben végzi, itt csak olvassuk.
+
+    ⚠ A PARANCS-RÉTEGBEN VAN, tehát a konzol, a TUI és a Telegram UGYANAZT a
+    választ kapja, mint a felület. Egy jelentés, ami felületenként mást mond,
+    rosszabb a hiányzónál."""
+    # ⚠ KIKAPCSOLVA: nem hallgatunk, megmondjuk (lásd `_karmester_ki`).
+    _ki = _karmester_ki(ctx)
+    if _ki is not None:
+        return _ki
+    if not args:
+        return Result([_t("console.why.usage")], ok=False)
+    sym = _resolve_symbol(ctx, args[0])
+    if sym is None:
+        return Result([_t("console.unknown_pair", symbol=args[0])], ok=False)
+    names = [args[1]] if len(args) > 1 else list(ctx.strategies_of(sym) or [])
+    if not names:
+        return Result([_t("console.play.no_strategy", symbol=sym)], ok=False)
+
+    from conductor import report as _crep, snapshot as _csnap
+    sorok = []
+    for n in names:
+        snap = _csnap.cell(ctx.cfg, sym, n,
+                           strategies_of=lambda s: ctx.strategies_of(s) or [])
+        sorok += _crep.why_lines(snap)
+    return Result(sorok)
+
+
+def cmd_health(ctx: Context, args: list, confirmed: bool = False) -> Result:
+    """`health` — a NÉMA bajok: mi néz ki rendben, közben nem?
+
+    ⚠ A LELETEK NEM ITT SZÜLETNEK. A karmester egészségőre
+    (`conductor/policies/health.py`) fogja össze a meglévő detektorokat
+    (`config_check`, `config_freshness`, `overview`) és a mérésből jövő
+    leleteket — itt csak megjelenítjük. Egy külön „konzolos ellenőrzés" az első
+    config-változásnál mást mondana, mint a felület."""
+    # ⚠ KIKAPCSOLVA: nem hallgatunk, megmondjuk (lásd `_karmester_ki`).
+    _ki = _karmester_ki(ctx)
+    if _ki is not None:
+        return _ki
+    from conductor.policies import health as _h
+    from conductor import report as _crep
+
+    leletek = _h.findings(ctx.cfg,
+                          strategies_of=lambda s: ctx.strategies_of(s) or [])
+    # A fennálló leletek a KRÓNIKÁBA is bekerülnek (naponta egyszer) — így a
+    # „mióta áll fenn?" kérdés utólag megválaszolható.
+    try:
+        _h.journal_new(ctx.cfg, leletek)
+    except Exception:
+        pass
+    return Result(_crep.health_lines(leletek), ok=not leletek)
+
+
+def cmd_plan(ctx: Context, args: list, confirmed: bool = False) -> Result:
+    """`plan` — az életciklus-létra javaslatai (ÁRNYÉK-MÓD: nem hajt végre semmit).
+
+    ⚠ A JAVASLAT NEM AKCIÓ. A karmester az F1 fázisban csak LEÍRJA, mit tenne; a
+    végrehajtás emberi (a `mode` paranccsal vagy a felületen). A javaslatok a
+    krónikába is bekerülnek, hogy utólag mérhető legyen, jók lettek volna-e — a
+    terv szerint az önállóság csak ezután adható meg."""
+    # ⚠ KIKAPCSOLVA: nem hallgatunk, megmondjuk (lásd `_karmester_ki`).
+    _ki = _karmester_ki(ctx)
+    if _ki is not None:
+        return _ki
+    from conductor.policies import health as _h, lifecycle as _lc
+    from conductor import report as _crep
+
+    _sof = lambda s: ctx.strategies_of(s) or []
+    leletek = _h.findings(ctx.cfg, strategies_of=_sof)
+    javaslatok = _lc.proposals(ctx.cfg, strategies_of=_sof,
+                               health_findings=leletek)
+    try:
+        _lc.shadow(ctx.cfg, javaslatok)
+    except Exception:
+        # ⚠ A krónika hiánya nem viheti el a választ — de a javaslat attól még
+        # érvényes, és a felhasználó LÁTJA.
+        pass
+    return Result(_crep.plan_lines(javaslatok))
+
+
+def cmd_report(ctx: Context, args: list, confirmed: bool = False) -> Result:
+    """`report` — a MAI nap + a karmester jelentése. EZ megy este Telegramra.
+
+    ⚠ EGY ESTI ÜZENET, NEM KETTŐ. A napi összefoglaló már ma is megy
+    (`notify.daily_summary_time`), és a `cmd_today` adja a tartalmát. Egy MÁSODIK
+    esti üzenet versenyezne az elsővel a figyelmedért, és a kettő előbb-utóbb
+    mást mondana ugyanarról a napról — ez a projekt visszatérő hibaosztálya. A
+    karmester ezért SZAKASZOKAT ad a meglévő üzenethez.
+
+    ⚠ KÉT „MA" TALÁLKOZIK ITT, és ez szándékos. A `cmd_today` a HELYI napot
+    használja (a felhasználó abban gondolkodik, amikor azt kérdezi, „mi volt
+    ma"), a karmester mérése viszont a BRÓKER napjához tartozik (a napi limit és
+    a szesszió-ablakok is ahhoz igazodnak). A karmester szakasza ezért KIÍRJA,
+    melyik napról beszél — így a kettő nem tud némán elcsúszni."""
+    from conductor import report as _crep
+
+    sorok = list(cmd_today(ctx, []).lines)
+    # ⚠ A KIKAPCSOLT KARMESTER NEM RIPORTOL — de a NAPI ÖSSZEFOGLALÓ megy
+    # tovább. A kötések és az eredmény nem a karmester szakaszai; azokat egy
+    # kikapcsolás nem veheti el.
+    if _karmester_ki(ctx) is not None:
+        return Result(sorok)
+    try:
+        sorok += _crep.daily_lines(
+            ctx.cfg, strategies_of=lambda s: ctx.strategies_of(s) or [])
+    except Exception:
+        # ⚠ A karmester szakasza SOHA nem viheti el a napi összefoglalót: a
+        # kötések és az eredmény akkor is kimennek, ha a mérés elakadt.
+        log.debug("karmester: a napi szakasz kimaradt", exc_info=True)
+    return Result(sorok)
+
+
+# ---------------------------------------------------------------------------
+# JAVASLAT-POSTALÁDA (a karmester F2 fázisa)
+# ---------------------------------------------------------------------------
+# ⚠ MIÉRT ITT, ÉS NEM A KARMESTERBEN. A döntés VÉGREHAJTÁSA ugyanazon az úton
+# megy, mint a kézi `play`/`stop`/`mode` — a karmester nem lehet negyedik írási
+# út. Itt tehát csak a PARANCS-alak van; a szabályok a `conductor/`-ban.
+
+
+def _inbox_sync(ctx: Context):
+    """A friss javaslatok beolvasztása a postaládába. Visszaad: a statisztika."""
+    from conductor import inbox as _ib
+    from conductor.policies import health as _h, lifecycle as _lc
+
+    _sof = lambda s: ctx.strategies_of(s) or []
+    lel = _h.findings(ctx.cfg, strategies_of=_sof)
+    jav = _lc.proposals(ctx.cfg, strategies_of=_sof, health_findings=lel)
+    return _ib.sync(ctx.cfg, jav, strategies_of=_sof)
+
+
+def _inbox_tetel(ctx: Context, args: list, parancs: str):
+    """`(tétel, hibás_Result)` — a közös azonosító-feloldás a négy döntéshez."""
+    from conductor import inbox as _ib
+
+    if not args:
+        return None, Result([_t("conductor.inbox.usage", cmd=parancs)], ok=False)
+    e = _ib.get(args[0])
+    if not e:
+        return None, Result([_t("conductor.inbox.unknown", id=args[0])], ok=False)
+    return e, None
+
+
+def cmd_inbox(ctx: Context, args: list, confirmed: bool = False) -> Result:
+    """`inbox` — a karmester nyitott javaslatai, azonosítóval."""
+    # ⚠ KIKAPCSOLVA: nem hallgatunk, megmondjuk (lásd `_karmester_ki`).
+    _ki = _karmester_ki(ctx)
+    if _ki is not None:
+        return _ki
+    from conductor import inbox as _ib
+    from conductor import report as _crep
+
+    stat = {}
+    try:
+        stat = _inbox_sync(ctx)
+    except Exception:
+        # ⚠ A friss javaslatok hiánya nem viheti el a MÁR MEGLÉVŐ postaládát:
+        # a nyitott ügyekről akkor is dönteni kell, ha a házirend most elakadt.
+        log.debug("karmester: a postaláda frissítése kimaradt", exc_info=True)
+    tetelek = _ib.items(_ib.PENDING)
+    # ⚠ BEKAPCSOLT GÉPI VÉGREHAJTÁSNÁL MEGMONDJUK, MIÉRT ÁLL MÉG ITT. Egy tétel,
+    # ami a gép hatókörében van, de mégsem hajtódott végre, magyarázat nélkül
+    # gyanúsan néz ki — pedig lehet, hogy csak a türelmi idő tart még.
+    gov = {}
+    try:
+        from conductor import autonomy as _au
+        from conductor import governor as _gov
+        if _au.enged(ctx.cfg, _au.AUTO):
+            for _e in tetelek:
+                _szabad, _ok = _gov.allowed(ctx.cfg, _e, positions=ctx.positions)
+                if not _szabad:
+                    gov[_e.get("id")] = _ok
+    except Exception:
+        log.debug("karmester: a burok-indokok kimaradtak", exc_info=True)
+    return Result(_crep.inbox_lines(tetelek, stat=stat, gov_reasons=gov))
+
+
+def cmd_accept(ctx: Context, args: list, confirmed: bool = False) -> Result:
+    """`accept <id>` — javaslat elfogadása ÉS végrehajtása.
+
+    ⚠ AZ ELFOGADÁS NEM VAKON HAJT VÉGRE: a `conductor.actions` újraszámolja a
+    javaslatot, és csak akkor lép, ha a házirend MA IS ugyanazt mondja."""
+    # ⚠ KIKAPCSOLVA: nem hallgatunk, megmondjuk (lásd `_karmester_ki`).
+    _ki = _karmester_ki(ctx)
+    if _ki is not None:
+        return _ki
+    from conductor import actions as _act
+    from conductor import inbox as _ib
+
+    e, hiba = _inbox_tetel(ctx, args, "accept")
+    if hiba:
+        return hiba
+    if e.get("state") != _ib.PENDING:
+        return Result([_t("conductor.inbox.not_pending", id=e["id"],
+                          state=e.get("state"))], ok=False)
+    return _act.apply(ctx, e, confirmed=confirmed, by="human")
+
+
+def cmd_reject(ctx: Context, args: list, confirmed: bool = False) -> Result:
+    """`reject <id>` — elvetés. A javaslat egy ideig NEM születik újra."""
+    # ⚠ KIKAPCSOLVA: nem hallgatunk, megmondjuk (lásd `_karmester_ki`).
+    _ki = _karmester_ki(ctx)
+    if _ki is not None:
+        return _ki
+    from conductor import config as _ccfg
+    from conductor import inbox as _ib
+
+    e, hiba = _inbox_tetel(ctx, args, "reject")
+    if hiba:
+        return hiba
+    _ib.set_state(e["id"], _ib.REJECTED, ctx.cfg, by="human")
+    return Result([_t("conductor.inbox.rejected", text=e.get("text") or e["id"],
+                      days=int(_ccfg.inbox(ctx.cfg)["reject_cooldown_days"]))])
+
+
+def cmd_defer(ctx: Context, args: list, confirmed: bool = False) -> Result:
+    """`defer <id>` — „most nem": a javaslat néhány napra félrekerül."""
+    # ⚠ KIKAPCSOLVA: nem hallgatunk, megmondjuk (lásd `_karmester_ki`).
+    _ki = _karmester_ki(ctx)
+    if _ki is not None:
+        return _ki
+    from conductor import config as _ccfg
+    from conductor import inbox as _ib
+
+    e, hiba = _inbox_tetel(ctx, args, "defer")
+    if hiba:
+        return hiba
+    _ib.set_state(e["id"], _ib.DEFERRED, ctx.cfg, by="human")
+    return Result([_t("conductor.inbox.deferred", text=e.get("text") or e["id"],
+                      days=int(_ccfg.inbox(ctx.cfg)["defer_days"]))])
+
+
+def cmd_undo(ctx: Context, args: list, confirmed: bool = False) -> Result:
+    """`undo <id>` — egy VÉGREHAJTOTT javaslat visszavonása.
+
+    ⚠ A VISSZAVONÁS IS AKCIÓ: egy visszaminősítés visszavonása VALÓDI KÖTÉST
+    kapcsol vissza, ezért ugyanazon a megerősítés-mintán megy."""
+    # ⚠ KIKAPCSOLVA: nem hallgatunk, megmondjuk (lásd `_karmester_ki`).
+    _ki = _karmester_ki(ctx)
+    if _ki is not None:
+        return _ki
+    from conductor import actions as _act
+
+    e, hiba = _inbox_tetel(ctx, args, "undo")
+    if hiba:
+        return hiba
+    return _act.undo(ctx, e, confirmed=confirmed, by="human")
+
+
+def cmd_optq(ctx: Context, args: list, confirmed: bool = False) -> Result:
+    """`optq [cancel <id>]` — a fej nélküli optimalizálás-sor.
+
+    ⚠ A SOR HAJTÁSA A MOTORÉ (óránként), nem ezé a parancsé: egy alprocessz
+    indítása egy lekérdezés mellékhatásaként meglepetés volna. Itt csak
+    megnézzük, mi van benne — és kivehetünk belőle egy várakozó tételt."""
+    # ⚠ KIKAPCSOLVA: nem hallgatunk, megmondjuk (lásd `_karmester_ki`).
+    _ki = _karmester_ki(ctx)
+    if _ki is not None:
+        return _ki
+    from conductor import optqueue as _q
+    from conductor import report as _crep
+
+    if args and str(args[0]).lower() == "cancel":
+        if len(args) < 2:
+            return Result([_t("conductor.inbox.usage", cmd="optq cancel")],
+                          ok=False)
+        if _q.cancel(args[1]):
+            return Result([_t("conductor.optq.cancelled", id=args[1])])
+        return Result([_t("conductor.optq.cancel_failed", id=args[1])], ok=False)
+    return Result(_crep.optq_lines(_q.items()))
+
+
+def set_no_optimize(ctx: Context, symbol: str, strategy: str,
+                    ertek, *, save: bool = True) -> Result:
+    """A cella (vagy `symbol=None` esetén a STRATÉGIA) kizárása az
+    optimalizálásból. `ertek`: `True` · `False` · `None` (= kövesse az alapot).
+
+    ⚠ EGY ÍRÁSI ÚT. A felület pipája, a konzol parancsa és a Telegram ugyanitt
+    ír — különben megismételnénk azt a hibát, amit a `run_state`-nél és a
+    kötés-módnál már egyszer megfizettünk."""
+    from conductor import optout as _oo
+
+    nev = str(strategy or "").strip()
+    if not nev:
+        return Result([_t("conductor.noopt.usage")], ok=False)
+    if symbol is None:
+        valt = _oo.set_strategia(ctx.cfg, nev, ertek)
+        cimke = _t("conductor.noopt.scope_strategy", strategy=nev)
+    else:
+        if nev not in (ctx.strategies_of(symbol) or []):
+            # ⚠ NEM ÍRUNK olyan cellára, ami nincs: a bejegyzés árván maradna a
+            # configban, és később senki nem értené, honnan való.
+            return Result([_t("conductor.noopt.unknown_cell", symbol=symbol,
+                              strategy=nev)], ok=False)
+        valt = _oo.set_cella(ctx.cfg, symbol, nev, ertek)
+        cimke = _t("conductor.noopt.scope_cell", symbol=symbol, strategy=nev)
+    if not valt:
+        return Result([_t("conductor.noopt.unchanged", what=cimke)])
+    mentve = ctx.save_config() if save else True
+    kulcs = ("conductor.noopt.set_on" if ertek is True else
+             "conductor.noopt.set_off" if ertek is False else
+             "conductor.noopt.set_auto")
+    sorok = [_t(kulcs, what=cimke)]
+    if symbol is not None and ertek is None:
+        # A törlés után az ALAP lép életbe — mondjuk is meg, mi lett belőle.
+        sorok.append(_t("conductor.noopt.effective", what=cimke,
+                        state=_t("conductor.noopt.state_on"
+                                 if _oo.no_optimize(ctx.cfg, symbol, nev)
+                                 else "conductor.noopt.state_off")))
+    if save and not mentve:
+        sorok.append(_t("console.not_saved"))
+    return Result(sorok, ok=(mentve if save else True))
+
+
+def cmd_noopt(ctx: Context, args: list, confirmed: bool = False) -> Result:
+    """`noopt` · `noopt <pár> <strat> on|off|auto` · `noopt <strat> on|off`
+
+    A KIZÁRÁS TARTÓS DÖNTÉS, nem egy javaslat elvetése: a kizárt cellára a
+    karmester nem javasol optimalizálást, és a sorba sem kerülhet be."""
+    from conductor import optout as _oo
+    from conductor import report as _crep
+
+    _sof = lambda s: ctx.strategies_of(s) or []
+    if not args:
+        return Result(_crep.noopt_lines(_oo.kizartak(ctx.cfg, strategies_of=_sof)))
+
+    _ERTEK = {"on": True, "ki": True, "igen": True, "true": True,
+              "off": False, "be": False, "nem": False, "false": False,
+              "auto": None, "alap": None}
+    szo = str(args[-1]).lower()
+    if szo not in _ERTEK:
+        return Result([_t("conductor.noopt.usage")], ok=False)
+    ertek = _ERTEK[szo]
+    tobbi = list(args[:-1])
+    if len(tobbi) == 2:
+        sym = _resolve_symbol(ctx, tobbi[0])
+        if sym is None:
+            return Result([_t("console.unknown_pair", symbol=tobbi[0])], ok=False)
+        return set_no_optimize(ctx, sym, tobbi[1], ertek)
+    if len(tobbi) == 1:
+        # ⚠ STRATÉGIA-SZINT: itt az `auto` a bejegyzés TÖRLÉSE (nincs mihez
+        # visszaesni), a cellákon pedig ettől kezdve megint az alap (`False`) él.
+        return set_no_optimize(ctx, None, tobbi[0], ertek)
+    return Result([_t("conductor.noopt.usage")], ok=False)
+
+
+# ---------------------------------------------------------------------------
+# AUTONÓMIA-LÉTRA ÉS KIKAPCSOLÓ
+# ---------------------------------------------------------------------------
+
+def _karmester_ki(ctx: Context) -> "Result | None":
+    """`Result`, ha a karmester KI van kapcsolva — különben `None`.
+
+    ⚠ MIÉRT NEM HALLGATUNK. Egy kikapcsolt karmester lekérdezésére üres listát
+    adni a legrosszabb válasz: pont úgy néz ki, mintha minden rendben volna
+    („nincs lelet, nincs javaslat"). Megmondjuk, hogy ki van kapcsolva, és
+    azt is, hol lehet visszakapcsolni."""
+    from conductor import autonomy as _au
+
+    if _au.barmi_aktiv(ctx.cfg):
+        return None
+    honnan = _t("conductor.autonomy.by_file" if _au.off_by_file()
+                else "conductor.autonomy.by_config")
+    return Result([_t("conductor.autonomy.is_off", how=honnan),
+                   _t("conductor.autonomy.turn_on_hint")], ok=False)
+
+
+def set_autonomy(ctx: Context, symbol, strategy, szint,
+                 *, save: bool = True) -> Result:
+    """A fok állítása. `symbol=None` → az ALAPÉRTÉK; különben hatókör-felülírás
+    (`szint=None` → a felülírás törlése)."""
+    from conductor import autonomy as _au
+
+    if symbol is None:
+        if szint is None or szint not in _au.SZINTEK:
+            return Result([_t("conductor.autonomy.usage")], ok=False)
+        valt = _au.set_default(ctx.cfg, szint)
+        cimke = _t("conductor.autonomy.scope_default")
+    else:
+        if strategy and strategy not in (ctx.strategies_of(symbol) or []):
+            return Result([_t("conductor.noopt.unknown_cell", symbol=symbol,
+                              strategy=strategy)], ok=False)
+        valt = _au.set_override(ctx.cfg, symbol, strategy, szint)
+        cimke = (_t("conductor.noopt.scope_cell", symbol=symbol,
+                    strategy=strategy) if strategy else symbol)
+    if not valt:
+        return Result([_t("conductor.noopt.unchanged", what=cimke)])
+    mentve = ctx.save_config() if save else True
+    if szint is None:
+        sorok = [_t("conductor.autonomy.cleared", what=cimke)]
+    else:
+        sorok = [_t("conductor.autonomy.set", what=cimke,
+                    level=_szint_cimke(szint))]
+    # ⚠ AMI ÉRVÉNYES, AZT MONDJUK KI. A felülírás TÖRLÉSE után a TÁGABB fok lép
+    # életbe — ha csak annyit írnánk ki, hogy „törölve", nem tudnád, mi lett.
+    # (Egy kifejezett beállításnál ez ugyanaz a sor volna kétszer.)
+    if symbol is not None and szint is None:
+        sorok.append(_t("conductor.autonomy.effective", what=cimke,
+                        level=_szint_cimke(_au.level(ctx.cfg, symbol, strategy))))
+    if save and not mentve:
+        sorok.append(_t("console.not_saved"))
+    return Result(sorok, ok=(mentve if save else True))
+
+
+def _szint_cimke(szint: int) -> str:
+    """`L3 — Korlátozott önálló` alakban. ⚠ A SZÁM IS OTT VAN: a config
+    számot vár, és a felirat fordul — a kettő együtt köti össze a kettőt."""
+    from conductor import autonomy as _au
+
+    nev = _t(f"conductor.autonomy.level.{_au.kod(szint)}")
+    jel = ""
+    # ⚠ NEM HAZUDUNK ÖNÁLLÓSÁGOT. Amíg a gépi végrehajtás (F3/b) nincs meg, az
+    # L2+ ugyanazt teszi, mint az L1 — ezt a felirat KIMONDJA.
+    if szint >= _au.ASSISTED:
+        jel = " " + _t("conductor.autonomy.not_yet_auto")
+    return f"L{szint} — {nev}{jel}"
+
+
+def cmd_karmester(ctx: Context, args: list, confirmed: bool = False) -> Result:
+    """`karmester` · `karmester off|on` · `karmester <fok>` ·
+    `karmester <pár> [stratégia] <fok>|auto`"""
+    from conductor import autonomy as _au
+    from conductor import report as _crep
+
+    if not args:
+        return Result(_crep.autonomy_lines(ctx.cfg))
+
+    elso = str(args[0]).lower()
+    # ── A KILL SWITCH ───────────────────────────────────────────────────
+    if elso in ("off", "ki", "on", "be"):
+        ki = elso in ("off", "ki")
+        if not _au.set_off_file(ki):
+            # ⚠ A SIKERTELEN KIKAPCSOLÁST KI KELL MONDANI. Egy „kikapcsolva"
+            # felirat egy futó karmester felett a lehető legrosszabb hazugság.
+            return Result([_t("conductor.autonomy.switch_failed")], ok=False)
+        if ki:
+            return Result([_t("conductor.autonomy.off_done"),
+                           _t("conductor.autonomy.off_keeps_state")])
+        return Result([_t("conductor.autonomy.on_done",
+                          level=_szint_cimke(_au.level(ctx.cfg)))])
+
+    def _fok(sz):
+        if str(sz).lower() in ("auto", "alap", "-"):
+            return "auto"
+        t = str(sz).upper().lstrip("L")
+        try:
+            v = int(t)
+        except ValueError:
+            return None
+        return v if v in _au.SZINTEK else None
+
+    v = _fok(args[-1])
+    if v is None:
+        return Result([_t("conductor.autonomy.usage")], ok=False)
+    tobbi = list(args[:-1])
+    if not tobbi:
+        if v == "auto":
+            return Result([_t("conductor.autonomy.usage")], ok=False)
+        return set_autonomy(ctx, None, None, v)
+    sym = _resolve_symbol(ctx, tobbi[0])
+    if sym is None:
+        return Result([_t("console.unknown_pair", symbol=tobbi[0])], ok=False)
+    strat = tobbi[1] if len(tobbi) > 1 else None
+    return set_autonomy(ctx, sym, strat, None if v == "auto" else v)
 
 
 def cmd_balance(ctx: Context, args: list, confirmed: bool = False) -> Result:
@@ -468,6 +1160,19 @@ COMMANDS: dict = {
     "close":   cmd_close,
     "play":    cmd_play,
     "stop":    cmd_stop,
+    "mode":    cmd_mode,
+    "why":     cmd_why,
+    "health":  cmd_health,
+    "plan":    cmd_plan,
+    "report":  cmd_report,
+    "inbox":   cmd_inbox,
+    "accept":  cmd_accept,
+    "reject":  cmd_reject,
+    "defer":   cmd_defer,
+    "undo":    cmd_undo,
+    "optq":    cmd_optq,
+    "karmester": cmd_karmester,
+    "noopt":   cmd_noopt,
     "balance": cmd_balance,
     "today":   cmd_today,
     "state":   cmd_state,
@@ -485,6 +1190,19 @@ _HELP = (
     ("close <ticket>|all", "console.help.close"),
     ("play <pár> [stratégia]", "console.help.play"),
     ("stop <pár> [stratégia]", "console.help.stop"),
+    ("mode <pár> [strat] live|signal", "console.help.mode"),
+    ("why <pár> [stratégia]", "console.help.why"),
+    ("health", "console.help.health"),
+    ("plan", "console.help.plan"),
+    ("report", "console.help.report"),
+    ("inbox", "console.help.inbox"),
+    ("accept <id>", "console.help.accept"),
+    ("reject <id>", "console.help.reject"),
+    ("defer <id>", "console.help.defer"),
+    ("undo <id>", "console.help.undo"),
+    ("optq [cancel <id>]", "console.help.optq"),
+    ("noopt [<pár>] <strat> on|off|auto", "console.help.noopt"),
+    ("karmester [off|on|<fok>]", "console.help.karmester"),
     ("balance", "console.help.balance"),
     ("today", "console.help.today"),
     ("state", "console.help.state"),
