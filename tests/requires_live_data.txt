@@ -34,3 +34,4 @@ test_stage_legend_and_runbar.py   # a párbeszédablakot az éles párkészletb�
 test_strategy_params_merge.py     # éles stratégia-paraméterek kellenek
 test_viz_send_on_demand.py        # az éles párkészletből épít vizualizációs állapotot
 test_wpr_m1_direction_triggers.py # mentett készletek kellenek (0 fájl esetén bukik)
+test_portfolio_parity.py          # egypáros ↔ portfólió paritás a valódi Ger40/wpr_sma adaton (data/m1+m15, optimalizált params, config.json)

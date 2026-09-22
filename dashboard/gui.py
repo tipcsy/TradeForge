@@ -1254,19 +1254,21 @@ class PortfolioBacktestTab:
                        variable=self._pf_exec_gates_var,
                        bg=BG_BT, fg=FG_WHITE, selectcolor=BG_HEADER,
                        activebackground=BG_BT, activeforeground=FG_WHITE,
-                       font=self._small).grid(row=3, column=2, columnspan=2,
+                       font=self._small).grid(row=3, column=0, columnspan=4,
                                               sticky="w", padx=4)
 
+        # ⚠ A gombok a 4. sorban: a kapu-pipa és a „Leállítás" korábban UGYANABBA
+        # a rács-cellába (row=3, column=2) került, és egymásra rajzolódtak.
         self._btn_start = tk.Button(form, text=_t("gui.backtest_inditasa"), width=20,
                                     bg=BTN_BT_BG, fg=BTN_BT_FG, font=self._small,
                                     relief="flat", command=self._start_bt)
-        self._btn_start.grid(row=3, column=0, columnspan=2, pady=8, sticky="w")
+        self._btn_start.grid(row=4, column=0, columnspan=2, pady=8, sticky="w")
 
         self._btn_stop_bt = tk.Button(form, text=_t("gui.leallitas2"), width=12,
                                       bg=BTN_DIS_BG, fg=BTN_DIS_FG, font=self._small,
                                       relief="flat", command=self._stop_bt,
                                       state="disabled")
-        self._btn_stop_bt.grid(row=3, column=2, columnspan=2, pady=8, sticky="w")
+        self._btn_stop_bt.grid(row=4, column=2, columnspan=2, pady=8, sticky="w")
 
         right = tk.Frame(top, bg=BG_BT)
         right.pack(side="left", fill="both", expand=True, padx=(20, 0))
@@ -1388,6 +1390,13 @@ class PortfolioBacktestTab:
         self._equity_pts = []
         self._clear_results()
         self._draw_equity([])
+        # ⚠ A KEZDŐ EGYENLEG MÁR A BETÖLTÉS ALATT IS A KEZDŐ TŐKE. A haladás-
+        # szótár 0,0-ról indult, és az első visszahívásig (14 pár betöltése +
+        # indikátor-számítás: percek) a felület „$0,00 / −1000 $ (−100 %)"-ot
+        # mutatott — a szimuláció közben rendben 1000-ről indult.
+        self._progress.update({"running": True, "date": "—", "balance": init_bal,
+                               "n_open": 0, "n_closed": 0, "pct": 0.0,
+                               "result": None, "error": None})
 
         self._btn_start.config(state="disabled", bg=BTN_DIS_BG, fg=BTN_DIS_FG)
         self._btn_stop_bt.config(state="normal", bg=BTN_STOP_BG, fg=BTN_STOP_FG)

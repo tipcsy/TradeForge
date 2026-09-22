@@ -2783,38 +2783,48 @@ def run_portfolio_backtest(
             closed   = False
 
             _tp_e = trade.tp_eff        # 0 = nincs élő célár (épített, cél nélkül)
+            # ⚠ PARITÁS (2026-09-22): ha EGY baron a TP és az SL is elérhető, a
+            # bar-adatból nem derül ki, melyik jött előbb. A `run_pair` (és az
+            # optimalizáló) alapból PESSZIMISTA (az SL nyer, `intrabar_order`);
+            # a portfólió eddig mindig a TP-t nézte előbb — ugyanaz a kötés itt
+            # +9,57 $, ott +5,05 $ volt.
+            _sl_first = str(info["params"].get("intrabar_order", "pessimistic")) != "optimistic"
             if trade.direction == "BUY":
                 # Épített csomagnál a KÖZÖS célár (mint a run_pair-ben / élesben);
                 # `target_r = 0` (alap) → 0, azaz nincs TP.
-                if _tp_e > 0 and row["high"] >= _tp_e:
-                    trade.close_price = _tp_e
-                    trade.close_time  = m1_time
-                    trade.pnl_usd     = calc_pnl(trade, _tp_e)
-                    trade.pnl_points    = (_tp_e - trade.open_price) / point_size
-                    trade.status      = "tp";  closed = True
-                elif row["low"] <= trade.sl:
+                _tp_hit = _tp_e > 0 and row["high"] >= _tp_e
+                _sl_hit = row["low"] <= trade.sl
+                if _sl_hit and (_sl_first or not _tp_hit):
                     trade.close_price = trade.sl
                     trade.close_time  = m1_time
                     trade.pnl_usd     = calc_pnl(trade, trade.sl)
                     trade.pnl_points    = (trade.sl - trade.open_price) / point_size
                     trade.status      = "sl";  closed = True
+                elif _tp_hit:
+                    trade.close_price = _tp_e
+                    trade.close_time  = m1_time
+                    trade.pnl_usd     = calc_pnl(trade, _tp_e)
+                    trade.pnl_points    = (_tp_e - trade.open_price) / point_size
+                    trade.status      = "tp";  closed = True
                 else:
                     _manage_position(trade, row["high"], row["low"],
                                      point_size, _minlot, _lotstep, rr_spec)
 
             else:  # SELL — az ASK-sorozaton (bid + spread)
-                if _tp_e > 0 and _lo_x <= _tp_e:
-                    trade.close_price = _tp_e
-                    trade.close_time  = m1_time
-                    trade.pnl_usd     = calc_pnl(trade, _tp_e)
-                    trade.pnl_points    = (trade.open_price - _tp_e) / point_size
-                    trade.status      = "tp";  closed = True
-                elif _hi_x >= trade.sl:
+                _tp_hit = _tp_e > 0 and _lo_x <= _tp_e
+                _sl_hit = _hi_x >= trade.sl
+                if _sl_hit and (_sl_first or not _tp_hit):
                     trade.close_price = trade.sl
                     trade.close_time  = m1_time
                     trade.pnl_usd     = calc_pnl(trade, trade.sl)
                     trade.pnl_points    = (trade.open_price - trade.sl) / point_size
                     trade.status      = "sl";  closed = True
+                elif _tp_hit:
+                    trade.close_price = _tp_e
+                    trade.close_time  = m1_time
+                    trade.pnl_usd     = calc_pnl(trade, _tp_e)
+                    trade.pnl_points    = (trade.open_price - _tp_e) / point_size
+                    trade.status      = "tp";  closed = True
                 else:
                     # A BE/trailing is a KILÉPÉSI (ask) oldalon mér
                     _manage_position(trade, _hi_x, _lo_x,
@@ -2969,6 +2979,20 @@ def run_portfolio_backtest(
                         point_size = pair_cfg["point_size"]
                         pv1_point  = pair_cfg["pv1_point"]
                         sp       = pair_cfg.get("backtest_spread_points", spread_default)
+                        # ⚠ PARITÁS (2026-09-22, `tests/test_portfolio_parity`): a
+                        # BELÉPŐ a gyertya ZÁRÁSÁN történik → a bar utolsó tickjének
+                        # spreadje (`close_spread`) a pontos, tartalék az átlag, végül
+                        # a pár konstansa — UGYANAZ a sorrend, mint a `run_pair`-ben.
+                        # Eddig itt mindig a konstans ment: a BUY belépő ára és a
+                        # swing-stop más volt, mint az egypáros úton.
+                        _asp = row.get("avg_spread", float("nan"))      # a bar ÁTLAGA
+                        if not (_asp > 0):
+                            _asp = points_to_price(sp, point_size)
+                        _esp = row.get("close_spread", float("nan"))    # a ZÁRÁS tickjéé
+                        if not (_esp > 0):
+                            _esp = _asp
+                        _asp_points = _asp / point_size   # a swing-stophoz (mint a run_pair `spread_points`-e)
+                        _esp_points = _esp / point_size   # a költség-kapuhoz (mint a run_pair `_csp`-je)
 
                         # ── Végrehajtási kapuk (él-paritás) — UGYANAZ, mint a run_pair ──
                         # A HATÁS is: blokkol / kockázatcsökkentés / ki, a közös
@@ -3039,16 +3063,34 @@ def run_portfolio_backtest(
                                 if _gate_ok else None)
                         if plan is not None:
                             sl_points, tp_points = plan
+                            # ⚠ PARITÁS (2026-09-22): SL-módszer `swing20` → az utolsó
+                            # N M1-gyertya swingjéből, mint a `run_pair`-ben ÉS az
+                            # élő motorban. A portfólió eddig MINDIG az ATR-tervet
+                            # használta: a wpr_sma (alapból swing20) minden stopja
+                            # 1,25–1,9× nagyobb volt, mint az egypáros úton, és a
+                            # kötések harmada másképp zárt.
+                            if params.get("sl_method", strategy.default_sl_method) == "swing20":
+                                _nb = int(params.get("sl_swing_bars", 20) or 20)
+                                _i1 = m1_df.index.get_loc(m1_time)
+                                _lo = m1_df["low"].iloc[max(0, _i1 - _nb + 1):_i1 + 1].to_numpy()
+                                _hi = m1_df["high"].iloc[max(0, _i1 - _nb + 1):_i1 + 1].to_numpy()
+                                _sw = calc_swing_sl_tp_points(float(row["close"]), signal,
+                                                              _lo, _hi, params, point_size,
+                                                              _asp_points)
+                                plan = _sw
+                        if plan is not None:
+                            sl_points, tp_points = plan
                             # ── KÖLTSÉG/KOCKÁZAT kapu — a TERV ISMERETÉBEN ────
                             # (Ugyanaz, mint a run_pair-ben: a mérőszám a spread
                             # és a TERVEZETT stop viszonya, tehát a terv UTÁN dől el.)
                             if _exec_gates and _gt.active(info["gate_eff"], _gt.COST):
                                 from gates import cost_gate as _cgx
                                 _ccap = _gt.cost_max_distortion(pair_cfg, cfg)
+                                # ⚠ PARITÁS: a gyertya spreadje (pontban), nem a konstans.
                                 _cf = {_gt.COST: _cgx.failed(sl_points, tp_points,
-                                                             sp, _ccap)}
+                                                             _esp_points, _ccap)}
                                 _cl = ({_gt.COST: _gb.scalar_level(
-                                    _cgx.distortion(sl_points, tp_points, sp), _ccap)}
+                                    _cgx.distortion(sl_points, tp_points, _esp_points), _ccap)}
                                     if _bnd.get(_gt.COST) else {})
                                 _ceff = _gb.effects_at(info["gate_eff"], _bnd, _cf, _cl)
                                 _cd = _gt.decide(_gb.failed_at(_ceff, _cf), _ceff)
@@ -3081,7 +3123,7 @@ def run_portfolio_backtest(
 
                             open_price = float(row["close"])
                             if signal == "BUY":
-                                open_price += points_to_price(sp, point_size)
+                                open_price += _esp                  # BUY → ASK-on lép be
                                 sl_price = open_price - points_to_price(sl_points, point_size)
                                 tp_price = open_price + points_to_price(tp_points, point_size)
                             else:
