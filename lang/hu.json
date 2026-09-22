@@ -1032,7 +1032,6 @@
   "idlg.runs_done": "{n} futás kész.",
   "idlg.runs_done_axes": "{n} futás kész, de a rajz tengelyei elvesztek (a szakasz közben újraépült). Indítsd újra.",
   "idlg.runs_progress": "{done}/{total} futás",
-  "idlg.runs_progress_dots": "{done}/{total} futás…",
   "idlg.runs_start": "{runs} futás indul — az Eredmény szakaszban rajzolódik.",
   "idlg.sent": "Kiküldve: {n} objektum — {who}.",
   "idlg.skipped_off": "  Kihagyva (a rajzuk ki van kapcsolva): {names}.",

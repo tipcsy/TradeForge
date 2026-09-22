@@ -1032,7 +1032,6 @@
   "idlg.runs_done": "{n} runs done.",
   "idlg.runs_done_axes": "{n} runs done, but the plot's axes were lost (the section was rebuilt meanwhile). Start it again.",
   "idlg.runs_progress": "{done}/{total} runs",
-  "idlg.runs_progress_dots": "{done}/{total} runs…",
   "idlg.runs_start": "{runs} runs starting — they are drawn in the Result section.",
   "idlg.sent": "Sent: {n} objects — {who}.",
   "idlg.skipped_off": "  Skipped (their drawing is switched off): {names}.",

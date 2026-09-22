@@ -1392,6 +1392,20 @@ class InstrumentParamsDialog:
         kulso.pack(fill="both", expand=True, padx=12, pady=(10, 0))
         bar = tk.Frame(kulso, bg=BG_HEADER)
         bar.pack(fill="x")
+        # ⚠ EGY INDÍTÁS-GOMB, A FÜL-SÁV JOBB SZÉLÉN (2026-09-22, a felhasználó
+        # kérdése: „vezessük ki az indítás gombot?"). Három gomb három lapon
+        # ugyanazt jelentette (egy motor, egy megszakítás), és a szinkronban
+        # tartásuk MA KÉTSZER hibázott: futás közben a Hangolás lapon „Indítás"
+        # maradt, leállítás után pedig csak az első állt vissza.
+        # ⚠ MIÉRT ITT, ÉS NEM A FÜLEK FÖLÖTT: ott a sorrend visszafelé volna
+        # (előbb nyomsz indítást, aztán választasz módot). A sáv jobb szélén a
+        # MÓD és az INDÍTÁS egy sorban van, balról jobbra olvasva helyesen.
+        self._plan_btn = tk.Button(bar, text=_t("idlg.inditas"), bg=BTN_PLAY_BG,
+                                   fg=BTN_PLAY_FG, relief="flat", font=self._sf,
+                                   padx=18, pady=4, cursor="hand2",
+                                   borderwidth=0, highlightthickness=0,
+                                   command=self._start_planned)
+        self._plan_btn.pack(side="right", padx=8, pady=4)
         pages = tk.Frame(kulso, bg=BG)
         pages.pack(fill="both", expand=True)
         self._tab_btns, self._tab_pages = {}, {}
@@ -1417,13 +1431,15 @@ class InstrumentParamsDialog:
         self._show_run_tab(self._run_mode.get(), save=False)
 
     def _run_btns(self):
-        """A három lap Indítás-gombja. ⚠ MINDHÁRMAT EGYSZERRE állítjuk: a futás
-        EGY dolog (egy motor, egy megszakítás), csak a kérés helye három. Amíg
-        csak az elsőt írtuk át, a Hangolás lapon futás közben is „Indítás" állt,
-        és egy második kattintás újraindította volna azt, ami épp fut."""
-        return [b for b in (getattr(self, "_plan_btn", None),
-                            getattr(self, "_plan_btn2", None),
-                            getattr(self, "_plan_btn3", None)) if b is not None]
+        """AZ Indítás-gomb (a fül-sáv jobb szélén) — listában, mert a hívók
+        egységesen a `_set_run_btn`-t használják.
+
+        ⚠ ELŐTTE HÁROM VOLT, laponként egy, és a szinkronban tartásuk MA
+        KÉTSZER hibázott (futás közben „Indítás" maradt a Hangolás lapon;
+        leállítás után csak az első állt vissza). Egy gombot nem lehet
+        elfelejteni átállítani."""
+        b = getattr(self, "_plan_btn", None)
+        return [b] if b is not None else []
 
     def _set_run_btn(self, **kw):
         for b in self._run_btns():
@@ -1470,32 +1486,20 @@ class InstrumentParamsDialog:
         """Backtest lap: a beágyazott panel MINDEN futás-tartalma (indítás,
         haladás, élő sor, jelölt-lista, összevetés, egyenleg-görbe, minősítés).
         A fejléc-mezők a `head_box`-ba kerülnek — a fülek FÖLÉ."""
-        act = tk.Frame(pg, bg=BG)
-        act.pack(anchor="w", fill="x", padx=12, pady=(8, 0))
-        self._plan_btn = tk.Button(act, text=_t("idlg.inditas"), bg=BTN_PLAY_BG,
-                                   fg=BTN_PLAY_FG, relief="flat", font=self._sf,
-                                   command=self._start_planned)
-        self._plan_btn.pack(side="left")
-        self._plan_short = tk.Label(act, text=_t("bt.single_run"),
+        self._plan_short = tk.Label(pg, text=_t("bt.single_run"),
                                     bg=BG, fg=FG_GRAY, font=self._sf,
                                     anchor="w", justify="left")
-        self._plan_short.pack(side="left", padx=(10, 0), fill="x", expand=True)
+        self._plan_short.pack(anchor="w", fill="x", padx=12, pady=(8, 0))
         self._bt_page = pg          # ide épül a beágyazott panel törzse
 
     def _build_tab_planned(self, pg):
         """Hangolás lap: MI fog végigpróbálódni + Indítás + haladás + a
         végigpróbálás rajza (az utóbbi az Eredmény szakaszból költözött ide —
         a felhasználó kérése: ne keveredjen a backtest eredményével)."""
-        act = tk.Frame(pg, bg=BG)
-        act.pack(anchor="w", fill="x", padx=12, pady=(8, 0))
-        self._plan_btn2 = tk.Button(act, text=_t("idlg.inditas"), bg=BTN_PLAY_BG,
-                                    fg=BTN_PLAY_FG, relief="flat", font=self._sf,
-                                    command=self._start_planned)
-        self._plan_btn2.pack(side="left")
         self._tuned_lbl = _autowrap(tk.Label(pg, bg=BG, fg=FG_GRAY, font=self._sf,
                                              anchor="w", justify="left"),
                                     self._body_canvas)
-        self._tuned_lbl.pack(anchor="w", fill="x", padx=12, pady=(4, 0))
+        self._tuned_lbl.pack(anchor="w", fill="x", padx=12, pady=(8, 0))
         from tkinter import ttk as _ttk
         self._prog_box = tk.Frame(pg, bg=BG)
         self._prog = _ttk.Progressbar(self._prog_box, mode="determinate",
@@ -1538,17 +1542,11 @@ class InstrumentParamsDialog:
         """Optimalizálás lap: a mintavétel magyarázata, a feltételek
         (walk-forward, kapuk), Indítás, haladás-sáv és az állapot — az utóbbi
         CSAK akkor, ha van mit mondania (a „nem fut" felirat zaj volt)."""
-        act = tk.Frame(pg, bg=BG)
-        act.pack(anchor="w", fill="x", padx=12, pady=(8, 0))
-        self._plan_btn3 = tk.Button(act, text=_t("idlg.inditas"), bg=BTN_PLAY_BG,
-                                    fg=BTN_PLAY_FG, relief="flat", font=self._sf,
-                                    command=self._start_planned)
-        self._plan_btn3.pack(side="left")
         self._space_lbl = _autowrap(tk.Label(pg, bg=BG, fg=FG_GRAY_DIM,
                                              font=self._sf, anchor="w",
                                              justify="left"),
                                     self._body_canvas)
-        self._space_lbl.pack(anchor="w", fill="x", padx=12, pady=(4, 4))
+        self._space_lbl.pack(anchor="w", fill="x", padx=12, pady=(8, 4))
         from tkinter import ttk as _ttk
         self._prog_box2 = tk.Frame(pg, bg=BG)
         self._prog2 = _ttk.Progressbar(self._prog_box2, mode="determinate",
@@ -1770,9 +1768,14 @@ class InstrumentParamsDialog:
         if getattr(self, "_closed", False):
             return
         if callable(getattr(self, "opt_state_of", None)) and                 getattr(self, "_plan_btn", None) is not None:
-            # Csak akkor nyúlunk a gombhoz, ha ÉPP nem egy beágyazott backtest
-            # futása birtokolja (az `_on_run_state` állítja Megszakításra).
-            if not getattr(self, "_bt_running", False):
+            # ⚠ CSAK AKKOR NYÚLUNK A GOMBHOZ, HA SENKI MÁS NEM BIRTOKOLJA.
+            # A beágyazott backtestre (`_bt_running`) volt őr, a SÖPRÉSRE nem —
+            # ezért a Hangolás lapon a gomb 2 másodpercenként visszaugrott
+            # „Indítás"-ra egy futó végigpróbálás közben (a felhasználó leletje:
+            # „az indításból nem lett leállítás továbbra sem"). A söprés futását
+            # a `_sw_stop` jelzi.
+            if not (getattr(self, "_bt_running", False)
+                    or getattr(self, "_sw_stop", None) is not None):
                 self._sync_opt_status()
         # A legenda körei az ÉLŐ állapotot mutatják — velük is lépést tartunk.
         self._refresh_legend_dots()
@@ -2900,8 +2903,11 @@ class InstrumentParamsDialog:
             while True:
                 msg = self._sw_queue.get_nowait()
                 if msg[0] == "progress":
-                    self._sw_status.config(text=_t("idlg.runs_progress_dots", done=msg[1], total=msg[2]),
-                                           fg=FG_GRAY)
+                    # ⚠ A SZÁMLÁLÓ CSAK EGY HELYEN. Korábban a haladás-sáv MELLETT
+                    # és a mérce-választó mellett IS ott állt ugyanaz a
+                    # „57/3551 futás" — a felhasználó kérése: „ez utóbbi nem
+                    # kell". A mérce sora a KÉSZ eredményről szól (hány futás
+                    # lett, mi a legjobb), nem a haladásról.
                     _tot = max(1, int(msg[2]))
                     self._prog_show(100.0 * int(msg[1]) / _tot,
                                     _t("idlg.runs_progress", done=msg[1], total=msg[2]))
@@ -2926,7 +2932,11 @@ class InstrumentParamsDialog:
         self._sw_stop = None
         self._prog_hide()
         try:
-            self._plan_btn.config(text=_t("idlg.inditas"), state="normal")
+            # ⚠ MINDHÁROM gomb (lásd `_set_run_btn`): a söprés vége után a
+            # Hangolás és az Optimalizálás lapon is „Indítás" kell — a fej
+            # nélküli próba pont ezt fogta meg (`Indítás, Leállítás, Leállítás`).
+            self._set_run_btn(text=_t("idlg.inditas"), state="normal",
+                              command=self._start_planned)
         except tk.TclError:
             return
         if err:
