@@ -88,7 +88,7 @@ def groups(strategies, collapsed: dict = None) -> list:
             out.append((_lab, [f"{n}|stages", f"{n}|ctrl"], n))
         else:
             out.append((_lab, [f"{n}|{k}" for k in
-                               ("stages", "position", "daily", "quality", "ctrl", "opt")], n))
+                               ("stages", "position", "daily", "ctrl")], n))
     out.append((_t("table.total"), ["total_pos", "total_daily"], None))
     return out
 
@@ -116,7 +116,7 @@ def blocks(strategies, collapsed: dict = None) -> list:
             out.append([f"{n}|stages", f"{n}|ctrl"])
         else:
             out.append([f"{n}|{k}" for k in
-                        ("stages", "position", "daily", "quality", "ctrl", "opt")])
+                        ("stages", "position", "daily", "ctrl")])
     out.append(["total_pos", "total_daily", "close"])
     return out
 

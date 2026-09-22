@@ -16,7 +16,7 @@ azt a hívó adja be).
 A SORREND kötött, és pontosan a `live_row.build_header` sorrendje:
 
     symbol bid ask change | [spread align market? momentum?] badge |
-    stratégiánként: stages [position daily quality] ctrl [opt] |
+    stratégiánként: stages [position daily] ctrl |
     total_pos total_daily close
 """
 
@@ -55,8 +55,15 @@ def column_keys(strategies, collapsed: dict = None) -> list:
             # további oszlop elcsúszik.
             keys.append(f"{name}|ctrl")
             continue
-        keys += [f"{name}|position", f"{name}|daily", f"{name}|quality",
-                 f"{name}|ctrl", f"{name}|opt"]
+        # ⚠ A „Min." (minősítés) és az „Opt" (utolsó optimalizálás) OSZLOP
+        # KIKERÜLT a főképernyőről (2026-09-22, a felhasználó kérése). Az indok
+        # az ő szavával: „ezekre egyszerűen rossz ránézni, hogy csupa rossz
+        # minden… elég, ha rámegyünk a stratégiában, és ott látszanak — pláne
+        # akkor, ha nincs is optimalizáció". A két érték NEM veszett el: a
+        # minősítés a Paraméterek ablak Áttekintés lapján és a futás végén, az
+        # optimalizálás állapota pedig a Futtatás szakasz Optimalizálás fülén
+        # látszik — ott, ahol kezdeni is lehet vele valamit.
+        keys += [f"{name}|position", f"{name}|daily", f"{name}|ctrl"]
     keys += ["total_pos", "total_daily", "close"]
     return keys
 

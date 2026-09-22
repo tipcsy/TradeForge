@@ -99,12 +99,17 @@ if TK_OK:
         "change":          ("-0.42%",      FG_RED),
         "wpr_sma|position": ("+12.50$ +0.50R", FG_WHITE),
         "wpr_sma|daily":   ("-3.25$",      FG_RED),     # R nelkul CSAK a penz
-        "wpr_sma|quality": ("Jó",          FG_GREEN),
-        "wpr_sma|opt":     ("08/06",       FG_GRAY),
     }
     bad = [(k, (cells[k].text, cells[k].fg), v)
            for k, v in GOLDEN.items() if (cells[k].text, cells[k].fg) != v]
     check("a cellak szovege es szine a ROGZITETT ertekeket adja", not bad, str(bad))
+    # ⚠ 2026-09-22: a „Min." es az „Opt" cella LEKERULT a fokepernyorol. A
+    # sor-adatban (`st0`) BENNE van mindketto — ez a teszt azt bizonyitja, hogy
+    # attol meg nem keletkezik cella, tehat a nezet dont, nem az adat.
+    check("a „Min.” es az „Opt” CELLA nem keletkezik (az adat megvan)",
+          not any(k.endswith(("|quality", "|opt")) for k in cells)
+          and (st0["quality"], st0["opt"]) == ("Jó", "08/06"),
+          str([k for k in cells if k.endswith(("|quality", "|opt"))]))
 
     run = next(p for p in cells["wpr_sma|ctrl"].parts if p[0] == "run")
     check("a futo strategian PIROS stop-jel all", (run[1], run[2]) == ("■", FG_RED),

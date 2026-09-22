@@ -49,10 +49,17 @@ if TK_OK:
           keys[4:11] == ["spread", "align", "market", "momentum", "cost",
                          "volatility", "badge"],
           str(keys[4:11]))
+    # ⚠ 2026-09-22: a „Min." (quality) es az „Opt" oszlop KIKERULT a
+    # fokepernyorol (a felhasznalo kerese: ott csak ijeszto, es nem lehet vele
+    # kezdeni semmit; a ket ertek a Parameterek ablakban latszik). A blokk
+    # igy negy oszlop: jelzes · pozicio · napi P&L · vezerles.
     check("a strategia-oszlopok kulcsa '<nev>|<mezo>' (a rendezes blokkra hat)",
-          keys[11:17] == ["wpr_sma|stages", "wpr_sma|position", "wpr_sma|daily",
-                          "wpr_sma|quality", "wpr_sma|ctrl", "wpr_sma|opt"],
-          str(keys[11:17]))
+          keys[11:15] == ["wpr_sma|stages", "wpr_sma|position", "wpr_sma|daily",
+                          "wpr_sma|ctrl"],
+          str(keys[11:15]))
+    check("a „Min.” es az „Opt” oszlop NINCS a fokepernyon",
+          not any(k.endswith("|quality") or k.endswith("|opt") for k in keys),
+          str([k for k in keys if k.endswith(("|quality", "|opt"))]))
     check("a vegen az osszesito + a torles",
           keys[-3:] == ["total_pos", "total_daily", "close"], str(keys[-3:]))
 
@@ -65,7 +72,7 @@ if TK_OK:
           "ml_ai|stages" in ks and "ml_ai|ctrl" in ks
           and "ml_ai|position" not in ks, str([k for k in ks if k.startswith("ml_ai")]))
     check("...a masik strategia blokkja teljes marad",
-          len([k for k in ks if k.startswith("wpr_sma|")]) == 6)
+          len([k for k in ks if k.startswith("wpr_sma|")]) == 4)
     # A kapu-oszlopok KÖRE és SORRENDJE a configból jon (`dashboard.gate_order`).
     # Az AUTOMATIKUS elrejtes (v2.9.0 elott: ha egy paron sincs mert ertek, az
     # oszlop eltunik) MEGSZUNT — ket oka is lehetett annak, hogy valami nem
@@ -115,7 +122,7 @@ if TK_OK:
     many = [f"strat{i}" for i in range(10)]
     c10 = cc.layout(fonts, many, {})
     check("10 strategiaval is felepul az oszlop-terkep",
-          len([k for k, _x, _w in c10 if k.startswith("strat0|")]) == 6,
+          len([k for k, _x, _w in c10 if k.startswith("strat0|")]) == 4,
           f"oszlop={len(c10)}, szelesseg={cc.total_width(c10)}px")
 
     # ── A `Piac` oszlop a VALODI kategoria-cimkekhez igazodik ────────────

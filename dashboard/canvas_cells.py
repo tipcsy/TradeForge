@@ -161,11 +161,14 @@ def cells_for(d: dict, collapsed: dict, on_close=None) -> dict:
                 f"{n}|daily", anchor="e",
                 text=_lr._money_r(day.get("money"), day.get("r"), pnl),
                 fg=_lr._pnl_color(day.get("money")))
-            q = st.get("quality") or "—"
-            # A SZÖVEG a lefordított felirat, a SZÍN a kódból jön.
-            out[f"{n}|quality"] = Cell(
-                f"{n}|quality", text=q, anchor="center", font="small",
-                fg=_lr._quality_color(st.get("quality_code") or q))
+            # ⚠ A „MIN." (minősítés) CELLA LEKERÜLT a főképernyőről
+            # (2026-09-22). A felhasználó leletje: „ezekre egyszerűen rossz
+            # ránézni, hogy csupa rossz minden… elég, ha rámegyünk a
+            # stratégiában, és ott látszanak". A főképernyő SORA azt mondja
+            # meg, mi történik MOST (jelzés · pozíció · napi P&L · vezérlés) —
+            # a mentett backtest minősítése nem az. Az ÉRTÉK megvan (a
+            # `row_source` továbbra is előállítja, a Paraméterek ablak
+            # mutatja), csak ez a nézet nem rajzolja ki.
         # ⚠ A VEZERLES mostantol CSAK Play/Stop. Az OPT lekerult: az
         # optimalizalas a parameter-ablak Futtatas lapjarol indul, ahol LATOD,
         # mi fog tortenni (idoszakok, kapuk, hangolt dimenziok, keresesi ter).
@@ -185,9 +188,11 @@ def cells_for(d: dict, collapsed: dict, on_close=None) -> dict:
             ("run", run_txt, run_fg, st.get("on_toggle"),
              bool(st.get("enabled", True))),
         ])
-        if not coll:
-            out[f"{n}|opt"] = Cell(f"{n}|opt", text=st.get("opt") or "—",
-                                   anchor="center", font="small", fg=FG_GRAY)
+        # ⚠ Az „OPT" CELLA IS LEKERÜLT (2026-09-22, ugyanaz az ok). Az utolsó
+        # optimalizálás dátuma egy olyan oszlopot töltött meg gondolatjelekkel,
+        # ahol a legtöbb páron nincs is optimalizálás — a hiányt mutatta, nem az
+        # állapotot. A futó optimalizálás haladása a Paraméterek ablakban
+        # (Futtatás lap) látszik, ahol el is lehet indítani.
 
     # ── jobb: összesítő ──────────────────────────────────────────────────
     t = d.get("total") or {}
