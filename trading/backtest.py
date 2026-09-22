@@ -1226,14 +1226,23 @@ def _szukit_keret(df_m15, df_m1, params, strategy, test_start, test_end):
         if i - wu <= 0:
             return df_m15, df_m1                        # nincs mit levágni
         kezd = df_m15.index[i - wu]
-        m15 = df_m15[df_m15.index >= kezd]
-        m1 = df_m1[df_m1.index >= kezd]
+        # ⚠ POZÍCIÓS vágás (`iloc`), nem logikai maszk. A `df[df.index >= kezd]`
+        # végigmegy az egész indexen ÉS másolatot készít — egy söprésben, ahol
+        # minden jel-paraméter-értékhez újraépül a jelölt-lista, ez
+        # kombinációnként fizetendő (mérve: 74 ms a 1786-ból, 4 %). A rendezett
+        # indexen a `searchsorted` + `iloc` NÉZETET ad, ezredmásodpercek alatt.
+        _i15 = int(df_m15.index.searchsorted(kezd, side="left"))
+        _i1 = int(df_m1.index.searchsorted(kezd, side="left"))
+        _j15 = len(df_m15)
+        _j1 = len(df_m1)
         if test_end:
             te = pd.Timestamp(test_end)
             if df_m15.index.tzinfo is not None and te.tzinfo is None:
                 te = te.tz_localize("UTC")
-            m15 = m15[m15.index <= te]
-            m1 = m1[m1.index <= te]
+            _j15 = int(df_m15.index.searchsorted(te, side="right"))
+            _j1 = int(df_m1.index.searchsorted(te, side="right"))
+        m15 = df_m15.iloc[_i15:_j15]
+        m1 = df_m1.iloc[_i1:_j1]
         # ⚠ A `bt_warmup` ELEJÉT a hívó vágja le (`_prepare_frames`), ezért a
         # keretnek ENNÉL hosszabbnak kell lennie — különben a szimuláció üres
         # lenne (a csilla ezt egyszer megfizette: „warmup > keret → 0 kötés
