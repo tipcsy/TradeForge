@@ -2739,18 +2739,27 @@ class DashboardWindow:
         tk.Button(info_bar, text="▲", font=small_font, width=2,
                   bg=BG_INACTIVE, fg=FG_WHITE, relief="flat", cursor="hand2",
                   command=lambda: self._change_risk_pct(+0.001)).pack(side="left", padx=(1, 10))
-        self.lbl_limit   = tk.Label(info_bar, text="Napi limit: OK",
+        self.lbl_limit   = tk.Label(info_bar, text=_t("gui.limit.init"),
                                     bg=BG_HEADER, fg=FG_GREEN, font=info_font)
         self.lbl_limit.pack(side="left", padx=(10, 2))
-        # Napi limit állítása a felületről (mint a slotoké): ▼/▲ 10$-os lépésben,
-        # a config.json trading.daily_loss_limit_usd kulcsába perzisztálva. A live
+        # Napi limit állítása a felületről (mint a slotoké): ▼/▲ az ÉPPEN
+        # ÉRVÉNYES dimenzióban lép (fix összeg vagy százalék), a `$`/`%` gomb
+        # pedig módot vált. A szabály a `core/daily_limit.py`-ban lakik; a live
         # motor UGYANEZT a cfg-dictet olvassa → azonnal él.
         tk.Button(info_bar, text="▼", font=small_font, width=2,
                   bg=BG_INACTIVE, fg=FG_WHITE, relief="flat", cursor="hand2",
-                  command=lambda: self._change_daily_limit(-10)).pack(side="left", padx=1)
+                  command=lambda: self._change_daily_limit(-1)).pack(side="left", padx=1)
         tk.Button(info_bar, text="▲", font=small_font, width=2,
                   bg=BG_INACTIVE, fg=FG_WHITE, relief="flat", cursor="hand2",
-                  command=lambda: self._change_daily_limit(+10)).pack(side="left", padx=(1, 10))
+                  command=lambda: self._change_daily_limit(+1)).pack(side="left", padx=1)
+        # ⚠ A MÓD LÁTSZIK ÉS VÁLTHATÓ. Egy ▼ gomb, ami hol dollárt, hol
+        # százalékot léptet anélkül, hogy kiderülne, melyiket mikor, pontosan az
+        # a néma viselkedés, ami ellen az egész mérő réteg készült.
+        self._btn_limit_mode = tk.Button(
+            info_bar, text="$", font=small_font, width=2,
+            bg=BG_INACTIVE, fg=FG_WHITE, relief="flat", cursor="hand2",
+            command=self._toggle_daily_limit_mode)
+        self._btn_limit_mode.pack(side="left", padx=(1, 10))
 
         tk.Frame(self.root, bg=FG_GRAY_DIM, height=1).pack(fill="x", pady=2)
 
@@ -6105,24 +6114,56 @@ class DashboardWindow:
         self._render_slots_label()
         self._render_risk_label()   # egy slot kerete = risk_pct / max_slots
 
-    def _change_daily_limit(self, delta: int):
-        """A napi veszteség-limit állítása a felületről (10$-os lépés, min. 10$).
-        Az abszolút $ értéket a config trading.daily_loss_limit_usd kulcsa tárolja;
-        első állításkor a jelenlegi effektív (pct-alapú) limitből indulunk. A live
-        motor ugyanezt a cfg-dictet olvassa → a következő ciklusban már él."""
-        from trading.backtest import daily_limit_usd as _dlim
-        cur = _dlim(self.cfg["trading"], self._balance)
-        # 10$-ra kerekített kiindulás (a pct-ből származó érték tört lehet)
-        new = max(10, int(round(cur / 10.0)) * 10 + delta)
-        self.cfg["trading"]["daily_loss_limit_usd"] = float(new)
+    def _change_daily_limit(self, irany: int):
+        """▼/▲ — egy lépés az ÉPPEN ÉRVÉNYES dimenzióban.
+
+        Fix módban 10 egységet, százalék módban 0,1 százalékpontot lép; a
+        szabály és a határok a `core/daily_limit.py`-ban vannak. A live motor
+        ugyanezt a cfg-dictet olvassa → a következő ciklusban már él."""
+        from core import daily_limit as _dl
+        _dl.step(self.cfg["trading"], self._balance, irany)
         self._save_main_config()
-        # Azonnali kijelzés-frissítés (a periodikus update is felülírja majd)
-        total_daily = sum(ds.daily_pnl for ds in self.dashboard_ref.values())
-        hit = total_daily <= -new
-        self.lbl_limit.config(
-            text=(f"Napi limit: STOP  ({total_daily:+.0f}$ / -{new}$)" if hit
-                  else f"Napi limit: {total_daily:+.0f}$ / -{new}$"),
-            fg=FG_RED if hit else FG_GREEN)
+        self._render_limit_label()
+
+    def _toggle_daily_limit_mode(self):
+        """Fix összeg ↔ az egyenleg százaléka.
+
+        ⚠ A LIMIT NEM UGRIK: a mostani effektív érték megy át a másik
+        dimenzióba (lásd `core.daily_limit.toggle`). Aki módot vált, ne kapjon
+        mellé egy észrevétlen szigorítást vagy lazítást."""
+        from core import daily_limit as _dl
+        _dl.toggle(self.cfg["trading"], self._balance)
+        self._save_main_config()
+        self._render_limit_label()
+
+    def _render_limit_label(self):
+        """A napi limit címkéje — EGY igazságforrás.
+
+        ⚠ MIÉRT EGY HELYEN. Ez a címke korábban KÉT helyen készült (a periodikus
+        frissítésben és a léptetés után), külön formázással — ugyanaz a hiba,
+        amit a slot-címkénél már egyszer megfizettünk: a két sor elcsúszott, és
+        a felhasználó azt látta, amelyik épp utoljára futott."""
+        from core import daily_limit as _dl
+        lbl = getattr(self, "lbl_limit", None)
+        if lbl is None:
+            return
+        tc = self.cfg.get("trading") or {}
+        limit = _dl.value(tc, self._balance)
+        napi = sum(ds.daily_pnl for ds in self.dashboard_ref.values())
+        allj = (limit > 0 and napi <= -limit)
+        # ⚠ A MÓD IS A CÍMKÉN VAN. Százalék módban kiírjuk a százalékot is —
+        # különben nem derülne ki, miért változik a limit magától, ahogy a
+        # számla mozog.
+        mod = _dl.mode(tc)
+        jel = (_t("gui.limit.pct_tag", pct=f"{_dl.pct_of(tc) * 100:.1f}")
+               if mod == _dl.MODE_PCT else _t("gui.limit.fix_tag"))
+        lbl.config(
+            text=_t("gui.limit.stop" if allj else "gui.limit.row",
+                    daily=f"{napi:+.0f}", limit=f"{limit:.0f}", tag=jel),
+            fg=FG_RED if allj else FG_GREEN)
+        gomb = getattr(self, "_btn_limit_mode", None)
+        if gomb is not None:
+            gomb.config(text="%" if mod == _dl.MODE_PCT else "$")
 
     # ── Kapcsolat UI ────────────────────────────────────────────────────
     def _update_connection_ui(self, info: dict):
@@ -6864,16 +6905,9 @@ class DashboardWindow:
         self._render_slots_label()
         self._render_risk_label()
 
-        total_daily = sum(ds.daily_pnl for ds in self.dashboard_ref.values())
-        # A limit értéke EGY igazságforrásból (mint a live kapué): abszolút $
-        # (daily_loss_limit_usd, a ▼/▲ állítja), különben pct × egyenleg.
-        from trading.backtest import daily_limit_usd as _dlim
-        _limit = _dlim(self.cfg["trading"], self._balance)
-        limit_hit = (_limit > 0 and total_daily <= -_limit)
-        self.lbl_limit.config(
-            text=(f"Napi limit: STOP  ({total_daily:+.0f}$ / -{_limit:.0f}$)" if limit_hit
-                  else f"Napi limit: {total_daily:+.0f}$ / -{_limit:.0f}$"),
-            fg=FG_RED if limit_hit else FG_GREEN)
+        # A limit címkéje EGY helyen készül (lásd `_render_limit_label`) — mint
+        # a slot-címke. Korábban itt egy második, formázásban eltérő út is volt.
+        self._render_limit_label()
 
         if mt5_positions is not None:
             # Csak a NEM kockázatmentes pozíciók foglalnak slotot (a kockázatmentes

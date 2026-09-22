@@ -480,13 +480,15 @@ def _natv_exec(m1, t1_ns, t15_ns, delta_ns, n15, day_idx, h_arr, l_arr, c_arr,
 
 
 def daily_limit_usd(trading_cfg: dict, balance: float) -> float:
-    """A napi veszteség-limit ÉRTÉKE $-ban — EGY igazságforrás (live + backtest +
-    GUI). Az abszolút `daily_loss_limit_usd` nyer, ha > 0 (a felületről állítható);
-    különben a régi `daily_loss_limit_pct` × egyenleg."""
-    usd = float(trading_cfg.get("daily_loss_limit_usd", 0) or 0)
-    if usd > 0:
-        return usd
-    return balance * float(trading_cfg.get("daily_loss_limit_pct", 0.015))
+    """A napi veszteség-limit ÉRTÉKE — EGY igazságforrás (live + backtest + GUI).
+
+    ⚠ A SZABÁLY A `core.daily_limit`-BEN LAKIK, nem itt. Amióta a limit a
+    felületen MÓDOT is válthat (fix összeg ↔ az egyenleg százaléka), a „melyik
+    dimenzió érvényes" kérdést egy helyen kell megválaszolni — különben a motor,
+    a backteszt és a fejléc három külön értelmezést kapna. Ez a név megmarad,
+    mert három modul hívja."""
+    from core.daily_limit import value as _ertek
+    return _ertek(trading_cfg, balance)
 
 
 class _Row(dict):
