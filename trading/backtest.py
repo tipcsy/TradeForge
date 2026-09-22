@@ -1188,8 +1188,70 @@ def _signal_bar_delta(strategy, params: dict) -> "pd.Timedelta":
     return pd.Timedelta(minutes=strategy.timeframes()[0].minutes)
 
 
+def _szukit_keret(df_m15, df_m1, params, strategy, test_start, test_end):
+    """A keretek szűkítése a SZÁMÍTÁSHOZ SZÜKSÉGES ablakra: `[test_start −
+    warmup, test_end]`. `(df_m15, df_m1)` — ha nincs `test_start`, változatlanul.
+
+    ⚠ MIÉRT (2026-09-22). Mindkét backtest-út a TELJES betöltött kereten
+    számolt indikátort, majd eldobta a 97 %-át: GOLD-on 314 857 M15 bar egy
+    3 hónapos teszthez, amihez 7 699 is elég. Fázis-profilozva a portfólió
+    futásidejének **68 %-a** volt a `bt_indicators` (a végrehajtási ciklus
+    0,5 %) — ez tehát a legnagyobb egyetlen tétel.
+
+    ⚠ A VÁGÁS CSAK AKKOR ÁRTALMATLAN, HA AZ INDIKÁTOROK OK-OKOZATIAK (véges,
+    múltba néző ablak). Egy teljes-sorozat statisztika (pl. `mean()` az egész
+    kereten) a vágástól NÉMÁN más számot adna — és egyébként is look-ahead
+    volna. A `tests/test_indicator_window.py` ezt méri: ugyanaz az időszak
+    teljes és vágott kereten BITRE ugyanazokat a kötéseket adja, stratégiánként.
+
+    ⚠ A LEGMÉLYEBB WARMUP DÖNT, ÉS MINDKÉT KERETET UGYANONNAN VÁGJUK. Egy
+    stratégia a magasabb idősíkjait az M1-ből is képezheti (a `csilla` a
+    D1/W1-szinteket), tehát az M1-et nem szabad az M15-nél később kezdeni.
+    A `bt_warmup` az adott idősík BARJAIBAN ad választ, ezért az M1-igényt
+    átszámoljuk M15-barra, és a kettő maximumát használjuk — plusz egy kis
+    ráhagyás (a hiányzó gyertyák, hétvégék miatt az index nem egyenletes)."""
+    if not test_start:
+        return df_m15, df_m1
+    try:
+        tf_hi, tf_lo = strategy.timeframes()[0], strategy.timeframes()[1]
+        wu_hi = int(strategy.bt_warmup(params, tf_hi.label) or 0)
+        wu_lo = int(strategy.bt_warmup(params, tf_lo.label) or 0)
+        # az M1-igény a magas idősík barjaiban (felfelé kerekítve)
+        arany = max(1, int(tf_hi.minutes) // max(1, int(tf_lo.minutes)))
+        wu = max(wu_hi, -(-wu_lo // arany)) + 50        # + ráhagyás
+        ts = pd.Timestamp(test_start)
+        if df_m15.index.tzinfo is not None and ts.tzinfo is None:
+            ts = ts.tz_localize("UTC")
+        i = int(df_m15.index.searchsorted(ts))
+        if i - wu <= 0:
+            return df_m15, df_m1                        # nincs mit levágni
+        kezd = df_m15.index[i - wu]
+        m15 = df_m15[df_m15.index >= kezd]
+        m1 = df_m1[df_m1.index >= kezd]
+        if test_end:
+            te = pd.Timestamp(test_end)
+            if df_m15.index.tzinfo is not None and te.tzinfo is None:
+                te = te.tz_localize("UTC")
+            m15 = m15[m15.index <= te]
+            m1 = m1[m1.index <= te]
+        # ⚠ A `bt_warmup` ELEJÉT a hívó vágja le (`_prepare_frames`), ezért a
+        # keretnek ENNÉL hosszabbnak kell lennie — különben a szimuláció üres
+        # lenne (a csilla ezt egyszer megfizette: „warmup > keret → 0 kötés
+        # némán"). Ha a vágás után nem maradna elég, inkább nem vágunk.
+        if len(m15) <= wu_hi or len(m1) <= wu_lo:
+            return df_m15, df_m1
+        return m15, m1
+    except Exception:
+        # A gyorsítás SOHA nem állíthatja meg a backtestet: kétség esetén a
+        # teljes keret megy tovább (helyes eredmény, lassabban).
+        log.debug("keret-szűkítés kimaradt", exc_info=True)
+        return df_m15, df_m1
+
+
 def _prepare_frames(df_m15, df_m1, params, strategy, test_start, test_end):
     """Indikátorok → warmup-vágás → test_start/test_end szűkítés."""
+    df_m15, df_m1 = _szukit_keret(df_m15, df_m1, params, strategy,
+                                  test_start, test_end)
     m15, m1 = strategy.bt_indicators(df_m15, df_m1, params)
     m15 = m15.iloc[strategy.bt_warmup(params, strategy.timeframes()[0].label):].copy()
     m1  = m1.iloc[strategy.bt_warmup(params, strategy.timeframes()[1].label):].copy()
@@ -2725,6 +2787,10 @@ def run_portfolio_backtest(
         params.setdefault("sess_start", _pcfg.get("sess_start", 0))
         params.setdefault("sess_end",   _pcfg.get("sess_end", 24))
 
+        # A keret szűkítése a SZÁMÍTÁS ELŐTT (lásd `_szukit_keret`): a portfólió
+        # is a teljes előzményen számolt indikátort egy pár hónapos időszakhoz.
+        df_m15, df_m1 = _szukit_keret(df_m15, df_m1, params, strategy,
+                                      date_from, date_to)
         m15, m1 = strategy.bt_indicators(df_m15, df_m1, params)
 
         m15 = m15.iloc[strategy.bt_warmup(params, tf_hi):].copy()
