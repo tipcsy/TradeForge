@@ -12,8 +12,9 @@ mérés története a „Csilla beszállója — mérés" jegyzetben; röviden:
     bizonyíték (t < 2), ezért 2026-09-15-től FORWARD papírkereskedés.
 
 ⚠ A SZABÁLY NEM ITT VAN. A szint-/esemény-/belépő-logika a `strategies/csilla_rules`
-modulban él, és a kutató-labor (`tools/research/csilla_levels.py`) UGYANAZT
-hívja — a paritás szerkezeti, nem ígéret (`tests/test_csilla_parity.py`).
+modulban él, és a kutató-labor (`tools/research/csilla_levels.py` → a lezárt
+változatokat őrző `csilla_variants`) UGYANAZT hívja — a paritás szerkezeti, nem
+ígéret (`tests/test_csilla_parity.py`).
 Ez a modul csak a keret hookjait adja: időkeretek, warmup, jelölő-oszlop,
 élő jelzés, backtest-oszlopok, SL/TP, viz. A napszak-sáv (Ger40 8–11,
 UsaTec/GOLD 15–18) a KERET stratégia-hatókörű kereskedési-óra kapuja
@@ -58,8 +59,11 @@ def _P(params: dict) -> dict:
     `sl_atr_mult` a keret konvenciója (mint a többi stratégiánál); a core
     belső neve `stop_atr`. A `level_kinds` ("D1+W1" alak) → `kinds` tuple."""
     p = dict(sw.DEFAULTS)
-    for k in ("k_hi", "k_lo", "k_d1", "k_w1", "ttl_d1", "ttl_w1", "k_h4", "ttl_h4",
-              "k_h1", "ttl_h1", "max_wait", "buffer_atr", "min_sl_atr"):
+    # ⚠ A H1/H4 szint-fajta paraméterei (k_h1/ttl_h1/k_h4/ttl_h4) 2026-09-22-én
+    # kikerültek: a „páros olvasat" mérve és bukott (H1→M15 −0,049 R, H1→M1
+    # −0,167 R, 0/14 év). A kódjuk a `tools/research/csilla_variants`-ban él.
+    for k in ("k_hi", "k_lo", "k_d1", "k_w1", "ttl_d1", "ttl_w1",
+              "max_wait", "buffer_atr", "min_sl_atr"):
         if params.get(k) is not None:
             p[k] = params[k]
     p["stop_atr"] = float(params.get("sl_atr_mult", params.get("stop_atr", 1.5)) or 1.5)

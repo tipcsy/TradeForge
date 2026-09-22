@@ -112,7 +112,11 @@ T_MIN, EV_POZ_MIN, INSTR_MIN = 2.0, 0.60, 3
 
 
 # ── swing-pontok + M1 belépők: a KÖZÖS magból (2026-09-15 óta) ─────────────
-from strategies.csilla_rules import lo_entries, pivots  # noqa: E402,F401
+from strategies.csilla_rules import pivots              # noqa: E402,F401
+# ⚠ A mód-választós belépő a fagyasztott kutató-modulból (2026-09-22): a
+# `retest`/`fordulo` mérve és bukott, ezért kikerült az élő szabályból. A
+# `break` ág innen is a `csilla_rules`-ba megy — egy szabály, egy példány.
+from csilla_variants import lo_entries                  # noqa: E402
 
 
 # ── a magas TF eseményei ─────────────────────────────────────────────────────

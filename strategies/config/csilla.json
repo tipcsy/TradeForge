@@ -13,16 +13,12 @@
     "winrate_good": 0.45
   },
   "indicators": {
-    "_comment": "A szint- és belépő-szabály paraméterei. ⚠ A mérés ezekkel az értékekkel készült (2026-09-14, előre rögzítve) — a forward teszt alatt NEM hangolhatók. A `level_kinds` mondja meg, MELYIK időkeret szintjeit keressük: H1 / H4 / D1 / W1 tetszőleges kombinációja „+”-szal (pl. D1+W1, H4+D1). A mért (forward) változat: D1+W1.",
+    "_comment": "A szint- és belépő-szabály paraméterei. ⚠ A mérés ezekkel az értékekkel készült (2026-09-14, előre rögzítve) — a forward teszt alatt NEM hangolhatók. A `level_kinds` mondja meg, MELYIK időkeret szintjeit keressük: D1 / W1 / D1+W1. (A H1 és H4 szintek 2026-09-22-én kikerültek: a „páros olvasat” mérve és bukott — H1→M15 −0,049 R, H1→M1 −0,167 R, 0/14 év; a kódjuk a tools/research/csilla_variants.py-ban.)",
     "level_kinds": "D1+W1",
     "k_d1": 2,
     "k_w1": 1,
     "ttl_d1": 90,
     "ttl_w1": 365,
-    "k_h4": 3,
-    "ttl_h4": 30,
-    "k_h1": 3,
-    "ttl_h1": 10,
     "k_hi": 3,
     "k_lo": 3,
     "max_wait": 8
@@ -66,7 +62,7 @@
       "level_kinds": {
         "recompute": "signal",
         "category": "levels",
-        "comment": "Melyik időkeret szintjeit keressük: H1 / H4 / D1 / W1, „+”-szal kombinálva (pl. D1+W1). Mérve: D1+W1"
+        "comment": "Melyik időkeret szintjeit keressük: D1 / W1 / D1+W1 („+”-szal kombinálva). Mérve: D1+W1"
       },
       "k_d1": {
         "recompute": "signal",
@@ -87,26 +83,6 @@
         "recompute": "signal",
         "category": "levels",
         "comment": "Egy W1 szint élettartama napokban"
-      },
-      "k_h4": {
-        "recompute": "signal",
-        "category": "levels",
-        "comment": "H4 fraktál félablak (csak ha a level_kinds tartalmazza a H4-et)"
-      },
-      "ttl_h4": {
-        "recompute": "signal",
-        "category": "levels",
-        "comment": "Egy H4 szint élettartama napokban"
-      },
-      "k_h1": {
-        "recompute": "signal",
-        "category": "levels",
-        "comment": "H1 fraktál félablak (csak ha a level_kinds tartalmazza a H1-et)"
-      },
-      "ttl_h1": {
-        "recompute": "signal",
-        "category": "levels",
-        "comment": "Egy H1 szint élettartama napokban"
       },
       "k_hi": {
         "recompute": "signal",

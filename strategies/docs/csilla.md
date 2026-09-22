@@ -10,7 +10,7 @@ modulban van, amit a kutató-labor is ugyanígy hív.
 
 | lépés | mi történik |
 |---|---|
-| **szint** | `level_kinds` (alap `D1+W1`; H1 / H4 / D1 / W1 kombinálható): igazolt D1 fraktál-swing (`k_d1` = 2 → 2 nappal később ismert) vagy W1 swing (`k_w1` = 1); H4/H1 esetén `k_h4`/`ttl_h4`, `k_h1`/`ttl_h1`. Csúcs = ellenállás, völgy = támasz. Él `ttl_d1` / `ttl_w1` napig, vagy amíg át nem törik. Minden szint egyszer törhet. |
+| **szint** | `level_kinds` (alap `D1+W1`; `D1`, `W1` vagy a kettő): igazolt D1 fraktál-swing (`k_d1` = 2 → 2 nappal később ismert) vagy W1 swing (`k_w1` = 1). Csúcs = ellenállás, völgy = támasz. Él `ttl_d1` / `ttl_w1` napig, vagy amíg át nem törik. Minden szint egyszer törhet. |
 | **törés** (M15) | egy M15 gyertya a szint FÖLÖTT zár (BUY-irány) / ALATT zár (SELL-irány) |
 | **belépő** (M1) | a törés utáni `max_wait` × 15 percen belül egy igazolt M1 swing az irány oldalán (`k_lo` = 3), majd zárás azon túl → **belépés a zárón**. Egy töréshez több belépő is jöhet. |
 | **napszak** | NEM a stratégia paramétere: a **Csilla-sáv** (Ger40 8–11h, UsaTec és GOLD 15–18h, szerver-idő) a keret stratégia-hatókörű **kereskedési órái** (a dashboard óra-választója, `data/optimized_params/csilla/<PÁR>_hours.json`). A stratégia minden órában jelez, az óra-kapu dönt. |
@@ -55,6 +55,25 @@ keret a stratégiát név szerint nem ismeri: a stratégia törlésével a felad
 eltűnik. Az első hét megmutatta, hogy a „naponta, kézzel" nem fut — ezért
 került a programba. A páros olvasat (H1→M1, H1→M15, szerkezeti ablak, forduló-belépő)
 2026-09-22-én mérve és bukott — a mérés-jegyzet 12. szakasza.
+
+## Amit ez a stratégia NEM csinál
+
+A modul 2026-09-22-én **megtisztult**: csak az maradt benne, ami a forwardban
+fut. A megmért és megbukott változatok kódja a `tools/research/csilla_variants.py`
+fagyasztott kutató-modulba került — a `.tfs` csomag nem viszi, a program nem
+hívja, de a lezárt kérdések újrafuttathatók maradtak:
+
+| kivezetve | mit csinált | miért nincs itt |
+|---|---|---|
+| `retest` belépő | visszaérés a tört szintre | az első 14 éves mérés 4 változatának egyike, mind negatív (−0,217 R) |
+| `fordulo` belépő | a zászló utáni első ellenoldali M1-swing | −0,435 R/kötés, 6% találat (n = 212 000) |
+| H1 / H4 szintek | a „páros olvasat" felső idősíkja | H1→M15 −0,049 R, H1→M1 −0,167 R, 0/14 év |
+| fibo célár | a tört szinttől 138,2% × a láb | célár nélkül minden változat jobb volt; 14 éven egyetlen csomag sem ért el 10–20 R-t |
+
+Ami **maradt** a lezárt kísérletekből: a **szerkezeti stop** (`stop_atr=None`,
+a törés előtti utolsó ellenoldali M15-swing). Nem azért, mert nyert — hanem mert
+ez az egyetlen nyitva hagyott kérdés: a bukások közös tényezője a szűk
+zászló-stop volt.
 
 ## Paraméterek
 

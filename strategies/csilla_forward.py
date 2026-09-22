@@ -22,7 +22,7 @@ ELŐRE RÖGZÍTVE (a mérés után nem módosítható):
     ELSŐDLEGES minta  Ger40 8–11h · UsaTec 15–18h · GOLD 15–18h (szerver-idő,
                       a belépő M1 gyertyájának órája), egyszerre EGY pozíció
                       páronként (a mérés is így számolt).
-    szabály           `csilla_levels`: D1/W1 igazolt swing-szint → M15 zárás a
+    szabály           `csilla_rules`: D1/W1 igazolt swing-szint → M15 zárás a
                       szinten túl → M1-zászló törése (k=3) a törés utáni 2 órán belül.
     kilépés           stop = 1,5 × ATR15 (a törés M15-gyertyáján); BE (stop a
                       belépőre) +0,67 R-nél; utána 2 R-es csúszó stop; NINCS célár;
@@ -67,6 +67,14 @@ változat a `tools/`-ban lakott és a `main.py` importálta: a stratégia törl�
 után minden este elbukott volna (a felhasználó kérdése hozta felszínre).
 A `tools/research/lab`-ot (a kutató-harness) használja — az a program része,
 nem a stratégiáé, mindenhol ott van, ahol a program.
+
+⚠ A SZABÁLYT A `csilla_rules`-BÓL HÍVJA, NEM A LABOR-SZKRIPTBŐL (2026-09-22).
+Az első változat a `tools/research/csilla_levels.py`-t importálta — azt viszont
+a `.tfs` csomag NEM viszi magával (csak a `strategies.<x>` segédmodulokat),
+tehát másik gépre telepítve a napi feladat import-hibával állt volna meg,
+némán, minden este. Ugyanaz a hordozhatósági szabály, ami miatt ez a modul a
+`strategies/`-ben lakik. A hívás egy az egyben ugyanaz (`entry_table`,
+D1+W1, fix 1,5 ATR15 stop) — a belépők bitre azonosak maradtak.
 """
 from __future__ import annotations
 
@@ -83,13 +91,15 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools" / "research"))
 
 import lab                                       # noqa: E402
-import csilla_levels as cl                       # noqa: E402
+
+from strategies import csilla_rules as sw         # noqa: E402
 
 START = pd.Timestamp("2026-09-15 00:00", tz="UTC")     # a forward kezdete (szerver-idő)
 JOURNAL = ROOT / "data" / "forward" / "csilla_signals.csv"
 STATUS_JSON = ROOT / "data" / "forward" / "csilla_status.json"   # a felületnek
 PRIMARY = {"Ger40": (8, 11), "UsaTec": (15, 18), "GOLD": (15, 18)}
-ALL_SYMS = cl.SYMS
+ALL_SYMS = ["GOLD", "USDJPY", "UsaInd", "UsaTec", "Ger40",
+            "EURUSD", "EURJPY", "UK100"]
 STOP_ATR = 1.5
 BE_AT_R = 0.67
 TRAIL_R = 2.0
@@ -111,6 +121,19 @@ def _save_journal(j: pd.DataFrame):
     j.sort_values(["sym", "t"]).to_csv(JOURNAL, sep=";", index=False)
 
 
+def _entries(sym: str):
+    """`(m1, belépők)` — a rögzített szabály egy párra: D1+W1 szintek, M15-törés,
+    M1-zászló, fix `STOP_ATR` × ATR15 stop. A stop PONTBAN, mint a naplóban."""
+    m1 = lab.load_m1(sym)
+    et = sw.entry_table(m1, None, ("D1", "W1"), stop_atr=STOP_ATR)
+    if not len(et):
+        return None
+    ps = float(lab.PAIRS[sym]["point_size"])
+    ent = pd.DataFrame(dict(i=et.i, dir=et.dir, sl_pts=et.sl_abs / ps,
+                            atr15=et.atr15, kind=et.kind, label=et.label))
+    return m1, ent
+
+
 def _in_band(sym: str, t: pd.Timestamp) -> bool:
     b = PRIMARY.get(sym)
     return bool(b and b[0] <= t.hour <= b[1])
@@ -127,10 +150,10 @@ def update(with_mt5: bool = True):
     j = _load_journal()
     uj = []
     for sym in ALL_SYMS:
-        r = cl.entries(sym, ("D1", "W1"), stop_atr=STOP_ATR)
+        r = _entries(sym)
         if r is None:
             continue
-        m1, ent, ps, _ = r
+        m1, ent = r
         ent = ent.drop_duplicates("i")
         # ⚠ csak ZÁRT M1 gyertya: az utolsó bar formálódhat → kihagyjuk
         ent = ent[ent.i < len(m1) - 1]

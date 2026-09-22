@@ -54,9 +54,14 @@ cfg = config_for_strategy(raw, NAME)
 cfg_file = ROOT / "strategies" / "config" / f"{NAME}.json"
 check("van strategia-config fajl", cfg_file.exists())
 base = s.base_params(cfg)
-for k in ("level_kinds", "k_d1", "k_w1", "ttl_d1", "ttl_w1", "k_h4", "ttl_h4", "k_h1", "ttl_h1",
+for k in ("level_kinds", "k_d1", "k_w1", "ttl_d1", "ttl_w1",
           "max_wait", "sl_atr_mult", "tp_rr_ratio"):
     check(f"a(z) {k!r} a base_params-ban", k in base)
+# ⚠ TAKARITAS 2026-09-22: a H1/H4 szint-parameterek KIKERULTEK (a „paros
+# olvasat" merve es bukott). Ha visszaszivarognanak a configba, a Parameterek
+# ablak megint olyat kinalna, amit a szabaly nem tud hasznalni.
+for k in ("k_h4", "ttl_h4", "k_h1", "ttl_h1", "fib_ext", "retest_tol"):
+    check(f"a(z) {k!r} MAR NINCS a base_params-ban", k not in base)
 # ⚠ A napszak-sav NEM strategia-parameter: a keret strategia-hatokoru
 # kereskedesi-ora kapuja (params_store.trade_hours). Az elso valtozat sajat
 # `session_hours` parametert vitt — a Parameterek ablakban olvashatatlan
@@ -96,14 +101,17 @@ else:
     lab = sw.entry_table(m1_lab, base, stop_atr=float(base["sl_atr_mult"]))
     check("a mert alap: level_kinds = D1+W1", sw.parse_kinds(base["level_kinds"]) == ("D1", "W1"),
           str(base["level_kinds"]))
-    check("parse_kinds: 'H4+D1' / 'w1' / ismeretlen",
-          sw.parse_kinds("H4+D1") == ("H4", "D1") and sw.parse_kinds("w1") == ("W1",)
+    check("parse_kinds: 'D1' / 'w1' / ismeretlen",
+          sw.parse_kinds("D1") == ("D1",) and sw.parse_kinds("w1") == ("W1",)
           and sw.parse_kinds("XX") == ("D1", "W1"))
-    # H4-szintekkel is fut a modul (mas belepo-halmaz, de nem ures / nem hiba)
-    _hi4, _lo4 = s.bt_indicators(sw.resample(m1_lab, 15), m1_lab[m1_lab.index >= m1_lab.index.max() - pd.Timedelta(days=60)],
-                                 {**prm, "level_kinds": "H4"})
-    check("level_kinds=H4: a modul fut es ad belepot", int((_lo4["cs_sig"] != 0).sum()) > 0,
-          str(int((_lo4["cs_sig"] != 0).sum())))
+    # ⚠ A H1/H4 MAR NEM VALASZTHATO: a bukott valtozat nem szivaroghat vissza egy
+    # config-ertekkel. A H4 kerese most a mert alapra (D1+W1) esik vissza.
+    check("level_kinds='H4' -> a mert alapra esik vissza (nincs H4 szint)",
+          sw.parse_kinds("H4") == ("D1", "W1") and "H4" not in sw.KINDS,
+          str(sw.KINDS))
+    check("a H4 szint-tabla URES az elo modulban",
+          len(sw.level_table(m1_lab[m1_lab.index >= m1_lab.index.max() - pd.Timedelta(days=60)],
+                             ("H4",))) == 0)
     lab = lab.drop_duplicates("i", keep="first")
     lab_t = m1_lab.index[lab.i.to_numpy(int)]
     check("a labor ad belepot (nem 0 vs 0)", len(lab) > 50, str(len(lab)))
@@ -187,6 +195,67 @@ else:
     check("a savos kotesek mind 8-11 kozott nyiltak",
           all(8 <= pd.Timestamp(t.open_time).hour <= 11 for t in r2.trades)
           if r2.trades and hasattr(r2.trades[0], "open_time") else True)
+
+# ---------------------------------------------------------------------------
+print("== A kivezetett valtozatok: a fagyasztott kutato-modul ==")
+# ⚠ MIERT KELL EZ A SZAKASZ. 2026-09-22-en a bukott valtozatok (retest/fordulo
+# belepo, H1/H4 szintek, fibo celar) kikerultek az ELO szabalybol a
+# `tools/research/csilla_variants` modulba. Ket dolog romolhat el nemaan:
+#   (a) a kutato-modul lemasolja a `break` agat is -> ket peldany, es az egyik
+#       elcsuszik (`duplication-produced-its-own-bug`);
+#   (b) valaki visszahozza a H1/H4-et vagy a celart az elo modulba.
+# Ez a szakasz mindkettot fogja. NEM ures paritas: a ket kar KULON kodutat
+# jar (az egyik a `csilla_rules`, a masik a `csilla_variants`), es azt is
+# bizonyitjuk, hogy a TOBBI mod MAS eredmenyt ad — kulonben a delegalas
+# barmit csinalhatna.
+sys.path.insert(0, str(ROOT / "tools" / "research"))
+try:
+    import csilla_variants as _cv                                        # noqa: E402
+except Exception as _e:                                                  # pragma: no cover
+    check("a csilla_variants importalhato", False, str(_e))
+    _cv = None
+if _cv is not None and _m1p.exists():
+    from strategies import csilla_rules as _sw2                          # noqa: E402
+    _m = m1_all[m1_all.index >= m1_all.index.max() - pd.Timedelta(days=400)]
+    _elo = _sw2.entry_table(_m, None, ("D1", "W1"), stop_atr=1.5)
+    _var = _cv.entry_table(_m, None, ("D1", "W1"), "break", stop_atr=1.5)
+    check("mindket kar ad belepot (nem 0 vs 0)", len(_elo) > 20 and len(_var) > 20,
+          f"{len(_elo)} / {len(_var)}")
+    _kozos = ["i", "dir", "sl_abs", "atr15", "kind", "label", "piv", "b", "level", "ev_i"]
+    check("a `break` ag BITRE AZONOS (a variants az elo modulba delegal)",
+          len(_elo) == len(_var) and all(
+              (_elo[c].reset_index(drop=True) == _var[c].reset_index(drop=True)).all()
+              for c in _kozos),
+          f"{len(_elo)} vs {len(_var)}")
+    check("a fibo celar CSAK a kutato-modulban van",
+          "tp_abs" in _var.columns and "tp_abs" not in _elo.columns)
+    _ford = _cv.entry_table(_m, None, ("D1", "W1"), "fordulo", stop_atr=1.5)
+    _ret = _cv.entry_table(_m, None, ("D1", "W1"), "retest", stop_atr=1.5)
+    check("a `fordulo` es a `retest` MAS halmazt ad (a delegalas nem nyeli el)",
+          len(_ford) != len(_elo) and len(_ret) != len(_elo),
+          f"break={len(_elo)} fordulo={len(_ford)} retest={len(_ret)}")
+    check("H1 szint: a kutato-modul ad, az elo NEM",
+          len(_cv.level_table(_m, ("H1",))) > 0 and len(_sw2.level_table(_m, ("H1",))) == 0)
+    # az elo modul mar nem is ismeri a bukott kapcsolokat
+    import inspect                                                       # noqa: E402
+    check("az elo `lo_entries`-nek NINCS `mode` parametere",
+          "mode" not in inspect.signature(_sw2.lo_entries).parameters,
+          str(inspect.signature(_sw2.lo_entries)))
+    check("az elo `entries_from`-nak NINCS `mode` parametere",
+          "mode" not in inspect.signature(_sw2.entries_from).parameters)
+    for _k in ("fib_ext", "retest_tol", "k_h1", "k_h4", "ttl_h1", "ttl_h4"):
+        check(f"a(z) {_k!r} NINCS a csilla_rules.DEFAULTS-ban", _k not in _sw2.DEFAULTS)
+
+# ---------------------------------------------------------------------------
+print("== A napi feladat HORDOZHATO ==")
+# ⚠ A `.tfs` csomag csak a `strategies.<x>` segedmodulokat viszi. Az elso
+# valtozat a `tools/research/csilla_levels`-t importalta: masik gepre telepitve
+# a napi feladat minden este import-hibaval allt volna meg, nemaan.
+_fw_src = (ROOT / "strategies" / "csilla_forward.py").read_text(encoding="utf-8")
+check("a forward-feladat NEM importal kutato-szkriptet (csilla_levels)",
+      "import csilla_levels" not in _fw_src)
+check("a forward-feladat a KOZOS szabalyt hivja (csilla_rules)",
+      "from strategies import csilla_rules" in _fw_src)
 
 print()
 if _fail:

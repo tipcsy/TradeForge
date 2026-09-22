@@ -1,7 +1,8 @@
 """SWING-SZINTEK ÉS SZERKEZET-TÖRÉS — a „Csilla beszállója" szabály KÖZÖS magja.
 
-Egyetlen hely, ahonnan a kutató-labor (`tools/research/csilla_levels.py`) ÉS a
-stratégia-modul (`strategies/csilla.py`) ugyanazt a szabályt hívja.
+Egyetlen hely, ahonnan a kutató-labor (`tools/research/csilla_levels.py`, a
+`csilla_variants`-on át) ÉS a stratégia-modul (`strategies/csilla.py`) ugyanazt
+a szabályt hívja.
 
 ⚠ MIÉRT A `strategies/`-BEN, ÉS NEM A `core/`-BAN. A `.tfs` csomagoló a
 stratégia SAJÁT segédmoduljait viszi magával (amiket `strategies.<x>`-ből
@@ -30,6 +31,22 @@ mérés" jegyzet 5. szakasza):
 
 Az M1 az egyetlen bemenet: a M15 / D1 / W1 keretek belőle képződnek
 (`resample`), így a labor és a stratégia ugyanazt a gyertyát látja.
+
+⚠ EZ A MODUL CSAK AZT TARTALMAZZA, AMI FUT (takarítás: 2026-09-22). A Csilla
+körül nyolc gépi olvasat készült, és mind MÉRVE ÉS BUKOTT; a kódjuk ezért
+átkerült a `tools/research/csilla_variants.py` fagyasztott modulba, hogy a
+szállított stratégia ne vigye magával a zsákutcákat:
+
+  * `retest` és `fordulo` belépő-mód — az első 14 éves mérés 4 változata
+    (−0,22 R), illetve a 09-22-i páros olvasat (−0,435 R, 6% találat);
+  * H1 és H4 szint-fajta — a páros olvasat (H1→M15 −0,049, H1→M1 −0,167);
+  * fibo célár (`fib_ext`, `leg`, `tp_abs`) — a mért változatban NINCS célár,
+    és célár nélkül mindig jobb volt; a motor `tp_rr_ratio`-ból számol.
+
+Ami MARAD a bukott kísérletekből: a SZERKEZETI stop (`stop_atr=None`, a törés
+előtti utolsó ellenoldali M15-swing). Nem azért, mert nyert — hanem mert ez az
+EGYETLEN nyitva hagyott kérdés (a bukások közös tényezője a szűk zászló-stop
+volt), és a mérés-jegyzet kifejezetten erre tart fenn egy visszatérést.
 """
 from __future__ import annotations
 
@@ -37,13 +54,10 @@ import numpy as np
 import pandas as pd
 
 DEFAULTS = dict(hi_tf=15, k_hi=3, k_lo=3, k_d1=2, k_w1=1, ttl_d1=90, ttl_w1=365,
-                # H4 / H1 szintek — a jegyzet ezeket is említi; a MÉRT változat
-                # csak D1+W1 (a `level_kinds` alapja). k = fraktál félablak,
-                # ttl = élettartam NAPBAN.
-                k_h4=3, ttl_h4=30, k_h1=3, ttl_h1=10,
-                max_wait=8, buffer_atr=0.2, min_sl_atr=1.0, retest_tol=0.1,
-                fib_ext=1.382, stop_atr=1.5)
-KINDS = ("H1", "H4", "D1", "W1")          # a `level_kinds` megengedett elemei
+                max_wait=8, buffer_atr=0.2, min_sl_atr=1.0, stop_atr=1.5)
+# A szint-fajták: k = fraktál félablak, ttl = élettartam NAPBAN. A H1/H4
+# 2026-09-22-én kikerült (mérve és bukott) — a `csilla_variants` viszi tovább.
+KINDS = ("D1", "W1")                      # a `level_kinds` megengedett elemei
 
 
 def parse_kinds(spec) -> tuple:
@@ -119,12 +133,6 @@ def level_table(m1: pd.DataFrame, kinds=("D1", "W1"), P: dict | None = None) -> 
     napi/heti OHLC ugyanaz, akár M1-ből, akár M15-ből jön."""
     P = {**DEFAULTS, **(P or {})}
     rows = []
-    if "H1" in kinds:
-        rows += _levels_of(resample(m1, 60), P["k_h1"], pd.Timedelta(hours=1),
-                           pd.Timedelta(days=P["ttl_h1"]), "H1")
-    if "H4" in kinds:
-        rows += _levels_of(resample(m1, 240), P["k_h4"], pd.Timedelta(hours=4),
-                           pd.Timedelta(days=P["ttl_h4"]), "H4")
     if "D1" in kinds:
         rows += _levels_of(resample(m1, 1440), P["k_d1"], pd.Timedelta(days=1),
                            pd.Timedelta(days=P["ttl_d1"]), "D1")
@@ -161,10 +169,13 @@ def d1_trend_series(m1: pd.DataFrame, P: dict | None = None) -> pd.Series:
 
 # ── az M15 események ─────────────────────────────────────────────────────────
 def hi_events(hi: pd.DataFrame, lv: pd.DataFrame, trend: pd.Series,
-              d1_opp: pd.DataFrame, P: dict | None = None) -> list[dict]:
-    """M15 zárás egy élő szinten túl. Minden szint egyszer. A `leg` a tört
-    szint és a D1 ellenoldali utolsó igazolt swingje közti táv; `stop_lvl` a
-    törés előtti utolsó igazolt ellenoldali M15-swing (a szerkezeti stophoz)."""
+              P: dict | None = None) -> list[dict]:
+    """M15 zárás egy élő szinten túl. Minden szint egyszer. A `stop_lvl` a
+    törés előtti utolsó igazolt ellenoldali M15-swing (a szerkezeti stophoz).
+
+    ⚠ A `leg` (a tört szint és a D1 ellenoldali utolsó swingje közti táv) 2026-09-22-én
+    kikerült: EGYETLEN fogyasztója a fibo célár volt, ami megbukott. Vele együtt
+    a `d1_opp` paraméter is — az csak a `leg`-hez kellett."""
     P = {**DEFAULTS, **(P or {})}
     c = hi.index
     close = hi["close"].to_numpy(float)
@@ -186,9 +197,6 @@ def hi_events(hi: pd.DataFrame, lv: pd.DataFrame, trend: pd.Series,
     nxt = 0
     tr_t = trend.index.to_numpy()
     tr_v = trend.to_numpy()
-    opp_t = d1_opp["t_conf"].to_numpy()
-    opp_p = d1_opp["price"].to_numpy(float)
-    opp_s = d1_opp["side"].to_numpy(int)
     out = []
     for i in range(k, len(hi)):
         j = i - k
@@ -215,35 +223,34 @@ def hi_events(hi: pd.DataFrame, lv: pd.DataFrame, trend: pd.Series,
             broken[grp] = True
             g = grp[np.argmin(np.abs(lv_price[grp] - close[i]))]
             lvl = float(lv_price[g])
-            m = (opp_t <= t_open[i]) & (opp_s == -d)
-            leg = abs(lvl - float(opp_p[m][-1])) if m.any() else 0.0
             if d > 0:
                 stop_lvl = sw_l[-1][1] if sw_l else np.nan
             else:
                 stop_lvl = sw_h[-1][1] if sw_h else np.nan
             lab_ = ("folyt" if trend_now == d else
                     "ford" if trend_now == -d else "nincs")
-            out.append(dict(i=i, dir=d, level=lvl, leg=leg, kind=str(lv_kind[g]),
+            out.append(dict(i=i, dir=d, level=lvl, kind=str(lv_kind[g]),
                             stop_lvl=stop_lvl, label=lab_, t_close=t_close[i]))
     return out
 
 
 # ── az M1 belépők egy eseményhez ─────────────────────────────────────────────
 def lo_entries(ev: dict, start: int, end: int, h, l, c, atr1, pc, pv, k,
-               mode: str, P: dict) -> list[dict]:
-    """[{i, sl_abs, level, piv, b}] — a visszahúzódás-belépők az [start, end]
+               P: dict) -> list[dict]:
+    """[{i, sl_abs, level, piv, b}] — a zászló-törés belépői az [start, end]
     ablakban. `pc`/`pv` az M1 pivotjai (a pivot baron), `k` a félablak (az
     igazolás késése). `sl_abs`: az M1-alapú (első mérés) stop — a hívó
     felülírhatja.
 
-    `mode`:
-      `break`   — az M1 gyertya a zászló csúcsán TÚL zár (a törés gyertyáján);
-      `retest`  — a törés után az első visszaérés a tört szintre;
-      `fordulo` — a zászló csúcsa utáni első IGAZOLT ellenoldali M1-swing (long:
-                  völgy) — a visszahúzódás fordulója; belépő az igazolás
-                  gyertyáján (a pivot + k), stop a forduló-swing mögött.
-                  (2026-09-22: a felhasználó kérte a `break` mellé, mindkettő
-                  mérve; `b` = −1, mert nincs törés.)"""
+    A SZABÁLY: az esemény iránya felőli első IGAZOLT M1-swing a „zászló" csúcsa;
+    belépő az a gyertya, amelyik ezen TÚL zár. Az ablakban több belépő is lehet.
+
+    ⚠ A `mode` PARAMÉTER MEGSZŰNT (2026-09-22). Két másik belépő-mód létezett
+    itt — `retest` (visszaérés a tört szintre) és `fordulo` (a zászló utáni első
+    igazolt ellenoldali swing) —, mindkettő mérve és bukva; a kódjuk a
+    `tools/research/csilla_variants.py`-ban él tovább, és ONNAN hívja vissza ezt
+    a függvényt a `break` ágra, hogy az élő szabályból ne legyen második példány.
+    """
     d = ev["dir"]
     out = []
     i = start
@@ -258,25 +265,6 @@ def lo_entries(ev: dict, start: int, end: int, h, l, c, atr1, pc, pv, k,
         if piv < 0:
             break
         lvl = h[piv] if d > 0 else l[piv]
-        if mode == "fordulo":
-            ent = fj = -1
-            for t in range(i, end + 1):
-                j = t - k                      # ez a bar MOST igazolódik swingnek
-                if j > piv and ((d > 0 and pv[j]) or (d < 0 and pc[j])):
-                    ent, fj = t, j
-                    break
-            if ent < 0:
-                break
-            a = atr1[ent]
-            if np.isfinite(a) and a > 0:
-                if d > 0:
-                    sl_abs = c[ent] - (l[fj] - P["buffer_atr"] * a)
-                else:
-                    sl_abs = (h[fj] + P["buffer_atr"] * a) - c[ent]
-                sl_abs = max(sl_abs, P["min_sl_atr"] * a)
-                out.append(dict(i=ent, sl_abs=sl_abs, level=lvl, piv=piv, b=-1))
-            i = ent + 1
-            continue
         b = -1
         for t in range(i, end + 1):
             if (d > 0 and c[t] > lvl) or (d < 0 and c[t] < lvl):
@@ -284,21 +272,8 @@ def lo_entries(ev: dict, start: int, end: int, h, l, c, atr1, pc, pv, k,
                 break
         if b < 0:
             break
-        ent = -1
-        if mode == "break":
-            ent = b
-        else:                       # retest
-            for t in range(b + 1, min(end, b + P["max_wait_lo"]) + 1):
-                a = atr1[t]
-                if not np.isfinite(a):
-                    continue
-                if d > 0 and l[t] <= lvl + P["retest_tol"] * a and c[t] > lvl:
-                    ent = t
-                    break
-                if d < 0 and h[t] >= lvl - P["retest_tol"] * a and c[t] < lvl:
-                    ent = t
-                    break
-        if ent >= 0 and np.isfinite(atr1[ent]) and atr1[ent] > 0:
+        ent = b
+        if np.isfinite(atr1[ent]) and atr1[ent] > 0:
             a = atr1[ent]
             if d > 0:
                 szel = min(l[piv:ent + 1])
@@ -325,16 +300,21 @@ def hi_context(hi: pd.DataFrame, P: dict | None = None, kinds=("D1", "W1")) -> d
     if not len(lv):
         return dict(lv=lv, evs=[], a15=a15, P=P)
     trend = d1_trend_series(hi, P)
-    d1_opp = lv[lv.kind == "D1"] if "D1" in kinds else level_table(hi, ("D1",), P)
-    evs = hi_events(hi, lv, trend, d1_opp, P)
+    evs = hi_events(hi, lv, trend, P)
     return dict(lv=lv, evs=evs, a15=a15, P=P, kinds=tuple(kinds))
 
 
-def entries_from(ctx: dict, m1: pd.DataFrame, mode: str = "break",
+def entries_from(ctx: dict, m1: pd.DataFrame,
                  stop_atr: float | None = None) -> pd.DataFrame:
     """A belépők táblája az M1 sorokra egy `hi_context`-ből: `i` (M1 sorindex),
-    `dir`, `sl_abs` (ÁRBAN), `tp_abs` (fibo, árban), `atr15` (a törés
-    gyertyáján), `kind`, `label`, `piv`, `b`, `level`, `ev_i` (M15 esemény)."""
+    `dir`, `sl_abs` (ÁRBAN), `atr15` (a törés gyertyáján), `kind`, `label`,
+    `piv`, `b`, `level`, `ev_i` (M15 esemény).
+
+    ⚠ CÉLÁR NINCS. Volt: `tp_abs` = a tört szinttől `fib_ext` × a láb hossza
+    (a jegyzet fibo 138,2-je). A mérés minden változatban célár NÉLKÜL adott
+    jobb eredményt (−0,013 vs −0,068 R), 14 éven EGYSZER sem ért el csomag
+    10–20 R-t, és a motor amúgy is a `tp_rr_ratio`-ból számol messzi célárat
+    (lásd `be-threshold-is-tp-relative`: rövid célár némán kikapcsolná a BE-t)."""
     P = ctx["P"]
     evs, a15 = ctx["evs"], ctx["a15"]
     if not evs or not len(m1):
@@ -347,7 +327,6 @@ def entries_from(ctx: dict, m1: pd.DataFrame, mode: str = "break",
     pc, pv = pivots(h, l, P["k_lo"])
     start = np.searchsorted(m1.index.to_numpy(), [e["t_close"] for e in evs], side="left")
     max_wait_lo = P["max_wait"] * P["hi_tf"]
-    PP = {**P, "max_wait_lo": max_wait_lo}
     rows = []
     n = len(c)
     t0 = m1.index[0]
@@ -363,22 +342,21 @@ def entries_from(ctx: dict, m1: pd.DataFrame, mode: str = "break",
         if not (np.isfinite(a) and a > 0) or not np.isfinite(e["stop_lvl"]):
             continue
         end = min(n - 1, int(s) + max_wait_lo)
-        for x in lo_entries(e, int(s), end, h, l, c, atr1, pc, pv, P["k_lo"], mode, PP):
+        for x in lo_entries(e, int(s), end, h, l, c, atr1, pc, pv, P["k_lo"], P):
             i = x["i"]
             d = e["dir"]
             sl_abs = (c[i] - (e["stop_lvl"] - P["buffer_atr"] * a)) if d > 0                 else ((e["stop_lvl"] + P["buffer_atr"] * a) - c[i])
             sl_abs = max(sl_abs, P["min_sl_atr"] * a)
             if stop_atr:
                 sl_abs = float(stop_atr) * a
-            cel = e["level"] + d * P["fib_ext"] * e["leg"]
-            rows.append(dict(i=i, dir=d, sl_abs=sl_abs, tp_abs=d * (cel - c[i]),
+            rows.append(dict(i=i, dir=d, sl_abs=sl_abs,
                              atr15=a, kind=e["kind"], label=e["label"],
                              piv=x["piv"], b=x["b"], level=x["level"], ev_i=e["i"]))
     return pd.DataFrame(rows) if rows else pd.DataFrame()
 
 
 def entry_table(m1: pd.DataFrame, P: dict | None = None, kinds=("D1", "W1"),
-                mode: str = "break", stop_atr: float | None = None,
+                stop_atr: float | None = None,
                 hi: pd.DataFrame | None = None) -> pd.DataFrame:
     """A teljes szabály egy M1 keretre. `hi` = None → a M15 az M1-ből képződik
     (labor); megadva (a motor MT5-ös M15 kerete) azt használja a kontextushoz.
@@ -388,7 +366,7 @@ def entry_table(m1: pd.DataFrame, P: dict | None = None, kinds=("D1", "W1"),
     P = {**DEFAULTS, **(P or {})}
     if hi is None:
         hi = resample(m1, P["hi_tf"])
-    return entries_from(hi_context(hi, P, kinds), m1, mode, stop_atr)
+    return entries_from(hi_context(hi, P, kinds), m1, stop_atr)
 
 
 def signal_column(m1: pd.DataFrame, P: dict | None = None,
@@ -403,7 +381,7 @@ def signal_column(m1: pd.DataFrame, P: dict | None = None,
     sl = np.full(n, np.nan)
     a15 = np.full(n, np.nan)
     if ctx is not None:
-        et = entries_from(ctx, m1, "break", stop_atr)
+        et = entries_from(ctx, m1, stop_atr)
     else:
         et = entry_table(m1, P, stop_atr=stop_atr, hi=hi)
     if len(et):

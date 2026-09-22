@@ -57,7 +57,8 @@ import pandas as pd
 
 import lab
 from csilla_swing_break import summarize, bontas
-from strategies.csilla_rules import lo_entries, pivots  # noqa: F401 (a többi szkript innen importálja)
+from strategies.csilla_rules import pivots               # noqa: F401 (a többi szkript innen importálja)
+from csilla_variants import lo_entries                   # noqa: F401 (mód-választós változat)
 
 SYMS = ["GOLD", "USDJPY", "UsaInd", "UsaTec", "Ger40",
         "EURUSD", "EURJPY", "UK100"]
@@ -75,7 +76,13 @@ T_MIN, EDGE_SPREAD_MIN, INSTR_MIN = 2.0, 2.0, 3
 # modulban élnek, hogy a stratégia-modul (`strategies/csilla.py`) UGYANAZT
 # hívja. Itt csak vékony burkok maradtak; a mérés eredménye bitre azonos
 # (ellenőrizve Ger40-en: break/fibo n=201 R=+0,0159, break/none n=213 R=−0,0454).
-from strategies import csilla_rules as _sw
+#
+# ⚠ 2026-09-22 ÓTA a `csilla_variants`-on KERESZTÜL, nem közvetlenül. Ez a
+# szkript LEZÁRT kérdéseket mér (H1/H4 szintek, `retest`/`fordulo` belépő, fibo
+# célár), és ezek kikerültek az élő szabályból — a `csilla_variants` őrzi őket,
+# a `break` ágat pedig változatlanul a `csilla_rules`-ból hívja. Az élő úton
+# tehát NINCS második példány.
+import csilla_variants as _sw
 
 
 def level_table(m1, kinds):
