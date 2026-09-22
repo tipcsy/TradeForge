@@ -1125,12 +1125,27 @@ class InstrumentParamsDialog:
         # Fent a TERV (mi fog történni és milyen feltételek mellett), alatta a
         # tényleges futtató. A korábbi külön „Optimalizálás" lap tartalma ide
         # költözött: ugyanarra a kérdésre válaszolt, csak más számmal.
-        plan_box = tk.Frame(page, bg=BG)
-        plan_box.pack(side="top", fill="x")
-        bt_host = tk.Frame(page, bg=BG)
-        bt_host.pack(side="top", fill="both", expand=True)
+        # ── A LAP HÁROM RÉTEGE (2026-09-22, a felhasználó terve) ───────────
+        #   1. FEJLÉC-MEZŐK: instrumentum · stratégia, időszak, elérhető, slot,
+        #      nyitó összeg — MINDHÁROM módra ugyanazok, ezért a fülek FÖLÖTT.
+        #   2. FÜLEK: Backtest · Hangolás · Optimalizálás (a volt rádiógombok).
+        #   3. LAPOK: fülönként CSAK az oda tartozó vezérlő és eredmény.
+        #
+        # ⚠ MIÉRT FÜLEK, ÉS MIÉRT ÍGY. A korábbi elrendezésben mindhárom mód
+        # szövegei EGYSZERRE látszottak (a backtest mondata, a hangolás terve és
+        # az optimalizálás mintavétel-magyarázata), ráadásul kettő kétszer is —
+        # egyszer az Indítás mellett, egyszer alatta. A felhasználó szava:
+        # „a backtesthez tartozó rész is megjelenik a hangoláson és fordítva",
+        # és ez adta a kavalkád nagy részét. Egy fül egy kérdésre felel.
+        head_box = tk.Frame(page, bg=BG)
+        head_box.pack(side="top", fill="x")
+        tabs_box = tk.Frame(page, bg=BG)
+        tabs_box.pack(side="top", fill="both", expand=True)
 
-        self._build_plan_strip(plan_box)
+        # ⚠ A SORREND KÖTÖTT: a fülek építése hozza létre a végigpróbálás
+        # rajzát (a Hangolás lapon), az Eredmény szakasz pedig már csak a
+        # kötés-listát teszi le.
+        self._build_run_tabs(head_box, tabs_box)
         self._build_result_section(_res)
 
         from dashboard.backtest_dialog import BacktestDialog
@@ -1144,7 +1159,8 @@ class InstrumentParamsDialog:
             on_result=self._on_bt_window_result,
             preset_name=self._rr_name.get(),
             on_apply_params=self._apply_params_from_bt,
-            host=bt_host, on_state=self._on_run_state, host_scroll=False,
+            host=self._bt_page, header_host=self._bt_header,
+            on_state=self._on_run_state, host_scroll=False,
             on_run_done=self._on_run_done,
             provide_hours=self._allowed_hours_from_ui,
             provide_rr=self._rr_spec_from_ui,
@@ -1223,39 +1239,74 @@ class InstrumentParamsDialog:
         mód/pipa nem változik (az új helyzet)."""
         self._run_note = (text, fg or FG_YELLOW)
         try:
-            self._run_status.config(text=text, fg=fg or FG_YELLOW)
+            self._set_run_status(text, fg or FG_YELLOW)
         except tk.TclError:
             pass
         self._prog_hide()
 
-    def _prog_show(self, pct=None, text=""):
-        """Haladás-sáv a gomb ALATT. `pct=None` → határozatlan (fut, de nem
-        tudjuk, hol tart) — ez őszintébb, mint egy kitalált százalék."""
+    def _set_run_status(self, text: str, fg=None):
+        """Az optimalizáló ÁLLAPOTSORA — és CSAK akkor látszik, ha van mit
+        mondania.
+
+        ⚠ A felhasználó leletje (2026-09-22): az állandó „Az optimalizálás nem
+        fut." felirat zaj volt — hogy nem fut, az amúgy is látszik (nem pörög a
+        sáv, az Indítás nem Leállítás). Az üzenet akkor ér valamit, ha épp fut,
+        vagy ha most állítottad le (a leállás a futó trial végén hat)."""
+        lbl = getattr(self, "_run_status", None)
+        if lbl is None:
+            return
         try:
-            if not self._prog_box.winfo_manager():
-                # ⚠ `before`: a `pack` alapból a doboz VÉGÉRE tenné, a feltételek
-                # és a keresési tér alá — a kérés viszont „közvetlen az indítás
-                # gomb alatt".
-                self._prog_box.pack(anchor="w", fill="x", padx=12, pady=(4, 0),
-                                    before=self._run_status)
-            if pct is None:
-                if str(self._prog.cget("mode")) != "indeterminate":
-                    self._prog.config(mode="indeterminate")
-                    self._prog.start(60)
+            lbl.config(text=text or "", fg=fg or FG_GRAY)
+            if text:
+                if not lbl.winfo_manager():
+                    lbl.pack(anchor="w", fill="x", padx=12, pady=(4, 0))
             else:
-                self._prog.stop()
-                self._prog.config(mode="determinate",
-                                  value=max(0.0, min(100.0, float(pct))))
-            self._prog_lbl.config(text=text)
+                lbl.pack_forget()
         except (tk.TclError, AttributeError):
             pass
 
+    def _prog_bars(self):
+        """A haladás-sávok `(box, bar, label)` hármasai: a Hangolás és az
+        Optimalizálás lapé.
+
+        ⚠ MINDKETTŐT EGYSZERRE állítjuk. A futás típusát a fül dönti el, de a
+        felhasználó közben átlapozhat — egy másik lapon álló, 0 %-on maradt sáv
+        azt sugallná, hogy ott is fut valami, ami nem halad."""
+        out = []
+        for _b, _p, _l in (("_prog_box", "_prog", "_prog_lbl"),
+                           ("_prog_box2", "_prog2", "_prog_lbl2")):
+            box, bar = getattr(self, _b, None), getattr(self, _p, None)
+            if box is not None and bar is not None:
+                out.append((box, bar, getattr(self, _l, None)))
+        return out
+
+    def _prog_show(self, pct=None, text=""):
+        """Haladás-sáv a gomb ALATT. `pct=None` → határozatlan (fut, de nem
+        tudjuk, hol tart) — ez őszintébb, mint egy kitalált százalék."""
+        for box, bar, lbl in self._prog_bars():
+            try:
+                if not box.winfo_manager():
+                    box.pack(anchor="w", fill="x", padx=12, pady=(4, 0))
+                if pct is None:
+                    if str(bar.cget("mode")) != "indeterminate":
+                        bar.config(mode="indeterminate")
+                        bar.start(60)
+                else:
+                    bar.stop()
+                    bar.config(mode="determinate",
+                               value=max(0.0, min(100.0, float(pct))))
+                if lbl is not None:
+                    lbl.config(text=text)
+            except (tk.TclError, AttributeError):
+                continue
+
     def _prog_hide(self):
-        try:
-            self._prog.stop()
-            self._prog_box.pack_forget()
-        except (tk.TclError, AttributeError):
-            pass
+        for box, bar, _lbl in self._prog_bars():
+            try:
+                bar.stop()
+                box.pack_forget()
+            except (tk.TclError, AttributeError):
+                continue
 
     def _refresh_run_mode_ui(self):
         """⚠ A mód/pipa változása ÚJ helyzet: a korábbi elutasítás oka elavult.
@@ -1267,23 +1318,12 @@ class InstrumentParamsDialog:
         except (AttributeError, tk.TclError):
             return
         self._run_note = None
-        _lbl = getattr(self, "_mode_lbl", None)
-        if _lbl is not None:
-            try:
-                _c = self._mode_conflict()
-                _lbl.config(text=_c)
-                _lbl.pack_configure(pady=(2, 0) if _c else (0, 0))
-            except tk.TclError:
-                pass
-        _cond = getattr(self, "_cond_box", None)
-        if _cond is not None:
-            try:
-                if _m == self.RUN_OPTIMIZE:
-                    _cond.pack(anchor="w", fill="x", padx=12)
-                else:
-                    _cond.pack_forget()
-            except tk.TclError:
-                pass
+        # ⚠ A MÓD-KONFLIKTUS FELIRATA MEGSZŰNT (2026-09-22). Azt mondta meg, mit
+        # hagy figyelmen kívül a mostani mód („A 1 pipa most nem számít") —
+        # fülekkel felesleges: a Backtest fülön nincs pipa-ígéret, a Hangolás
+        # fül pedig LETILTVA van, ha nincs bepipált paraméter. A feltételek
+        # (walk-forward, kapuk) a saját lapjukon állnak.
+        _ = _m
 
     def _tuned_rows(self) -> list:
         """A paraméter-sorok a PILLANATNYI pipákkal (egy helyen, hogy a terv és
@@ -1327,6 +1367,166 @@ class InstrumentParamsDialog:
             return _t("idlg3.nincs_pipa_igy_ez")
         return ""
 
+    # A fülek KÓDJA = a mentett mód kódja (`_run_mode`), tehát a választás
+    # ugyanúgy megmarad instrumentumonként, mint a rádiógomboknál.
+    def _build_run_tabs(self, head_box, box):
+        """A fül-sáv és a három lap. A fejléc-mezőket a beágyazott
+        `BacktestDialog` építi a `head_box`-ba (ő birtokolja a változókat)."""
+        self._run_mode = tk.StringVar(value=self._load_run_mode())
+        bar = tk.Frame(box, bg=BG)
+        bar.pack(fill="x", padx=12, pady=(8, 0))
+        pages = tk.Frame(box, bg=BG)
+        pages.pack(fill="both", expand=True)
+        self._tab_btns, self._tab_pages = {}, {}
+        for _val, _txt in ((self.RUN_BACKTEST, "Backtest"),
+                           (self.RUN_PLANNED, _t("idlg3.hangolas")),
+                           (self.RUN_OPTIMIZE, _t("idlg3.optimalizalas"))):
+            b = tk.Button(bar, text=_txt, bg=BG_HEADER, fg=FG_GRAY, relief="flat",
+                          font=self._sf, padx=14, pady=4, cursor="hand2",
+                          command=lambda v=_val: self._show_run_tab(v))
+            b.pack(side="left", padx=(0, 2))
+            self._tab_btns[_val] = b
+            pg = tk.Frame(pages, bg=BG)
+            self._tab_pages[_val] = pg
+        # ⚠ A HANGOLÁS fül LETILTHATÓ: ha nincs bepipált paraméter, a mód üres
+        # ígéret volna (a `_effective_mode` amúgy is Backtestre esne vissza).
+        self._rb_planned = self._tab_btns[self.RUN_PLANNED]
+        self._bt_header = head_box
+        self._build_tab_backtest(head_box, self._tab_pages[self.RUN_BACKTEST])
+        self._build_tab_planned(self._tab_pages[self.RUN_PLANNED])
+        self._build_tab_optimize(self._tab_pages[self.RUN_OPTIMIZE])
+        self._show_run_tab(self._run_mode.get(), save=False)
+
+    def _show_run_tab(self, val: str, save: bool = True):
+        """Fülváltás: a lap cseréje + a fejléc-mezők állapota + a mentés."""
+        try:
+            for k, b in (self._tab_btns or {}).items():
+                _akt = (k == val)
+                b.config(bg=(BG if _akt else BG_HEADER),
+                         fg=(FG_WHITE if _akt else FG_GRAY),
+                         font=(self._hf if _akt else self._sf))
+            for k, pg in (self._tab_pages or {}).items():
+                if k == val:
+                    pg.pack(fill="both", expand=True)
+                else:
+                    pg.pack_forget()
+        except (tk.TclError, AttributeError):
+            return
+        self._run_mode.set(val)
+        # ⚠ AZ IDŐSZAK/SLOT/NYITÓ ÖSSZEG KISZÜRKÜL az Optimalizálás fülön: az
+        # optimalizálás WALK-FORWARD ablakokból dolgozik (a configból), nem
+        # ezekből a dátumokból. Aktívan hagyva azt ígérnék, hogy számítanak.
+        self._set_header_enabled(val != self.RUN_OPTIMIZE)
+        if save:
+            self._on_run_mode()
+
+    def _set_header_enabled(self, on: bool):
+        _bt = getattr(self, "_run_tab", None)
+        if _bt is None:
+            return
+        try:
+            _bt.set_header_enabled(bool(on))
+        except (AttributeError, tk.TclError):
+            pass
+
+    def _build_tab_backtest(self, head_box, pg):
+        """Backtest lap: a beágyazott panel MINDEN futás-tartalma (indítás,
+        haladás, élő sor, jelölt-lista, összevetés, egyenleg-görbe, minősítés).
+        A fejléc-mezők a `head_box`-ba kerülnek — a fülek FÖLÉ."""
+        act = tk.Frame(pg, bg=BG)
+        act.pack(anchor="w", fill="x", padx=12, pady=(8, 0))
+        self._plan_btn = tk.Button(act, text=_t("idlg.inditas"), bg=BTN_PLAY_BG,
+                                   fg=BTN_PLAY_FG, relief="flat", font=self._sf,
+                                   command=self._start_planned)
+        self._plan_btn.pack(side="left")
+        self._plan_short = tk.Label(act, text=_t("bt.single_run"),
+                                    bg=BG, fg=FG_GRAY, font=self._sf,
+                                    anchor="w", justify="left")
+        self._plan_short.pack(side="left", padx=(10, 0), fill="x", expand=True)
+        self._bt_page = pg          # ide épül a beágyazott panel törzse
+
+    def _build_tab_planned(self, pg):
+        """Hangolás lap: MI fog végigpróbálódni + Indítás + haladás + a
+        végigpróbálás rajza (az utóbbi az Eredmény szakaszból költözött ide —
+        a felhasználó kérése: ne keveredjen a backtest eredményével)."""
+        act = tk.Frame(pg, bg=BG)
+        act.pack(anchor="w", fill="x", padx=12, pady=(8, 0))
+        self._plan_btn2 = tk.Button(act, text=_t("idlg.inditas"), bg=BTN_PLAY_BG,
+                                    fg=BTN_PLAY_FG, relief="flat", font=self._sf,
+                                    command=self._start_planned)
+        self._plan_btn2.pack(side="left")
+        self._tuned_lbl = _autowrap(tk.Label(pg, bg=BG, fg=FG_GRAY, font=self._sf,
+                                             anchor="w", justify="left"),
+                                    self._body_canvas)
+        self._tuned_lbl.pack(anchor="w", fill="x", padx=12, pady=(4, 0))
+        from tkinter import ttk as _ttk
+        self._prog_box = tk.Frame(pg, bg=BG)
+        self._prog = _ttk.Progressbar(self._prog_box, mode="determinate",
+                                      maximum=100, length=260)
+        self._prog.pack(side="left")
+        self._prog_lbl = tk.Label(self._prog_box, text="", bg=BG, fg=FG_GRAY,
+                                  font=self._sf)
+        self._prog_lbl.pack(side="left", padx=(8, 0))
+        # ── A VÉGIGPRÓBÁLÁS RAJZA — ITT, nem az Eredmény szakaszban ────────
+        # ⚠ A felhasználó kérése (2026-09-22): „a backtesthez tartozó rész is
+        # megjelenik a hangoláson és fordítva" — ez adta a kavalkád nagy részét.
+        # A hangolás eredménye (a mérce szerinti görbe) ezért a HANGOLÁS lapon
+        # van; az Eredmény szakaszban csak a KÖTÉS-LISTA maradt, ami mindkét
+        # futásra ugyanazt jelenti.
+        self._sweep_box = tk.Frame(pg, bg=BG)
+        self._sweep_box.pack(anchor="w", fill="x", padx=12, pady=(4, 0))
+        _sb = tk.Frame(self._sweep_box, bg=BG)
+        _sb.pack(anchor="w", fill="x")
+        tk.Label(_sb, text=_t("idlg.merce"), bg=BG, fg=FG_GRAY_DIM,
+                 font=self._sf).pack(side="left", padx=(0, 3))
+        self._sw_metric = tk.StringVar(value="total_pnl")
+        _mm = tk.OptionMenu(_sb, self._sw_metric, "total_pnl", "profit_factor",
+                            "win_rate", "trades", "max_drawdown")
+        _mm.config(bg=BG_HEADER, fg=FG_WHITE, relief="flat", font=self._sf,
+                   highlightthickness=0, activebackground=BG_HEADER)
+        _mm["menu"].config(bg=BG_HEADER, fg=FG_WHITE, font=self._sf)
+        _mm.pack(side="left", padx=(0, 10))
+        self._sw_metric.trace_add("write", lambda *_a: self._redraw_sweep())
+        self._sw_status = tk.Label(_sb, text="", bg=BG, fg=FG_GRAY, font=self._sf)
+        self._sw_status.pack(side="left")
+        self._sw_canvas = tk.Canvas(self._sweep_box, bg=BG, height=260,
+                                    highlightthickness=0)
+        self._sw_canvas.bind("<Configure>", lambda _e: self._redraw_sweep())
+        self._sw_best = tk.Label(self._sweep_box, text="", bg=BG, fg=FG_GRAY,
+                                 font=self._sf, anchor="w", justify="left")
+        self._sw_rows, self._sw_axes = [], []
+
+    def _build_tab_optimize(self, pg):
+        """Optimalizálás lap: a mintavétel magyarázata, a feltételek
+        (walk-forward, kapuk), Indítás, haladás-sáv és az állapot — az utóbbi
+        CSAK akkor, ha van mit mondania (a „nem fut" felirat zaj volt)."""
+        act = tk.Frame(pg, bg=BG)
+        act.pack(anchor="w", fill="x", padx=12, pady=(8, 0))
+        self._plan_btn3 = tk.Button(act, text=_t("idlg.inditas"), bg=BTN_PLAY_BG,
+                                    fg=BTN_PLAY_FG, relief="flat", font=self._sf,
+                                    command=self._start_planned)
+        self._plan_btn3.pack(side="left")
+        self._space_lbl = _autowrap(tk.Label(pg, bg=BG, fg=FG_GRAY_DIM,
+                                             font=self._sf, anchor="w",
+                                             justify="left"),
+                                    self._body_canvas)
+        self._space_lbl.pack(anchor="w", fill="x", padx=12, pady=(4, 4))
+        from tkinter import ttk as _ttk
+        self._prog_box2 = tk.Frame(pg, bg=BG)
+        self._prog2 = _ttk.Progressbar(self._prog_box2, mode="determinate",
+                                       maximum=100, length=260)
+        self._prog2.pack(side="left")
+        self._prog_lbl2 = tk.Label(self._prog_box2, text="", bg=BG, fg=FG_GRAY,
+                                   font=self._sf)
+        self._prog_lbl2.pack(side="left", padx=(8, 0))
+        self._run_status = _autowrap(tk.Label(pg, text="", bg=BG, fg=FG_GRAY,
+                                              font=self._sf, anchor="w",
+                                              justify="left"),
+                                     self._body_canvas)
+        self._opt_cond_host = tk.Frame(pg, bg=BG)
+        self._opt_cond_host.pack(anchor="w", fill="x", padx=12, pady=(4, 0))
+        self._build_plan_strip(self._opt_cond_host)
+
     def _build_plan_strip(self, box):
         from core import opt_plan as _op
         from core import gates as _gt
@@ -1349,87 +1549,13 @@ class InstrumentParamsDialog:
             plan = None
         self._opt_plan = plan
 
-        head = tk.Frame(box, bg=BG)
-        head.pack(anchor="w", fill="x", padx=12, pady=(10, 0))
-        tk.Label(head, text=_t("idlg.mi_fog_tortenni"), bg=BG, fg=FG_WHITE,
-                 font=self._hf).pack(side="left")
-
-        # ── MI FUSSON: választó + Indítás, közvetlenül a cím alatt, BALRA ───
-        # ⚠ A VÁLASZTÓ nem kényelmi elem. A futás típusát eddig KIZÁRÓLAG a
-        # paraméterek pipái döntötték el — ha egyetlen paramétert akartál
-        # megnézni egy sima backteszttel, előbb ki kellett venni MINDEN pipát,
-        # utána vissza. A „Backtest" mód ezt megkerüli: az AKTUÁLIS értékekkel
-        # fut egyszer, akkor is, ha minden be van pipálva.
-        mode_box = tk.Frame(box, bg=BG)
-        mode_box.pack(anchor="w", fill="x", padx=12, pady=(6, 0))
-        self._run_mode = tk.StringVar(value=self._load_run_mode())
-        for _val, _txt, _tip in (
-                (self.RUN_BACKTEST, "Backtest",
-                 _t("idlg3.egyszer_fut_le_pontosan")),
-                (self.RUN_PLANNED, _t("idlg3.hangolas"),
-                 _t("idlg3.a_bepipalt_dimenziok_szamabol")),
-                (self.RUN_OPTIMIZE, _t("idlg3.optimalizalas"),
-                 _t("idlg3.a_megszokott_opt_minden"))):
-            _rb = tk.Radiobutton(mode_box, text=_txt, value=_val,
-                                 variable=self._run_mode, bg=BG, fg=FG_GRAY,
-                                 selectcolor=BG_HEADER, font=self._sf,
-                                 activebackground=BG, activeforeground=FG_WHITE,
-                                 anchor="w", command=self._on_run_mode)
-            _rb.pack(side="left", padx=(0, 12))
-            _attach_tooltip(_rb, _tip)
-            if _val == self.RUN_PLANNED:
-                self._rb_planned = _rb
-
-        act = tk.Frame(box, bg=BG)
-        act.pack(anchor="w", fill="x", padx=12, pady=(6, 0))
-        self._plan_btn = tk.Button(act, text=_t("idlg.inditas"), bg=BTN_PLAY_BG,
-                                   fg=BTN_PLAY_FG, relief="flat", font=self._sf,
-                                   command=self._start_planned)
-        self._plan_btn.pack(side="left")
-        self._plan_short = tk.Label(act, text="", bg=BG, fg=FG_GRAY,
-                                    font=self._sf, anchor="w", justify="left")
-        self._plan_short.pack(side="left", padx=(10, 0), fill="x", expand=True)
-
-        # ── HALADÁS-SÁV, KÖZVETLENÜL a gomb alatt ──────────────────────────
-        # ⚠ A kérés szó szerint: „elinduljon egy progress bar közvetlen az
-        # indítás gomb alatt, hogy látszódjon, hogy történik valami". A gomb
-        # felirata (Indítás → Leállítás) megmondja, hogy FUT; a sáv azt, hogy
-        # HALAD — a kettő nem ugyanaz. Egy órákig tartó optimalizálásnál az
-        # „elindult" önmagában nem nyugtat meg senkit.
-        #
-        # ⚠ Alapból NINCS kicsomagolva: egy 0%-on álló sáv tétlenségben azt
-        # sugallná, hogy fut valami, ami nem halad.
-        from tkinter import ttk as _ttk
-        self._prog_box = tk.Frame(box, bg=BG)
-        self._prog = _ttk.Progressbar(self._prog_box, mode="determinate",
-                                      maximum=100, length=260)
-        self._prog.pack(side="left")
-        self._prog_lbl = tk.Label(self._prog_box, text="", bg=BG, fg=FG_GRAY,
-                                  font=self._sf)
-        self._prog_lbl.pack(side="left", padx=(8, 0))
-
-        self._run_status = _autowrap(tk.Label(box, text="", bg=BG, fg=FG_GRAY,
-                                              font=self._sf, anchor="w",
-                                              justify="left"),
-                                     self._body_canvas)
-        self._run_status.pack(anchor="w", fill="x", padx=12, pady=(2, 0))
-        # ⚠ A KONFLIKTUS a gomb KÖZVETLEN közelébe: ott nézel, amikor nyomod.
-        self._mode_lbl = _autowrap(tk.Label(box, text="", bg=BG, fg=FG_YELLOW,
-                                            font=self._sf, anchor="w",
-                                            justify="left"),
-                                   self._body_canvas)
-        self._mode_lbl.pack(anchor="w", fill="x", padx=12)
-
-        self._tuned_lbl = _autowrap(tk.Label(box, bg=BG, fg=FG_GRAY, font=self._sf,
-                                             anchor="w", justify="left"),
-                                    self._body_canvas)
-        self._tuned_lbl.pack(anchor="w", fill="x", padx=12)
-        self._space_lbl = _autowrap(tk.Label(box, bg=BG, fg=FG_GRAY_DIM,
-                                             font=self._sf, anchor="w",
-                                             justify="left"),
-                                    self._body_canvas)
-        self._space_lbl.pack(anchor="w", fill="x", padx=12, pady=(0, 4))
-
+        # ⚠ AMI INNEN ELTŰNT (2026-09-22). Ez a csík korábban a TELJES futás-
+        # vezérlést vitte: „Mi fog történni" cím, három rádiógomb, Indítás +
+        # terv-szöveg, haladás-sáv, mód-konfliktus, terv- és tér-magyarázat.
+        # Mindez MINDHÁROM módra egyszerre látszott, kettő kétszer is (a gomb
+        # mellett ÉS alatta) — ez adta a kavalkád nagy részét. A vezérlők a
+        # FÜLEKRE kerültek (`_build_run_tabs`), és innen csak az OPTIMALIZÁLÁS
+        # feltételei maradtak, amik eleve csak ott értelmesek.
         # ── A FELTÉTELEK: időszakok és kapuk (a volt Optimalizálás lapról) ──
         # ⚠ A FELTÉTELEK (walk-forward ablakok, kapuk, minősítés) CSAK az
         # optimalizálásra vonatkoznak — a kérés szerint csak akkor látszódjanak.
@@ -1470,6 +1596,9 @@ class InstrumentParamsDialog:
             tk.Label(cond, bg=BG, fg=FG_GRAY_DIM, font=self._sf, anchor="w",
                      justify="left", wraplength=820,
                      text=(_t("idlg.a_mentett_minosites_csak"))).pack(anchor="w")
+            # A saját lapján (Optimalizálás) MINDIG látszik: a mód-függő
+            # rejtegetés a fülekkel értelmét vesztette.
+            cond.pack(anchor="w", fill="x")
 
         self._refresh_opt_space()
         self._refresh_run_mode_ui()
@@ -1481,31 +1610,6 @@ class InstrumentParamsDialog:
     # egymás mellett azt sugallná, hogy a szám ehhez a beállításhoz tartozik.
 
     def _build_result_section(self, box):
-        # ── A rajz és a mércéje (1–2 hangolt paraméternél a végigmérés) ─────
-        self._sweep_box = tk.Frame(box, bg=BG)
-        self._sweep_box.pack(anchor="w", fill="x", padx=12, pady=(4, 0))
-        _sb = tk.Frame(self._sweep_box, bg=BG)
-        _sb.pack(anchor="w", fill="x")
-        tk.Label(_sb, text=_t("idlg.merce"), bg=BG, fg=FG_GRAY_DIM,
-                 font=self._sf).pack(side="left", padx=(0, 3))
-        self._sw_metric = tk.StringVar(value="total_pnl")
-        _mm = tk.OptionMenu(_sb, self._sw_metric, "total_pnl", "profit_factor",
-                            "win_rate", "trades", "max_drawdown")
-        _mm.config(bg=BG_HEADER, fg=FG_WHITE, relief="flat", font=self._sf,
-                   highlightthickness=0, activebackground=BG_HEADER)
-        _mm["menu"].config(bg=BG_HEADER, fg=FG_WHITE, font=self._sf)
-        _mm.pack(side="left", padx=(0, 10))
-        self._sw_metric.trace_add("write", lambda *_a: self._redraw_sweep())
-        self._sw_status = tk.Label(_sb, text="", bg=BG, fg=FG_GRAY, font=self._sf)
-        self._sw_status.pack(side="left")
-        self._sw_canvas = tk.Canvas(self._sweep_box, bg=BG, height=260,
-                                    highlightthickness=0)
-        self._sw_canvas.bind("<Configure>", lambda _e: self._redraw_sweep())
-        self._sw_best = tk.Label(self._sweep_box, text="", bg=BG, fg=FG_GRAY,
-                                 font=self._sf, anchor="w", justify="left")
-        self._sw_rows, self._sw_axes = [], []
-        # A végigmérés IDŐSZAKA a futtatás mezőiből jön (egy helyen állítod).
-
         # ── KÖTÉS-LISTA: a futás kötései TÉTELESEN ─────────────────────────
         # ⚠ Ez az, ami eddig hiányzott. A futás egyetlen sorban végződött
         # („42 kötés, +1 234$, PF 1,31"), és ha a szám nem tetszett, nem volt
@@ -1676,7 +1780,12 @@ class InstrumentParamsDialog:
         elif not getattr(self, "_bt_running", False) and self._sw_stop is None:
             self._prog_hide()
         try:
-            self._run_status.config(text=txt, fg=fg)
+            # ⚠ A „nem fut" állapot ÜRES szöveget jelent → a sor eltűnik.
+            # ⚠ ÜRES SZÖVEG = eltűnik a sor. Az „optimalizálás nem fut" állapot
+            # (nincs `_OPT_TEXT` bejegyzés ÉS nincs megjegyzendő ok) néma: hogy
+            # nem fut, az a sávból és a gomb feliratából amúgy is látszik.
+            self._set_run_status(
+                txt if (_st in self._OPT_TEXT or _note) else "", fg)
             self._plan_btn.config(
                 text=(_t("idlg3.optimalizalas_leallitasa") if _st == "OPTIMIZING"
                       else (_t("idlg3.kivetel_a_sorbol") if _st == "QUEUED" else _t("idlg.inditas"))))
@@ -2159,10 +2268,19 @@ class InstrumentParamsDialog:
                         for r in (self._opt_rows or []) if r["key"] in self._skip_vars]
                 _rp = _op.run_plan(rows, int((getattr(self, "_opt_cfg_cache", None)
                                               or {}).get("max_trials", 500) or 500))
+                # ⚠ AZ AKTÍV FÜLHÖZ igazodik (2026-09-22): becsukva az a
+                # kérdés érdekel, amit épp futtatnál — nem az, amit nem.
                 _n = len(_rp["tuned"])
-                secs["futtatas"].set_summary(
-                    _t("idlg3.egyetlen_futas_backtest") if _n == 0 else
-                    _t("idlg.tuned_runs", tuned=_n, runs=_rp["runs"]))
+                _m = self._run_mode.get() if getattr(self, "_run_mode", None) else ""
+                if _m == self.RUN_OPTIMIZE:
+                    _sum = _t("idlg.summary_trials", trials=int(
+                        (getattr(self, "_opt_cfg_cache", None) or {})
+                        .get("max_trials", 500) or 500))
+                elif _m == self.RUN_PLANNED and _n:
+                    _sum = _t("idlg.tuned_runs", tuned=_n, runs=_rp["runs"])
+                else:
+                    _sum = "Backtest"
+                secs["futtatas"].set_summary(_sum)
         except Exception:
             pass
         # ── EREDMÉNY: a legutóbbi futás egy sorban ─────────────────────────
@@ -2862,25 +2980,20 @@ class InstrumentParamsDialog:
             # ⚠ A KIÍRT TERV a TÉNYLEGES módot tükrözze. Backtest módban a pipák
             # NEM számítanak — ha ilyenkor is az optimalizálás tervét írnánk ki,
             # a felület mást ígérne, mint ami elindul.
-            _mode = self._effective_mode()
-            _bt_txt = (_t("idlg3.egyetlen_futas_a_mostani"))
+            # ⚠ FÜLENKÉNT MÁS SZÖVEG. A Hangolás lapon a TERV (mit próbál
+            # végig), a Backtest lapon az állandó „egyetlen futás" mondat — a
+            # kettő korábban EGYSZERRE látszott, ráadásul duplán.
             self._tuned_lbl.config(
-                text=(_bt_txt if _mode == self.RUN_BACKTEST else
-                      rp["text"] + chr(10) + "Hangolva: "
+                text=(rp["text"] + chr(10) + "Hangolva: "
                       + (", ".join(rp["tuned"]) or "—")))
             try:
-                self._plan_short.config(
-                    text=(_bt_txt if _mode == self.RUN_BACKTEST else rp["text"]))
-                # ⚠ Ha nincs mit hangolni, a „Hangolás" ÜRES ÍGÉRET — letiltjuk,
-                # és a választó magától Backtestre áll (nem némán: a felirat is
-                # megmondja, miért).
+                # Ha nincs mit hangolni, a „Hangolás" fül ÜRES ÍGÉRET — letiltva.
                 _has = bool(rp["tuned"])
                 _rb = getattr(self, "_rb_planned", None)
                 if _rb is not None:
-                    _rb.config(state=("normal" if _has else "disabled"),
-                               text=(_t("idlg3.hangolas_a_bepipalt_parameterek")
-                                     if _has else
-                                     _t("idlg3.hangolas_nincs_bepipalt_parameter")))
+                    _rb.config(state=("normal" if _has else "disabled"))
+                if not _has and self._run_mode.get() == self.RUN_PLANNED:
+                    self._show_run_tab(self.RUN_BACKTEST)
             except (tk.TclError, AttributeError):
                 pass
         except (tk.TclError, AttributeError):

@@ -105,7 +105,8 @@ class BacktestDialog:
                  rr_spec, header_font, small_font, on_result=None,
                  preset_name: str = "Ki", on_apply_params=None, host=None,
                  on_state=None, host_scroll: bool = True, on_run_done=None,
-                 provide_hours=None, provide_rr=None, provide_build=None):
+                 provide_hours=None, provide_rr=None, provide_build=None,
+                 header_host=None):
         # `host`: ha adott (egy Frame), a tartalom ODA épül, nem külön ablakba —
         # így ugyanez az osztály szolgálja ki a Paraméterek ablak „Futtatás"
         # lapját is. A logika (haladás, grafikon, összevetés, CSV, MT5-export)
@@ -115,6 +116,15 @@ class BacktestDialog:
         # elcsúszna. A backtest-ablak a projekt egyik legtöbbet használt felülete
         # — egy „majdnem ugyanolyan" második változat pont abban térne el, ami
         # ritkán fut (megszakítás, hibaág, MT5-export), és az nem derülne ki.
+        # `header_host`: ha adott, az IDŐSZAK / Elérhető / Slotok / Nyitó összeg
+        # (és a cím) ODA épül, nem a törzsbe. A Paraméterek ablak „Futtatás"
+        # lapján ezek a MEZŐK A FÜLEK FÖLÖTT állnak, mert mindhárom futás-módra
+        # ugyanazok — a fülön belül csak az adott mód vezérlői vannak.
+        # ⚠ A VÁLTOZÓK (`_start_var`, `_slots_var`, …) ITT MARADNAK: a dátum-
+        # figyelők, a `_data_ready` alapértékei, a naptár és a beállítás-mentés
+        # mind rájuk épül. Csak a SZÜLŐ widget más — egy második példány a
+        # gazdában két külön értéket jelentene ugyanarra a mezőre.
+        self._header_host = header_host
         self._host    = host
         # ⚠ `host_scroll=False`: a gazda MAGA görget (a Paraméter lap egy
         # görgethető oldal). Sajat gorgetheto teruletet epiteni bele KETTOS
@@ -353,13 +363,24 @@ class BacktestDialog:
             holder.pack(side="top", fill="both", expand=True)
             self._body = body
 
-        tk.Label(body, text=f"{self.symbol}  ·  {self.strategy.name} — Backtest",
-                 bg=BG, fg=FG_WHITE, font=self._hf).pack(anchor="w", padx=12, pady=(12, 2))
+        # A FEJLÉC-MEZŐK gazdája: külön keret (a fülek fölött), vagy a törzs.
+        head_box = self._header_host if self._header_host is not None else body
+        tk.Label(head_box,
+                 text=(f"{self.symbol}  ·  {self.strategy.name}"
+                       if self._header_host is not None else
+                       f"{self.symbol}  ·  {self.strategy.name} — Backtest"),
+                 bg=BG, fg=FG_WHITE, font=self._hf).pack(anchor="w", padx=12,
+                                                         pady=(12, 2))
 
         # ── Időszak ─────────────────────────────────────────────────────────
-        rng = tk.Frame(body, bg=BG)
+        rng = tk.Frame(head_box, bg=BG)
         rng.pack(anchor="w", padx=12, pady=(4, 0))
-        tk.Label(rng, text=_t("bt.range"), bg=BG,
+        # ⚠ Beágyazva RÖVID felirat: a „(YYYY-MM-DD, üresen = teljes)" a naptár-
+        # gombok mellett felesleges magyarázat — a mező formátuma a beírt
+        # értékből és a naptárból amúgy is látszik. Önálló ablakban marad a
+        # hosszú alak (ott nincs melletta a lap többi része, ami eligazítana).
+        tk.Label(rng, text=_t("bt.range_short" if self._header_host is not None
+                              else "bt.range"), bg=BG,
                  fg=FG_GRAY, font=self._sf).pack(side="left")
         self._start_var = tk.StringVar()
         self._end_var   = tk.StringVar()
@@ -382,7 +403,9 @@ class BacktestDialog:
                          command=lambda: self._open_calendar(self._end_var, e2))
         _cb2.pack(side="left")
         _attach_tooltip(_cb2, _t("bt.cal_to"))
-        self._span_lbl = tk.Label(body, text=_t("bt.loading"), bg=BG,
+        # A kiszürkíthető fejléc-widgetek (lásd `set_header_enabled`).
+        self._hdr_widgets = [e1, _cb1, e2, _cb2]
+        self._span_lbl = tk.Label(head_box, text=_t("bt.loading"), bg=BG,
                                   fg=FG_GRAY_DIM, font=self._sf)
         self._span_lbl.pack(anchor="w", padx=12, pady=(1, 4))
 
@@ -392,7 +415,7 @@ class BacktestDialog:
         # eddig sehol nem látszott: egy 1000$ → 14 398$ eredmény ugyanúgy nézett
         # ki, mint egy valódi. A sor a dátumok MINDEN változásánál frissül, tehát
         # a figyelmeztetés a választás közben jön, nem a futtatás után.
-        self._train_lbl = tk.Label(body, text="", bg=BG, fg=FG_RED,
+        self._train_lbl = tk.Label(head_box, text="", bg=BG, fg=FG_RED,
                                    font=self._sf, anchor="w", justify="left",
                                    wraplength=680)
         self._train_lbl.pack(anchor="w", padx=12, pady=(0, 4))
@@ -404,7 +427,7 @@ class BacktestDialog:
         # mint a live) nyit — a többi óra kimarad, és ha a `no_trade_resets_signal`
         # param be van kapcsolva, a szünet reseteli az M15 ablakot (mint élesben).
         # Alap: KI → minden órában kereskedik (a korábbi backtest-ablak viselkedése).
-        hrow = tk.Frame(body, bg=BG)
+        hrow = tk.Frame(head_box, bg=BG)
         hrow.pack(anchor="w", padx=12, pady=(0, 4))
         self._hours_filter_var = tk.BooleanVar(value=False)
         _hcb = tk.Checkbutton(hrow,
@@ -467,6 +490,7 @@ class BacktestDialog:
                        fg=FG_WHITE, font=self._sf, insertbackground=FG_WHITE,
                        justify="center")
         _se.pack(side="left")
+        self._hdr_widgets.append(_se)
         _attach_tooltip(_se, _t("bt.slots_tip"))
 
         # ── Nyitó összeg (kezdő tőke a futtatáshoz) ─────────────────────────
@@ -479,6 +503,7 @@ class BacktestDialog:
                        fg=FG_WHITE, font=self._sf, insertbackground=FG_WHITE,
                        justify="center")
         _ie.pack(side="left")
+        self._hdr_widgets.append(_ie)
         _attach_tooltip(_ie, _t("bt.initial_tip"))
 
         # ── Paraméterek ─────────────────────────────────────────────────────
@@ -513,11 +538,11 @@ class BacktestDialog:
                 e.insert(0, str(self._init_params[k]))
                 e.pack(side="left")
                 self._pentries[k] = e
-        else:
-            tk.Label(body, bg=BG, fg=FG_GRAY_DIM, font=self._sf, anchor="w",
-                     justify="left", wraplength=820,
-                     text=_t("bt.params_on_tab")
-                     ).pack(anchor="w", padx=12, pady=(2, 2))
+        # ⚠ BEÁGYAZVA NINCS ITT SEMMI. Korábban egy sor állt itt („A paraméterek
+        # a Paraméter lapon állnak…") — a felhasználó kérésére kikerült: a lap
+        # TETEJÉN ott a paraméter-űrlap, tehát a mondat azt magyarázta, ami
+        # látszik. Egy magyarázat, amire nincs szükség, ugyanúgy zaj, mint egy
+        # hiányzó: mindkettő elvon a lényegtől.
 
         # ── Vezérlő-csoportok: Kockázatcsökkentés + Pozícióépítés (FELTÁRÓ) ──
         # Ugyanaz a logikai tiltás, mint az instrumentum-ablakban: a nem releváns
@@ -691,21 +716,16 @@ class BacktestDialog:
                                  width=6)
         self._pct_lbl.pack(side="left", padx=(8, 0))
 
-        # ── Élő kijelzés ────────────────────────────────────────────────────
-        live = tk.Frame(body, bg=BG)
-        live.pack(anchor="w", padx=12, pady=(2, 2))
-        self._live = {}
-        for key, label in (("time", _t("bt.live.time")),
-                           ("balance", _t("bt.live.balance")),
-                           ("open", _t("bt.live.open")),
-                           ("closed", _t("bt.live.closed"))):
-            cell = tk.Frame(live, bg=BG)
-            cell.pack(side="left", padx=(0, 14))
-            tk.Label(cell, text=label, bg=BG, fg=FG_GRAY,
-                     font=self._sf).pack(side="left")
-            v = tk.Label(cell, text="—", bg=BG, fg=FG_WHITE, font=self._sf)
-            v.pack(side="left")
-            self._live[key] = v
+        # ── Élő kijelzés: EGY SOR, a sáv MELLETT ────────────────────────────
+        # ⚠ A felhasználó leletje (2026-09-22): négy felirat négy gondolatjellel
+        # („Idő — Egyenleg — Nyitott — Lezárt —”) futás ELŐTT értelmezhetetlen,
+        # mert nincs mellette érték. Most egyetlen sor, ami CSAK futástól él:
+        #     `2026-07-14 12:30 · 812$ · 2 nyitott · 137 lezárt`
+        # A négy adat ugyanolyan fontos, ezért egy sorban marad mind — csak a
+        # címkéik tűntek el (az érték maga megmondja, mi az).
+        self._live_lbl = tk.Label(pf, text="", bg=BG, fg=FG_WHITE, font=self._sf,
+                                  anchor="w")
+        self._live_lbl.pack(side="left", padx=(10, 0))
         self._tech_lbl = tk.Label(body, text="", bg=BG, fg=FG_GRAY_DIM,
                                   font=self._sf)
         self._tech_lbl.pack(anchor="w", padx=12, pady=(0, 2))
@@ -813,6 +833,21 @@ class BacktestDialog:
                 self._body_canvas.config(height=520)
             except Exception:
                 pass
+
+    def set_header_enabled(self, on: bool):
+        """A FEJLÉC-MEZŐK (időszak, slot, nyitó összeg) ki/be — a gazda hívja.
+
+        ⚠ MIÉRT KELL. A Paraméterek ablak „Futtatás" lapján ezek a mezők a
+        fülek FÖLÖTT állnak, mert a Backtestre és a Hangolásra ugyanazok. Az
+        OPTIMALIZÁLÁS viszont walk-forward ablakokból dolgozik (a configból),
+        nem ezekből a dátumokból — aktívan hagyva azt ígérnék, hogy számítanak.
+        Kiszürkítve a felület megmondja az igazat, magyarázó szöveg nélkül."""
+        _st = "normal" if on else "disabled"
+        for w in (getattr(self, "_hdr_widgets", None) or []):
+            try:
+                w.config(state=_st)
+            except tk.TclError:
+                continue
 
     def _fit_to_screen(self, win, body, footer):
         """Az ablak méretezése a KÉPERNYŐHÖZ: ha a tartalom elfér, minden látszik;
@@ -1100,7 +1135,8 @@ class BacktestDialog:
             # kimarad — a teljes tartomány látszik és a mezőben bővíthető).
             default_start = max(lo_ts, hi_ts - pd.DateOffset(months=18))
             ds = default_start.strftime("%Y-%m-%d")
-            self._span_lbl.config(text=_t("bt.available", lo=lo, hi=hi),
+            self._span_lbl.config(text=_t("bt.available" if self._header_host is None
+                                          else "bt.available_short", lo=lo, hi=hi),
                                   fg=FG_GRAY_DIM)
             # Megjegyzett időszak (ha van) elsőbbséget élvez a ~18 hónap alap fölött.
             if not self._start_var.get():
@@ -1323,11 +1359,10 @@ class BacktestDialog:
         try:
             self._pbar.config(value=pct * 100.0)
             self._pct_lbl.config(text=f"{pct * 100:.0f}%")
-            self._live["time"].config(text=str(m1_time)[:16])
-            col = FG_GREEN if balance >= 0 else FG_RED
-            self._live["balance"].config(text=f"{balance:,.0f}$", fg=col)
-            self._live["open"].config(text=str(n_open))
-            self._live["closed"].config(text=str(n_closed))
+            self._live_lbl.config(
+                text=_t("bt.live.line", time=str(m1_time)[:16],
+                        balance=f"{balance:,.0f}", open=n_open, closed=n_closed),
+                fg=(FG_GREEN if balance >= 0 else FG_RED))
             if tech:
                 self._tech_lbl.config(text="Technika: " + ", ".join(
                     f"{_tech_name(k)}×{v}" for k, v in tech.items()))

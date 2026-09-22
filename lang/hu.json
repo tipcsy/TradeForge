@@ -52,10 +52,6 @@
   "bt.hours_only": "Csak a kereskedési órákban (trade_hours, mint élesben)",
   "bt.initial": "Nyitó összeg:",
   "bt.initial_tip": "A backtest kezdő tőkéje ($). A pozícióméretet\n(kockázat = egyenleg × account_risk_pct) és a\nszázalékos hozamot skálázza. Üresen a config\nkezdő egyenlege (starting_balance_eur).",
-  "bt.live.balance": "Egyenleg ",
-  "bt.live.closed": "Lezárt ",
-  "bt.live.open": "Nyitott ",
-  "bt.live.time": "Idő ",
   "bt.loaded": "Adat betöltve.",
   "bt.loading": "Adat betöltése…",
   "bt.no_build_csv": "Nincs Építés CSV — ebben a futásban nem volt ráépítés.",
@@ -64,7 +60,6 @@
   "bt.open_error": "Megnyitási hiba: {error}",
   "bt.params_back": "Vissza",
   "bt.params_edit": "Paraméterek (szerkeszthető — feltáró):",
-  "bt.params_on_tab": "A paraméterek a Paraméter lapon állnak — az ott beírt értékekkel fut. (Ha ott átírsz valamit, ez a lap magától frissül.)",
   "bt.params_reset": "Paraméterek visszaállítva a megnyitáskori értékekre.",
   "bt.preset": "Preset:",
   "bt.preset_tip": "Ki = alap kezelés (BE + trailing). Risky = felezett méret + azonnali BE 1R-nél. Felező/Pajzs = 1R-nél 50%/75% zárás + runner. Fibo = a belépő→TP táv 61,8%-ánál a stop BE-re (nincs zárás/trailing). Harmados = 1/3–2/3: az alap-táv (1R) után stop az 1/3-ra, célárnál a 2/3-ra. Pajzs↔Fibo = auto: nagy mozgásnál Fibo, különben Pajzs (belépéskor dől el).",
@@ -1655,5 +1650,10 @@
   "gui.pbt.no_instruments": "(Nincs ilyen instrumentum: a stratégia egyetlen pár listáján sincs, és nincs mentett készlete)",
   "gui.pbt.untuned_mark": "{symbol} ·alap",
   "gui.pbt.all_cells": "élő cellák (mind)",
-  "gui.pbt.running_cells": "Fut… ({n} cella, {pairs} pár)"
+  "gui.pbt.running_cells": "Fut… ({n} cella, {pairs} pár)",
+  "bt.available_short": "Elérhető: {lo} → {hi}",
+  "bt.live.line": "{time} · {balance}$ · {open} nyitott · {closed} lezárt",
+  "idlg.summary_trials": "{trials} trial",
+  "bt.range_short": "Időszak:",
+  "bt.single_run": "Egyetlen futás a mostani paraméter-értékekkel"
 }

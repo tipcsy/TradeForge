@@ -52,10 +52,6 @@
   "bt.hours_only": "Trading hours only (trade_hours, as in live)",
   "bt.initial": "Starting balance:",
   "bt.initial_tip": "The backtest's starting capital ($). It scales the position size\n(risk = balance × account_risk_pct) and the\npercentage return. Empty = the config's\nstarting balance (starting_balance_eur).",
-  "bt.live.balance": "Balance ",
-  "bt.live.closed": "Closed ",
-  "bt.live.open": "Open ",
-  "bt.live.time": "Time ",
   "bt.loaded": "Data loaded.",
   "bt.loading": "Loading data…",
   "bt.no_build_csv": "No Building CSV — this run had no add-ons.",
@@ -64,7 +60,6 @@
   "bt.open_error": "Could not open: {error}",
   "bt.params_back": "Undo",
   "bt.params_edit": "Parameters (editable — exploratory):",
-  "bt.params_on_tab": "The parameters live on the Parameters tab — the run uses the values entered there. (If you change them there, this tab refreshes itself.)",
   "bt.params_reset": "Parameters restored to the values from when this opened.",
   "bt.preset": "Preset:",
   "bt.preset_tip": "Off = base handling (BE + trailing). Risky = halved size + immediate BE at 1R. Halving/Shield = close 50%/75% at 1R + runner. Fibo = stop to BE at 61.8% of the entry→TP distance (no partial close/trailing). Thirds = 1/3–2/3: after the base distance (1R) the stop goes to 1/3, at the target to 2/3. Shield↔Fibo = auto: Fibo on a big move, otherwise Shield (decided at entry).",
@@ -1655,5 +1650,10 @@
   "gui.pbt.no_instruments": "(No such instrument: the strategy is on no pair's list and has no saved parameter set)",
   "gui.pbt.untuned_mark": "{symbol} ·default",
   "gui.pbt.all_cells": "live cells (all)",
-  "gui.pbt.running_cells": "Running… ({n} cells, {pairs} pairs)"
+  "gui.pbt.running_cells": "Running… ({n} cells, {pairs} pairs)",
+  "bt.available_short": "Available: {lo} → {hi}",
+  "bt.live.line": "{time} · {balance}$ · {open} open · {closed} closed",
+  "idlg.summary_trials": "{trials} trials",
+  "bt.range_short": "Period:",
+  "bt.single_run": "A single run with the current parameter values"
 }

@@ -339,8 +339,13 @@ if TK_OK:
         # ⚠ 0 hangolt -> a TENYLEGES mod automatikusan „Backtest" (a
         # „Hangolas" ures igeret volna), tehat a terv a backtest szoveget
         # mondja. A lenyeg valtozatlan: EGYETLEN futas indul.
+        # ⚠ 2026-09-22: a `_tuned_lbl` a HANGOLAS fulre kerult, es ott MINDIG a
+        # hangolasi tervet mondja — 0 pipanal ez „0 hangolt parameter →
+        # EGYETLEN futas (ez a backtest)." (A korabbi szoveg a backtest
+        # mondata volt; az allitas ugyanaz, csak az irasmod mas.)
         check("0 hangolt -> a terv EGYETLEN futast mond",
-              "gyetlen futás" in d._tuned_lbl.cget("text"),
+              "gyetlen futás" in d._tuned_lbl.cget("text").lower()
+              or "GYETLEN futás" in d._tuned_lbl.cget("text"),
               d._tuned_lbl.cget("text").split(chr(10))[0])
         check("...es a tenyleges mod is backtest",
               d._effective_mode() == d.RUN_BACKTEST)
