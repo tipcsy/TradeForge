@@ -427,8 +427,17 @@ class BacktestDialog:
         # mint a live) nyit — a többi óra kimarad, és ha a `no_trade_resets_signal`
         # param be van kapcsolva, a szünet reseteli az M15 ablakot (mint élesben).
         # Alap: KI → minden órában kereskedik (a korábbi backtest-ablak viselkedése).
-        hrow = tk.Frame(head_box, bg=BG)
-        hrow.pack(anchor="w", padx=12, pady=(0, 4))
+        # ⚠ BEÁGYAZVA EGY SORBAN az időszakkal (2026-09-22, a felhasználó kérése:
+        # „a slotok és a nyitó összeg elfér az időszak mellett, nem kell külön
+        # sor neki"). Beágyazva az óra-kapu pipája amúgy sem látszik (a gazda
+        # kereskedési-óra szakasza dönt), tehát a sorban tényleg csak a slot és
+        # a nyitó összeg van. Önálló ablakban marad a külön sor: ott a pipa is
+        # ott van, és hárman már nem férnének el kényelmesen.
+        if self._header_host is not None:
+            hrow = rng
+        else:
+            hrow = tk.Frame(head_box, bg=BG)
+            hrow.pack(anchor="w", padx=12, pady=(0, 4))
         self._hours_filter_var = tk.BooleanVar(value=False)
         _hcb = tk.Checkbutton(hrow,
                               text=_t("bt.hours_only"),
@@ -483,7 +492,9 @@ class BacktestDialog:
         # kockázat nagyjából állandó marad — a slot-szám azt osztja szét
         # (`risk_per_slot = egyenleg × account_risk_pct / slotok`, `calc_lot`).
         tk.Label(hrow, text="Slotok:", bg=BG, fg=FG_GRAY,
-                 font=self._sf).pack(side="left", padx=(16, 2))
+                 font=self._sf).pack(side="left",
+                                     padx=((28 if self._header_host is not None
+                                            else 16), 2))
         self._slots_var = tk.StringVar(
             value=str(self._prefs.get("slots", self._cfg_max_slots())))
         _se = tk.Entry(hrow, width=4, textvariable=self._slots_var, bg=BG_HEADER,
