@@ -43,7 +43,10 @@ pub mod exec;
 ///
 /// 3 (2026-09-05): a `wpr_sma` jelzés-mag KIKERÜLT — a könyvtár felülete
 /// megváltozott, a régi `.dll` már nem használható.
-pub const KERNEL_ABI: i32 = 3;
+/// 4 (2026-09-22): egy szimbólumon egyszerre csak EGY pozíció (az él szabálya)
+/// — a felület nem változott, a VISELKEDÉS igen; egy 3-as `.dll` némán
+/// halmozna, ezért emelés.
+pub const KERNEL_ABI: i32 = 4;
 
 #[no_mangle]
 pub extern "C" fn tfbt_abi_version() -> i32 {

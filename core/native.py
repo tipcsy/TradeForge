@@ -46,7 +46,7 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 # A natív mag ABI-verziója, amit EZ a Python-kód elvár (lásd `rust/tfbt/src/lib.rs`).
-EXPECTED_ABI = 3
+EXPECTED_ABI = 4
 
 ROOT = Path(__file__).resolve().parents[1]
 _LIB_NAMES = ("tfbt.dll", "libtfbt.so", "libtfbt.dylib")

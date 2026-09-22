@@ -416,8 +416,13 @@ pub unsafe extern "C" fn tfbt_run_exec(
         }
 
         // ── Belepo ────────────────────────────────────────────────────
+        // ⚠ EGY SZIMBOLUMON EGYSZERRE CSAK EGY POZICIO (ABI 4, 2026-09-22): az elo
+        // motor szabalya; eddig a mag a slot-szamig halmozott ugyanarra a parra,
+        // amit az el nem tesz. A kockazatmentes pozicio is pozicio (elesben az
+        // is tilt). A Python-ciklus (`trading/backtest.py` run_pair) ugyanezt.
         let sg = sig[i];
-        if sg != 0 && (p.max_open_slots - occupied) > 0.0 && offh[i] == 0 && !limit_hit {
+        if sg != 0 && open.is_empty() && (p.max_open_slots - occupied) > 0.0
+            && offh[i] == 0 && !limit_hit {
             let sl_points = slp[i];
             if sl_points > 0.0 {
                 let risk_pct = p.account_risk_pct * grisk[i];

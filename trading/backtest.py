@@ -1608,7 +1608,16 @@ def run_pair(
                 if _atr_e and not pd.isna(_atr_e):
                     _sp_e = _cspread_arr[i] if _cspread_arr is not None else float("nan")
                     if not (_sp_e > 0):
-                        _sp_e = _spread_arr[i] if _spread_arr is not None else _spread_fallback
+                        _sp_e = _spread_arr[i] if _spread_arr is not None else float("nan")
+                    # ⚠ NaN-VÉDELEM (2026-09-22, `tests/test_portfolio_parity`): az
+                    # MT5-ből natívan pótolt gyertyáknak NINCS spreadjük (NaN az
+                    # oszlopban, nem hiányzó oszlop). Eddig a NaN ment tovább a
+                    # kapuba, ami NÉMÁN minden belépőt tiltott — Ger40-en 08-26
+                    # 15:13 után egyetlen kötés sem született, míg a portfólió
+                    # (a pár konstansára esve) 23-at kötött. A tartalék ugyanaz,
+                    # mint a belépő áránál (`_sp`): a pár `backtest_spread_points`-e.
+                    if not (_sp_e > 0):
+                        _sp_e = _spread_fallback
                     _ok_s, _cap_s = _spread_gate.spread_ok(
                         _sp_e / point_size, float(_atr_e), point_size, params,
                         pair_cfg.get("backtest_spread_points"))
@@ -2164,7 +2173,16 @@ def run_pair(
             signal = (_sig_at.get(i, "NONE") if _cached
                       else strategy.bt_on_low_close(state, prev_m1_row, m1_row, params))
 
-            if (signal != "NONE" and free_slots > 0 and not _off_hour
+            # ⚠ EGY SZIMBÓLUMON EGYSZERRE CSAK EGY POZÍCIÓ — az élő motor szabálya
+            # (`live_trader`: `already_open`), 2026-09-22-ig az egypáros út NEM
+            # tartotta: a slot-számig HALMOZOTT ugyanarra a párra (Ger40/wpr_sma,
+            # 3 hónap: 12/159 kötés, max 3 egyszerre) — a portfólió-BT és az él
+            # ilyet nem tesz (`tests/test_portfolio_parity`). A felhasználó
+            # döntése: a backtest az élet modellezze, a számok elmozdulhatnak.
+            # A kockázatmentes (BE-n álló) pozíció is pozíció: élesben az is
+            # tilt. A ráépítés (build) nem új pozíció, hanem láb — az külön út.
+            if (signal != "NONE" and free_slots > 0 and not open_trades
+                    and not _off_hour
                     and not _limit_hit and m15_ptr < len(m15_times)):
                 _plan = _entry_decision(i, m1_time, float(_bar_c), signal,
                                         m15_ptr, _sp, spread_points)
