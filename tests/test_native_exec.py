@@ -1,7 +1,8 @@
 """A NATIV VEGREHAJTASI CIKLUS — a masodik Rust-mag (v3.36.0).
 
 ⚠ MIT CSINAL. A jelzes-mag utan a VEGREHAJTAS is atkerult: SL/TP a bid/ask
-modellel, `none`/`off`/`risky` preset (breakeven + trailing), cost-cut, napi
+modellel, `none`/`off`/`risky` preset (breakeven + trailing — a kuszob
+celar-aranyosan VAGY R-ben, ABI 5), cost-cut, napi
 veszteseglimit, slot-keret, meretezes, jutalek/swap. Merve (wpr_sma, 3 honap):
 Ger40 0,90 -> 0,60 mp, GOLD 2,07 -> 1,73 mp, EURUSD 0,70 -> 0,44 mp.
 
@@ -163,7 +164,7 @@ if native.available() and os.environ.get("TFBT_NATIVE", "1") != "0":
                  "pnl_usd", "commission_usd", "swap_usd", "pnl_points",
                  "status", "risk_free")
 
-        # /!\ EZ A BLOKK KORABBAN URESEN MENT AT (javitva 2026-09-08).
+        # ⚠ EZ A BLOKK KORABBAN URESEN MENT AT (javitva 2026-09-08).
         # A `run_pair`-t `signal_series` NELKUL hivta, a nativ ut viszont pont
         # akkor marad ki ("nincs elore epitett jelolt-lista") — tehat MINDKET
         # kar a Python-uton futott, es a "BITRE egyeznek" allitas onmagat
@@ -223,21 +224,41 @@ if native.available() and os.environ.get("TFBT_NATIVE", "1") != "0":
             _py, _ = _fut(sym, False, _RR_NATV)
             _rs, _ran = _fut(sym, True, _RR_NATV)
             _futott = True
-            check(f"{sym}: /!\ a natív ut TENYLEG lefutott (nem ures paritas)",
+            check(f"{sym}: ⚠ a natív ut TENYLEG lefutott (nem ures paritas)",
                   _ran, "a nativ blokk nem hivodott meg")
             check(f"{sym}: a natív es a Python kotesei BITRE egyeznek",
                   _py == _rs, f"{len(_py)} vs {len(_rs)} kotes")
             check(f"{sym}: ...es volt mit osszevetni", len(_py) > 0,
                   f"{len(_py)} kotes")
-            # /!\ A `breakeven_r`-t a natív ABI NEM ismeri (`EXEC_FIELDS`:
-            # van `be_pct`, nincs `be_r`). Merve: azonos jelolt-listan 87 vs
-            # 166 kotes. Amig a Rust oldal nem tudja, KI KELL MARADNIA.
+            # ⚠ A `breakeven_r` MOSTANTOL A MAGE IS (ABI 5, 2026-09-22).
+            # Korabban itt az allt, hogy a nativ ut KIMARAD, mert az ABI nem
+            # ismerte a be_r-t (a `be_pct` a CELARHOZ mer, az R-alapu a
+            # STOP-TAVHOZ; merve: azonos jelolt-listan 87 vs 166 kotes).
+            # ⚠ ES EZ NEM EGY SZELSOSEGES ESET VOLT: a valodi configban 18/19
+            # cella `breakeven_r`-t hasznal, tehat a mag GYAKORLATILAG SOHA
+            # nem futott. A Rust most a kozos `breakeven_trigger` portjat
+            # futtatja — a ket „nincs kuszob" esettel egyutt (be_r>0 de
+            # ismeretlen stop-tav; be_pct>0 de nincs celar).
             _br, _ran_br = _fut(sym, True, _RR_BE_R)
-            check(f"{sym}: /!\ breakeven_r mellett a natív ut KIMARAD",
-                  not _ran_br, "a nativ ut lefutott, pedig nem ismeri a be_r-t")
+            check(f"{sym}: breakeven_r mellett a natív ut FUT (ABI 5)",
+                  _ran_br, "a nativ ut kimaradt, pedig mar ismeri a be_r-t")
             _br_py, _ = _fut(sym, False, _RR_BE_R)
-            check(f"{sym}: ...es igy a ket ut TOVABBRA is egyezik",
+            check(f"{sym}: ...es a be_r-es kotesei BITRE egyeznek a Pythonnal",
                   _br == _br_py, f"{len(_br)} vs {len(_br_py)} kotes")
+            # ⚠ SZAMIT-E EGYALTALAN? Egy „bitre egyezik" allitas semmit nem er,
+            # ha a mezo el sem jut a magig. De a ket keplet EGYBE IS ESHET:
+            # a be_pct a CELARHOZ mer, tehat a kuszob `be_pct × tp_rr` R-ben —
+            # Ger40-en (tp_rr = 2,0, be_pct = 0,5) ez pont 1,0 R, vagyis a
+            # be_r = 1,0-val AZONOS ar. Ez nem hiba, hanem a keplet; ezert a
+            # varakozast ELORE szamoljuk ki, es azt kerjuk szamon.
+            _prm_x, _, _ = _adat(sym)
+            _tp_rr = float(_prm_x.get("tp_rr_ratio", 0.0) or 0.0)
+            _be_pct = float(_RR_NATV.get("breakeven_pct", 0.0) or 0.0)
+            _egybeesik = abs(_tp_rr * _be_pct - 1.0) < 1e-9     # be_r = 1,0
+            check(f"{sym}: a be_r hatasa a VART (egybeesik={_egybeesik}, "
+                  f"tp_rr={_tp_rr:g} × be_pct={_be_pct:g})",
+                  (_br == _rs) == _egybeesik,
+                  "a be_r-es futas nem ugy viselkedik, ahogy a keplet mondja")
     except Exception as e:      # adat/config hianya nem teszthiba
         print(f"SKIP  eles paritas — {type(e).__name__}: {e}")
 

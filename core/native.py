@@ -46,7 +46,7 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 # A natív mag ABI-verziója, amit EZ a Python-kód elvár (lásd `rust/tfbt/src/lib.rs`).
-EXPECTED_ABI = 4
+EXPECTED_ABI = 5
 
 ROOT = Path(__file__).resolve().parents[1]
 _LIB_NAMES = ("tfbt.dll", "libtfbt.so", "libtfbt.dylib")
@@ -120,6 +120,8 @@ EXEC_FIELDS = (
     "commission_per_lot", "swap_long_per_lot", "swap_short_per_lot",
     "cost_cut_ns", "sl_first", "preset", "rollover3_weekday", "cost_cut_on",
     "slot_risk_pct", "max_lot",
+    # ⚠ A BE-küszöb R-ben (ABI 5) — a `be_pct` a célárhoz, ez a STOP-távhoz mér.
+    "be_r",
 )
 
 # A kimeneti f64-mezők sorrendje (`out_f64`, `k * max_trades + j`).

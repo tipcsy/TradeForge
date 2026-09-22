@@ -46,7 +46,9 @@ pub mod exec;
 /// 4 (2026-09-22): egy szimbólumon egyszerre csak EGY pozíció (az él szabálya)
 /// — a felület nem változott, a VISELKEDÉS igen; egy 3-as `.dll` némán
 /// halmozna, ezért emelés.
-pub const KERNEL_ABI: i32 = 4;
+/// 5 (2026-09-22): `be_r` (a BE-küszöb R-ben) az `ExecParams` végén — enélkül a
+/// mag a valódi configon SOHA nem futott (18/19 cella `breakeven_r`-t használ).
+pub const KERNEL_ABI: i32 = 5;
 
 #[no_mangle]
 pub extern "C" fn tfbt_abi_version() -> i32 {

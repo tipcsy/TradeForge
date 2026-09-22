@@ -369,6 +369,54 @@ def _update_stops(trade: "Trade", high: float, low: float, rr: dict,
                     trade.sl = new_sl
 
 
+def _exit_step(trade: "Trade", bid_hi: float, bid_lo: float,
+               ask_hi: float, ask_lo: float, m1_time, point_size: float,
+               min_lot: float, lot_step: float, rr_spec: dict,
+               sl_first: bool) -> bool:
+    """EGY nyitott pozíció EGY baron: zárt-e (SL/TP), vagy menedzselni kell.
+    Vissza: `True`, ha a pozíció ezen a baron ZÁRT.
+
+    ⚠ EGY LEÍRÁS, KÉT CIKLUS (2026-09-22). Ez a blokk korábban KÉTSZER volt
+    leírva — a `run_pair`-ben és a portfólió-ciklusban —, és a kettő NÉMÁN
+    szétcsúszott: a portfólió előbb a TP-t nézte (optimista), a `run_pair` az
+    SL-t (pesszimista, `intrabar_order`); ugyanaz a kötés az egyik úton +9,57 $,
+    a másikon +5,05 $ volt (`tests/test_portfolio_parity`). A projekt
+    visszatérő hibaosztálya (`duplication-produced-its-own-bug`); a javítás nem
+    az, hogy a két másolatot egyeztetjük, hanem hogy EGY marad.
+
+    A KONVENCIÓ (a bid/ask modell): a gyertya BID; a BUY a BID-en zár, a SELL az
+    ASK-on (bid + spread). Ha egy baron a TP és az SL is elérhető, a bar-adatból
+    nem derül ki, melyik jött előbb — a sorrendet a `sl_first` dönti
+    (alap: pesszimista, az SL nyer).
+
+    A `tp_eff`: egyleges pozíciónál a belépéskori TP, ÉPÍTETT csomagnál a KÖZÖS
+    célár (`target_r = 0` → 0, azaz nincs TP).
+
+    ⚠ A hívó felel a záráskori TÖBBI dologért (költség, esemény-napló,
+    pnl_points, a kötés áthelyezése a lezártak közé): azok ciklusonként mást
+    jelentenek, és nem tartoznak a „mi történt ezen a baron" kérdéshez."""
+    buy = trade.direction == "BUY"
+    hi, lo = (bid_hi, bid_lo) if buy else (ask_hi, ask_lo)
+    tp_e = trade.tp_eff
+    tp_hit = tp_e > 0 and (hi >= tp_e if buy else lo <= tp_e)
+    sl_hit = (lo <= trade.sl) if buy else (hi >= trade.sl)
+    if sl_hit and (sl_first or not tp_hit):
+        ar, allapot = trade.sl, "sl"
+    elif tp_hit:
+        ar, allapot = tp_e, "tp"
+    else:
+        # A BE/trailing (és a részleges zárás) is a KILÉPÉSI oldalon mér.
+        _manage_position(trade, hi, lo, point_size, min_lot, lot_step, rr_spec)
+        return False
+    trade.close_price = ar
+    trade.close_time = m1_time
+    trade.pnl_usd = calc_pnl(trade, ar)
+    trade.pnl_points = ((ar - trade.open_price) if buy
+                        else (trade.open_price - ar)) / point_size
+    trade.status = allapot
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Natív végrehajtási út — opcionális gyorsítás, soha nem kötelező
 # ---------------------------------------------------------------------------
@@ -455,6 +503,12 @@ def _natv_exec(m1, t1_ns, t15_ns, delta_ns, n15, day_idx, h_arr, l_arr, c_arr,
         "daily_limit_pct": float(trading_cfg.get("daily_loss_limit_pct", 0.015)),
         "initial_balance": initial_balance,
         "be_pct": rr_spec.get("breakeven_pct", 0.5),
+        # ⚠ ABI 5: a BE-küszöb R-BEN. A `be_pct` a CÉLÁRHOZ mér, ezért hosszú
+        # vagy hiányzó célárnál némán kikapcsolja a breakevent (és a trailinget
+        # is, mert az a BE után indul) — a `be_r` a stop-távolsághoz. A valódi
+        # configban 18/19 cella ezt használja, tehát a natív mag eddig
+        # gyakorlatilag SOHA nem futott (mérve, 2026-09-22).
+        "be_r": float(rr_spec.get("breakeven_r", 0.0) or 0.0),
         "be_buffer_points": float(rr_spec.get("be_buffer_points", 0.0) or 0.0),
         "trail_act_atr": rr_spec.get("trail_activation_atr", 0.5),
         "trail_dist_atr": rr_spec.get("trail_distance_atr", 0.4),
@@ -1763,22 +1817,13 @@ def run_pair(
         _nat_indok = "kézi események"
     elif str(rr_spec.get("preset", "")) not in _NATV_PRESETEK:
         _nat_indok = f"preset={rr_spec.get('preset')!r}"
-    elif float(rr_spec.get("breakeven_r", 0.0) or 0.0) > 0:
-        # ⚠ A NATÍV ABI NEM ISMERI a `breakeven_r`-t (`core.native.EXEC_FIELDS`:
-        # van `be_pct`, de nincs `be_r`). A Rust mag tehát a RÉGI, célár-arányos
-        # BE-t számolná, miközben a Python az R-alapút — és hosszú célárnál a
-        # kettő GYÖKERESEN mást ad.
-        #
-        # Mérve, ahogy kiderült (Ger40, 2025 H1, azonos jelölt-lista):
-        #   jelölt-lista + NATÍV  →  87 kötés
-        #   jelölt-lista + PYTHON → 166 kötés
-        # A natív mag a BE-t 7,25 R-re tette (0,5 × 14,5 R célár), a Python 1
-        # R-re — más pozíciókezelés, más kötés-populáció.
-        #
-        # Amíg a Rust oldal nem tudja (`rust/tfbt/src/exec.rs` + ABI-emelés),
-        # itt KIMARADUNK. Ez a modul saját szabálya: „egy »majdnem jó« natív út
-        # rosszabb, mint a semmi: némán MÁS backtestet adna."
-        _nat_indok = "breakeven_r (a natív ABI nem ismeri)"
+    # ⚠ A `breakeven_r` KIZÁRÁSA MEGSZŰNT (ABI 5, 2026-09-22). Korábban itt állt:
+    # a mag csak a célár-arányos `be_pct`-t ismerte, az R-alapút nem — és hosszú
+    # célárnál a kettő gyökeresen mást ad (mérve, Ger40 2025 H1: natív 87 vs
+    # Python 166 kötés). A Rust most a közös `breakeven_trigger` portját futtatja
+    # (risky → be_r → be_pct, a két „nincs küszöb" esettel együtt), és a
+    # `tests/test_native_parity` éles adaton méri. A kizárás EGYBEN azt is
+    # jelentette, hogy a mag a valódi configon SOHA nem futott (18/19 cella).
     elif trading_cfg.get("max_open_slots") != sizing_cfg.get("max_open_slots"):
         _nat_indok = "eltérő max_open_slots"
 
@@ -1925,56 +1970,12 @@ def run_pair(
             if record_events:
                 _ev_sl0, _ev_lot0 = trade.sl, trade.lot
 
-            if trade.direction == "BUY":
-                # TP ellenőrzés a ÉLŐ célárral (`tp_eff`): egyleges pozíciónál a
-                # belépéskori TP, ÉPÍTETT csomagnál a KÖZÖS célár — ami
-                # `target_r = 0` (alap) mellett 0, tehát a csomag TP nélkül fut
-                # az átlagár-stopig / kiszállási jelig, mint eddig.
-                # A BUY a BID-en zár → a TP/SL a BID-sorozaton triggerel. Ha MINDKETTŐ
-                # elérhető egy baron, a sorrendet a `_sl_first` dönti (lásd fent).
-                _tp_e = trade.tp_eff
-                _tp_hit = _tp_e > 0 and bid_hi >= _tp_e
-                _sl_hit = bid_lo <= trade.sl
-                if _sl_hit and (_sl_first or not _tp_hit):
-                    trade.close_price = trade.sl
-                    trade.close_time  = m1_time
-                    trade.pnl_usd     = calc_pnl(trade, trade.sl)
-                    trade.status      = "sl"
-                    closed = True
-                elif _tp_hit:
-                    trade.close_price = _tp_e
-                    trade.close_time  = m1_time
-                    trade.pnl_usd     = calc_pnl(trade, _tp_e)
-                    trade.status      = "tp"
-                    closed = True
-                else:
-                    # A BE/trailing is a KILÉPÉSI (bid) oldalon mér
-                    _manage_position(trade, bid_hi, bid_lo,
-                                     point_size, min_lot, lot_step, rr_spec)
-                    _apply_manual_be(trade, m1_time, manual_events, point_size)
-
-            elif trade.direction == "SELL":
-                # A SELL az ASK-on zár → a TP/SL az ASK-sorozaton triggerel. Ha MINDKETTŐ
-                # elérhető egy baron, a sorrendet a `_sl_first` dönti (lásd fent).
-                _tp_e = trade.tp_eff
-                _tp_hit = _tp_e > 0 and ask_lo <= _tp_e
-                _sl_hit = ask_hi >= trade.sl
-                if _sl_hit and (_sl_first or not _tp_hit):
-                    trade.close_price = trade.sl
-                    trade.close_time  = m1_time
-                    trade.pnl_usd     = calc_pnl(trade, trade.sl)
-                    trade.status      = "sl"
-                    closed = True
-                elif _tp_hit:
-                    trade.close_price = _tp_e
-                    trade.close_time  = m1_time
-                    trade.pnl_usd     = calc_pnl(trade, _tp_e)
-                    trade.status      = "tp"
-                    closed = True
-                else:
-                    _manage_position(trade, ask_hi, ask_lo,
-                                     point_size, min_lot, lot_step, rr_spec)
-                    _apply_manual_be(trade, m1_time, manual_events, point_size)
+            # A KÖZÖS lépés (`_exit_step`) — ugyanaz a leírás, amit a
+            # portfólió-ciklus is hív. A kézi BE csak a laboré, ezért marad itt.
+            closed = _exit_step(trade, bid_hi, bid_lo, ask_hi, ask_lo, m1_time,
+                                point_size, min_lot, lot_step, rr_spec, _sl_first)
+            if not closed:
+                _apply_manual_be(trade, m1_time, manual_events, point_size)
 
             # ── Esemény-napló: a menedzsment-fázis (részleges zárás + stop-mozgás)
             # változásai. A TP/SL-záró bar-on a `else` nem futott → nincs változás.
@@ -2864,53 +2865,14 @@ def run_portfolio_backtest(
             _lotstep = _pc.get("lot_step", 0.01)
             closed   = False
 
-            _tp_e = trade.tp_eff        # 0 = nincs élő célár (épített, cél nélkül)
-            # ⚠ PARITÁS (2026-09-22): ha EGY baron a TP és az SL is elérhető, a
-            # bar-adatból nem derül ki, melyik jött előbb. A `run_pair` (és az
-            # optimalizáló) alapból PESSZIMISTA (az SL nyer, `intrabar_order`);
-            # a portfólió eddig mindig a TP-t nézte előbb — ugyanaz a kötés itt
-            # +9,57 $, ott +5,05 $ volt.
-            _sl_first = str(info["params"].get("intrabar_order", "pessimistic")) != "optimistic"
-            if trade.direction == "BUY":
-                # Épített csomagnál a KÖZÖS célár (mint a run_pair-ben / élesben);
-                # `target_r = 0` (alap) → 0, azaz nincs TP.
-                _tp_hit = _tp_e > 0 and row["high"] >= _tp_e
-                _sl_hit = row["low"] <= trade.sl
-                if _sl_hit and (_sl_first or not _tp_hit):
-                    trade.close_price = trade.sl
-                    trade.close_time  = m1_time
-                    trade.pnl_usd     = calc_pnl(trade, trade.sl)
-                    trade.pnl_points    = (trade.sl - trade.open_price) / point_size
-                    trade.status      = "sl";  closed = True
-                elif _tp_hit:
-                    trade.close_price = _tp_e
-                    trade.close_time  = m1_time
-                    trade.pnl_usd     = calc_pnl(trade, _tp_e)
-                    trade.pnl_points    = (_tp_e - trade.open_price) / point_size
-                    trade.status      = "tp";  closed = True
-                else:
-                    _manage_position(trade, row["high"], row["low"],
-                                     point_size, _minlot, _lotstep, rr_spec)
-
-            else:  # SELL — az ASK-sorozaton (bid + spread)
-                _tp_hit = _tp_e > 0 and _lo_x <= _tp_e
-                _sl_hit = _hi_x >= trade.sl
-                if _sl_hit and (_sl_first or not _tp_hit):
-                    trade.close_price = trade.sl
-                    trade.close_time  = m1_time
-                    trade.pnl_usd     = calc_pnl(trade, trade.sl)
-                    trade.pnl_points    = (trade.open_price - trade.sl) / point_size
-                    trade.status      = "sl";  closed = True
-                elif _tp_hit:
-                    trade.close_price = _tp_e
-                    trade.close_time  = m1_time
-                    trade.pnl_usd     = calc_pnl(trade, _tp_e)
-                    trade.pnl_points    = (trade.open_price - _tp_e) / point_size
-                    trade.status      = "tp";  closed = True
-                else:
-                    # A BE/trailing is a KILÉPÉSI (ask) oldalon mér
-                    _manage_position(trade, _hi_x, _lo_x,
-                                     point_size, _minlot, _lotstep, rr_spec)
+            # A KÖZÖS lépés (`_exit_step`) — UGYANAZ a leírás, amit a `run_pair`
+            # is hív. Az intrabar sorrend (`intrabar_order`, alap pesszimista)
+            # is onnan jön: amíg a blokk kétszer volt leírva, a portfólió előbb
+            # a TP-t nézte, és ugyanaz a kötés +9,57 $ volt +5,05 $ helyett.
+            _sl_first = str(params.get("intrabar_order", "pessimistic")) != "optimistic"
+            closed = _exit_step(trade, float(row["high"]), float(row["low"]),
+                                _hi_x, _lo_x, m1_time, point_size,
+                                _minlot, _lotstep, rr_spec, _sl_first)
 
             # Runner KISZÁLLÁSI JELRE zárása (mint a run_pair-ben): a részleges zárás
             # UTÁN, a jel az info["m15_ptr"] gyertyán, a gyertyazáró áron.

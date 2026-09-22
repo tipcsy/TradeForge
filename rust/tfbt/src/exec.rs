@@ -71,6 +71,12 @@ pub struct ExecParams {
     pub slot_risk_pct: f64,
     /// A brókeri felső lot-korlát (`volume_max`); 0 = nincs.
     pub max_lot: f64,
+    /// ⚠ A BE-KUSZOB R-BEN (ABI 5). A `be_pct` a CELARHOZ meri a kuszobot, ezert
+    /// hosszu/hianyzo celarnal nemán kikapcsolja a breakevent; a `be_r` a STOP-
+    /// TAVOLSAGHOZ (1 R). A valodi configban 18/19 cella ezt hasznalja, tehat a
+    /// nativ mag e nelkul GYAKORLATILAG SOHA nem futott. A sorrend a Python
+    /// `core.risk_reduction.breakeven_trigger`-eve: risky → be_r → be_pct.
+    pub be_r: f64,
 }
 
 #[derive(Clone)]
@@ -181,6 +187,33 @@ fn fits_budget(occupied_w: f64, new_w: f64, max_slots: f64) -> bool {
     occupied_w + new_w <= max_slots + EPS
 }
 
+/// `core.risk_reduction.breakeven_trigger` hű portja: a BE-kuszob ARA, vagy
+/// `None`, ha nincs breakeven. A SORREND KOTOTT (risky → be_r → be_pct), es a
+/// ket „nincs kuszob" eset is: `be_r > 0` ismeretlen stop-tavnal NEM esik vissza
+/// a `be_pct`-re (mas szemantika volna), `be_pct > 0` celar nelkul pedig
+/// HAMIS, azonnali BE-t adna — mindketto `None`.
+fn breakeven_trigger(t: &Trade, p: &ExecParams, risky: bool) -> Option<f64> {
+    if risky {
+        return Some(t.open_price);
+    }
+    if p.be_r > 0.0 {
+        let d = t.sl_points * p.point_size;
+        if d > 0.0 {
+            let x = p.be_r * d;
+            return Some(if t.dir_buy { t.open_price + x } else { t.open_price - x });
+        }
+        return None;
+    }
+    if p.be_pct <= 0.0 || t.tp == 0.0 {
+        return None;
+    }
+    Some(if t.dir_buy {
+        t.open_price + (t.tp - t.open_price) * p.be_pct
+    } else {
+        t.open_price - (t.open_price - t.tp) * p.be_pct
+    })
+}
+
 /// `trading.backtest._update_stops` hű portja (BE + trailing).
 fn update_stops(t: &mut Trade, high: f64, low: f64, p: &ExecParams, risky: bool) {
     let atr = t.entry_atr;
@@ -190,15 +223,12 @@ fn update_stops(t: &mut Trade, high: f64, low: f64, p: &ExecParams, risky: bool)
     let be_buf = p.be_buffer_points * p.point_size;
 
     if t.dir_buy {
-        if (risky || p.be_pct > 0.0) && !t.risk_free {
-            let trig = if risky {
-                t.open_price
-            } else {
-                t.open_price + (t.tp - t.open_price) * p.be_pct
-            };
-            if high >= trig {
-                t.sl = t.open_price + be_buf;
-                t.risk_free = true;
+        if !t.risk_free {
+            if let Some(trig) = breakeven_trigger(t, p, risky) {
+                if high >= trig {
+                    t.sl = t.open_price + be_buf;
+                    t.risk_free = true;
+                }
             }
         }
         if t.risk_free && trail_ok && high >= t.open_price + trail_act {
@@ -208,15 +238,12 @@ fn update_stops(t: &mut Trade, high: f64, low: f64, p: &ExecParams, risky: bool)
             }
         }
     } else {
-        if (risky || p.be_pct > 0.0) && !t.risk_free {
-            let trig = if risky {
-                t.open_price
-            } else {
-                t.open_price - (t.open_price - t.tp) * p.be_pct
-            };
-            if low <= trig {
-                t.sl = t.open_price - be_buf;
-                t.risk_free = true;
+        if !t.risk_free {
+            if let Some(trig) = breakeven_trigger(t, p, risky) {
+                if low <= trig {
+                    t.sl = t.open_price - be_buf;
+                    t.risk_free = true;
+                }
             }
         }
         if t.risk_free && trail_ok && low <= t.open_price - trail_act {
