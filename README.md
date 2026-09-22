@@ -465,7 +465,7 @@ python main.py live
 | **Live Dashboard** | instrumentumonként egy sor: BID/ASK, változás%, spread, pozíció, napi P&L, stratégia-cellák, optimalizálás-státusz és a vezérlőgombok |
 | **Pozíciók** | a nyitott pozíciók részletei (stratégia, kiszállási terv, BE/trailing állapot, kézi vezérlés) |
 | **Lezárt** | a lezárt kötések — köztük a mai nap |
-| **Portfólió Backtest** | több instrumentum együttes visszatesztelése: kezdő tőke, időszak, kockázatcsökkentés, equity-görbe és eredménytáblázat |
+| **Portfólió Backtest** | az ÉLŐ RENDSZER modellje: a (pár × stratégia) cellák együtt, közös tőkén és slotokon — több stratégia egyszerre, a szimbólum-házirenddel, a kereskedési órákkal, a hangolatlan pár a stratégia alapértékeivel (narancs „·alap”); kezdő tőke, időszak, kockázatcsökkentés, equity-görbe és cellánkénti eredménytáblázat. Az egyelemű portfólió BITRE az egypáros backtestet adja (`tests/test_portfolio_parity.py`) |
 
 ### Vezérlés a Live Dashboardon
 

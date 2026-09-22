@@ -1167,8 +1167,13 @@ class PortfolioBacktestTab:
         strat_row.pack(fill="x", pady=(0, 4))
         tk.Label(strat_row, text=_t("gui.strategia"), bg=BG_BT, fg=FG_BLUE,
                  font=self._header).pack(side="left")
-        self._strat_var = tk.StringVar(value=default_strategy_name(self.cfg))
-        _snames = available_strategy_names(self.cfg)
+        # ⚠ AZ ÉL MODELLJE AZ ALAP (2026-09-22): „élő cellák" = minden (pár ×
+        # stratégia), amit az él futtat (`enabled_strategy_names`) — több
+        # stratégia EGYSZERRE, közös slotokon, a szimbólum-házirenddel. Egy
+        # stratégiát választva a régi, egy-stratégiás nézet marad.
+        self._ALL = _t("gui.pbt.all_cells")
+        self._strat_var = tk.StringVar(value=self._ALL)
+        _snames = [self._ALL] + list(available_strategy_names(self.cfg))
         self._strat_menu = tk.OptionMenu(strat_row, self._strat_var, *_snames,
                                          command=lambda _=None: self._reload_symbols())
         self._strat_menu.config(bg=BG_HEADER, fg=FG_WHITE, font=self._small,
@@ -1351,37 +1356,48 @@ class PortfolioBacktestTab:
             w.destroy()
         self._sym_vars = {}
         strat_name = getattr(self, "_strat_var", None)
-        _sn = strat_name.get() if strat_name else None
-        params_dir = strategy_dir(_sn)
+        _sel = strat_name.get() if strat_name else None
+        _mind = (_sel is None) or (_sel == getattr(self, "_ALL", None))
         # CSAK a configban SZEREPLŐ párok: az optimized_params/ mappában bróker-
         # váltás után is maradhatnak régi fájlok (pl. XAUUSD) — a config-párokkal
         # vett metszet ezeket kiszűri. A *_hours.json a kereskedési-óra fájl, nem
         # paraméter-készlet.
         _pairs = {s for s, p in (self.cfg.get("pairs") or {}).items() if isinstance(p, dict)}
-        tuned = {f.stem for f in params_dir.glob("*.json")
-                 if not f.stem.endswith("_hours") and f.stem in _pairs} \
-                if params_dir.exists() else set()
-        running = set()
-        for s in _pairs:
+        # A CELLÁK: (pár, stratégia). „Mind": amit az él futtat; egy stratégia:
+        # ahol az a pár listáján van, PLUSZ amire van mentett készlete.
+        cellak: set = set()
+        for s in sorted(_pairs):
             try:
-                if _sn and _sn in (enabled_strategy_names(self.cfg, s) or []):
-                    running.add(s)
+                _futo = list(enabled_strategy_names(self.cfg, s) or [])
             except Exception:
                 log.debug("Portfólió-fül: %s stratégia-listája nem olvasható", s, exc_info=True)
-        szimbolumok = sorted(tuned | running)
-        self._sym_untuned = {s for s in szimbolumok if s not in tuned}
-        if not szimbolumok:
+                _futo = []
+            for n in _futo:
+                if _mind or n == _sel:
+                    cellak.add((s, n))
+        if not _mind and _sel:
+            params_dir = strategy_dir(_sel)
+            if params_dir.exists():
+                for f in params_dir.glob("*.json"):
+                    if not f.stem.endswith("_hours") and f.stem in _pairs:
+                        cellak.add((f.stem, _sel))
+        def _tuned(c):
+            return (strategy_dir(c[1]) / f"{c[0]}.json").exists()
+        rendezett = sorted(cellak)
+        self._sym_untuned = {c for c in rendezett if not _tuned(c)}
+        if not rendezett:
             tk.Label(self._sym_frame, text=_t("gui.pbt.no_instruments"),
                      bg=BG_BT, fg=FG_GRAY, font=self._small).grid(
                          row=0, column=0, columnspan=4, sticky="w")
             return
-        cols = 4
-        for i, sym in enumerate(szimbolumok):
+        cols = 3 if _mind else 4
+        for i, cell in enumerate(rendezett):
             var = tk.BooleanVar(value=True)
-            self._sym_vars[sym] = var
-            _untuned = sym in self._sym_untuned
+            self._sym_vars[cell] = var
+            _untuned = cell in self._sym_untuned
+            _nev = f"{cell[0]} · {cell[1]}" if _mind else cell[0]
             tk.Checkbutton(self._sym_frame,
-                           text=(_t("gui.pbt.untuned_mark", symbol=sym) if _untuned else sym),
+                           text=(_t("gui.pbt.untuned_mark", symbol=_nev) if _untuned else _nev),
                            variable=var,
                            bg=BG_BT, fg=(FG_ORANGE if _untuned else FG_WHITE),
                            selectcolor=BG_HEADER,
@@ -1392,10 +1408,11 @@ class PortfolioBacktestTab:
     def _start_bt(self):
         if self._thread and self._thread.is_alive():
             return
-        symbols = [s for s, v in self._sym_vars.items() if v.get()]
-        if not symbols:
+        cells = [c for c, v in self._sym_vars.items() if v.get()]
+        if not cells:
             self._lbl_status.config(text=_t("gui.valassz_legalabb_egy_instrumentumot"), fg=FG_RED)
             return
+        symbols = sorted({c[0] for c in cells})
         date_from = self._entry_from.get().strip()
         date_to   = self._entry_to.get().strip()
         try:
@@ -1425,11 +1442,12 @@ class PortfolioBacktestTab:
         self._btn_start.config(state="disabled", bg=BTN_DIS_BG, fg=BTN_DIS_FG)
         self._btn_stop_bt.config(state="normal", bg=BTN_STOP_BG, fg=BTN_STOP_FG)
         self._progressbar["value"] = 0
-        self._lbl_status.config(text=_t("gui.pbt.running", n=len(symbols)), fg=FG_YELLOW)
+        self._lbl_status.config(text=_t("gui.pbt.running_cells", n=len(cells),
+                                        pairs=len(symbols)), fg=FG_YELLOW)
 
         self._thread = threading.Thread(
             target=self._run_thread,
-            args=(symbols, date_from, date_to, init_bal, self._rr_spec(),
+            args=(cells, date_from, date_to, init_bal, self._rr_spec(),
                   strat_name, n_slots, build_on, exec_gates),
             daemon=True,
         )
@@ -1456,7 +1474,7 @@ class PortfolioBacktestTab:
             return None
         return {**_rr.default_config(), "preset": preset}
 
-    def _run_thread(self, symbols, date_from, date_to, init_bal, rr_spec=None,
+    def _run_thread(self, cells, date_from, date_to, init_bal, rr_spec=None,
                     strat_name=None, n_slots=None, build_on=False, exec_gates=False):
         from trading.backtest import run_portfolio_backtest, _save_backtest_results
 
@@ -1469,15 +1487,15 @@ class PortfolioBacktestTab:
 
         try:
             result = run_portfolio_backtest(
-                self.cfg, symbols, date_from, date_to,
+                self.cfg, None, date_from, date_to,
                 initial_balance=init_bal,
                 progress_callback=on_progress,
                 stop_flag=self._stop_flag,
                 rr=rr_spec,
-                strategy_name=strat_name,
                 max_slots=n_slots,
                 build=build_on,
                 exec_gates=exec_gates,
+                cells=cells,            # (pár, stratégia) — több stratégia egyszerre
             )
             if result.get("trades"):
                 _save_backtest_results(
@@ -1608,7 +1626,8 @@ class PortfolioBacktestTab:
             fr = tk.Frame(self._res_rows_frame, bg=bg)
             fr.pack(fill="x")
             vals = [
-                ((f"{sym} ⚠R" if is_risky else sym) + (" ·alap" if _default else ""), 10,
+                ((f"{sym} ⚠R" if is_risky else sym) + (" ·alap" if _default else ""),
+                 (16 if "/" in sym else 10),
                  FG_ORANGE if (is_risky or _default) else FG_WHITE),
                 (str(s.get("trades", 0)),         6, FG_WHITE),
                 (f"{s.get('win_rate',0):.0%}",    7, FG_GREEN if s.get('win_rate',0) >= 0.5 else FG_RED),

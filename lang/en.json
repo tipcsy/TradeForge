@@ -1653,5 +1653,7 @@
   "gui.pbt.instruments": "Instruments (where the strategy runs):",
   "gui.pbt.instruments_hint": "orange = untuned — runs with the strategy's defaults, as live does",
   "gui.pbt.no_instruments": "(No such instrument: the strategy is on no pair's list and has no saved parameter set)",
-  "gui.pbt.untuned_mark": "{symbol} ·default"
+  "gui.pbt.untuned_mark": "{symbol} ·default",
+  "gui.pbt.all_cells": "live cells (all)",
+  "gui.pbt.running_cells": "Running… ({n} cells, {pairs} pairs)"
 }

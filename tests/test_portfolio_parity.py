@@ -168,6 +168,46 @@ veg1 = BAL + sum(t.pnl_usd for t in t1)
 check("a VÉGEGYENLEG egyezik (1 cent)", abs(veg1 - float(r2.get("final_balance", 0))) <= 0.01,
       f"{veg1:.2f} vs {r2.get('final_balance', 0):.2f}")
 
+# ══ TÖBB STRATÉGIA EGY PÁRON (2026-09-22) — az él modellje ════════════════
+# A második cella (alap: csilla) ugyanazon a páron. Amit állítunk: (a) a futás
+# mindkét cellát viszi; (b) egy cellának egyszerre EGY pozíciója van; (c) a
+# szimbólum-házirend (alap `no_opposite`) áll: más stratégia pozíciója mellett
+# ellenirányút nem nyit; (d) a cella-halmaz kötései nem többek, mint a szólók
+# összege (a másik cella csak ELVEHET belépőt, nem adhat hozzá — a jelzés-
+# állapotgépek függetlenek).
+STRAT2 = os.environ.get("PARITAS_STRAT2", "csilla")
+if STRAT2 != STRAT:
+    from core import symbol_policy as _pol
+    r3 = bt.run_portfolio_backtest(cfg, None, FROM, TO, initial_balance=BAL, rr=None,
+                                   max_slots=trading_cfg["max_open_slots"], build=False,
+                                   exec_gates=True, cells=[(SYM, STRAT), (SYM, STRAT2)])
+    r4 = bt.run_portfolio_backtest(cfg, None, FROM, TO, initial_balance=BAL, rr=None,
+                                   max_slots=trading_cfg["max_open_slots"], build=False,
+                                   exec_gates=True, cells=[(SYM, STRAT2)])
+    t3 = sorted(r3.get("trades", []), key=lambda t: t.open_time)
+    print(f"két cella ({STRAT}+{STRAT2}): {len(t3)} kötés — {STRAT}: "
+          f"{sum(1 for t in t3 if getattr(t, 'strategy', None) == STRAT)}, {STRAT2}: "
+          f"{sum(1 for t in t3 if getattr(t, 'strategy', None) == STRAT2)} "
+          f"(szóló: {len(t2)} + {len(r4.get('trades', []))}); házirend={_pol.resolve(cfg, SYM)}")
+    check("a két cella EGYÜTT fut, mindkettő az eredményben",
+          {k.split('/')[-1] for k in r3.get("per_pair", {})} >= {STRAT, STRAT2},
+          str(sorted(r3.get("per_pair", {}))))
+    _ketto = _ellen = 0
+    for i, a in enumerate(t3):
+        for b in t3[:i]:
+            if b.close_time is not None and b.close_time > a.open_time:
+                if getattr(b, "strategy", None) == getattr(a, "strategy", None):
+                    _ketto += 1
+                elif b.direction != a.direction:
+                    _ellen += 1
+    check("egy cellának egyszerre EGY pozíciója van", _ketto == 0, str(_ketto))
+    if _pol.resolve(cfg, SYM) == _pol.NO_OPPOSITE:
+        check("szimbólum-házirend (no_opposite): nincs egyidejű ellenirányú a két cella közt",
+              _ellen == 0, str(_ellen))
+    check("a cella-halmaz nem köt többet, mint a két szóló összege",
+          len(t3) <= len(t2) + len(r4.get("trades", [])),
+          f"{len(t3)} <= {len(t2)} + {len(r4.get('trades', []))}")
+
 jo = sum(results)
 print(f"\n{jo}/{len(results)} teszt PASS")
 sys.exit(0 if jo == len(results) else 1)

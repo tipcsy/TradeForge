@@ -2516,10 +2516,20 @@ def run_portfolio_backtest(
     max_slots: "int | None" = None,      # egyszerre nyitott pozíciók száma (None = trading.max_open_slots)
     build: bool = False,                 # pozícióépítés (piramidális ráépítés) bekapcsolva?
     exec_gates: bool = False,            # él-paritású végrehajtási kapuk (spread + TF-együttállás)
+    cells: "list | None" = None,         # [(pár, stratégia), …] — TÖBB stratégia egyszerre (mint az él)
 ) -> dict:
     """
     Portfólió szintű backtest: az összes szimbólum közös tőkén,
     kronológiai M1 szimulációval fut.
+
+    ⚠ A CELLA A (PÁR × STRATÉGIA) — 2026-09-22 óta, az él modellje szerint. Az élő
+    motor páronként TÖBB stratégiát futtat (`strategies_for`), mindegyik saját
+    paraméter-készlettel, jelzés-állapotgéppel és pozícióval; a slotok és a napi
+    limit a SZÁMLÁÉ (közös), a kockázatcsökkentés a PÁRÉ, és két stratégia
+    ugyanazon a páron a szimbólum-házirend szerint fér össze
+    (`core.symbol_policy`, alap: `no_opposite`). A portfólió eddig EGY stratégiát
+    tudott — a `symbols` + `strategy_name` alak megmaradt (= minden pár azzal az
+    egy stratégiával), a `cells` az általános.
 
     Optimalizált params betöltése: data/optimized_params/<strategy>/<SYMBOL>.json
 
@@ -2540,11 +2550,24 @@ def run_portfolio_backtest(
         initial_balance = float(cfg.get("ml", {}).get("starting_balance_eur", 1000.0))
     trading_cfg = cfg["trading"]
     spread_default = 1.5
-    strategy = get_strategy_by_name(strategy_name) if strategy_name else get_strategy(cfg)
-    set_active_strategy(strategy.name)     # stratégia-hatókörű params-tárolás
-    migrate_flat_layout(strategy.name)
-    tf_hi = strategy.timeframes()[0].label
-    tf_lo = strategy.timeframes()[1].label
+    # ── A CELLÁK: (pár, stratégia) ───────────────────────────────────────────
+    if cells is None:
+        _one = get_strategy_by_name(strategy_name) if strategy_name else get_strategy(cfg)
+        cells = [(str(s), _one.name) for s in (symbols or [])]
+    cells = [(str(a), str(b)) for a, b in cells]
+    _strats: dict = {}
+    for _sym, _sn in cells:
+        if _sn not in _strats:
+            _strats[_sn] = get_strategy_by_name(_sn)
+            set_active_strategy(_sn)     # stratégia-hatókörű params-tárolás
+            migrate_flat_layout(_sn)
+    if not _strats:
+        return {"error": _t("bt.err.no_params"),
+                "trades": [], "daily_pnl": {}, "final_balance": initial_balance}
+    # `strategy`: az ELSŐ cella stratégiája — csak a naplónak; a ciklus mindenütt
+    # a cella sajátját (`info["strategy"]`) használja.
+    strategy = next(iter(_strats.values()))
+    from core import symbol_policy as _sym_policy
 
     # ── Végrehajtási kapuk (él-paritás, opcionális) — UGYANAZ, mint a run_pair-ben ──
     from gates import spread_gate as _spread_gate
@@ -2604,27 +2627,29 @@ def run_portfolio_backtest(
         return {**_pb.default_config(), **bc}
 
     # ── Per-pár optimalizált paraméterek + risky állapot betöltése ─────────
-    pair_params: dict = {}
-    pair_risky:  dict = {}
-    pair_source: dict = {}      # sym → "tuned" | "default" (a felület kiírja)
-    for sym in symbols:
+    pair_params: dict = {}      # (sym, strat) → params
+    pair_risky:  dict = {}      # (sym, strat) → risky
+    pair_source: dict = {}      # (sym, strat) → "tuned" | "default" (a felület kiírja)
+    for cell in cells:
+        sym, _sn = cell
+        strategy = _strats[_sn]
         f = params_file(sym, strategy.name)
         if f.exists():
-            pair_source[sym] = "tuned"
+            pair_source[cell] = "tuned"
             with open(f, encoding="utf-8") as fh:
                 data = json.load(fh)
             # BE/trailing/atr_period/spread-kapu MÁR NEM stratégia-paraméter — a
             # közös, instrumentum-szintű execution config felülírja az esetleges
             # elavult másolatot a régi optimalizált json-ban.
-            pair_params[sym] = {**data.get("params", {}), **load_execution_params(sym, cfg)}
+            pair_params[cell] = {**data.get("params", {}), **load_execution_params(sym, cfg)}
             # ⚠ KÓD, nem a kijelzett szöveg: a döntés (RISKY mód) nem függhet a
             # felület nyelvétől — angolra kapcsolva a `grade_rank` a lefordított
             # szót nem ismerné fel, és MINDEN pár kimaradna a risky ágból.
             gcode, _, _ = strategy.grade_code(data.get("test_summary", {}), cfg)
             weak = 1 <= strategy.grade_rank(gcode) <= 3   # Közepes/Gyenge/Rossz
-            pair_risky[sym] = risky_mode.is_risky(sym) or (auto_risky and weak)
-            if pair_risky[sym]:
-                log.info("Portfolio BT: %s — RISKY mód (minősítés: %s%s)", sym, gcode,
+            pair_risky[cell] = risky_mode.is_risky(sym) or (auto_risky and weak)
+            if pair_risky[cell]:
+                log.info("Portfolio BT: %s/%s — RISKY mód (minősítés: %s%s)", sym, _sn, gcode,
                          ", kézi" if risky_mode.is_risky(sym) else "")
         else:
             # ⚠ HANGOLATLAN PÁR: NEM hagyjuk ki — az élő motor ugyanezt a párt a
@@ -2638,9 +2663,9 @@ def run_portfolio_backtest(
                 log.warning("Portfolio BT: %s — nincs optimalizált params ÉS a "
                             "stratégiának nincs alapértéke, kihagyva.", sym)
                 continue
-            pair_params[sym] = {**_base, **load_execution_params(sym, cfg)}
-            pair_source[sym] = "default"
-            pair_risky[sym] = risky_mode.is_risky(sym)
+            pair_params[cell] = {**_base, **load_execution_params(sym, cfg)}
+            pair_source[cell] = "default"
+            pair_risky[cell] = risky_mode.is_risky(sym)
             log.info("Portfolio BT: %s — HANGOLATLAN, a(z) %s alapértékeivel fut",
                      sym, strategy.name)
 
@@ -2660,10 +2685,17 @@ def run_portfolio_backtest(
     if ts_to.tzinfo is None:
         ts_to = ts_to.tz_localize("UTC")
 
-    for sym, params in pair_params.items():
+    _data_cache: dict = {}      # sym → (df_m15, df_m1): két stratégia ugyanazt az adatot kapja
+    for cell, params in pair_params.items():
+        sym, _sn = cell
+        strategy = _strats[_sn]
+        tf_hi = strategy.timeframes()[0].label
+        tf_lo = strategy.timeframes()[1].label
         if sym not in cfg["pairs"] or not isinstance(cfg["pairs"][sym], dict):
             continue
-        df_m15, df_m1 = load_data(sym)
+        if sym not in _data_cache:
+            _data_cache[sym] = load_data(sym)
+        df_m15, df_m1 = _data_cache[sym]
         if df_m15 is None:
             log.warning("Portfolio BT: %s — nincs adat, kihagyva.", sym)
             continue
@@ -2684,16 +2716,20 @@ def run_portfolio_backtest(
         m1  = m1[(m1.index  >= ts_from) & (m1.index  <= ts_to)]
 
         if len(m1) < 100:
-            log.warning("Portfolio BT: %s — túl kevés adat a megadott időszakban.", sym)
+            log.warning("Portfolio BT: %s/%s — túl kevés adat a megadott időszakban.", sym, _sn)
             continue
 
         # A kockázatcsökkentő spec: globális rr (mind a párra), különben a
         # per-pár választott preset (rr_state) + gyenge-minősítés auto-risky.
-        _rr_pair = rr if rr else _pair_auto_rr(sym, pair_risky.get(sym, False))
+        # ⚠ A PÁRÉ, nem a stratégiáé: két stratégia ugyanazon a páron ugyanazt kapja.
+        _rr_pair = rr if rr else _pair_auto_rr(sym, pair_risky.get(cell, False))
         # A per-bar sor-epites tombokbol (mint a run_pair-ben) — a `.iloc`
         # baronkent uj pandas Series-t epitene. EGYSZER oldjuk fel, par-szinten.
         _c15, _a15 = _oszlop_tombok(m15)
-        pair_data[sym] = {
+        pair_data[cell] = {
+            "symbol":    sym,
+            "strategy":  strategy,
+            "strat_name": _sn,
             "m15":       m15,
             "cols15":    _c15,
             "arr15":     _a15,
@@ -2704,7 +2740,7 @@ def run_portfolio_backtest(
             "m15_delta": _signal_bar_delta(strategy, params),
             "params":    params,
             "pair_cfg":  cfg["pairs"][sym],
-            "risky":     pair_risky.get(sym, False),
+            "risky":     pair_risky.get(cell, False),
             "rr":        _rr_pair,
             # Kiszállási-jel kiértékelő (None, ha a runner != exit) — a runner
             # zárásához, ugyanaz a logika, mint a run_pair-ben és az élő motorban.
@@ -2749,7 +2785,7 @@ def run_portfolio_backtest(
             # a dontesi idopontokra, look-ahead nelkul.
             **_pair_momentum(cfg, sym, strategy.name, m15, df_m1, _exec_gates),
         }
-        log.info("Portfolio BT: %s betöltve — M15=%d M1=%d bar", sym, len(m15), len(m1))
+        log.info("Portfolio BT: %s/%s betöltve — M15=%d M1=%d bar", sym, _sn, len(m15), len(m1))
 
     if not pair_data:
         return {"error": _t("bt.err.no_period"),
@@ -2761,12 +2797,13 @@ def run_portfolio_backtest(
         all_times.update(info["m1"].index.tolist())
     all_times_sorted = sorted(all_times)
     n_total = len(all_times_sorted)
-    log.info("Portfolio BT: %d pár | %d M1 bar | tőke: $%.0f",
-             len(pair_data), n_total, initial_balance)
+    log.info("Portfolio BT: %d cella (%d pár, %d stratégia) | %d M1 bar | tőke: $%.0f",
+             len(pair_data), len({c[0] for c in pair_data}), len({c[1] for c in pair_data}),
+             n_total, initial_balance)
 
     # ── Szimuláció állapot ────────────────────────────────────────────────
     balance        = initial_balance
-    open_trades:   dict  = {}   # sym → Trade (max 1 pozíció/szimbólum)
+    open_trades:   dict  = {}   # (sym, strat) → Trade (cellánként EGY pozíció)
     closed_trades: list  = []
     daily_pnl:     dict  = {}
     equity_curve:  list  = []   # (date_str, balance) pontok a görbe rajzához
@@ -2796,12 +2833,13 @@ def run_portfolio_backtest(
 
         # ── 1. M15 állapot frissítése minden párhoz ───────────────────────
         for info in pair_data.values():
-            _advance_m15_state(info, m1_time, strategy)
+            _advance_m15_state(info, m1_time, info["strategy"])
 
         # ── 2. Nyitott pozíciók kezelése ──────────────────────────────────
-        for sym in list(open_trades.keys()):
-            trade  = open_trades[sym]
-            info   = pair_data[sym]
+        for cell in list(open_trades.keys()):
+            trade  = open_trades[cell]
+            info   = pair_data[cell]
+            sym    = info["symbol"]
             m1_df  = info["m1"]
             params = info["params"]
 
@@ -2973,7 +3011,7 @@ def run_portfolio_backtest(
                 trade.pnl_usd, trade.commission_usd, trade.swap_usd = _costs.apply(
                     trade.pnl_usd, trade.lot, trade.direction,
                     trade.open_time.timestamp(), m1_time.timestamp(), pair_cfg)
-                del open_trades[sym]
+                del open_trades[cell]
                 closed_trades.append(trade)
                 balance += trade.pnl_usd
                 daily_pnl[day_key] = daily_pnl.get(day_key, 0.0) + trade.pnl_usd
@@ -2991,7 +3029,9 @@ def run_portfolio_backtest(
         occupied_w = sum(t.slot_weight for t in open_trades.values()
                          if not t.risk_free)
 
-        for sym, info in pair_data.items():
+        for cell, info in pair_data.items():
+            sym      = info["symbol"]
+            strategy = info["strategy"]
             m1_df    = info["m1"]
             params   = info["params"]
             pair_cfg = info["pair_cfg"]
@@ -3017,7 +3057,14 @@ def run_portfolio_backtest(
                 # NYITÁST gátoljuk. (Ugyanaz a fix, mint a run_pair-ben.)
                 signal = strategy.bt_on_low_close(info["state"], prev_row, row, params)
 
-                if (signal != "NONE" and sym not in open_trades
+                # ⚠ SZIMBÓLUM-HÁZIREND (mint az él): a saját cella nyitott pozíciója
+                # MINDIG tilt; a MÁS stratégia pozíciója ugyanezen a páron a
+                # házirend szerint (alap `no_opposite`: ellenirányút nem nyitunk).
+                _book = [t.direction for c2, t in open_trades.items()
+                         if c2[0] == sym and c2 != cell]
+                _pol_block = (_sym_policy.blocks(_sym_policy.resolve(cfg, sym), signal, _book)
+                              if (signal != "NONE" and _book) else None)
+                if (signal != "NONE" and cell not in open_trades and _pol_block is None
                         and occupied < max_slots and _sess_ok and not _off_hour):
                     ptr = info["m15_ptr"]
                     m15_df = info["m15"]
@@ -3200,7 +3247,8 @@ def run_portfolio_backtest(
                                 trade.rr_preset_eff = (
                                     _rrm.PRESET_FIBO if info["bigmove_at"](ptr)
                                     else _rrm.PRESET_SHIELD)
-                            open_trades[sym] = trade
+                            trade.strategy = info["strat_name"]   # a cella (az eredmény-táblához)
+                            open_trades[cell] = trade
                             occupied += 1
                             occupied_w += _w
 
@@ -3210,27 +3258,34 @@ def run_portfolio_backtest(
                           0, len(closed_trades), 100.0)
     equity_curve.append((last_eq_date, balance))
 
-    # Per-pár összesítő
-    by_sym: dict = defaultdict(list)
+    # Per-CELLA összesítő. A kulcs a pár neve, ha a futásban egy stratégia van
+    # (visszafelé kompatibilis: a felület és a mentés így ismeri); több
+    # stratégiánál „PÁR/stratégia" — a `strategy` mező mindig ott van.
+    _tobb = len({c[1] for c in pair_data}) > 1
+    def _cimke(c):
+        return f"{c[0]}/{c[1]}" if _tobb else c[0]
+    by_cell: dict = defaultdict(list)
     for t in closed_trades:
-        by_sym[t.symbol].append(t)
+        by_cell[(t.symbol, getattr(t, "strategy", strategy.name))].append(t)
 
     per_pair: dict = {}
-    for sym, tt in by_sym.items():
-        r = BacktestResult(symbol=sym, trades=tt)
+    for cell, tt in by_cell.items():
+        r = BacktestResult(symbol=cell[0], trades=tt)
         s = r.summary(initial_balance)
-        s["risky"] = pair_risky.get(sym, False)   # a GUI jelzi a risky párokat
-        s["params_source"] = pair_source.get(sym, "tuned")
-        per_pair[sym] = s
-    # ⚠ A KÖTÉS NÉLKÜLI pár is szerepeljen a `per_pair`-ben (a forrásával):
+        s["risky"] = pair_risky.get(cell, False)   # a GUI jelzi a risky párokat
+        s["params_source"] = pair_source.get(cell, "tuned")
+        s["strategy"] = cell[1]
+        per_pair[_cimke(cell)] = s
+    # ⚠ A KÖTÉS NÉLKÜLI cella is szerepeljen a `per_pair`-ben (a forrásával):
     # egy hangolatlan pár, ami 0-t kötött, ne tűnjön el a táblából — a „nem
     # kötött" és a „nem futott" nem ugyanaz.
-    for sym in pair_data:
-        if sym not in per_pair:
-            per_pair[sym] = {"symbol": sym, "trades": 0, "risky": pair_risky.get(sym, False),
-                             "params_source": pair_source.get(sym, "tuned")}
+    for cell in pair_data:
+        if _cimke(cell) not in per_pair:
+            per_pair[_cimke(cell)] = {"symbol": cell[0], "strategy": cell[1], "trades": 0,
+                                      "risky": pair_risky.get(cell, False),
+                                      "params_source": pair_source.get(cell, "tuned")}
 
-    risky_syms = [s for s, v in pair_risky.items() if v and s in pair_data]
+    risky_syms = sorted({c[0] for c, v in pair_risky.items() if v and c in pair_data})
     log.info("Portfolio BT kész | Kötések: %d | P&L: $%.2f | Végegyenleg: $%.2f | Risky: %s",
              len(closed_trades), balance - initial_balance, balance,
              ", ".join(risky_syms) if risky_syms else "—")
