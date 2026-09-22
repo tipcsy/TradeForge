@@ -1391,7 +1391,7 @@
   "overlap.partial": "⚠ {pct}% of the window falls into the model's training period ({from} … {to}) — it biases upwards by that much. For a clean measurement pick a start after {to}.",
   "pack.btn.export": "Pack selected…",
   "pack.btn.install": "Load package…",
-  "pack.dlg.confirm.body": "{name}  v{version}   (api {api})\nCreated by: {by}\n\nThe package contains:\n  {files}\n\n⚠ Installing brings EXECUTABLE PYTHON CODE onto your machine — the same act of trust as launching an .exe.\nOnly continue if this file came from YOU.",
+  "pack.dlg.confirm.body": "{name}  v{version}   (api {api})\nCreated by: {by}\n\nThe package contains:\n  {files}\n\nDaily job the program runs by itself (switch off: daily_jobs.<name>.enabled):\n{jobs}\n\n⚠ Installing brings EXECUTABLE PYTHON CODE onto your machine — the same act of trust as launching an .exe.\nOnly continue if this file came from YOU.",
   "pack.dlg.confirm.title": "Install this strategy?",
   "pack.dlg.open": "Open strategy package",
   "pack.dlg.overwrite.body": "A strategy named {name} already exists. Installing will OVERWRITE its module, config and docs.\n\nSaved (optimised) parameters are kept — but if the strategy's logic changed, those were tuned for DIFFERENT code.",
@@ -1642,5 +1642,7 @@
   "jobs.no_log": "(no log yet)",
   "cond.tab.jobs": "Daily jobs",
   "cond.tab.job_run": "▶ Run now",
-  "cond.tab.job_log": "Log"
+  "cond.tab.job_log": "Log",
+  "pack.dlg.confirm.job": "  • {name} — {time} — {label}",
+  "pack.dlg.confirm.no_jobs": "  (none)"
 }

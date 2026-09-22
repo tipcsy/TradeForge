@@ -1391,7 +1391,7 @@
   "overlap.partial": "⚠ Az ablak {pct}%-a a modell tanítási időszakára esik ({from} … {to}) — ennyivel felfelé torzít. Tiszta méréshez válassz {to} utáni kezdetet.",
   "pack.btn.export": "Kijelölt csomagolása…",
   "pack.btn.install": "Csomag betöltése…",
-  "pack.dlg.confirm.body": "{name}  v{version}   (api {api})\nKészítette: {by}\n\nA csomag tartalma:\n  {files}\n\n⚠ A telepítés FUTTATHATÓ PYTHON KÓDOT hoz be a gépedre — ugyanaz a bizalmi lépés, mint egy .exe elindítása.\nCsak akkor folytasd, ha ez a fájl TŐLED származik.",
+  "pack.dlg.confirm.body": "{name}  v{version}   (api {api})\nKészítette: {by}\n\nA csomag tartalma:\n  {files}\n\nNapi feladat, amit a program magától futtat (kikapcsolható: daily_jobs.<név>.enabled):\n{jobs}\n\n⚠ A telepítés FUTTATHATÓ PYTHON KÓDOT hoz be a gépedre — ugyanaz a bizalmi lépés, mint egy .exe elindítása.\nCsak akkor folytasd, ha ez a fájl TŐLED származik.",
   "pack.dlg.confirm.title": "Telepíted ezt a stratégiát?",
   "pack.dlg.open": "Stratégia-csomag megnyitása",
   "pack.dlg.overwrite.body": "Már van {name} nevű stratégia. A telepítés FELÜLÍRJA a modulját, a configját és a leírását.\n\nA mentett (optimalizált) paraméterek megmaradnak — de ha a stratégia logikája változott, azok már MÁS kódra készültek.",
@@ -1642,5 +1642,7 @@
   "jobs.no_log": "(még nincs napló)",
   "cond.tab.jobs": "Napi feladatok",
   "cond.tab.job_run": "▶ Futtat most",
-  "cond.tab.job_log": "Napló"
+  "cond.tab.job_log": "Napló",
+  "pack.dlg.confirm.job": "  • {name} — {time} — {label}",
+  "pack.dlg.confirm.no_jobs": "  (nincs)"
 }

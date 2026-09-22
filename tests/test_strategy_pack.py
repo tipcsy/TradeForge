@@ -111,6 +111,73 @@ check("masik strategia NEM kerul a csomagba",
       not (_masok & set(man_ml["_files"])),
       str(_masok & set(man_ml["_files"])))
 
+# ══ 1b. A NAPI FELADATOK A MANIFESTBEN (2026-09-22) ═══════════════════
+# A strategia deklaralhat napi feladatot (`Strategy.daily_jobs()`), amit a keret
+# naponta futtat — ez KOD, ami magatol fut, ezert a manifest szabvanyos alakban
+# viszi, es a telepito kiirja. A csilla deklaral egyet, a wpr_sma nem.
+man_w = pack.inspect(csomag)
+check("napi feladat nelkuli strategia manifestje: ures `daily_jobs` lista",
+      man_w.get("daily_jobs") == [], str(man_w.get("daily_jobs")))
+cs = pack.build("csilla", TMP)
+man_cs = pack.inspect(cs)
+check("a csilla manifestje viszi a napi feladatat (nev, ido, cim)",
+      [j["name"] for j in man_cs["daily_jobs"]] == ["csilla_forward"]
+      and man_cs["daily_jobs"][0]["time"] == "22:30"
+      and bool(man_cs["daily_jobs"][0]["label"]), str(man_cs.get("daily_jobs")))
+check("...es a feladat moduljat segedmodulkent",
+      "csilla_forward.py" in man_cs["_files"], str(man_cs["_files"]))
+check("a manifestben NINCS hivhato (csak nev/ido/cim — adat, nem kod)",
+      set(man_cs["daily_jobs"][0]) == {"name", "time", "label"})
+
+
+class _Rossz:
+    """Strategia-utanzat hibas deklaracioval — a csomagolo utasitsa el."""
+    def __init__(self, jobs):
+        self._j = jobs
+
+    def daily_jobs(self):
+        return self._j
+
+
+def _elutasit(jobs) -> bool:
+    try:
+        pack.declared_jobs(_Rossz(jobs))
+        return False
+    except pack.PackError:
+        return True
+
+
+check("hibas nev (szokoz, nagybetu) elutasitva",
+      _elutasit([dict(name="Rossz Nev", run=lambda a: 0)]))
+check("hianyzo `run` elutasitva", _elutasit([dict(name="ok_nev")]))
+check("ketszer deklaralt nev elutasitva",
+      _elutasit([dict(name="a_b", run=lambda a: 0), dict(name="a_b", run=lambda a: 0)]))
+check("rossz ido (25:99) elutasitva",
+      _elutasit([dict(name="a_b", time="25:99", run=lambda a: 0)]))
+check("helyes deklaracio: a szabvanyos alak jon vissza",
+      pack.declared_jobs(_Rossz([dict(name="a_b", run=lambda a: 0)]))
+      == [{"name": "a_b", "time": "22:30", "label": "a_b"}])
+# manipulalt manifest: a `daily_jobs` nem lista → a csomag nem olvashato
+import json as _json
+_man_rossz = dict(man_cs)
+_man_rossz.pop("_files", None)
+_man_rossz["daily_jobs"] = "csilla_forward"
+_rossz_cs = _ujracsomagol(cs, TMP / "csilla-rossz.tfs",
+                          {"manifest.json": _json.dumps(_man_rossz).encode("utf-8")})
+try:
+    pack.inspect(_rossz_cs)
+    check("manipulalt `daily_jobs` mezo (nem lista) elutasitva", False)
+except pack.PackError as e:
+    check("manipulalt `daily_jobs` mezo (nem lista) elutasitva", "daily_jobs" in str(e))
+# regi csomag (nincs mezo): visszafele kompatibilis, ures lista
+_man_regi = dict(man_cs)
+_man_regi.pop("_files", None)
+_man_regi.pop("daily_jobs", None)
+_regi_cs = _ujracsomagol(cs, TMP / "csilla-regi.tfs",
+                         {"manifest.json": _json.dumps(_man_regi).encode("utf-8")})
+check("regi csomag `daily_jobs` nelkul: olvashato, ures lista",
+      pack.inspect(_regi_cs).get("daily_jobs") == [])
+
 
 # ══ 2. TELEPITES ideiglenes celba ══════════════════════════════════════
 try:

@@ -508,6 +508,11 @@ def cmd_install(argv=None):
     print(f"Csomag:   {man['name']}  v{man.get('version')}  (api {man.get('api')})")
     print(f"Keszult:  {man.get('created_by')}")
     print("Fajlok:   " + ", ".join(man["_files"]))
+    # ⚠ AMI NAPONTA MAGATOL FUT: a strategia napi feladatai — a bizalmi lepes
+    # resze, ezert a megerosites ELOTT.
+    for j in man.get("daily_jobs") or []:
+        print(f"NAPI FELADAT: {j.get('name')}  {j.get('time')}  {j.get('label')}"
+              f"  (a program naponta futtatja; daily_jobs.{j.get('name')}.enabled)")
     if gondok:
         print("GONDOK:")
         for g in gondok:

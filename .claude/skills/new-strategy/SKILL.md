@@ -174,6 +174,72 @@ bukik, és dönteni kell — törő (`STRATEGY_API + 1`) vagy sem (ujjlenyomat
 frissítése). Új hook alapértelmezett megvalósítással NEM törő. Új stratégia
 írásakor ehhez nem kell nyúlni; ha a KERETEN változtatsz közben, igen.
 
+### Napi feladatok — a `daily_jobs()` hook (v3.87.1)
+
+**Mi ez.** Ha a stratégiának van olyan munkája, amit **naponta egyszer, a
+kereskedéstől függetlenül** el kell végezni — forward-napló frissítése, egy
+saját állapotfájl újraszámolása, egy modell heti/napi újratanítás-előkészítése
+—, azt **a stratégia deklarálja**, és **a keret futtatja**: naponta egyszer a
+beállított helyi idő után, **alprocesszben** (`main.py job <név>`), állapottal
+(`data/daily_jobs.json`), naplóval (`data/daily_jobs/<név>.log`), gombbal a
+Karmester fülön („Napi feladatok"), `jobs [run <név>]` paranccsal (konzol +
+Telegram) és egy szakasszal az esti riportban. A config csak az eltérést
+rögzíti: `daily_jobs.<név>.enabled` / `.time`.
+
+**Miért így, és nem a keretbe drótozva.** A `csilla` forward-tesztje (2026-09-22)
+először a keretbe került: a `core/daily_jobs.py` ismerte a nevét, a `main.py`
+importálta a szkriptjét. A felhasználó kérdése — „mi van, ha letörlöm a csilla
+stratégiát?" — mutatta meg a hibát: a feladat minden este elbukott volna, a
+felületen egy halott doboz maradt volna. **A stratégia hordozható (`.tfs`): ami
+hozzá tartozik, azt ő deklarálja, és vele együtt tűnik el.** Ugyanaz a szabály,
+mint a segédmoduloknál: a keret a `strategies/`-ből nem importál, nevet nem
+ismer — a registry-n át, dinamikusan kérdez (`tests/test_strategy_layout.py`
+őrzi: a `main.py` sem importálhat a tartalomból, a `core/daily_jobs.py` kódjában
+nem lehet stratégia-név).
+
+**Hogyan.** A hook a `Strategy`-n opcionális (alap: `[]`), tehát egy stratégia,
+aminek nincs ilyen munkája, nem is tud róla. Ha van:
+
+```python
+# strategies/<név>.py
+def daily_jobs(self) -> list:
+    from strategies import <név>_forward as _fw     # ← ITT importáld: a .tfs így viszi
+    return [_fw.job_spec()]
+
+# strategies/<név>_forward.py  (a stratégia SAJÁT segédmodulja)
+def job_spec() -> dict:
+    from core.i18n import t as _t
+    return dict(
+        name="<név>_forward",          # kisbetű/szám/aláhúzás; config-kulcs és fájlnév is
+        time="22:30",                  # alap indítás, helyi idő (a config felülírhatja)
+        label=_t("<név>.forward.head"),  # a felületen megjelenő cím
+        run=lambda argv: main(argv or ["--all"]),   # az alprocesszben fut, kilépési kódot ad
+        status_lines=status_lines,     # az állás sorai — a futás által ÍRT fájlból, újraszámolás nélkül
+    )
+```
+
+Szabályok, amiken már elbukott valami:
+* **`run` az alprocesszben fut** — ne a motor szálán csinálj perces munkát; a
+  kimenete a naplóba megy (`print` jó), a kilépési kód (0 = rendben) a
+  felületen látszik.
+* **`status_lines` NE számoljon újra**: a `run` írjon egy kis állapotfájlt (pl.
+  `data/<név>/status.json`), a `status_lines` azt olvassa. A „nincs fájl" ≠ „0
+  eredmény" — mondd ki külön (`forward.no_status` minta).
+* **Egy feladat egyszer egy napon**, akkor is, ha elbukott — másnap újra. Ha a
+  feladatnak MT5 kell (gyertya-pótlás), az EXE-s gépen a terminál fusson.
+* **A `.tfs` manifestje szabványos alakban viszi** (`daily_jobs: [{name, time,
+  label}]` — adat, nem kód), és a telepítő a megerősítés ELŐTT kiírja: aki
+  telepít, tudja, mi fog naponta futni. A csomagoló ellenőrzi a deklarációt
+  (érvényes név, egyediség, hívható `run`, `HH:MM`) — hibás feladattal nem
+  csomagol (`strategy.pack.declared_jobs`).
+* Nyelvi kulcsok: a feladat szövegei (`<név>.forward.*`) egyelőre a keret
+  katalógusába (`lang/hu.json` + `en.json`) kerülnek, mint a `stage.<x>_*`
+  kulcsok — ismert engedmény; hiányuknál a kulcs jelenik meg, nem hiba.
+
+Minta: `strategies/csilla.py` (`daily_jobs`) + `strategies/csilla_forward.py`
+(`job_spec`, `status_lines`, `write_status`); teszt: `tests/test_daily_jobs.py`
+(a hamis forrás + a valódi registry), `tests/test_strategy_pack.py` 1b.
+
 ## 2. Regisztráció — AUTOMATIKUS (nincs teendő)
 
 A `strategy/__init__.py` **auto-felderíti** a `strategies/` csomag moduljait, és a `Strategy`
@@ -369,6 +435,10 @@ ami sokáig egy **elpazarolt optimalizálási tengely** volt. Lásd `strategy/ba
    `tests/test_bollinger_squeeze.py`, `tests/test_csilla_parity.py`).
 2c. `strategy.pack.build("<név>")` lefut, és a manifest `helpers` listája
    tartalmazza a segédmoduljaidat.
+2d. Ha van napi feladatod: a manifest `daily_jobs` listája tartalmazza (név,
+   idő, cím); `python main.py job` felsorolja; `jobs` parancs az állását adja;
+   a Karmester fülön megjelenik a doboza; `python main.py job <név>` kód 0-val
+   fut le; `test_daily_jobs` + `test_strategy_pack` zöld.
 3. Optimalizálás lefut (Opt gomb; tanítható stratégiánál = tanítás), 0 érvénytelen trial
    a constraints-tól; done-marker + "Utolsó opt" dátum megjelenik.
 4. Backtest ↔ live paritás: ugyanaz a `bt_entry`-terv élőben és backtestben.

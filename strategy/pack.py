@@ -8,7 +8,8 @@ docs/valami_hu.md, docs/valami_en.md, config.json"
 
 Pontosan ez. A `.tfs` egy sima zip, ezen a tartalommal:
 
-    manifest.json          mi ez, kinek készült, mi van benne
+    manifest.json          mi ez, kinek készült, mi van benne — és a stratégia
+                           NAPI FELADATAI (`daily_jobs`: név, idő, cím)
     <név>.py               a stratégia modulja
     config.json            a stratégia saját beállításai
     docs/<név>.md          a leírás (magyar)
@@ -19,6 +20,16 @@ Pontosan ez. A `.tfs` egy sima zip, ezen a tartalommal:
 (`ml_features`, `ml_train`), amiket a keret nem ismer. Egy csomag, ami csak
 EGY `.py`-t tud vinni, ezt a stratégiát nem tudná átadni — a hiány pedig
 importhibaként, a betöltés után derülne ki.
+
+── A NAPI FELADATOK A MANIFESTBEN (2026-09-22) ─────────────────────────
+Egy stratégia deklarálhat napi feladatot (`Strategy.daily_jobs()` — pl. a
+csilla forward-naplója), amit a keret naponta egyszer, alprocesszben futtat.
+Ez KÓD, ami magától fut a gépeden — ezért a manifest szabványos alakban
+felsorolja (`daily_jobs: [{name, time, label}]`), és a telepítő a megerősítés
+ELŐTT kiírja: aki telepít, tudja, mi fog naponta futni. A csomagoló a
+deklarációt ellenőrzi is (érvényes név, egyediség, hívható `run`): egy hibás
+feladat nem a telepítés után, az első estén derüljön ki. A mező opcionális
+és visszafelé kompatibilis (régebbi program egyszerűen nem olvassa).
 
 ── AMIT EZ A MODUL NEM CSINÁL, ÉS MIÉRT ────────────────────────────────
 Nem tölt le semmit, és nem is fog. Egy `.tfs` FUTTATHATÓ PYTHON KÓD: aki
@@ -51,6 +62,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shutil
 import zipfile
 from pathlib import Path
@@ -72,6 +84,40 @@ _MANIFEST = "manifest.json"
 class PackError(Exception):
     """A csomag hibás vagy nem telepíthető. Az üzenet EMBERNEK szól: mindig
     megmondja, mi a baj és mit lehet tenni."""
+
+
+# A napi feladat neve config-kulcs is (`daily_jobs.<név>`) és fájlnév is
+# (`data/daily_jobs/<név>.log`) — ezért szűk: kisbetű, szám, aláhúzás.
+_JOB_NAME = re.compile(r"^[a-z][a-z0-9_]{1,40}$")
+_TIME = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+
+
+def declared_jobs(strategy) -> list:
+    """A stratégia napi feladatai SZABVÁNYOS alakban a manifestnek:
+    `[{name, time, label}]` — ellenőrizve. Hibás deklarációnál `PackError`,
+    hogy a csomag ne vigyen olyat, ami az első estén bukna el."""
+    try:
+        nyers = list(strategy.daily_jobs() or [])
+    except Exception as e:
+        raise PackError(f"a stratégia `daily_jobs()` hookja hibát dob: {e!r}")
+    out, latott = [], set()
+    for j in nyers:
+        if not isinstance(j, dict):
+            raise PackError(f"napi feladat: nem szótár ({type(j).__name__})")
+        nev = str(j.get("name") or "")
+        if not _JOB_NAME.match(nev):
+            raise PackError(f"napi feladat: érvénytelen név {nev!r} "
+                            f"(kisbetű/szám/aláhúzás, 2–41 karakter)")
+        if nev in latott:
+            raise PackError(f"napi feladat: kétszer deklarált név {nev!r}")
+        if not callable(j.get("run")):
+            raise PackError(f"napi feladat {nev!r}: nincs hívható `run`")
+        ido = str(j.get("time") or "22:30")
+        if not _TIME.match(ido):
+            raise PackError(f"napi feladat {nev!r}: érvénytelen idő {ido!r} (HH:MM)")
+        latott.add(nev)
+        out.append({"name": nev, "time": ido, "label": str(j.get("label") or nev)})
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -156,6 +202,7 @@ def build(name: str, out_dir=None, version: str = "1.0.0", out_file=None) -> Pat
     st = get_strategy_by_name(name)
     segedek = helper_modules(name)
     dokik = sorted(p for p in _paths.docs_dir().glob(f"{name}.*md"))
+    feladatok = declared_jobs(st)
 
     if out_file:
         cel = Path(out_file)
@@ -181,6 +228,7 @@ def build(name: str, out_dir=None, version: str = "1.0.0", out_file=None) -> Pat
         "module": f"{name}.py",
         "helpers": [f"{m}.py" for m in segedek],
         "docs": [f"docs/{d.name}" for d in dokik],
+        "daily_jobs": feladatok,
         "sha256": {k: _sha(v) for k, v in tartalom.items()},
     }
     with zipfile.ZipFile(cel, "w", zipfile.ZIP_DEFLATED) as z:
@@ -241,6 +289,16 @@ def inspect(path) -> dict:
         raise PackError("A csomag nem megengedett bejegyzést tartalmaz: "
                         + ", ".join(sorted(rossz)[:5]))
     man["_files"] = sorted(n for n in nevek if n != _MANIFEST)
+    # ⚠ A NAPI FELADATOK MEZŐJE OPCIONÁLIS (régebbi csomagban nincs) — de ha
+    # van, SZABVÁNYOS: egy rossz alak itt derüljön ki, ne a telepítés után.
+    dj = man.get("daily_jobs")
+    if dj is None:
+        man["daily_jobs"] = []
+    elif not isinstance(dj, list) or not all(
+            isinstance(x, dict) and _JOB_NAME.match(str(x.get("name") or ""))
+            for x in dj):
+        raise PackError("A manifest `daily_jobs` mezője hibás alakú "
+                        "(lista {name, time, label} szótárakból).")
     return man
 
 

@@ -4218,7 +4218,13 @@ class DashboardWindow:
                     _t("pack.dlg.confirm.body", name=man["name"],
                        version=man.get("version", "?"), api=man.get("api", "?"),
                        by=man.get("created_by", "?"),
-                       files="\n  ".join(man["_files"])),
+                       files="\n  ".join(man["_files"]),
+                       # ⚠ AMI NAPONTA MAGÁTÓL FUT — a bizalmi lépés része.
+                       jobs=("\n".join(
+                           _t("pack.dlg.confirm.job", name=j.get("name"),
+                              time=j.get("time"), label=j.get("label"))
+                           for j in (man.get("daily_jobs") or []))
+                             or _t("pack.dlg.confirm.no_jobs"))),
                     _t("pack.dlg.confirm.title"), parent=popup):
                 return
             try:
