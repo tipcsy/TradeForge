@@ -417,6 +417,60 @@ def _exit_step(trade: "Trade", bid_hi: float, bid_lo: float,
     return True
 
 
+def _open_step(symbol: str, signal: str, bar_close: float, entry_spread: float,
+               sl_points: float, tp_points: float, entry_atr: float,
+               balance: float, occupied_w: float, gate_risk: float,
+               m1_time, pair_cfg: dict, trading_cfg: dict, sizing_cfg: dict,
+               max_slots) -> "Trade | None":
+    """A POZÍCIÓ MEGNYITÁSA egy kész belépő-tervből. `None`, ha a slot-keret nem
+    engedi (a hívó ilyenkor kihagyja ezt a bart).
+
+    ⚠ EGY LEÍRÁS, KÉT CIKLUS (2026-09-22) — az `_exit_step` párja. A méretezés,
+    a slot-súly, a bid/ask belépő-ár és a `Trade` mezői korábban kétszer voltak
+    leírva (`run_pair` + portfólió), és a kettő NÉMÁN szétcsúszott: a portfólió
+    a pár KONSTANS spreadjével nyitott a gyertya `close_spread`-je helyett, és
+    az ATR-tervet használta a `swing20` stop helyett (`tests/test_portfolio_parity`).
+
+    A SORREND KÖTÖTT, mert élesben is ez: a kapu-hatás csökkenti a kockázati
+    százalékot → `calc_effective_slots` → `calc_lot` → és CSAK a lot
+    ismeretében dől el a slot-keret (`min_lot` a keret fölé emelheti a
+    kockázatot — `slot-accounting-and-observability`).
+
+    A `gate_risk`: a kapuk `reduce` hatása (1,0 = nincs csökkentés).
+    Az `entry_spread` ÁRBAN értendő (a bar `close_spread`-je, tartalékkal)."""
+    size_cfg = (sizing_cfg if gate_risk >= 1.0 else
+                {**sizing_cfg,
+                 "account_risk_pct": sizing_cfg["account_risk_pct"] * gate_risk})
+    point_size = pair_cfg["point_size"]
+    pv1_point = pair_cfg["pv1_point"]
+    eff_slots = calc_effective_slots(balance, sl_points, pair_cfg, size_cfg)
+    lot = calc_lot(balance, sl_points, pair_cfg, size_cfg, eff_slots)
+    w = _rm_slot_weight(lot * sl_points * pv1_point, balance, trading_cfg)
+    if not _rm_fits(occupied_w, w,
+                    trading_cfg["max_open_slots"] if max_slots is None else max_slots):
+        return None
+    buy = signal == "BUY"
+    open_price = bar_close + (entry_spread if buy else 0.0)   # BUY → ASK-on lép be
+    sl_ar = points_to_price(sl_points, point_size)
+    tp_ar = points_to_price(tp_points, point_size)
+    risk_usd = lot * sl_points * pv1_point
+    trade = Trade(
+        symbol=symbol, direction=signal, open_time=m1_time,
+        open_price=open_price,
+        sl=(open_price - sl_ar) if buy else (open_price + sl_ar),
+        tp=(open_price + tp_ar) if buy else (open_price - tp_ar),
+        lot=lot, point_size=point_size, pv1_point=pv1_point,
+        sl_points=sl_points,
+        entry_atr=entry_atr,          # a belépéskori ATR (ÁRban) — ehhez mér a trailing
+        entry_balance=balance, risk_usd=risk_usd,
+        risk_pct=risk_usd / balance * 100 if balance > 0 else 0,
+        slot_weight=w,
+    )
+    trade.legs = [(open_price, lot)]     # 1. láb; a build a listát bővíti
+    trade.build_ref = open_price         # az első ráépítés innen figyel
+    return trade
+
+
 # ---------------------------------------------------------------------------
 # Natív végrehajtási út — opcionális gyorsítás, soha nem kötelező
 # ---------------------------------------------------------------------------
@@ -2193,58 +2247,22 @@ def run_pair(
                     # KAPU-hatás: `kockázatcsökkentés` → kisebb mérettel lépünk be
                     # (ugyanaz a mechanizmus, mint a Risky `cautious`-é: az
                     # `account_risk_pct` szorzója).
-                    _size_cfg = (sizing_cfg if _gate_risk >= 1.0 else
-                                 {**sizing_cfg,
-                                  "account_risk_pct": sizing_cfg["account_risk_pct"] * _gate_risk})
-                    eff_slots = calc_effective_slots(balance, sl_points, pair_cfg, _size_cfg)
-                    lot = calc_lot(balance, sl_points, pair_cfg, _size_cfg, eff_slots)
-
-                    # ── SLOT-KERET a TÉNYLEGES kockázat ismeretében ──────────
-                    # A fenti `free_slots > 0` csak azt nézte, van-e EGYÁLTALÁN
-                    # hely. A pontos döntés itt dől el, ahogy ÉLESBEN is
-                    # (live_trader: ugyanez a képlet a `calc_lot` után) — a
-                    # `min_lot` a kockázatot a slot kerete fölé emelheti.
-                    _w = _rm_slot_weight(lot * sl_points * pv1_point,
-                                         balance, trading_cfg)
-                    if not _rm_fits(occupied_w, _w, trading_cfg["max_open_slots"]):
-                        prev_m1_row = m1_row
-                        continue
-
                     # A belépő a gyertya ZÁRÁSÁN → a bar UTOLSÓ tickjének spreadje
                     # (`close_spread`) a pontos; tartalék az átlag (_sp).
                     _esp = _cspread_arr[i] if _cspread_arr is not None else float("nan")
                     if not (_esp > 0):
                         _esp = _sp
-                    open_price = _bar_c
-                    if signal == "BUY":
-                        open_price += _esp          # BUY → ASK-on lép be
-                        sl_price = open_price - points_to_price(sl_points, point_size)
-                        tp_price = open_price + points_to_price(tp_points, point_size)
-                    else:  # SELL
-                        sl_price = open_price + points_to_price(sl_points, point_size)
-                        tp_price = open_price - points_to_price(tp_points, point_size)
-
-                    risk_usd = lot * sl_points * pv1_point
-                    trade = Trade(
-                        symbol=symbol,
-                        direction=signal,
-                        open_time=m1_time,
-                        open_price=open_price,
-                        sl=sl_price,
-                        tp=tp_price,
-                        lot=lot,
-                        point_size=point_size,
-                        pv1_point=pv1_point,
-                        sl_points=sl_points,
-                        # a belépéskori ATR (ÁRban) — ehhez mér a trailing
-                        entry_atr=_entry_atr,
-                        entry_balance=balance,
-                        risk_usd=risk_usd,
-                        risk_pct=risk_usd / balance * 100 if balance > 0 else 0,
-                        slot_weight=_w,
-                    )
-                    trade.legs = [(open_price, lot)]     # 1. láb; a build a listát bővíti
-                    trade.build_ref = open_price         # az első ráépítés innen figyel
+                    # A KÖZÖS nyitás (`_open_step`) — ugyanaz a leírás, amit a
+                    # portfólió-ciklus is hív (méretezés → slot-keret → bid/ask ár).
+                    trade = _open_step(symbol, signal, float(_bar_c), _esp,
+                                       sl_points, tp_points, _entry_atr,
+                                       balance, occupied_w, _gate_risk, m1_time,
+                                       pair_cfg, trading_cfg, sizing_cfg, None)
+                    if trade is None:                # a slot-keret nem engedi
+                        prev_m1_row = m1_row
+                        continue
+                    lot, open_price = trade.lot, trade.open_price
+                    sl_price, tp_price = trade.sl, trade.tp
                     if _bigmove_at is not None:
                         # Pajzs↔Fibo auto: BELÉPÉSKOR dől el — nagy mozgásnál Fibo
                         # (hagyjuk futni, később stop), különben Pajzs (alaphelyzet).
@@ -2727,6 +2745,13 @@ def run_portfolio_backtest(
         # A per-bar sor-epites tombokbol (mint a run_pair-ben) — a `.iloc`
         # baronkent uj pandas Series-t epitene. EGYSZER oldjuk fel, par-szinten.
         _c15, _a15 = _oszlop_tombok(m15)
+        # ⚠ M1 OSZLOP-TÖMBÖK, NEM `.loc[]` (2026-09-22). A ciklus bar-onként és
+        # cellánként egy `m1_df.loc[m1_time]`-mal olvasott: PROFILOZVA ez a
+        # futásidő 40 %-a volt (381 399 pandas-keresés / 32 s a 80-ból). A
+        # `run_pair` ezt rég megoldotta (`_oszlop_tombok` + `_row_at` + előre
+        # kibontott időbélyeg-tömb); a portfólió most ugyanazt teszi — és ez
+        # EGYBEN a natív (Rust) út előfeltétele is: a mag tömböket vár.
+        _c1, _a1 = _oszlop_tombok(m1)
         pair_data[cell] = {
             "symbol":    sym,
             "strategy":  strategy,
@@ -2736,6 +2761,13 @@ def run_portfolio_backtest(
             "arr15":     _a15,
             "index15":   list(m15.index),
             "m1":        m1,
+            "cols1":     _c1,
+            "arr1":      _a1,
+            "index1":    list(m1.index),
+            "t1_ns":     _epoch_ns(m1.index),
+            "m1_ptr":    0,        # monoton előre halad a közös idővonalon
+            "row":       None,     # EZEN a báron (None, ha a cellának nincs bara)
+            "ri":        -1,       # ...és a sor indexe (a swing-stophoz)
             "m15_times": m15.index.tolist(),
             "m15_ptr":   0,
             "m15_delta": _signal_bar_delta(strategy, params),
@@ -2798,6 +2830,9 @@ def run_portfolio_backtest(
         all_times.update(info["m1"].index.tolist())
     all_times_sorted = sorted(all_times)
     n_total = len(all_times_sorted)
+    # A közös idővonal ns-ben: a cellák mutatója ehhez lép (egész-összehasonlítás
+    # a `m1_time not in m1_df.index` pandas-keresés helyett).
+    _all_ns = _epoch_ns(pd.DatetimeIndex(all_times_sorted))
     log.info("Portfolio BT: %d cella (%d pár, %d stratégia) | %d M1 bar | tőke: $%.0f",
              len(pair_data), len({c[0] for c in pair_data}), len({c[1] for c in pair_data}),
              n_total, initial_balance)
@@ -2832,21 +2867,36 @@ def run_portfolio_backtest(
                 equity_curve.append((date_str, balance))
                 last_eq_date = date_str
 
-        # ── 1. M15 állapot frissítése minden párhoz ───────────────────────
+        # ── 1. M15 állapot + a cella M1 sora EZEN a báron ─────────────────
+        # A mutató monoton halad: a közös idővonal rendezett, és minden cella
+        # M1-indexe annak részhalmaza. Így a sor-feloldás EGYSZER történik
+        # cellánként (eddig a kilépés- és a belépő-ág külön keresett).
+        _now_ns = _all_ns[bar_idx]
         for info in pair_data.values():
             _advance_m15_state(info, m1_time, info["strategy"])
+            _tns = info["t1_ns"]
+            _pt = info["m1_ptr"]
+            _n1 = len(_tns)
+            while _pt < _n1 and _tns[_pt] < _now_ns:
+                _pt += 1
+            info["m1_ptr"] = _pt
+            if _pt < _n1 and _tns[_pt] == _now_ns:
+                info["ri"] = _pt
+                info["row"] = _row_at(info["cols1"], info["arr1"], info["index1"], _pt)
+            else:
+                info["ri"] = -1
+                info["row"] = None
 
         # ── 2. Nyitott pozíciók kezelése ──────────────────────────────────
         for cell in list(open_trades.keys()):
             trade  = open_trades[cell]
             info   = pair_data[cell]
             sym    = info["symbol"]
-            m1_df  = info["m1"]
             params = info["params"]
 
-            if m1_time not in m1_df.index:
+            row = info["row"]
+            if row is None:                      # ennek a cellának nincs bara
                 continue
-            row      = m1_df.loc[m1_time]
             point_size = trade.point_size
             sp       = info["pair_cfg"].get("backtest_spread_points", spread_default)
             # ⚠ A gyertya BID; az ASK = BID + spread. A kilépés a SZEMBENI oldalon
@@ -2994,13 +3044,12 @@ def run_portfolio_backtest(
         for cell, info in pair_data.items():
             sym      = info["symbol"]
             strategy = info["strategy"]
-            m1_df    = info["m1"]
             params   = info["params"]
             pair_cfg = info["pair_cfg"]
 
-            if m1_time not in m1_df.index:
+            row = info["row"]
+            if row is None:                      # ennek a cellának nincs bara
                 continue
-            row  = m1_df.loc[m1_time]
             hour = m1_time.hour
             _sess_ok = (pair_cfg.get("sess_start", 0) <= hour
                         < pair_cfg.get("sess_end", 24))
@@ -3129,9 +3178,9 @@ def run_portfolio_backtest(
                             # kötések harmada másképp zárt.
                             if params.get("sl_method", strategy.default_sl_method) == "swing20":
                                 _nb = int(params.get("sl_swing_bars", 20) or 20)
-                                _i1 = m1_df.index.get_loc(m1_time)
-                                _lo = m1_df["low"].iloc[max(0, _i1 - _nb + 1):_i1 + 1].to_numpy()
-                                _hi = m1_df["high"].iloc[max(0, _i1 - _nb + 1):_i1 + 1].to_numpy()
+                                _i1 = info["ri"]          # a már feloldott sor-index
+                                _lo = info["arr1"]["low"][max(0, _i1 - _nb + 1):_i1 + 1]
+                                _hi = info["arr1"]["high"][max(0, _i1 - _nb + 1):_i1 + 1]
                                 _sw = calc_swing_sl_tp_points(float(row["close"]), signal,
                                                               _lo, _hi, params, point_size,
                                                               _asp_points)
@@ -3165,45 +3214,19 @@ def run_portfolio_backtest(
                             _rrp = (info.get("rr") or {}).get("preset", _rrm.PRESET_OFF)
                             sizing_cfg = _risky_trading_cfg(trading_cfg,
                                                             _rrm.wants_cautious_size(_rrp))
-                            if _gate_risk < 1.0:
-                                sizing_cfg = {**sizing_cfg, "account_risk_pct":
-                                              sizing_cfg["account_risk_pct"] * _gate_risk}
-                            eff_slots = calc_effective_slots(balance, sl_points, pair_cfg, sizing_cfg)
-                            lot = calc_lot(balance, sl_points, pair_cfg, sizing_cfg, eff_slots)
-
-                            # A `min_lot` a kockázatot a slot kerete fölé emelheti
-                            # — a pontos döntés csak a lot ismeretében hozható meg
-                            # (a fenti `occupied < max_slots` csak durva előszűrő).
-                            _w = _rm_slot_weight(lot * sl_points * pv1_point,
-                                                 balance, trading_cfg)
-                            if not _rm_fits(occupied_w, _w, max_slots):
+                            _eatr = m15_row.get("atr", float("nan"))
+                            # A KÖZÖS nyitás (`_open_step`) — UGYANAZ a leírás, amit a
+                            # `run_pair` is hív: méretezés → slot-keret → bid/ask ár.
+                            # Amíg kétszer volt leírva, a portfólió a pár KONSTANS
+                            # spreadjével nyitott a gyertyáé helyett.
+                            trade = _open_step(sym, signal, float(row["close"]), _esp,
+                                               sl_points, tp_points,
+                                               0.0 if pd.isna(_eatr) else float(_eatr or 0.0),
+                                               balance, occupied_w, _gate_risk, m1_time,
+                                               pair_cfg, trading_cfg, sizing_cfg, max_slots)
+                            if trade is None:            # a slot-keret nem engedi
                                 continue
-
-                            open_price = float(row["close"])
-                            if signal == "BUY":
-                                open_price += _esp                  # BUY → ASK-on lép be
-                                sl_price = open_price - points_to_price(sl_points, point_size)
-                                tp_price = open_price + points_to_price(tp_points, point_size)
-                            else:
-                                sl_price = open_price + points_to_price(sl_points, point_size)
-                                tp_price = open_price - points_to_price(tp_points, point_size)
-
-                            risk_usd = lot * sl_points * pv1_point
-                            trade = Trade(
-                                symbol=sym, direction=signal,
-                                open_time=m1_time, open_price=open_price,
-                                sl=sl_price, tp=tp_price, lot=lot,
-                                point_size=point_size, pv1_point=pv1_point, sl_points=sl_points,
-                                entry_atr=(float(m15_row.get("atr", 0.0) or 0.0)
-                                           if not pd.isna(m15_row.get("atr", float("nan")))
-                                           else 0.0),
-                                entry_balance=balance,
-                                risk_usd=risk_usd,
-                                risk_pct=risk_usd / balance * 100 if balance > 0 else 0,
-                                slot_weight=_w,
-                            )
-                            trade.legs = [(open_price, lot)]   # 1. láb; a build bővíti
-                            trade.build_ref = open_price       # az első ráépítés innen figyel
+                            _w = trade.slot_weight
                             if info.get("bigmove_at") is not None:
                                 # Pajzs↔Fibo auto: belépéskor dől el (nagy mozgás → Fibo)
                                 trade.rr_preset_eff = (
