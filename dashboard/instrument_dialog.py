@@ -1389,7 +1389,11 @@ class InstrumentParamsDialog:
         # dobozban — a kettő együtt olvasható fülként.
         kulso = tk.Frame(box, bg=BG, highlightbackground=FG_GRAY_DIM,
                          highlightcolor=FG_GRAY_DIM, highlightthickness=1)
-        kulso.pack(fill="both", expand=True, padx=12, pady=(10, 0))
+        # ⚠ `expand=False`: a doboz a TARTALMÁHOZ igazodjon. `expand=True`-val a
+        # szakasz teljes maradék magasságát elvitte, és egy rövid lap alatt
+        # hatalmas ÜRES keret maradt (a felhasználó képén ez a „összement a
+        # kép" érzet egyik fele). Fülváltáskor a magasság most az aktív lapé.
+        kulso.pack(fill="x", padx=12, pady=(10, 0))
         bar = tk.Frame(kulso, bg=BG_HEADER)
         bar.pack(fill="x")
         # ⚠ EGY INDÍTÁS-GOMB, A FÜL-SÁV JOBB SZÉLÉN (2026-09-22, a felhasználó
@@ -1929,7 +1933,14 @@ class InstrumentParamsDialog:
         # sokáig HIÁNYZOTT: a szakasz csak annyit írt ki, hogy „azt a főképernyő
         # OPT gombja indítja" — ami addigra már nem létezett, tehát az
         # optimalizálás SEHONNAN nem volt indítható.
-        self._sweep_box.pack_forget()
+        # ⚠ A HANGOLÁS LAP SÁVJÁT NEM REJTJÜK EL (2026-09-22). Itt korábban egy
+        # `self._sweep_box.pack_forget()` állt — a rádiógombos elrendezésben a
+        # három mód EGY lapon osztozott, tehát az optimalizálás indításakor el
+        # kellett tüntetni a végigpróbálás sávját. Fülekkel ez KÁR: a sáv a
+        # HANGOLÁS lapon él, ami optimalizálás alatt nem is látszik — viszont a
+        # rejtés ott maradt, és a felhasználó leletje pont ez volt:
+        # „Optimalizálást elindítottam, majd leállítottam, visszakapcsoltam
+        # Hangolásra, aminek összement a képernyője."
         _opt = getattr(self, "on_optimize", None)
         if not callable(_opt):
             self._note(_t("idlg3.ez_az_ablak_nincs"), FG_YELLOW)
@@ -3174,12 +3185,20 @@ class InstrumentParamsDialog:
             # méreteznénk, a paraméter-tábla beszorulna, és pont azt kellene
             # kézzel átméretezni, ami a napi munka.
             need = max(body.winfo_reqwidth() + 40, popup.winfo_reqwidth())
-            w = min(max(need, 900), int(popup.winfo_screenwidth() * 0.92))
+            # ⚠ AZ ALSÓ HATÁR 900 → 1200 (2026-09-22). A futtatás-fülek sávjának
+            # JOBB SZÉLÉN áll az Indítás gomb; a sáv kitölti a szélességet, de a
+            # benne lévő címkék tördelhetők (`_autowrap`), ezért a kért
+            # szélességbe a gomb nem számított bele — alapértelmezett méretnél
+            # egyszerűen KILÓGOTT a láthatóból („alapértelmezetten nem látszik
+            # az indítás nyomógomb"). A képernyő-arányos plafon változatlan,
+            # tehát kis kijelzőn nem nő túl.
+            w = min(max(need, 1200), int(popup.winfo_screenwidth() * 0.92))
             h = min(max(body.winfo_reqheight() + footer.winfo_reqheight() + 90,
                         popup.winfo_reqheight(), 600),
                     int(popup.winfo_screenheight() * 0.88))
             popup.geometry(f"{w}x{h}")
-            popup.minsize(720, 480)
+            # A minimum is nő: a gomb alatta ismét kicsúszna a képből.
+            popup.minsize(900, 480)
         except Exception:
             pass
 
