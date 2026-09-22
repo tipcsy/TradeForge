@@ -32,15 +32,19 @@ not disabled by it.
 per trade; D1/W1 levels with an M15 stop −0.07 R; **Csilla's band** (named in
 advance by the user) with a fixed 1.5 ATR15 stop, BE 0.67 R and 2R trailing:
 **+0.12 R, t = 1.5, 9/14 years** — a lead, not proof. Hence a forward paper
-test from 2026-09-15 (`tools/csilla_forward.py`) with a pre-registered kill
+test from 2026-09-15 (`strategies/csilla_forward.py`) with a pre-registered kill
 threshold (n ≥ 60 and R < −0.10). Small targets, early breakeven, trailing and
 position building were all measured: none turns the 8-pair result positive.
 
-The forward journal is updated **by the program** (v3.87.0): once a day after
-the configured time (`daily_jobs.csilla_forward.time`, default 22:30 local)
-the engine runs `main.py forward --all` in a subprocess; run it by hand with the
-"▶ Run now" button on the Conductor tab or the `forward run` command, and read
-the status with `forward` or in the evening report. The first week showed that
+The forward journal is updated **by the program** (v3.87.x): the strategy
+declares its daily job (`CsillaStrategy.daily_jobs()` →
+`strategies/csilla_forward.py`, carried by the `.tfs` package) and the engine
+runs it once a day after the configured time (`daily_jobs.csilla_forward.time`,
+default 22:30 local) in a subprocess (`main.py job csilla_forward`); run it by
+hand with the "▶ Run now" button on the Conductor tab or the
+`jobs run csilla_forward` command, and read the status with `jobs` or in the
+evening report. The framework does not know the strategy by name: deleting the
+strategy removes the job with it. The first week showed that
 "daily, by hand" does not run — hence the move into the program. The pair
 reading (H1→M1, H1→M15, structural window, turn entry) was measured on
 2026-09-22 and failed — section 12 of the measurement note.

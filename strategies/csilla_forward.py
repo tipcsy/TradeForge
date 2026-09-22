@@ -44,19 +44,29 @@ ADAT-CSAPDA (2026-09-15): az MT5-ből pótolt friss gyertyákban NINCS spread
 pár utolsó 12 hónapjának tick-alapú spread-mediánját teszi a hiányzó helyekre.
 
 Használat (naponta, a session után):
-    python tools/csilla_forward.py --update        # adat + új jelzések a naplóba
-    python tools/csilla_forward.py --evaluate      # lezárult kötések kiértékelése
-    python tools/csilla_forward.py --report        # állás az előre rögzített küszöbökhöz
-    python tools/csilla_forward.py --all           # mindhárom egymás után
-    python main.py forward --all                   # ugyanaz a keret alparancsaként
+    python strategies/csilla_forward.py --update   # adat + új jelzések a naplóba
+    python strategies/csilla_forward.py --evaluate # lezárult kötések kiértékelése
+    python strategies/csilla_forward.py --report   # állás az előre rögzített küszöbökhöz
+    python strategies/csilla_forward.py --all      # mindhárom egymás után
+    python main.py job csilla_forward              # ugyanaz a keret napi feladataként
 Napló: data/forward/csilla_signals.csv (git-ben követve, hogy ne vesszen el).
 
 ⚠ A NAPI FUTÁS A PROGRAMÉ (2026-09-22). Az első hét megmutatta, hogy a „naponta,
-kézzel" nem fut: a napló 09-15-től egy sorral állt. A `core/daily_jobs.py` a
-motorból indítja alprocesszben (`main.py forward --all`) naponta egyszer, a
-beállított idő után; a dashboard Karmester-fülén és a `forward run` parancsból
-kézzel is indítható. A `--report` az állást a `csilla_status.json`-ba is kiírja —
-a felület és az esti riport EBBŐL olvas, nem számol újra.
+kézzel" nem fut: a napló 09-15-től egy sorral állt. A keret napi-feladat
+mechanizmusa (`core/daily_jobs.py`) indítja alprocesszben naponta egyszer, a
+beállított idő után; a Karmester fülről és a `jobs run csilla_forward` parancsból
+kézzel is. A `--report` az állást a `csilla_status.json`-ba is kiírja — a
+`status_lines()` EBBŐL olvas, nem számol újra.
+
+⚠ MIÉRT A `strategies/` CSOMAGBAN, ÉS NEM A `tools/`-BAN. Ez a csilla stratégia
+SAJÁT feladata: a stratégia deklarálja (`CsillaStrategy.daily_jobs()`), a modult
+a stratégia importálja, tehát a `.tfs` csomag magával viszi, és a stratégia
+törlésével együtt tűnik el. A keret (`core/`, `main.py`, a felület) ezt a
+modult NEM ismeri — csak a registry-n át, dinamikusan jut el ide. Az első
+változat a `tools/`-ban lakott és a `main.py` importálta: a stratégia törlése
+után minden este elbukott volna (a felhasználó kérdése hozta felszínre).
+A `tools/research/lab`-ot (a kutató-harness) használja — az a program része,
+nem a stratégiáé, mindenhol ott van, ahol a program.
 """
 from __future__ import annotations
 
@@ -264,6 +274,44 @@ def report():
         print(f"   fut: n={len(p)}, R={p.R.mean():+.3f}, t={_t(p.R):+.2f} (kell ≥ 2)")
 
 
+def status_lines() -> list:
+    """Az állás EMBERI sorai a felületnek / az esti riportnak — a
+    `csilla_status.json`-ból, amit a `--report` ír. NEM számol újra: ha nincs
+    fájl, azt mondja (a „nincs adat" nem ugyanaz, mint a „0 kötés")."""
+    from core.i18n import t as _tr
+    try:
+        d = json.loads(STATUS_JSON.read_text(encoding="utf-8"))
+    except Exception:
+        return [_tr("forward.no_status")]
+    p = d.get("primary") or {}
+    sorok = [_tr("forward.journal", signals=d.get("signals", 0), closed=d.get("closed", 0),
+                 open=d.get("open", 0), skipped=d.get("skipped", 0),
+                 since=d.get("started", ""))]
+    if p.get("n"):
+        sorok.append(_tr("forward.primary", n=p["n"], r=f"{p['r_mean']:+.3f}",
+                         t=f"{p['t']:+.2f}", win=f"{100 * (p.get('win') or 0):.0f}"))
+    else:
+        sorok.append(_tr("forward.primary_empty"))
+    v = d.get("verdict")
+    if v == "kill":
+        sorok.append(_tr("forward.verdict_kill", n=p.get("n", 0),
+                         r=f"{p.get('r_mean') or 0:+.3f}"))
+    elif v == "running":
+        sorok.append(_tr("forward.verdict_running", left=d.get("to_kill", 0)))
+    else:
+        sorok.append(_tr("forward.verdict_holding", n=p.get("n", 0),
+                         r=f"{p.get('r_mean') or 0:+.3f}", t=f"{p.get('t') or 0:+.2f}"))
+    return sorok
+
+
+def job_spec() -> dict:
+    """A napi feladat leírása a keretnek (`Strategy.daily_jobs()` adja vissza)."""
+    from core.i18n import t as _tr
+    return dict(name="csilla_forward", time="22:30", label=_tr("forward.head"),
+                run=lambda argv: main(argv if argv else ["--all"]),
+                status_lines=status_lines)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--update", action="store_true")
@@ -278,6 +326,7 @@ def main(argv=None):
         evaluate()
     if a.all or a.report or not (a.update or a.evaluate):
         report()
+    return 0
 
 
 if __name__ == "__main__":

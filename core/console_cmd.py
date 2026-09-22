@@ -690,15 +690,16 @@ def cmd_report(ctx: Context, args: list, confirmed: bool = False) -> Result:
             # ⚠ A karmester szakasza SOHA nem viheti el a napi összefoglalót: a
             # kötések és az eredmény akkor is kimennek, ha a mérés elakadt.
             log.debug("karmester: a napi szakasz kimaradt", exc_info=True)
-    # ── A FORWARD-TESZT ÁLLÁSA — nem a karmesteré, a fokától független. ────
-    # ⚠ Csak ha a napi feladat egyáltalán be van kapcsolva: egy kikapcsolt
-    # forward-napló állását naponta felmondani zaj volna.
+    # ── A NAPI FELADATOK ÁLLÁSA — nem a karmesteré, a fokától független. ───
+    # ⚠ Csak a bekapcsoltak: egy kikapcsolt feladat állását naponta felmondani
+    # zaj volna. Amit egyetlen stratégia sem deklarál, az nincs is itt.
     try:
         from core import daily_jobs as _dj
-        if _dj.job_cfg(ctx.cfg, "csilla_forward")["enabled"]:
-            sorok += [""] + forward_lines(ctx.cfg)
+        for _nev, _spec in sorted(_dj.jobs().items()):
+            if _dj.job_cfg(ctx.cfg, _nev, _spec)["enabled"]:
+                sorok += [""] + job_lines(ctx.cfg, _nev)
     except Exception:
-        log.debug("forward: a napi szakasz kimaradt", exc_info=True)
+        log.debug("napi feladatok: a riport-szakasz kimaradt", exc_info=True)
     return Result(sorok)
 
 
@@ -1056,66 +1057,58 @@ def cmd_karmester(ctx: Context, args: list, confirmed: bool = False) -> Result:
     return set_autonomy(ctx, sym, strat, None if v == "auto" else v)
 
 
-def forward_lines(cfg: dict) -> list:
-    """A Csilla-sáv forward-teszt állása EMBERI sorokban — a `forward` parancs,
-    az esti riport és a dashboard gombja mellé ugyanez megy.
+def job_lines(cfg: dict, name: str) -> list:
+    """EGY napi feladat állása emberi sorokban — a `jobs` parancs, az esti riport
+    és a dashboard doboza mellé ugyanez megy.
 
-    ⚠ NEM SZÁMOL ÚJRA: a `csilla_status.json`-t olvassa, amit a futás ír. Ha
-    nincs, azt mondja — a „nincs adat" nem ugyanaz, mint a „0 kötés"."""
-    import json as _json
+    ⚠ A KERET SORAI + A STRATÉGIA SORAI. A keret csak azt tudja, futott-e és
+    mikor; hogy MIT jelent az eredmény, azt a deklaráló stratégia
+    `status_lines`-a mondja (a saját fájljából, újraszámolás nélkül)."""
     from core import daily_jobs as _dj
 
-    st = _dj.status(cfg, "csilla_forward")
-    sorok = [_t("forward.head")]
+    st = _dj.status(cfg, name)
+    sorok = [_t("jobs.head", label=st.get("label") or name, owner=st.get("owner") or "")]
+    if not st.get("known"):
+        sorok.append(_t("jobs.unknown", name=name))
+        return sorok
     if not st["enabled"]:
-        sorok.append(_t("forward.job_disabled"))
+        sorok.append(_t("jobs.disabled", name=name))
     elif st["status"] == _dj.RUNNING:
-        sorok.append(_t("forward.job_running", since=str(st.get("last_start") or "")[11:16]))
+        sorok.append(_t("jobs.running", since=str(st.get("last_start") or "")[11:16]))
     elif st["status"] == _dj.NEVER:
-        sorok.append(_t("forward.job_never", time=st["time"]))
+        sorok.append(_t("jobs.never", time=st["time"]))
     else:
-        kulcs = {"ok": "forward.job_ok", "failed": "forward.job_failed",
-                 "lost": "forward.job_lost"}.get(st["status"], "forward.job_ok")
+        kulcs = {"ok": "jobs.ok", "failed": "jobs.failed",
+                 "lost": "jobs.lost"}.get(st["status"], "jobs.ok")
         sorok.append(_t(kulcs, when=str(st.get("last_end") or st.get("last_start") or "")[:16],
                         time=st["time"], rc=st.get("last_rc")))
-    try:
-        d = _json.loads((_dj.base() / "data" / "forward" / "csilla_status.json")
-                        .read_text(encoding="utf-8"))
-    except Exception:
-        sorok.append(_t("forward.no_status"))
-        return sorok
-    p = d.get("primary") or {}
-    sorok.append(_t("forward.journal", signals=d.get("signals", 0), closed=d.get("closed", 0),
-                    open=d.get("open", 0), skipped=d.get("skipped", 0),
-                    since=d.get("started", "")))
-    if p.get("n"):
-        sorok.append(_t("forward.primary", n=p["n"], r=f"{p['r_mean']:+.3f}",
-                        t=f"{p['t']:+.2f}", win=f"{100 * (p.get('win') or 0):.0f}"))
-    else:
-        sorok.append(_t("forward.primary_empty"))
-    v = d.get("verdict")
-    if v == "kill":
-        sorok.append(_t("forward.verdict_kill", n=p.get("n", 0), r=f"{p.get('r_mean') or 0:+.3f}"))
-    elif v == "running":
-        sorok.append(_t("forward.verdict_running", left=d.get("to_kill", 0)))
-    else:
-        sorok.append(_t("forward.verdict_holding", n=p.get("n", 0),
-                        r=f"{p.get('r_mean') or 0:+.3f}", t=f"{p.get('t') or 0:+.2f}"))
+    sorok += _dj.status_lines(name)
     return sorok
 
 
-def cmd_forward(ctx: Context, args: list, confirmed: bool = False) -> Result:
-    """`forward` — a Csilla-sáv forward-teszt állása · `forward run` — futtatás MOST.
+def cmd_jobs(ctx: Context, args: list, confirmed: bool = False) -> Result:
+    """`jobs` — a napi feladatok állása · `jobs run <név>` — futtatás MOST.
 
     ⚠ EGY INDÍTÁSI ÚT. A dashboard gombja ugyanezt hívja; a napi időzítő is a
     `daily_jobs.start`-ot — a parancs csak a kérés alakja."""
     from core import daily_jobs as _dj
     if args and str(args[0]).lower() == "run":
-        ok, mi = _dj.start("csilla_forward", trigger="manual")
+        if len(args) < 2:
+            return Result([_t("jobs.run_usage")], ok=False)
+        ok, mi = _dj.start(args[1], trigger="manual")
         if ok:
-            return Result([_t("forward.started")])
-        return Result([_t("forward.start_failed", reason=_t(f"forward.reason.{mi}"))], ok=False)
-    return Result(forward_lines(ctx.cfg))
+            return Result([_t("jobs.started", name=args[1])])
+        return Result([_t("jobs.start_failed", name=args[1],
+                          reason=_t(f"jobs.reason.{mi}"))], ok=False)
+    nevek = sorted(_dj.jobs())
+    if not nevek:
+        return Result([_t("jobs.none")])
+    sorok = []
+    for i, nev in enumerate(nevek):
+        if i:
+            sorok.append("")
+        sorok += job_lines(ctx.cfg, nev)
+    return Result(sorok)
 
 
 def cmd_balance(ctx: Context, args: list, confirmed: bool = False) -> Result:
@@ -1244,7 +1237,7 @@ COMMANDS: dict = {
     "karmester": cmd_karmester,
     "noopt":   cmd_noopt,
     "balance": cmd_balance,
-    "forward": cmd_forward,
+    "jobs":    cmd_jobs,
     "today":   cmd_today,
     "state":   cmd_state,
     "heart":   cmd_heart,
@@ -1275,7 +1268,7 @@ _HELP = (
     ("noopt [<pár>] <strat> on|off|auto", "console.help.noopt"),
     ("karmester [off|on|<fok>]", "console.help.karmester"),
     ("balance", "console.help.balance"),
-    ("forward [run]", "console.help.forward"),
+    ("jobs [run <név>]", "console.help.jobs"),
     ("today", "console.help.today"),
     ("state", "console.help.state"),
     ("heart", "console.help.heart"),

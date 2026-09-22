@@ -101,6 +101,15 @@ class CsillaStrategy(Strategy):
         # (symbol, utolsó zárt M15 idő, paraméter-ujjlenyomat) → hi_context
         self._ctx_cache: dict = {}
 
+    # --- Napi feladat: a forward-napló --------------------------------------
+
+    def daily_jobs(self) -> list:
+        """A Csilla-sáv forward-tesztjének napi frissítése — a stratégia SAJÁT
+        feladata (a keret nem ismeri; törölt stratégiával eltűnik). A modult itt
+        importáljuk, hogy a `.tfs` csomagoló segédmodulként vigye."""
+        from strategies import csilla_forward as _fw
+        return [_fw.job_spec()]
+
     # --- Megjelenítés -----------------------------------------------------
 
     def timeframes(self) -> list[Timeframe]:

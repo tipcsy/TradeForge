@@ -120,7 +120,7 @@
     "licence_warn_days": 14,
     "_comment_notify_times": "`heartbeat_times`: eletjel-uzenetek idopontjai (ures lista = nincs). `daily_summary_time`: a napi zaras-osszefoglalo ideje, HELYI ido (ures = nincs). ⚠ Ha a csendes oraba esik, reggel jon meg -- a halasztott kotesekkel egyutt."
   },
-  "_comment_daily_jobs": "NAPI FELADATOK, amiket a motor naponta egyszer, a megadott HELYI ido utan alprocesszben futtat (core/daily_jobs.py). Alapbol MIND bekapcsolva a sajat idejen; ide csak az ELTERES kerul. `csilla_forward`: a Csilla-sav forward-naplo frissitese (`main.py forward --all`, ~1-2 perc, MT5 kell a gyertya-potlashoz). Allapot: `forward` parancs / Karmester ful; naplo: data/forward/csilla_forward.log.",
+  "_comment_daily_jobs": "NAPI FELADATOK, amiket a motor naponta egyszer, a megadott HELYI ido utan alprocesszben futtat (core/daily_jobs.py). A feladatokat a STRATEGIAK deklaraljak (Strategy.daily_jobs) — torolt strategiaval a feladata is eltunik. Alapbol MIND bekapcsolva a sajat idejen; ide csak az ELTERES kerul. Pl. `csilla_forward` (a csilla strategiae): a Csilla-sav forward-naplo frissitese (~1-2 perc, MT5 kell a gyertya-potlashoz). Allapot: `jobs` parancs / Karmester ful; naplo: data/daily_jobs/<nev>.log.",
   "daily_jobs": {
     "csilla_forward": {
       "enabled": true,

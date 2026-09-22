@@ -105,6 +105,31 @@ for csomag in _TILOS_HELYEK:
 check("a KERET egyetlen modulja sem importal a tartalombol", not _sertes,
       "; ".join(_sertes[:4]))
 
+# ⚠ A FOINDITO IS KERET (2026-09-22). A `main.py forward` alparancs importalta a
+# csilla forward-szkriptjet (tools/ → strategies/), es ez az or nem latta, mert
+# a main.py nem volt a listaban. A strategia torlese utan a napi feladat minden
+# este elbukott volna. A feladatokat azota a strategia deklaralja
+# (`Strategy.daily_jobs()`), a keret a registry-n at kerdezi.
+_main_imp = [imp for imp in _imports(ROOT / "main.py")
+             if imp == sp.PACKAGE or imp.startswith(sp.PACKAGE + ".")]
+check("a main.py sem importal a tartalombol", not _main_imp, "; ".join(_main_imp))
+# ...es a napi-feladat mechanizmus KODJA nem ismer strategia-nevet. A docstring
+# elmondhatja a tortenetet — ezert nem a szoveget, hanem az AST string-
+# konstansait nezzuk, a modul- es fuggveny-docstringek nelkul.
+import ast as _ast
+_dj_fa = _ast.parse((ROOT / "core" / "daily_jobs.py").read_text(encoding="utf-8"))
+_docs = set()
+for _n in _ast.walk(_dj_fa):
+    if isinstance(_n, (_ast.Module, _ast.FunctionDef, _ast.ClassDef)) and _n.body \
+            and isinstance(_n.body[0], _ast.Expr) \
+            and isinstance(getattr(_n.body[0], "value", None), _ast.Constant):
+        _docs.add(id(_n.body[0].value))
+_dj_str = [n.value for n in _ast.walk(_dj_fa)
+           if isinstance(n, _ast.Constant) and isinstance(n.value, str) and id(n) not in _docs]
+_dj_talalat = sorted({nev for nev in _nevek for s_ in _dj_str if nev in s_})
+check("a core/daily_jobs.py kodja egyetlen strategia nevet sem tartalmazza",
+      not _dj_talalat, str(_dj_talalat))
+
 # ...es a tartalom TERMESZETESEN importalhat a keretbol (kulonben nem is lenne
 # strategia). Ha ez a szam nulla lenne, elrontottunk valamit.
 _le = sum(1 for f in (ROOT / sp.PACKAGE).glob("*.py")

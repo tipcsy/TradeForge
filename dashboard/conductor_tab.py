@@ -122,13 +122,14 @@ class ConductorTab:
         holder, self._inner, _ = scrollable(p)
         holder.pack(fill="both", expand=True, padx=10, pady=(0, 8))
 
-        # ── NAPI FELADATOK (a Csilla-sáv forward-napló) ─────────────────
+        # ── NAPI FELADATOK (amit a stratégiák deklarálnak) ──────────────
         # ⚠ MIÉRT ITT. A felhasználó kérése (2026-09-22): a forward-teszt napi
         # futását a PROGRAM végezze, „akár naponta, akár nyomógombra". A gomb
-        # a KÖZÖS parancs-rétegen megy (`forward run`), az állapot a futás által
-        # írt `csilla_status.json`-ból jön — a fül nem számol újra semmit.
-        self._box_forward = tk.Frame(self._inner, bg=BG)
-        self._box_forward.pack(fill="x", pady=(0, 10))
+        # a KÖZÖS parancs-rétegen megy (`jobs run <név>`), az állás a
+        # feladatot deklaráló stratégia saját soraiból jön — a fül nem számol
+        # újra, és NEM ismer stratégiát: ha nincs feladat, nincs doboz.
+        self._box_jobs = tk.Frame(self._inner, bg=BG)
+        self._box_jobs.pack(fill="x", pady=(0, 10))
         self._box_inbox = tk.Frame(self._inner, bg=BG)
         self._box_inbox.pack(fill="x", pady=(0, 10))
         self._box_matrix = tk.Frame(self._inner, bg=BG)
@@ -173,7 +174,7 @@ class ConductorTab:
                 return
             self._mtime = most
             self._rajzol_fejlec()
-            self._rajzol_forward()
+            self._rajzol_jobs()
             self._rajzol_inbox()
             self._rajzol_kronika()
         except Exception:
@@ -208,7 +209,7 @@ class ConductorTab:
             self._lbl_info.config(text=_t("cond.tab.error"))
         self._mtime = self._allapot_ideje()
         self._rajzol_fejlec()
-        self._rajzol_forward()
+        self._rajzol_jobs()
         self._rajzol_inbox()
         self._rajzol_matrix()
         self._rajzol_kronika()
@@ -246,57 +247,65 @@ class ConductorTab:
             ctx, "karmester " + ("on" if ki_most else "off")))
         self._rajzol_fejlec()
 
-    # ── napi feladatok: a forward-napló ──────────────────────────────────
-    def _rajzol_forward(self):
-        """Az állás sorai (a közös `forward_lines`-ból) + „Futtat most" + „Napló"."""
+    # ── napi feladatok ───────────────────────────────────────────────────
+    def _rajzol_jobs(self):
+        """Feladatonként: cím + „Futtat most" + „Napló" + az állás sorai (a közös
+        `job_lines`-ból). Nincs feladat → nincs doboz."""
         from core import console_cmd as _cc
         from core import daily_jobs as _dj
 
-        for w in self._box_forward.winfo_children():
+        for w in self._box_jobs.winfo_children():
             w.destroy()
         ctx = self._ctx()
         cfg = getattr(ctx, "cfg", None) if ctx is not None else None
         if cfg is None:
             return
-        fej = tk.Frame(self._box_forward, bg=BG)
-        fej.pack(fill="x", pady=(0, 4))
-        tk.Label(fej, text=_t("cond.tab.forward"), bg=BG, fg=FG_WHITE,
-                 font=self._header, anchor="w").pack(side="left")
         try:
-            fut = _dj.status(cfg, "csilla_forward")["status"] == _dj.RUNNING
+            nevek = sorted(_dj.jobs())
         except Exception:
-            fut = False
-        tk.Button(fej, text=_t("cond.tab.forward_log"), bg=BG_HEADER, fg=FG_WHITE,
-                  relief="flat", font=self._small, padx=8,
-                  command=self._forward_naplo).pack(side="right", padx=4)
-        tk.Button(fej, text=_t("cond.tab.forward_run"), bg=BTN_PLAY_BG, fg=FG_WHITE,
-                  relief="flat", font=self._small, padx=8,
-                  state=("disabled" if fut else "normal"),
-                  command=self._forward_run).pack(side="right", padx=4)
-        try:
-            sorok = _cc.forward_lines(cfg)[1:]          # a fejsor a címke
-        except Exception:
-            log.debug("Karmester fül: a forward állása nem olvasható", exc_info=True)
-            sorok = [_t("cond.tab.error")]
-        for sor in sorok:
-            tk.Label(self._box_forward, text=sor, bg=BG, fg=FG_GRAY, font=self._small,
-                     anchor="w", justify="left", wraplength=900).pack(fill="x", padx=8)
+            log.debug("Karmester fül: a napi feladatok nem olvashatók", exc_info=True)
+            nevek = []
+        if not nevek:
+            return
+        tk.Label(self._box_jobs, text=_t("cond.tab.jobs"), bg=BG, fg=FG_WHITE,
+                 font=self._header, anchor="w").pack(fill="x", pady=(0, 4))
+        for nev in nevek:
+            try:
+                st = _dj.status(cfg, nev)
+                sorok = _cc.job_lines(cfg, nev)
+            except Exception:
+                log.debug("Karmester fül: a(z) %s állása nem olvasható", nev, exc_info=True)
+                st, sorok = {"status": ""}, [_t("cond.tab.error")]
+            fej = tk.Frame(self._box_jobs, bg=BG)
+            fej.pack(fill="x", padx=8, pady=(2, 0))
+            tk.Label(fej, text=sorok[0] if sorok else nev, bg=BG, fg=FG_WHITE,
+                     font=self._small, anchor="w").pack(side="left")
+            tk.Button(fej, text=_t("cond.tab.job_log"), bg=BG_HEADER, fg=FG_WHITE,
+                      relief="flat", font=self._small, padx=8,
+                      command=lambda n=nev: self._job_naplo(n)).pack(side="right", padx=4)
+            tk.Button(fej, text=_t("cond.tab.job_run"), bg=BTN_PLAY_BG, fg=FG_WHITE,
+                      relief="flat", font=self._small, padx=8,
+                      state=("disabled" if st.get("status") == _dj.RUNNING else "normal"),
+                      command=lambda n=nev: self._job_run(n)).pack(side="right", padx=4)
+            for sor in sorok[1:]:
+                tk.Label(self._box_jobs, text=sor, bg=BG, fg=FG_GRAY, font=self._small,
+                         anchor="w", justify="left", wraplength=900).pack(fill="x", padx=16)
 
-    def _forward_run(self):
+    def _job_run(self, nev: str):
         from core import console_cmd as _cc
-        self._futtat(lambda ctx, megerosit: _cc.dispatch(ctx, "forward run"))
+        self._futtat(lambda ctx, megerosit: _cc.dispatch(ctx, f"jobs run {nev}"))
 
-    def _forward_naplo(self):
+    def _job_naplo(self, nev: str):
         """A feladat naplójának vége egy külön ablakban — hogy egy bukott futás
         OKA is látható legyen, ne csak a „failed" címke."""
         from core import daily_jobs as _dj
         w = tk.Toplevel(self.parent)
-        w.title(_t("cond.tab.forward_log"))
+        w.title(f"{_t('cond.tab.job_log')} — {nev}")
         w.configure(bg=BG)
         txt = tk.Text(w, bg=BG, fg=FG_GRAY, font=self._small, width=110, height=32,
                       relief="flat", wrap="none")
         txt.pack(fill="both", expand=True, padx=8, pady=8)
-        sorok = _dj.log_tail("csilla_forward", 200) or [_t("forward.no_log")]
+        sorok = _dj.log_tail(nev, 200) or [_t("jobs.no_log")]
         txt.insert("1.0", chr(10).join(sorok))
         txt.see("end")
         txt.config(state="disabled")

@@ -16,8 +16,8 @@ Parancsok:
   python main.py install <f>  — stratégia-csomag telepítése (⚠ kódot hoz be)
   python main.py pack-gate <kulcs>    — kapu becsomagolása `.tfg` fájlba
   python main.py install-gate <f>     — kapu-csomag telepítése (⚠ kódot hoz be)
-  python main.py forward --all        — a Csilla-sáv forward-napló frissítése
-                                        (a motor naponta magától futtatja)
+  python main.py job <név> [args]     — egy stratégia napi feladatának futtatása
+                                        (a motor naponta magától indítja; `job` = lista)
 
 Az `optimize` pár × STRATÉGIA szinten dolgozik. Stratégia megadása nélkül minden
 páron a SAJÁT engedélyezett stratégiái futnak (pairs.<sym>.strategies) — ugyanaz a
@@ -416,14 +416,21 @@ def cmd_notify_test():
     return 1
 
 
-def cmd_forward(argv=None):
-    """A Csilla-sáv FORWARD-tesztje: adat-pótlás + jelzések + kiértékelés + riport.
+def cmd_job(argv=None):
+    """Egy NAPI FELADAT futtatása ebben a processzben — `main.py job <név> [args]`.
 
-    ⚠ EZ AZ ÚT AZ ALPROCESSZÉ. A `core/daily_jobs.py` naponta ezt indítja
-    (`main.py forward --all`), és a dashboard gombja / a `forward run` parancs
-    is — az EXE-ben a `tools/` szkript közvetlen hívása nem volna elérhető."""
-    from tools.csilla_forward import main as _fw
-    return _fw(argv if argv is not None else ["--all"])
+    ⚠ EZ AZ ÚT AZ ALPROCESSZÉ. A `core/daily_jobs.py` naponta ezt indítja, és a
+    dashboard gombja / a `jobs run <név>` parancs is. A feladatot a STRATÉGIÁK
+    deklarálják (`Strategy.daily_jobs()`), a keret a registry-n át találja meg
+    — a `main.py` egyetlen stratégiát sem ismer név szerint. Név nélkül: lista."""
+    from core import daily_jobs as _dj
+    argv = list(argv or [])
+    if not argv:
+        for nev, spec in sorted(_dj.jobs().items()):
+            print(f"  {nev:<24} {spec.get('time')}  {spec.get('label')}  "
+                  f"[{spec.get('owner')}]")
+        return 0
+    return _dj.run_in_process(argv[0], argv[1:])
 
 
 def cmd_lab(argv=None):
@@ -625,7 +632,7 @@ COMMANDS = {
     "install":   (cmd_install,    "argv"),
     "pack-gate":    (cmd_pack_gate,    "argv"),
     "install-gate": (cmd_install_gate, "argv"),
-    "forward":      (cmd_forward,      "argv"),
+    "job":          (cmd_job,          "argv"),
 }
 
 

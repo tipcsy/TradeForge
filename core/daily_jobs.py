@@ -1,32 +1,38 @@
 """NAPI FELADATOK — amit a program naponta egyszer, MAGÁTÓL elvégez.
 
-⚠ MIÉRT VAN EZ (2026-09-22). A Csilla-sáv forward-tesztje (`tools/csilla_forward.py`)
-09-15-én indult, és a fejléce szerint „naponta, a session után" kellett futnia —
-kézzel. Egy hét múlva a napló EGY sort tartalmazott: senki nem indította. A
-felhasználó döntése: NEM operációs rendszerbeli ütemező (a program egy másik
-gépen fog futni, ahol azt senki nem állítja be), hanem a PROGRAM futtassa —
-naponta magától, vagy nyomógombra.
+⚠ MIÉRT VAN EZ (2026-09-22). A Csilla-sáv forward-tesztje 09-15-én indult, és a
+fejléce szerint „naponta, a session után" kellett futnia — kézzel. Egy hét múlva
+a napló EGY sort tartalmazott: senki nem indította. A felhasználó döntése: NEM
+operációs rendszerbeli ütemező (a program egy másik gépen fog futni, ahol azt
+senki nem állítja be), hanem a PROGRAM futtassa — naponta magától, vagy gombra.
+
+⚠ A KERET NEM ISMER TARTALMAT. Az első változat ide drótozta a `csilla_forward`
+nevet, a `main.py` pedig importálta a szkriptjét. A felhasználó kérdése — „mi
+van, ha letörlöm a csilla stratégiát?" — mutatta meg: a feladat minden este
+elbukott volna, a felületen egy halott doboz maradt volna. Ezért a feladatokat
+a STRATÉGIÁK deklarálják (`Strategy.daily_jobs()`, a registry-n át, dinamikusan
+— lásd `package-layout-frame-vs-content`), ez a modul csak a mechanizmus:
+időzítés, alprocessz, állapot, napló. Törölt stratégiával a feladata is eltűnik.
+A `tests/test_strategy_layout.py` őrzi, hogy ide stratégia-név ne kerüljön.
 
 ⚠ ALPROCESSZBEN, NEM A MOTOR SZÁLÁN. Ugyanaz az érv, mint az optimalizálás-
-sornál (`conductor/optqueue.py`): a feladat percekig tarthat (MT5-ből
-gyertya-pótlás, 8 pár újraszámolása), a motor szálán a kereskedés körideje
-nyúlna meg. A modul csak INDÍT és LEARAT — mindkettő ezredmásodperces. A
-feladat kimenete fájlba megy (`log`), hogy utólag elolvasható legyen, MIÉRT
-bukott, ha bukott — a `DEVNULL` itt néma halál volna.
+sornál (`conductor/optqueue.py`): a feladat percekig tarthat, a motor szálán a
+kereskedés körideje nyúlna meg. A modul csak INDÍT és LEARAT — mindkettő
+ezredmásodperces. A kimenet fájlba megy (`data/daily_jobs/<név>.log`), hogy
+utólag elolvasható legyen, MIÉRT bukott, ha bukott — a `DEVNULL` néma halál volna.
 
 ⚠ EGY FUTÁS EGY NAPON. Az állapotfájl (`data/daily_jobs.json`) tartja, melyik
 feladat melyik napon futott utoljára; az indítás után a nap AZONNAL beíródik,
 tehát egy elhaló alprocessz sem indul újra percenként. Ha a futás elbukott, a
 `last_rc` és a napló mondja meg — a következő nap újra próbálja.
 
-⚠ A KÉZI INDÍTÁS UGYANAZ AZ ÚT. A dashboard gombja, a `forward run` konzol-
-parancs és a napi időzítő ugyanazt a `start()`-ot hívja — egy második
-indítási út elcsúszna az elsőtől (a projekt visszatérő hibája).
+⚠ A KÉZI INDÍTÁS UGYANAZ AZ ÚT. A dashboard gombja, a `jobs run <név>` parancs
+és a napi időzítő ugyanazt a `start()`-ot hívja — egy második indítási út
+elcsúszna az elsőtől (a projekt visszatérő hibája).
 
-A feladatok NEVESÍTVE vannak (`JOBS`); a config csak az ELTÉRÉST rögzíti
-(`daily_jobs.<név>.enabled` / `.time`), az alap: bekapcsolva, a feladat saját
-alap-időpontján. Egy kikapcsolt feladat a felületen is kikapcsoltként látszik —
-nem tűnik el némán (lásd `config-coherence-and-symbol-policy`).
+A config csak az ELTÉRÉST rögzíti (`daily_jobs.<név>.enabled` / `.time`), az
+alap: bekapcsolva, a feladat saját idején. Egy kikapcsolt feladat a felületen
+is kikapcsoltként látszik — nem tűnik el némán.
 """
 
 from __future__ import annotations
@@ -50,14 +56,7 @@ except Exception:                                   # pragma: no cover
 # írja a valódi állapotot (lásd `tests-must-never-write-real-config`).
 STATE_FILE = Path(_BASE) / "data" / "daily_jobs.json"
 MAIN_PY = Path(_BASE) / "main.py"
-
-# A FELADATOK. `argv`: a `main.py` alparancsa és argumentumai — az EXE-ben is
-# ez az út; `time`: az alap indítási idő (HELYI óra, a program gépén);
-# `log`: a kimenet fájlja (a BASE_DIR-hez képest).
-JOBS: dict = {
-    "csilla_forward": dict(argv=["forward", "--all"], time="22:30",
-                           log="data/forward/csilla_forward.log"),
-}
+LOG_DIR = "data/daily_jobs"                    # a BASE_DIR-hez képest
 
 RUNNING, OK, FAILED, LOST, NEVER = "running", "ok", "failed", "lost", "never"
 
@@ -65,10 +64,62 @@ _state: dict | None = None
 _popen: dict = {}                       # név → Popen (CSAK ebben a processzben)
 
 
+def base() -> Path:
+    """Az adat-gyökér (BASE_DIR) — EGY gazda; a feladatok fájljai ehhez képest.
+    A teszt a modul `_BASE`-ét irányítja át, és minden útvonal vele megy."""
+    return Path(_BASE)
+
+
+# ── a feladatok forrása: a STRATÉGIÁK ────────────────────────────────────────
+def _strategy_jobs() -> list:
+    """Minden felderített stratégia `daily_jobs()`-a — dinamikusan, a
+    registry-n át (a keret statikusan nem importál a `strategies/`-ből).
+    Egy hibás stratégia nem viheti el a többiét: a hibát naplózzuk, és megyünk."""
+    try:
+        from strategy import get_strategy_by_name, registered_strategy_names
+    except Exception:                                   # pragma: no cover
+        return []
+    out = []
+    for nev in registered_strategy_names():
+        try:
+            for j in (get_strategy_by_name(nev).daily_jobs() or []):
+                j = dict(j)
+                j.setdefault("owner", nev)
+                out.append(j)
+        except Exception:
+            log.warning("daily_jobs: a(z) %s stratégia feladatai nem olvashatók",
+                        nev, exc_info=True)
+    return out
+
+
+# ⚠ A teszt kicserélheti: `PROVIDERS = [lambda: [...]]`.
+PROVIDERS: list = [_strategy_jobs]
+
+
+def jobs() -> dict:
+    """`{név: spec}` — a most ISMERT feladatok. Amit egyetlen forrás sem
+    deklarál (törölt stratégia), az nincs — se időzítés, se doboz."""
+    out: dict = {}
+    for prov in PROVIDERS:
+        for j in (prov() or []):
+            nev = str(j.get("name") or "").strip()
+            if not nev or not callable(j.get("run")):
+                log.warning("daily_jobs: hiányos feladat-leírás kihagyva: %r", j)
+                continue
+            if nev in out:
+                # ⚠ Két azonos név némán egymást írná felül — ezt mondjuk.
+                log.warning("daily_jobs: kétszer deklarált feladat: %s (%s és %s)",
+                            nev, out[nev].get("owner"), j.get("owner"))
+                continue
+            out[nev] = dict(j, name=nev, time=str(j.get("time") or "22:30"),
+                            label=str(j.get("label") or nev))
+    return out
+
+
 # ── config ───────────────────────────────────────────────────────────────────
-def job_cfg(cfg: dict, name: str) -> dict:
+def job_cfg(cfg: dict, name: str, spec: dict | None = None) -> dict:
     """`{enabled, time}` — a config eltérése az alapra vetítve."""
-    alap = JOBS.get(name) or {}
+    alap = spec if spec is not None else (jobs().get(name) or {})
     c = ((cfg or {}).get("daily_jobs") or {}).get(name) or {}
     ido = str(c.get("time") or alap.get("time") or "")
     return {"enabled": bool(c.get("enabled", True)), "time": ido}
@@ -80,12 +131,6 @@ def _perc(hhmm: str):
         return int(h) * 60 + int(m)
     except Exception:
         return None
-
-
-def base() -> Path:
-    """Az adat-gyökér (BASE_DIR) — EGY gazda; a feladatok fájljai ehhez képest.
-    A teszt a modul `_BASE`-ét irányítja át, és minden útvonal vele megy."""
-    return Path(_BASE)
 
 
 # ── állapot ──────────────────────────────────────────────────────────────────
@@ -124,8 +169,14 @@ def reset_for_test() -> None:
 
 
 # ── indítás / learatás ───────────────────────────────────────────────────────
+def log_path(name: str) -> Path:
+    return base() / LOG_DIR / f"{name}.log"
+
+
 def _parancs(name: str) -> list:
-    return [sys.executable, str(MAIN_PY), *JOBS[name]["argv"]]
+    """`main.py job <név>` — az alprocessz a REGISTRY-n át találja meg a
+    feladatot; az EXE-ben is ez az út."""
+    return [sys.executable, str(MAIN_PY), "job", name]
 
 
 def start(name: str, *, trigger: str = "manual", now: datetime | None = None,
@@ -134,8 +185,8 @@ def start(name: str, *, trigger: str = "manual", now: datetime | None = None,
 
     `trigger`: `"daily"` (időzítő) vagy `"manual"` (gomb / parancs).
     ⚠ Futó feladat mellett NEM indít másodikat: két egyidejű futás ugyanazt a
-    naplófájlt írná, és a forward-napló (CSV) is összeakadna."""
-    if name not in JOBS:
+    naplófájlt (és a feladat saját fájljait) írná."""
+    if name not in jobs():
         return False, "unknown_job"
     reap()
     st = _load().setdefault(name, {})
@@ -143,17 +194,17 @@ def start(name: str, *, trigger: str = "manual", now: datetime | None = None,
         return False, "already_running"
     now = now or datetime.now()
     popen = popen or subprocess.Popen        # futásidőben: a teszt kicserélheti
-    log_path = base() / JOBS[name]["log"]
+    lp = log_path(name)
     try:
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        fh = open(log_path, "a", encoding="utf-8", errors="replace")
+        lp.parent.mkdir(parents=True, exist_ok=True)
+        fh = open(lp, "a", encoding="utf-8", errors="replace")
         fh.write(f"\n===== {now:%Y-%m-%d %H:%M:%S} indítás ({trigger}) =====\n")
         fh.flush()
         p = popen(_parancs(name), stdout=fh, stderr=subprocess.STDOUT)
     except Exception as ex:
         st.update({"status": FAILED, "last_rc": None, "last_error": repr(ex),
-                   "last_date": f"{now:%Y-%m-%d}", "last_start": now.isoformat(timespec="seconds"),
-                   "trigger": trigger})
+                   "last_date": f"{now:%Y-%m-%d}",
+                   "last_start": now.isoformat(timespec="seconds"), "trigger": trigger})
         _save()
         log.warning("daily_jobs: %s — az indítás nem sikerült: %s", name, ex)
         return False, "spawn_failed"
@@ -207,8 +258,8 @@ def tick(cfg: dict, now: datetime | None = None) -> list:
     ma = f"{now:%Y-%m-%d}"
     p_most = now.hour * 60 + now.minute
     indult = []
-    for name in JOBS:
-        c = job_cfg(cfg, name)
+    for name, spec in jobs().items():
+        c = job_cfg(cfg, name, spec)
         if not c["enabled"]:
             continue
         dp = _perc(c["time"])
@@ -223,23 +274,51 @@ def tick(cfg: dict, now: datetime | None = None) -> list:
     return indult
 
 
+def run_in_process(name: str, argv: list) -> int:
+    """A feladat FUTTATÁSA ebben a processzben — ezt hívja a `main.py job`
+    alparancs az alprocesszben. Vissza: kilépési kód."""
+    spec = jobs().get(name)
+    if spec is None:
+        print(f"daily_jobs: ismeretlen feladat: {name!r} (ismert: "
+              f"{', '.join(sorted(jobs())) or '-'})")
+        return 2
+    rc = spec["run"](list(argv or []))
+    return int(rc or 0)
+
+
 # ── állapot a felületnek / parancsnak ────────────────────────────────────────
 def status(cfg: dict, name: str) -> dict:
-    """Egy feladat állapota — a felület és a `forward` parancs EBBŐL ír, nem
+    """Egy feladat állapota — a felület és a `jobs` parancs EBBŐL ír, nem
     számol újra."""
     reap()
-    c = job_cfg(cfg, name)
+    spec = jobs().get(name) or {}
+    c = job_cfg(cfg, name, spec)
     st = dict(_load().get(name) or {})
     st.setdefault("status", NEVER)
     st.update({"enabled": c["enabled"], "time": c["time"], "name": name,
-               "log": str(base() / JOBS[name]["log"]) if name in JOBS else ""})
+               "label": spec.get("label", name), "owner": spec.get("owner", ""),
+               "known": bool(spec), "log": str(log_path(name))})
     return st
+
+
+def status_lines(name: str) -> list:
+    """A deklaráló stratégia saját állás-sorai (ha ad ilyet) — hibatűrően:
+    a felület sosem eshet el egy stratégia riportja miatt."""
+    spec = jobs().get(name) or {}
+    fn = spec.get("status_lines")
+    if not callable(fn):
+        return []
+    try:
+        return [str(x) for x in (fn() or [])]
+    except Exception:
+        log.debug("daily_jobs: %s status_lines elbukott", name, exc_info=True)
+        return []
 
 
 def log_tail(name: str, lines: int = 40) -> list:
     """A feladat naplójának utolsó sorai (a felületnek)."""
     try:
-        p = base() / JOBS[name]["log"]
-        return p.read_text(encoding="utf-8", errors="replace").splitlines()[-lines:]
+        return log_path(name).read_text(encoding="utf-8",
+                                        errors="replace").splitlines()[-lines:]
     except Exception:
         return []

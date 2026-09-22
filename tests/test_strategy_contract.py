@@ -47,7 +47,9 @@ from strategy.base import Strategy, STRATEGY_API, STRATEGY_API_MIN              
 # szamot: elobb dontsd el a `strategy/contract.py` listaja alapjan, hogy a
 # valtozas TORO-e. Ha igen, `STRATEGY_API` is emelendo (es a regi csomagok
 # betoltese ettol kezdve hibat ad — ez a szandek).
-UJJLENYOMAT = "edb6662bf868"
+# 2026-09-22: `daily_jobs()` hook alapertelmezessel — NEM toro (uj hook, a regi
+# strategia nem tud rola), az API szam marad 1.
+UJJLENYOMAT = "5a3d400ad829"
 API_AKKOR = 1
 
 

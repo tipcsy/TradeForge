@@ -185,15 +185,25 @@ if _root is not None:
         check("az atvizsgalas feltolti a postaladat", len(ib.items(ib.PENDING)) == 1,
               str(len(ib.items(ib.PENDING))))
         check("...es a matrixot", len(tab._cellak) == 1, str(len(tab._cellak)))
-        # A FORWARD-DOBOZ: cimke + ket gomb + az allas sorai (a hibat a rajzolo
-        # log.debug-ba nyeli, ezert itt a WIDGETEKET nezzuk).
-        _fw = tab._box_forward.winfo_children()
-        _gombok = [w for w in (_fw[0].winfo_children() if _fw else [])
-                   if isinstance(w, tk.Button)]
-        check("a forward-doboz felepul: fejsor + 2 gomb + allas-sorok",
+        # A NAPI FELADATOK DOBOZA: cim + feladatonkent fejsor (2 gomb) + allas-
+        # sorok (a hibat a rajzolo log.debug-ba nyeli, ezert a WIDGETEKET nezzuk).
+        # A valodi registry-bol a csilla deklaral egyet (csilla_forward).
+        _fw = tab._box_jobs.winfo_children()
+        _gombok = [w for f in _fw for w in f.winfo_children() if isinstance(w, tk.Button)]
+        check("a napi-feladat doboz felepul: cim + fejsor + allas-sorok, 2 gomb",
               len(_fw) >= 3 and len(_gombok) == 2, f"widgetek={len(_fw)} gombok={len(_gombok)}")
         check("...a 'Futtat most' aktiv (nem fut semmi)",
               any(str(g.cget("state")) == "normal" for g in _gombok))
+        # ...es TOROLT strategia (= nincs deklaralo) mellett NINCS doboz
+        _pv = _dj.PROVIDERS
+        _dj.PROVIDERS = [lambda: []]
+        try:
+            tab._rajzol_jobs()
+            check("feladat nelkul a doboz URES (nem halott cimke)",
+                  not tab._box_jobs.winfo_children())
+        finally:
+            _dj.PROVIDERS = _pv
+            tab._rajzol_jobs()
         check("a cella foka `live`", tab._cellak[0]["fok"] == "live")
 
         _id = ib.items(ib.PENDING)[0]["id"]

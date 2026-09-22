@@ -40,17 +40,20 @@ kapcsolja ki.
 A sáv volt az egyetlen cella, amit a felhasználó **előre** nevezett meg, és
 minden kimenet-változatban pozitív előjelet adott — de **t < 2**, tehát nem
 bizonyíték. Ezért **forward papírkereskedés** 2026-09-15-től
-(`tools/csilla_forward.py`), előre rögzített leállító küszöbbel (n ≥ 60 és
+(`strategies/csilla_forward.py`), előre rögzített leállító küszöbbel (n ≥ 60 és
 R < −0,10). A kicsi célár, a korai BE, a csúszó stop és a pozícióépítés
 mind mérve: egyik sem fordítja pozitívba a 8 páros eredményt.
 
-A forward-napló frissítését **a program végzi** (v3.87.0): a motor naponta
-egyszer, a beállított idő után (`daily_jobs.csilla_forward.time`, alap 22:30,
-helyi idő) alprocesszben futtatja a `main.py forward --all`-t; kézzel a
-Karmester fül „▶ Futtat most" gombjával vagy a `forward run` parancssal
-indítható, az állás a `forward` parancsból és az esti riportból olvasható.
-Az első hét megmutatta, hogy a „naponta, kézzel" nem fut — ezért kerül a
-programba. A páros olvasat (H1→M1, H1→M15, szerkezeti ablak, forduló-belépő)
+A forward-napló frissítését **a program végzi** (v3.87.x): a stratégia
+deklarálja a napi feladatát (`CsillaStrategy.daily_jobs()` →
+`strategies/csilla_forward.py`, a `.tfs` csomag viszi), a motor naponta egyszer,
+a beállított idő után (`daily_jobs.csilla_forward.time`, alap 22:30, helyi idő)
+alprocesszben futtatja (`main.py job csilla_forward`); kézzel a Karmester fül
+„▶ Futtat most" gombjával vagy a `jobs run csilla_forward` parancssal
+indítható, az állás a `jobs` parancsból és az esti riportból olvasható. A
+keret a stratégiát név szerint nem ismeri: a stratégia törlésével a feladat is
+eltűnik. Az első hét megmutatta, hogy a „naponta, kézzel" nem fut — ezért
+került a programba. A páros olvasat (H1→M1, H1→M15, szerkezeti ablak, forduló-belépő)
 2026-09-22-én mérve és bukott — a mérés-jegyzet 12. szakasza.
 
 ## Paraméterek

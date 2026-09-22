@@ -489,6 +489,34 @@ class Strategy(ABC):
     # Aki ATR-alapú SL/TP-t ad a `sl_tp_points`-ben, az írja felül `"atr"`-re.
     default_sl_method = "swing20"
 
+    # ── Napi feladatok (opcionális hook) ──────────────────────────────────
+    def daily_jobs(self) -> list:
+        """A stratégia SAJÁT napi feladatai — amit a keret naponta egyszer,
+        alprocesszben elvégez helyette (pl. egy forward-napló frissítése).
+
+        ⚠ MIÉRT A STRATÉGIÁÉ, ÉS NEM A KERETÉ (2026-09-22). Az első változat a
+        keretbe drótozta a Csilla-sáv forward-tesztjét (`core/daily_jobs.py`
+        ismerte a nevét, a `main.py` importálta a szkriptjét). A felhasználó
+        kérdése — „mi van, ha letörlöm a csilla stratégiát?" — mutatta meg a
+        hibát: a feladat minden este elbukott volna, a felületen egy halott
+        doboz maradt volna. A stratégia hordozható (`.tfs`): ami hozzá tartozik,
+        azt ő deklarálja, és vele együtt tűnik el. A keret csak a mechanizmust
+        adja (időzítés, alprocessz, állapot, gomb), tartalmat nem ismer.
+
+        Vissza: `[{name, time, run, status_lines, label}]`, ahol
+          `name`          egyedi azonosító (config-kulcs is: `daily_jobs.<name>`);
+          `time`          alap indítási idő, `"HH:MM"` (helyi; a config felülírhatja);
+          `run`           `Callable[[list[str]], int]` — az alprocesszben fut
+                          (`main.py job <name> [args]`), kilépési kódot ad;
+          `status_lines`  `Callable[[], list[str]]` — az állás emberi sorai a
+                          felületnek/riportnak (NE számoljon újra: a futás által
+                          írt fájlból olvasson);
+          `label`         a felületen megjelenő cím.
+        A `run` és a `status_lines` a stratégia segédmoduljában éljen
+        (`strategies/<x>_…`), amit a stratégia modulja importál — így a `.tfs`
+        csomag magával viszi. Alap: nincs feladat."""
+        return []
+
     # ── Leírás (a paraméter-ablakból megnyitható) ─────────────────────────
     def doc_path(self):
         """A stratégia leírásának útvonala: `strategies/docs/<név>.md`.
