@@ -2480,6 +2480,7 @@ def _save_backtest_results(trades: list, summaries: list[dict],
 
 from core.params_store import (
     PARAMS_DIR, params_file, set_active_strategy, migrate_flat_layout,
+    resolve_trade_hours as _resolve_hours,
 )
 from core.execution_params import load_execution_params
 
@@ -2605,9 +2606,11 @@ def run_portfolio_backtest(
     # ── Per-pár optimalizált paraméterek + risky állapot betöltése ─────────
     pair_params: dict = {}
     pair_risky:  dict = {}
+    pair_source: dict = {}      # sym → "tuned" | "default" (a felület kiírja)
     for sym in symbols:
         f = params_file(sym, strategy.name)
         if f.exists():
+            pair_source[sym] = "tuned"
             with open(f, encoding="utf-8") as fh:
                 data = json.load(fh)
             # BE/trailing/atr_period/spread-kapu MÁR NEM stratégia-paraméter — a
@@ -2624,7 +2627,22 @@ def run_portfolio_backtest(
                 log.info("Portfolio BT: %s — RISKY mód (minősítés: %s%s)", sym, gcode,
                          ", kézi" if risky_mode.is_risky(sym) else "")
         else:
-            log.warning("Portfolio BT: %s — nincs optimalizált params, kihagyva.", sym)
+            # ⚠ HANGOLATLAN PÁR: NEM hagyjuk ki — az élő motor ugyanezt a párt a
+            # stratégia SAJÁT alapértékeivel futtatja (`untuned-pair-can-run`),
+            # tehát a portfólió is így modellezi. A csilla 3 párja pl. csak így
+            # tesztelhető (nem is terveztük optimalizálni). Nem néma: naplózzuk,
+            # és a `per_pair` `params_source`-a a felületen is látszik.
+            from strategy.settings import default_params as _dp
+            _base = _dp(strategy, cfg)
+            if _base is None:
+                log.warning("Portfolio BT: %s — nincs optimalizált params ÉS a "
+                            "stratégiának nincs alapértéke, kihagyva.", sym)
+                continue
+            pair_params[sym] = {**_base, **load_execution_params(sym, cfg)}
+            pair_source[sym] = "default"
+            pair_risky[sym] = risky_mode.is_risky(sym)
+            log.info("Portfolio BT: %s — HANGOLATLAN, a(z) %s alapértékeivel fut",
+                     sym, strategy.name)
 
     if not pair_params:
         return {"error": _t("bt.err.no_params"),
@@ -2694,6 +2712,14 @@ def run_portfolio_backtest(
             # Pajzs↔Fibo auto kiértékelő (None, ha a preset nem shield_fibo).
             "bigmove_at": _build_bigmove_evaluator(m15, _rr_pair),
             "build_cfg": _pair_build_cfg(sym),   # pozícióépítés (None, ha kikapcsolva)
+            # ⚠ KERESKEDÉSI ÓRÁK (2026-09-22, paritás): az élő motor és a run_pair
+            # az órán kívüli BELÉPŐT tiltja (`resolve_trade_hours`: a stratégia-
+            # hatókörű `<PÁR>_hours.json`, különben a pár `trade_hours`-a); a
+            # portfólió ezt eddig nem ismerte — a csilla Ger40 8–11 / UsaTec+GOLD
+            # 15–18 sávja itt nem érvényesült. None = minden óra.
+            "hours":     (set(_h) if (_h := _resolve_hours(sym, strategy.name,
+                                                          cfg["pairs"][sym].get("trade_hours")))
+                          else None),
             "state":     strategy.bt_new_state(sym),
             "prev_row":  None,
             # TF-együttállás kapu kiértékelő (None, ha nincs bekapcsolva erre a párra/
@@ -2976,6 +3002,11 @@ def run_portfolio_backtest(
             hour = m1_time.hour
             _sess_ok = (pair_cfg.get("sess_start", 0) <= hour
                         < pair_cfg.get("sess_end", 24))
+            # Óra-kapu: CSAK az új belépőt tiltja (a nyitott pozíció kezelése és
+            # a jelzés-állapotgép megy tovább) — mint a run_pair `_off_hour`-ja.
+            _off_hour = info["hours"] is not None and hour not in info["hours"]
+            if _off_hour and params.get("no_trade_resets_signal", False):
+                info["state"] = strategy.bt_new_state(sym)
 
             prev_row = info["prev_row"]
             info["prev_row"] = row       # a következő bárhoz (MINDIG frissül)
@@ -2987,7 +3018,7 @@ def run_portfolio_backtest(
                 signal = strategy.bt_on_low_close(info["state"], prev_row, row, params)
 
                 if (signal != "NONE" and sym not in open_trades
-                        and occupied < max_slots and _sess_ok):
+                        and occupied < max_slots and _sess_ok and not _off_hour):
                     ptr = info["m15_ptr"]
                     m15_df = info["m15"]
                     if ptr < len(m15_df):
@@ -3189,7 +3220,15 @@ def run_portfolio_backtest(
         r = BacktestResult(symbol=sym, trades=tt)
         s = r.summary(initial_balance)
         s["risky"] = pair_risky.get(sym, False)   # a GUI jelzi a risky párokat
+        s["params_source"] = pair_source.get(sym, "tuned")
         per_pair[sym] = s
+    # ⚠ A KÖTÉS NÉLKÜLI pár is szerepeljen a `per_pair`-ben (a forrásával):
+    # egy hangolatlan pár, ami 0-t kötött, ne tűnjön el a táblából — a „nem
+    # kötött" és a „nem futott" nem ugyanaz.
+    for sym in pair_data:
+        if sym not in per_pair:
+            per_pair[sym] = {"symbol": sym, "trades": 0, "risky": pair_risky.get(sym, False),
+                             "params_source": pair_source.get(sym, "tuned")}
 
     risky_syms = [s for s, v in pair_risky.items() if v and s in pair_data]
     log.info("Portfolio BT kész | Kötések: %d | P&L: $%.2f | Végegyenleg: $%.2f | Risky: %s",

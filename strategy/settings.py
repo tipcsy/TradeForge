@@ -291,6 +291,31 @@ def save_main_config(cfg: dict, path: Path | str) -> str:
     return write_config_file(main_config_view(cfg), path)
 
 
+def default_params(strategy, cfg: dict):
+    """A stratégia SAJÁT alapértelmezett paraméterei — optimalizálás NÉLKÜL is
+    van mivel elindulni (a felhasználó kérése: „az alapértelmezett
+    paramétereket vegye alapul, és azzal helyből engedjen kereskedni").
+
+    ⚠ EGY KÉPLET, HÁROM HÍVÓ. Az élő motor (`live_trader.default_params`), az
+    egypáros backtest hangolatlan indítása és — 2026-09-22 óta — a
+    portfólió-backtest is INNEN veszi; a portfólió eddig a hangolatlan párt
+    egyszerűen KIHAGYTA („nincs optimalizált params"), miközben az él ugyanazt
+    a párt az alapértékekkel futtatta. Két képlet ugyanarra a kérdésre mindig
+    szétcsúszik.
+
+    ⚠ A `config_for_strategy` KELL: a futásidejű cfg az ELSŐDLEGES stratégia
+    szekcióival van merge-elve. Nyers `cfg`-vel a bollinger a `wpr_sma`
+    indikátor-blokkját kapná meg. A `_`-kezdetű kulcsok (kommentek) kimaradnak.
+    Vissza: dict, vagy None, ha a stratégiának nincs alapértéke."""
+    try:
+        base = strategy.base_params(config_for_strategy(cfg, strategy.name))
+    except Exception:
+        return None
+    if not base:
+        return None
+    return {k: v for k, v in base.items() if not str(k).startswith("_")}
+
+
 def config_for_strategy(cfg: dict, name: str) -> dict:
     """A futásidejű cfg átképezése EGY ADOTT stratégia nézetére.
 

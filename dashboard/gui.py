@@ -1177,8 +1177,10 @@ class PortfolioBacktestTab:
         self._strat_menu["menu"].config(bg=BG_HEADER, fg=FG_WHITE)
         self._strat_menu.pack(side="left", padx=6)
 
-        tk.Label(ctrl, text=_t("gui.instrumentumok_optimalizaltak"),
-                 bg=BG_BT, fg=FG_BLUE, font=self._header).pack(anchor="w", pady=(2, 4))
+        tk.Label(ctrl, text=_t("gui.pbt.instruments"),
+                 bg=BG_BT, fg=FG_BLUE, font=self._header).pack(anchor="w", pady=(2, 0))
+        tk.Label(ctrl, text=_t("gui.pbt.instruments_hint"),
+                 bg=BG_BT, fg=FG_GRAY_DIM, font=self._small).pack(anchor="w", pady=(0, 4))
         # A párlista dinamikusan újraépül a stratégiaváltásra.
         self._sym_frame = tk.Frame(ctrl, bg=BG_BT)
         self._sym_frame.pack(fill="x")
@@ -1332,35 +1334,57 @@ class PortfolioBacktestTab:
         self._lbl_res_total.pack(anchor="w", padx=8, pady=4)
 
     def _reload_symbols(self):
-        """A párlista (jelölőnégyzetek) újraépítése a választott stratégia
-        optimalizált almappájából (stratégiaváltáskor és induláskor)."""
+        """A párlista (jelölőnégyzetek) újraépítése a választott stratégiához
+        (stratégiaváltáskor és induláskor).
+
+        ⚠ AZ ÉL MODELLJE, NEM AZ OPTIMALIZÁLT MAPPA (2026-09-22). Eddig csak a
+        `data/optimized_params/<strat>/` fájljai látszottak — a csilla 3 párja
+        (amit nem is terveztünk optimalizálni) egyáltalán nem volt tesztelhető,
+        pedig élesben fut. A lista most az, amit az él is futtat: a config
+        párjai, amelyeknél a stratégia a pár `strategies` listájában van
+        (`enabled_strategy_names`), PLUSZ amire van mentett készlet (egy hangolt
+        pár akkor is tesztelhető, ha épp nincs a pár listáján). A hangolatlan
+        pár JELÖLVE van (a stratégia alapértékeivel fut — mint élesben)."""
         from core.params_store import strategy_dir
+        from strategy import enabled_strategy_names
         for w in self._sym_frame.winfo_children():
             w.destroy()
         self._sym_vars = {}
         strat_name = getattr(self, "_strat_var", None)
-        params_dir = strategy_dir(strat_name.get() if strat_name else None)
-        # A *_hours.json a kereskedési-óra fájl, NEM optimalizált param — kiszűrjük
-        # (ilyet kiválasztva a portfólió-backtest elszállna a hiányzó params miatt).
-        # FONTOS: CSAK a jelenleg a configban SZEREPLŐ párokat listázzuk. Az
-        # optimized_params/ mappában bróker-váltás/törlés után is ott maradhatnak régi
-        # fájlok (pl. XAUUSD a régi arany-névvel) — ezek „szellemként" jelentek meg a
-        # listában, holott már nem léteznek. A metszet a config-párokkal ezt megszünteti.
-        _pairs = set(self.cfg.get("pairs", {}))
-        optimized  = sorted([f.stem for f in params_dir.glob("*.json")
-                             if not f.stem.endswith("_hours") and f.stem in _pairs]) \
-                     if params_dir.exists() else []
-        if not optimized:
-            tk.Label(self._sym_frame, text=_t("gui.nincs_optimalizalt_instrumentum"),
+        _sn = strat_name.get() if strat_name else None
+        params_dir = strategy_dir(_sn)
+        # CSAK a configban SZEREPLŐ párok: az optimized_params/ mappában bróker-
+        # váltás után is maradhatnak régi fájlok (pl. XAUUSD) — a config-párokkal
+        # vett metszet ezeket kiszűri. A *_hours.json a kereskedési-óra fájl, nem
+        # paraméter-készlet.
+        _pairs = {s for s, p in (self.cfg.get("pairs") or {}).items() if isinstance(p, dict)}
+        tuned = {f.stem for f in params_dir.glob("*.json")
+                 if not f.stem.endswith("_hours") and f.stem in _pairs} \
+                if params_dir.exists() else set()
+        running = set()
+        for s in _pairs:
+            try:
+                if _sn and _sn in (enabled_strategy_names(self.cfg, s) or []):
+                    running.add(s)
+            except Exception:
+                log.debug("Portfólió-fül: %s stratégia-listája nem olvasható", s, exc_info=True)
+        szimbolumok = sorted(tuned | running)
+        self._sym_untuned = {s for s in szimbolumok if s not in tuned}
+        if not szimbolumok:
+            tk.Label(self._sym_frame, text=_t("gui.pbt.no_instruments"),
                      bg=BG_BT, fg=FG_GRAY, font=self._small).grid(
                          row=0, column=0, columnspan=4, sticky="w")
             return
         cols = 4
-        for i, sym in enumerate(optimized):
+        for i, sym in enumerate(szimbolumok):
             var = tk.BooleanVar(value=True)
             self._sym_vars[sym] = var
-            tk.Checkbutton(self._sym_frame, text=sym, variable=var,
-                           bg=BG_BT, fg=FG_WHITE, selectcolor=BG_HEADER,
+            _untuned = sym in self._sym_untuned
+            tk.Checkbutton(self._sym_frame,
+                           text=(_t("gui.pbt.untuned_mark", symbol=sym) if _untuned else sym),
+                           variable=var,
+                           bg=BG_BT, fg=(FG_ORANGE if _untuned else FG_WHITE),
+                           selectcolor=BG_HEADER,
                            activebackground=BG_BT, activeforeground=FG_WHITE,
                            font=self._small).grid(row=i // cols, column=i % cols,
                                                   sticky="w", padx=6)
@@ -1578,12 +1602,14 @@ class PortfolioBacktestTab:
             sym_final = init_bal + pnl
 
             is_risky = s.get("risky", False)
+            _default = s.get("params_source") == "default"
 
             bg = BG_ROW_ODD if row_idx % 2 == 0 else BG_ROW_EVEN
             fr = tk.Frame(self._res_rows_frame, bg=bg)
             fr.pack(fill="x")
             vals = [
-                (f"{sym} ⚠R" if is_risky else sym, 10, FG_ORANGE if is_risky else FG_WHITE),
+                ((f"{sym} ⚠R" if is_risky else sym) + (" ·alap" if _default else ""), 10,
+                 FG_ORANGE if (is_risky or _default) else FG_WHITE),
                 (str(s.get("trades", 0)),         6, FG_WHITE),
                 (f"{s.get('win_rate',0):.0%}",    7, FG_GREEN if s.get('win_rate',0) >= 0.5 else FG_RED),
                 (f"{pnl:+.2f}",                   9, FG_GREEN if pnl >= 0 else FG_RED),

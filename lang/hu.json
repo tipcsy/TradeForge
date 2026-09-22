@@ -1649,5 +1649,9 @@
   "cond.tab.job_run": "▶ Futtat most",
   "cond.tab.job_log": "Napló",
   "pack.dlg.confirm.job": "  • {name} — {time} — {label}",
-  "pack.dlg.confirm.no_jobs": "  (nincs)"
+  "pack.dlg.confirm.no_jobs": "  (nincs)",
+  "gui.pbt.instruments": "Instrumentumok (ahol a stratégia fut):",
+  "gui.pbt.instruments_hint": "narancs = hangolatlan — a stratégia alapértékeivel fut, mint élesben",
+  "gui.pbt.no_instruments": "(Nincs ilyen instrumentum: a stratégia egyetlen pár listáján sincs, és nincs mentett készlete)",
+  "gui.pbt.untuned_mark": "{symbol} ·alap"
 }

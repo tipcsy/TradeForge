@@ -67,11 +67,20 @@ if os.environ.get("PARITAS_NOLIMIT"):
 strategy = get_strategy_by_name(STRAT)
 set_active_strategy(STRAT)
 pf = params_file(SYM, STRAT)
-if not pf.exists():
-    print(f"NINCS hangolt params: {pf} — a teszt nem mérhető ezen a páron")
-    sys.exit(0)
-data = json.load(open(pf, encoding="utf-8"))
-params = {**data.get("params", {}), **load_execution_params(SYM, cfg)}
+if pf.exists():
+    data = json.load(open(pf, encoding="utf-8"))
+    base = data.get("params", {})
+    forras = "hangolt"
+else:
+    # HANGOLATLAN pár: a stratégia alapértékei — ugyanaz a képlet, mint az élé
+    # és a portfólióé (`strategy.settings.default_params`); így a csilla is mérhető.
+    from strategy.settings import default_params
+    base = default_params(strategy, cfg)
+    forras = "alapértékek (hangolatlan)"
+    if base is None:
+        print("NINCS params és nincs alapérték — a teszt nem mérhető ezen a páron")
+        sys.exit(0)
+params = {**base, **load_execution_params(SYM, cfg)}
 pair_cfg = cfg["pairs"][SYM]
 trading_cfg = cfg["trading"]
 risky_mode.load()
@@ -80,7 +89,7 @@ risky = risky_mode.is_risky(SYM)
 rr_spec = rr_state.spec_for(SYM)                       # a per-pár preset — mint a portfólió „Auto"-ja
 hours = resolve_trade_hours(SYM, STRAT, pair_cfg.get("trade_hours"))   # mint az él
 allowed = set(hours) if hours else None
-print(f"pár={SYM} strat={STRAT} {FROM}→{TO} risky={risky} preset={rr_spec.get('preset')} "
+print(f"pár={SYM} strat={STRAT} ({forras}) {FROM}→{TO} risky={risky} preset={rr_spec.get('preset')} "
       f"órák={'mind' if allowed is None else sorted(allowed)} slots={trading_cfg['max_open_slots']}")
 
 df15, df1 = bt.load_data(SYM)

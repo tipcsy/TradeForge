@@ -122,15 +122,13 @@ def default_params(strategy, cfg: dict) -> Optional[dict]:
     `bb_period`/`kc_*` kulcsai helyett.
 
     A `_`-kezdetű kulcsok (kommentek) kimaradnak: a mentett készletekben sincsenek
-    benne, és a paraméter-űrlap is szűri őket."""
-    try:
-        from strategy.settings import config_for_strategy
-        base = strategy.base_params(config_for_strategy(cfg, strategy.name))
-    except Exception:
-        return None
-    if not base:
-        return None
-    return {k: v for k, v in base.items() if not str(k).startswith("_")}
+    benne, és a paraméter-űrlap is szűri őket.
+
+    ⚠ A KÉPLET A KERETBEN LAKIK (`strategy.settings.default_params`) — a
+    portfólió-backtest is ugyanazt hívja (2026-09-22), hogy a hangolatlan pár
+    ott is pontosan azt kapja, amit élesben."""
+    from strategy.settings import default_params as _dp
+    return _dp(strategy, cfg)
 
 
 def params_source(symbol: str, strategy_name: str) -> str:
