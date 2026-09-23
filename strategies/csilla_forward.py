@@ -19,9 +19,11 @@ kiütött, ahol a labor +2,16 R-ig vitt. Ezért:
 
 ELŐRE RÖGZÍTVE (a mérés után nem módosítható):
 
-    ELSŐDLEGES minta  Ger40 8–11h · UsaTec 15–18h · GOLD 15–18h (szerver-idő,
-                      a belépő M1 gyertyájának órája), egyszerre EGY pozíció
-                      páronként (a mérés is így számolt).
+    ELSŐDLEGES minta  MIND a 8 pár, MINDEN óra — nincs sáv. Egyszerre EGY
+                      pozíció páronként (a mérés is így számolt). A korábbi
+                      teszt Csilla-sávja a D1/W1-es szabály mérésén alapult;
+                      az új láncra nincs alapja, és az első nap mind a 17
+                      jelzése azon kívül esett.
     szabály           `csilla_rules` LÁNC: a felső idősík (H1) a saját utolsó
                       igazolt swingjét töri → érvényes, amíg az ár nem zár a
                       törés előtti szélsőérték túloldalára → pipa (a korrekciót
@@ -34,8 +36,7 @@ ELŐRE RÖGZÍTVE (a mérés után nem módosítható):
                       nyers +0,038 R a KILÉPÉSÉ. Ez a forward tehát nem egy
                       ígéretes él megerősítése, hanem annak ellenőrzése, hogy
                       élesben sem lesz rosszabb a semminél.
-    MÁSODLAGOS minta  mind a 8 pár, minden óra (mintán −0,02 … −0,05 R) — csak
-                      naplózzuk, a döntésbe nem szól bele.
+    MÁSODLAGOS minta  nincs (az elsődleges már mindent lefed).
 
     KIMONDÁS
       * LEÁLL, ha n ≥ 60 és az átlag R < −0,10 (a minta-szórással ez már
@@ -110,7 +111,13 @@ from strategies import csilla_rules as sw         # noqa: E402
 START = pd.Timestamp("2026-09-23 00:00", tz="UTC")     # a forward kezdete (szerver-idő)
 JOURNAL = ROOT / "data" / "forward" / "csilla_chain_signals.csv"
 STATUS_JSON = ROOT / "data" / "forward" / "csilla_status.json"   # a felületnek
-PRIMARY = {"Ger40": (8, 11), "UsaTec": (15, 18), "GOLD": (15, 18)}
+# ⚠ AZ ÚJ TESZTBEN NINCS SÁV (2026-09-23, az első napon rögzítve). A korábbi
+# Csilla-sáv (Ger40 8–11, UsaTec/GOLD 15–18) a D1/W1-es szabály méréséből jött:
+# ott az volt az EGYETLEN cella, ami pozitív előjelet adott. Az új láncra ennek
+# nincs alapja, és mivel a mérés sehol nem talált élt, egy szűkítés csak
+# önkényes volna — ráadásul az első nap mind a 17 jelzése a sávon KÍVÜL esett
+# (elsődleges minta n = 0). Az elsődleges minta tehát MINDEN pár, MINDEN óra.
+PRIMARY: dict = {}
 ALL_SYMS = ["GOLD", "USDJPY", "UsaInd", "UsaTec", "Ger40",
             "EURUSD", "EURJPY", "UK100"]
 STOP_ATR = 1.5
@@ -158,6 +165,10 @@ def _entries(sym: str):
 
 
 def _in_band(sym: str, t: pd.Timestamp) -> bool:
+    """Az ELSŐDLEGES mintába esik-e? Üres `PRIMARY` → MINDEN jelzés beleesik
+    (nincs szűkítés). Ha valaha újra sáv kell, elég ide felvenni."""
+    if not PRIMARY:
+        return True
     b = PRIMARY.get(sym)
     return bool(b and b[0] <= t.hour <= b[1])
 
@@ -298,11 +309,15 @@ def report():
     j = _load_journal()
     c = j[j.status == "closed"]
     write_status(j)
-    print(f"\n════ CSILLA-SÁV FORWARD — {pd.Timestamp.now():%Y-%m-%d} (indult {START:%Y-%m-%d}) ════")
+    print(f"\n════ CSILLA-LÁNC FORWARD — {pd.Timestamp.now():%Y-%m-%d} (indult {START:%Y-%m-%d}) ════")
     print(f"napló: {len(j)} jelzés · lezárt {len(c)} · nyitott {int((j.status == 'open').sum())} "
           f"· kihagyva {int((j.status == 'kihagyva').sum())}")
-    for nev, d in (("ELSŐDLEGES (Csilla-sáv)", c[c.primary == True]),          # noqa: E712
-                   ("másodlagos (mind a 8 pár, minden óra)", c)):
+    # ⚠ Sáv nélkül a két minta AZONOS — ilyenkor EGY blokkot írunk ki. Két
+    # egyforma táblázat egymás alatt azt sugallná, hogy két külön mérés fut.
+    _blokkok = ([("ELSŐDLEGES (mind a pár, minden óra)", c)] if not PRIMARY else
+                [("ELSŐDLEGES (Csilla-sáv)", c[c.primary == True]),            # noqa: E712
+                 ("másodlagos (mind a pár, minden óra)", c)])
+    for nev, d in _blokkok:
         print(f"\n── {nev} ── n={len(d)}")
         if not len(d):
             continue
