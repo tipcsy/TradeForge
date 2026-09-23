@@ -13,7 +13,9 @@ LÉPÉSENKÉNT rajzol (`--lepes`), mert a szabályt lépésről lépésre beszé
      * a TÖRT szint: vízszintes vonal a swing gyertyájától a törésig (kék);
      * a törés: függőleges (sötét-arany) + felirat (irány, ár, folytatás/
        fordulat, a törő gyertya ideje és zárása).
-  2  + az ALSÓ idősík belépői — amint megegyeztünk a belépő szabályában.
+  2  A TELJES LÁNC, ahogy MAGA A STRATÉGIA rajzolja (`CsillaStrategy.visual_objects`)
+     — ugyanaz a hívás, mint élesben: törés + tört szint, pipa (2. jelzés), és
+     minden belépő a stopjával. Ez az, amit az MT5-ön élőben is látni fogsz.
 
 ⚠ 2026-09-22-ig ez a D1/W1 szint-réteget rajzolta. Az kikerült a szabályból
 (nem a módszer volt, hanem az én bevezetésem); a helyén a páros olvasat áll:
@@ -59,6 +61,34 @@ def _ar(x: float, point_size: float) -> str:
     return f"{float(x):.{tiz}f}"
 
 
+def _lanc_objektumok(symbol: str, t_from: str, t_to: str, P: dict) -> tuple[list, str]:
+    """A 2. lépés: a STRATÉGIA saját rajza. Nem másolat — a `visual_objects`-et
+    hívjuk, ugyanazzal a két kerettel, amit a motor is ad neki."""
+    from strategy import get_strategy_by_name
+    from strategy.base import MarketData
+    st = get_strategy_by_name("csilla")
+    m1 = lab.load_m1(symbol)
+    t0 = pd.Timestamp(t_from, tz="UTC")
+    t1 = pd.Timestamp(t_to, tz="UTC") + pd.Timedelta(days=1)
+    # ⚠ A FELSŐ keret TÖBBET lát az ablaknál (a szerkezet onnan jön), az ALSÓ
+    # viszont csak az ablakot — különben a rajz tele lenne régi belépőkkel.
+    hi = sw.resample(m1[m1.index < t1], P["hi_tf"])
+    lo = sw.resample(m1[(m1.index >= t0 - pd.Timedelta(days=2)) & (m1.index < t1)],
+                     P["lo_tf"])
+    ps = float(lab.PAIRS[symbol]["point_size"])
+    md = MarketData(symbol=symbol, params={"symbol": symbol, "point_size": ps,
+                                           "atr_period": 14,
+                                           "backtest_spread_points": 213},
+                    bars={_TF_LABEL[P["hi_tf"]]: hi, _TF_LABEL[P["lo_tf"]]: lo})
+    objs = st.visual_objects(md)
+    n_be = sum(1 for o in objs if str(getattr(o, "name", "")).startswith("m1sig_"))
+    n_tor = sum(1 for o in objs if str(getattr(o, "name", "")).startswith("cs_brk_"))
+    n_pipa = sum(1 for o in objs if str(getattr(o, "name", "")).startswith("cs_pipa"))
+    return objs, (f"{symbol} {t_from}->{t_to}  A STRATEGIA sajat rajza: "
+                  f"{n_tor} tores, {n_pipa} pipa, {n_be} belepo "
+                  f"({len(objs)} objektum)")
+
+
 def build_objects(symbol: str, t_from: str, t_to: str, tf_pair: str = "H1-M15",
                   k_hi: int | None = None, lepes: int = 1) -> tuple[list, str]:
     lab._CACHE.clear()
@@ -67,6 +97,8 @@ def build_objects(symbol: str, t_from: str, t_to: str, tf_pair: str = "H1-M15",
     if k_hi:
         P["k_hi"] = int(k_hi)
     P = sw.with_tf_pair(P)
+    if lepes >= 2:
+        return _lanc_objektumok(symbol, t_from, t_to, P)
     hi_min = P["hi_tf"]
     hi = sw.resample(m1, hi_min)
     ps = float(lab.PAIRS[symbol]["point_size"])
@@ -130,8 +162,6 @@ def build_objects(symbol: str, t_from: str, t_to: str, tf_pair: str = "H1-M15",
 
     msg = (f"{symbol} {tf_nev} {t_from}->{t_to}  (tf_pair={P['tf_pair']}, "
            f"k_hi={P['k_hi']}): {n_sw} igazolt swing, {n_ev} tores")
-    if lepes >= 2:
-        msg += "  [a 2. lepes (belepok) meg nincs bekotve]"
     return objs, msg
 
 
