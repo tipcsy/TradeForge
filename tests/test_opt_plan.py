@@ -351,6 +351,24 @@ check("a grid MINDHAROM erteket bejarja",
       sorted({x["belepo_mod"] for x in _g}) == ["a", "b", "c"] and len(_g) == 9,
       f"{len(_g)} kombinacio")
 
+# ⚠ A „nem valtozott" NEM HIBA. A tartomany-mezo `FocusOut`-ra is fut, tehat
+# egy sima kikattintas is elinditja a mentest; a `save_optimizer_ranges`
+# ilyenkor False-t ad (nem irt semmit), amibol a felulet „a mentes nem
+# sikerult" hibauzenetet csinalt. A SZAM-ag ezt `if not changed: return`-nel
+# kezeli — az ERTEKKESZLET-agnak is kell ugyanez.
+_ID = (ROOT / "dashboard" / "instrument_dialog.py").read_text(encoding="utf-8")
+_i = _ID.index("def _on_range_change")
+_blokk = _ID[_i:_i + 5000]
+check("a szam-ag kilep, ha nem valtozott", "if not changed:" in _blokk)
+check("az ERTEKKESZLET-ag is kilep, ha nem valtozott",
+      'if _uj == [str(x) for x in (orig.get("choices") or [])]:' in _blokk)
+
+# ⚠ ZARO UJSOR: enelkul minden tartomany-szerkesztes utan „piszkos" a
+# strategia-config a gitben (a diff egy tartalmi valtozas nelkuli sort mutat).
+_ST = (ROOT / "strategy" / "settings.py").read_text(encoding="utf-8")
+check("a config-irok zaro ujsort tesznek a fajl vegere",
+      _ST.count("f.write(chr(10))") >= 2, str(_ST.count("f.write(chr(10))")))
+
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")
 sys.exit(0 if all(results) else 1)

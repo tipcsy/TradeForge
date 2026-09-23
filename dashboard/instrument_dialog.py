@@ -3165,6 +3165,14 @@ class InstrumentParamsDialog:
                             ok=", ".join(str(x) for x in (orig.get("choices") or []))),
                     fg=FG_RED)
                 return
+            # ⚠ NEM VÁLTOZOTT → nincs mentés, és NINCS hibaüzenet sem. A mező
+            # `FocusOut`-ra is fut, tehát egy sima kikattintás is idehoz; a
+            # `save_optimizer_ranges` ilyenkor False-t ad (nem írt semmit), és
+            # abból „a mentés nem sikerült" lett — pedig nem volt mit menteni.
+            # A szám-ág ugyanezt `if not changed: return`-nel kezeli.
+            if _uj == [str(x) for x in (orig.get("choices") or [])]:
+                self._range_err.config(text="", fg=FG_RED)
+                return
             if save_optimizer_ranges(self.strategy.name, {key: {"values": _uj}}):
                 orig["choices"] = _uj
                 orig["values"] = len(_uj)

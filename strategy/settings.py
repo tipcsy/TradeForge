@@ -354,7 +354,11 @@ def save_param_comments(name: str, comments: dict) -> bool:
     try:
         tmp = p.with_suffix(".json.tmp")
         with open(tmp, "w", encoding="utf-8") as f:
+            # ⚠ ZÁRÓ ÚJSOR: nélküle minden szerkesztés után „piszkos" a fájl a
+            # gitben (`\ No newline at end of file`), és a diff egy tartalmi
+            # változás nélküli sort is mutat. A többi config-író is így ír.
             json.dump(data, f, indent=2, ensure_ascii=False)
+            f.write(chr(10))
         tmp.replace(p)
         return True
     except Exception as ex:
@@ -411,7 +415,11 @@ def save_optimizer_ranges(name: str, ranges: dict) -> bool:
     try:
         tmp = p.with_suffix(".json.tmp")
         with open(tmp, "w", encoding="utf-8") as f:
+            # ⚠ ZÁRÓ ÚJSOR: nélküle minden szerkesztés után „piszkos" a fájl a
+            # gitben (`\ No newline at end of file`), és a diff egy tartalmi
+            # változás nélküli sort is mutat. A többi config-író is így ír.
             json.dump(data, f, indent=2, ensure_ascii=False)
+            f.write(chr(10))
         tmp.replace(p)                  # atomikus csere
         return True
     except Exception as ex:
