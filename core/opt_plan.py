@@ -74,9 +74,21 @@ def set_skip_keys(cfg: dict, symbol: str, strategy: str, keys) -> dict:
 
 
 def tuned_specs(opt_cfg: dict) -> dict:
-    """A hangolható kulcsok tartomány-specifikációi (`{kulcs: {min,max,step,…}}`)."""
+    """A hangolható kulcsok tartomány-specifikációi.
+
+    Kétféle spec van:
+      * SZÁM-tartomány — `{"min": …, "max": …, "step": …}`
+      * ÉRTÉKKÉSZLET  — `{"values": [...]}`, pl. `belepo_mod` három módja.
+        Egy szöveges kapcsolónál a tól-ig-lépés értelmetlen, de hangolni
+        ugyanúgy akarjuk; enélkül az ilyen paraméter némán kimaradt a
+        keresésből (a régi szűrő csak a `min`-re nézett)."""
     return {k: v for k, v in (opt_cfg or {}).items()
-            if isinstance(v, dict) and "min" in v}
+            if isinstance(v, dict) and ("min" in v or "values" in v)}
+
+
+def is_enum(spec: dict) -> bool:
+    """ÉRTÉKKÉSZLET-spec? (a `values` kulcs dönt, nem az érték típusa)"""
+    return isinstance(spec, dict) and "values" in spec
 
 
 def grid_values(spec: dict) -> list:
@@ -87,6 +99,8 @@ def grid_values(spec: dict) -> list:
     (sma_period) tört értékeket kapna, az indikátor-motor vagy elszállna, vagy
     némán csonkolna — és a söprés görbéjén két szomszédos pont ugyanaz lenne.
     """
+    if is_enum(spec):
+        return list(spec["values"] or [])
     try:
         lo, hi, step = spec["min"], spec["max"], spec["step"]
         as_int = isinstance(lo, int) and isinstance(step, int) and not isinstance(lo, bool)
@@ -132,6 +146,10 @@ def param_rows(cfg: dict, symbol: str, strategy_name: str, opt_cfg: dict,
         rows.append({
             "key": key,
             "min": spec.get("min"), "max": spec.get("max"), "step": spec.get("step"),
+            # ⚠ `choices`: NEM None csak az ÉRTÉKKÉSZLET-specnél — a felület
+            # ebből tudja, hogy lenyíló mezőt kell rajzolnia a beviteli mező
+            # helyett, és hogy a tól-ig-lépés hármas itt értelmetlen.
+            "choices": (list(spec["values"]) if is_enum(spec) else None),
             "values": grid_size(spec),
             "cls": param_class(scfg, key),
             "skipped": key in skipped,

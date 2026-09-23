@@ -138,7 +138,12 @@ def _write_trials_csv(rows: list[dict], out_csv: Path) -> int:
 # ---------------------------------------------------------------------------
 
 def _range(spec: dict) -> list:
-    """Egész vagy float tartomány generálása a config alapján."""
+    """Egész vagy float tartomány — VAGY kész értékkészlet (`values`).
+
+    ⚠ Az értékkészlet szöveges is lehet (pl. `belepo_mod`). A `product`/`choice`
+    ugyanúgy működik rajta, csak nem szabad számnak nézni."""
+    if "values" in spec:
+        return list(spec["values"] or [])
     lo, hi, step = spec["min"], spec["max"], spec["step"]
     values = []
     v = lo
@@ -158,7 +163,7 @@ def generate_random_params(opt_cfg: dict, base_params: dict, n: int,
     ranges = {
         k: _range(v)
         for k, v in opt_cfg.items()
-        if isinstance(v, dict) and "min" in v
+        if isinstance(v, dict) and ("min" in v or "values" in v)
     }
 
     combos = []
@@ -194,7 +199,7 @@ def generate_grid_params(opt_cfg: dict, base_params: dict,
     fixed = deepcopy(base_params)
 
     for k, v in opt_cfg.items():
-        if isinstance(v, dict) and "min" in v:
+        if isinstance(v, dict) and ("min" in v or "values" in v):
             ranges[k] = _range(v)
         # string értékek (pl. method) kihagyva
 
@@ -530,6 +535,14 @@ def _suggest_params(trial, opt_cfg: dict, base_params: dict,
         specs = {k: v for k, v in specs.items() if k in keys}
     for key in _dep_order(specs):
         spec = specs[key]
+        # ⚠ ÉRTÉKKÉSZLET (pl. `belepo_mod`): az optunának SAJÁT hívása van rá.
+        # A szám-ágra engedve a `spec["min"]` KeyError-t dobna — az egész
+        # optimalizálás elszállna egy szöveges kapcsolótól.
+        if "values" in spec:
+            _v = list(spec["values"] or [])
+            if _v:
+                params[key] = trial.suggest_categorical(key, _v)
+            continue
         lo, hi, step = spec["min"], spec["max"], spec["step"]
         gt, lt = spec.get("gt"), spec.get("lt")
         if gt is not None and gt in params:

@@ -389,8 +389,19 @@ def save_optimizer_ranges(name: str, ranges: dict) -> bool:
     changed = False
     for key, spec in (ranges or {}).items():
         cur = opt.get(key)
-        if not isinstance(cur, dict) or "min" not in cur:
+        if not isinstance(cur, dict):
             continue                    # nem tartomány-kulcs → nem nyúlunk hozzá
+        if "values" in cur:
+            # ÉRTÉKKÉSZLET (pl. `belepo_mod`): a „tartomány" itt a megengedett
+            # értékek LISTÁJA. Üresre menteni tilos — az némán kivenné a
+            # paramétert a keresésből, és csak a trial-számból tűnne fel.
+            uj = [str(x) for x in (spec.get("values") or []) if str(x).strip()]
+            if uj and list(cur.get("values") or []) != uj:
+                cur["values"] = uj
+                changed = True
+            continue
+        if "min" not in cur:
+            continue
         for field in ("min", "max", "step"):
             if field in spec and cur.get(field) != spec[field]:
                 cur[field] = spec[field]

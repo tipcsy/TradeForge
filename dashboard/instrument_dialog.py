@@ -93,6 +93,22 @@ _METRIC_COLS = frozenset({
 _MANUAL_RANK_BASE = 501
 
 
+def _mezo_beir(w, szoveg: str) -> None:
+    """Egy paraméter-mező értékének beírása — Entry ÉS Combobox esetén is.
+
+    ⚠ A `state="readonly"` Combobox `delete`/`insert`-re TclError-t dob. A
+    paraméter-mezők több helyről is felülíródnak (rang-betöltés, backtest-eredmény
+    visszaírása, alapértékek), és mind a négy hely `delete`+`insert`-tel írt —
+    egy lenyíló mező ezeken némán (vagy hangosan) elhasalt volna."""
+    try:
+        w.set(szoveg)                       # ttk.Combobox
+        return
+    except (AttributeError, tk.TclError):
+        pass
+    w.delete(0, "end")
+    w.insert(0, szoveg)
+
+
 def _fmt_ranges(nums, max_runs: int = 3) -> str:
     """Egész sorszámok TÖMÖR felsorolása: az egymást követőket tartományba vonja.
 
@@ -534,6 +550,9 @@ class InstrumentParamsDialog:
         # A 'categories' a megjelenítési SORREND; a 'params.<kulcs>' adja a kategóriát
         # és a (szerkeszthető) megjegyzést. Ismeretlen kulcs → 'Egyéb' a végén.
         _pm     = self.cfg.get("param_meta") or {}
+        # ⚠ A `_on_range_change` is kell hozzá (az ÖSSZES megengedett érték a
+        # `choices`-ban van, az optimalizáló `values`-a annak részhalmaza).
+        self._pmeta_all = (_pm.get("params") or {})
         # AZONOSÍTÓK (a régi magyar feliratot a `category_order` is elfogadja —
         # egy `.tfs` csomag hozhat régi formátumú configot).
         _cat_ord = _sset.category_order(self.cfg)
@@ -611,12 +630,26 @@ class InstrumentParamsDialog:
                     _kfg = FG_YELLOW if _rr["cls"] == "signal" else FG_BLUE
                 tk.Label(form, text=k, bg=BG, fg=_kfg, font=self._sf,
                          anchor="w", width=24).grid(row=_r, column=0, sticky="w", pady=1)
-                e = tk.Entry(form, width=8, bg=BG_HEADER, fg=FG_WHITE,
-                             font=self._sf, insertbackground=FG_WHITE)
-                e.insert(0, str(self._src[k]))
+                # ── LENYÍLÓ MEZŐ, ha a param_meta `choices`-t ad ───────────
+                # ⚠ A `choices` a STRATÉGIA configjában van, nem a keretben —
+                # így a `.tfs` magával viszi, és másik gépen is lenyíló lesz.
+                # Ha hiányzik (régi stratégia, régi csomag), sima beviteli mező
+                # marad: a felület nem tételezi fel, hogy van ilyen tulajdonság.
+                _ch = [str(x) for x in ((_pmeta.get(k) or {}).get("choices") or [])]
+                if _ch:
+                    from tkinter import ttk as _ttk
+                    e = _ttk.Combobox(form, values=_ch, state="readonly",
+                                      width=max(8, min(16, max(len(x) for x in _ch))),
+                                      font=self._sf)
+                    e.set(str(self._src[k]))
+                    e.bind("<<ComboboxSelected>>", lambda ev: self._invalidate_bt())
+                else:
+                    e = tk.Entry(form, width=8, bg=BG_HEADER, fg=FG_WHITE,
+                                 font=self._sf, insertbackground=FG_WHITE)
+                    e.insert(0, str(self._src[k]))
+                    # Kézi átírásnál a korábbi backtest elavul → a Mentés újraszámol.
+                    e.bind("<KeyRelease>", lambda ev: self._invalidate_bt())
                 e.grid(row=_r, column=1, padx=(0, 3), pady=1, sticky="w")
-                # Kézi átírásnál a korábbi backtest-eredmény elavul → a Mentés újraszámol.
-                e.bind("<KeyRelease>", lambda ev: self._invalidate_bt())
                 self.entries[k] = e
 
                 # ── Söprési tartomány — CSAK ha van hangolható tartománya ───
@@ -634,8 +667,28 @@ class InstrumentParamsDialog:
                                    activeforeground=FG_WHITE,
                                    command=lambda kk=k: self._on_skip_change(kk)
                                    ).grid(row=_r, column=2, sticky="w")
-                    _vars = {}
-                    for _ci, _field in enumerate(("min", "max", "step"), start=3):
+                    if _rr.get("choices"):
+                        # ⚠ ÉRTÉKKÉSZLET: a tól-ig-lépés hármas itt értelmetlen.
+                        # Helyette EGY mező a megengedett értékek vesszős
+                        # listájával — ez a „tartomány" egy szöveges kapcsolónál.
+                        sv = tk.StringVar(value=", ".join(str(x) for x in _rr["choices"]))
+                        re_ = tk.Entry(form, textvariable=sv, bg=BG_HEADER,
+                                       fg=FG_WHITE, insertbackground=FG_WHITE,
+                                       relief="flat", font=self._sf)
+                        re_.grid(row=_r, column=3, columnspan=3, sticky="we",
+                                 padx=(0, 3), pady=1)
+                        re_.bind("<Return>", lambda _ev, kk=k: self._on_range_change(kk))
+                        re_.bind("<FocusOut>", lambda _ev, kk=k: self._on_range_change(kk))
+                        self._range_vars[k] = {"values": sv}
+                        _nl = tk.Label(form, text=str(_rr["values"]), bg=BG,
+                                       fg=FG_GRAY, font=self._sf, width=4, anchor="w")
+                        _nl.grid(row=_r, column=6, sticky="w")
+                        self._range_lbls[k] = _nl
+                        _vars = None
+                    else:
+                        _vars = {}
+                    for _ci, _field in enumerate(("min", "max", "step") if _vars is not None
+                                                 else (), start=3):
                         sv = tk.StringVar(value=self._fmt_range(_rr[_field]))
                         re_ = tk.Entry(form, textvariable=sv, width=7, bg=BG_HEADER,
                                        fg=FG_WHITE, insertbackground=FG_WHITE,
@@ -648,11 +701,12 @@ class InstrumentParamsDialog:
                         re_.bind("<FocusOut>",
                                  lambda _ev, kk=k: self._on_range_change(kk))
                         _vars[_field] = sv
-                    self._range_vars[k] = _vars
-                    _nl = tk.Label(form, text=str(_rr["values"]), bg=BG,
-                                   fg=FG_GRAY, font=self._sf, width=4, anchor="w")
-                    _nl.grid(row=_r, column=6, sticky="w")
-                    self._range_lbls[k] = _nl
+                    if _vars is not None:
+                        self._range_vars[k] = _vars
+                        _nl = tk.Label(form, text=str(_rr["values"]), bg=BG,
+                                       fg=FG_GRAY, font=self._sf, width=4, anchor="w")
+                        _nl.grid(row=_r, column=6, sticky="w")
+                        self._range_lbls[k] = _nl
 
                 # Megjegyzés — szerkeszthető; a Mentés a stratégia-configba írja vissza.
                 ce = tk.Entry(form, bg=BG_HEADER, fg=FG_GRAY, font=self._sf,
@@ -3006,8 +3060,7 @@ class InstrumentParamsDialog:
             e = self.entries.get(k)
             if e is None:
                 continue
-            e.delete(0, "end")
-            e.insert(0, self._fmt_range(v))
+            _mezo_beir(e, self._fmt_range(v))
         self._invalidate_bt()
         self._sw_status.config(
             text=_t("idlg.a_pont_parameterei_betoltve"),
@@ -3092,6 +3145,37 @@ class InstrumentParamsDialog:
             return
         orig = next((r for r in self._opt_rows if r["key"] == key), None)
         if orig is None:
+            return
+        if "values" in vars_:
+            # ÉRTÉKKÉSZLET: vesszős lista. Üres vagy ismeretlen elem esetén
+            # visszaállunk — inkább ne változzon, mint hogy némán kiessen a
+            # paraméter a keresésből.
+            _uj = [x.strip() for x in vars_["values"].get().split(",") if x.strip()]
+            # A megengedett ÉRTÉKEK a param_meta `choices`-a (a teljes készlet);
+            # az optimalizáló `values`-a ennek részhalmaza. Ha az utóbbihoz
+            # mérnénk, egy egyszer kivett értéket SOHA nem lehetne visszatenni.
+            _eng = set(str(x) for x in
+                       ((getattr(self, "_pmeta_all", {}).get(key) or {}).get("choices") or []))
+            _rossz = [x for x in _uj if _eng and x not in _eng]
+            if not _uj or _rossz:
+                vars_["values"].set(", ".join(str(x) for x in (orig.get("choices") or [])))
+                self._range_err.config(
+                    text=_t("idlg.range_values_bad", key=key,
+                            bad=", ".join(_rossz) or "-",
+                            ok=", ".join(str(x) for x in (orig.get("choices") or []))),
+                    fg=FG_RED)
+                return
+            if save_optimizer_ranges(self.strategy.name, {key: {"values": _uj}}):
+                orig["choices"] = _uj
+                orig["values"] = len(_uj)
+                self._range_lbls[key].config(text=str(len(_uj)))
+                self._range_err.config(
+                    text=_t("idlg.range_values_saved", key=key,
+                            vals=", ".join(_uj), n=len(_uj)), fg=FG_GREEN)
+                self._refresh_opt_space()
+            else:
+                self._range_err.config(text=_t("idlg.range_save_failed", key=key),
+                                       fg=FG_RED)
             return
         spec, changed = {}, False
         for field in ("min", "max", "step"):
@@ -3333,8 +3417,7 @@ class InstrumentParamsDialog:
             return
         for k, e in self.entries.items():
             if k in row:
-                e.delete(0, "end")
-                e.insert(0, self._fmt_param(k, row[k]))
+                _mezo_beir(e, self._fmt_param(k, row[k]))
         # Betöltéskor a korábbi friss backtest már nem erre a készletre vonatkozik.
         self._bt_summary = None
         note = (row.get("note") or "").strip()
@@ -4303,8 +4386,7 @@ class InstrumentParamsDialog:
         friss backtest-eredmény, azt is átvesszük forrásként."""
         for k, e in self.entries.items():
             if k in params:
-                e.delete(0, "end")
-                e.insert(0, self._fmt_param(k, params[k]))
+                _mezo_beir(e, self._fmt_param(k, params[k]))
         if summary and summary.get("trades", 0) > 0:
             self._bt_summary = summary
             self._render_metrics(summary, _t("idlg2.friss_backtest_a_backtest"))

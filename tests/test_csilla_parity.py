@@ -67,6 +67,27 @@ for k in ("level_kinds", "k_d1", "k_w1", "ttl_d1", "ttl_w1",
     check(f"a(z) {k!r} MAR NINCS a base_params-ban", k not in base)
 check("a tf_pair a megengedettek kozul valo", base["tf_pair"] in sw0.TF_PAIRS,
       str(base["tf_pair"]))
+# ⚠ A LENYILO ERTEKEK a param_meta `choices`-abol jonnek (hogy a `.tfs`
+# vigye oket), a SZABALY viszont a kodbol. Ha a ketto elcsuszik, a felulet
+# olyat kinalna, amit a szabaly nem ismer — es a `parse_tf_pair` nemaan az
+# alapertelmezesre esne vissza.
+_pm_cs = ((__import__("strategy.settings", fromlist=["x"])
+           .load_strategy_config(NAME).get("param_meta") or {}).get("params") or {})
+check("a tf_pair lenyilo ertekei == a kod TF_PAIRS-e",
+      list((_pm_cs.get("tf_pair") or {}).get("choices") or []) == list(sw0.TF_PAIRS),
+      str((_pm_cs.get("tf_pair") or {}).get("choices")))
+check("a belepo_mod lenyilo ertekei == amit a counter_entries ismer",
+      set((_pm_cs.get("belepo_mod") or {}).get("choices") or [])
+      == {"varj_pirosra", "leszuras", "piros_zaras"},
+      str((_pm_cs.get("belepo_mod") or {}).get("choices")))
+_ocs = (__import__("strategy.settings", fromlist=["x"])
+        .load_strategy_config(NAME).get("optimizer") or {})
+check("a belepo_mod ERTEKKESZLET-spec az optimalizaloban (nem szam-tartomany)",
+      isinstance(_ocs.get("belepo_mod"), dict) and "values" in _ocs["belepo_mod"],
+      str(_ocs.get("belepo_mod")))
+check("az optimalizalo ertekei a lenyilo keszlet RESZHALMAZA",
+      set(_ocs.get("belepo_mod", {}).get("values") or [])
+      <= set((_pm_cs.get("belepo_mod") or {}).get("choices") or []))
 check("H4 A PLAFON: a csilla_rules kikenyszeriti",
       sw0.MAX_TF_MIN == 240 and all(v[0] <= 240 for v in sw0.TF_PAIRS.values()),
       str(sw0.TF_PAIRS))

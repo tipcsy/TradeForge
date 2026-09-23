@@ -325,6 +325,32 @@ shutil.rmtree(_tmp_dir, ignore_errors=True)
 
 shutil.rmtree(ps.PARAMS_DIR, ignore_errors=True)
 
+# ---------------------------------------------------------------------------
+print("== ERTEKKESZLET-spec (enum) a hangolasban ==")
+# ⚠ MIERT KELL. A szoveges kapcsolokat (pl. csilla `belepo_mod`) a regi szuro
+# NEMAN kihagyta a keresesbol: csak a `min` kulcsra nezett. A felhasznalo
+# szamara ez ugy latszott volna, hogy hangol, kozben a parameter vegig az
+# alapertelmezesen all.
+_ENUM = {"belepo_mod": {"values": ["a", "b", "c"]},
+         "szam": {"min": 1, "max": 3, "step": 1}}
+check("tuned_specs viszi az ertekkeszletet is",
+      set(op.tuned_specs(_ENUM)) == {"belepo_mod", "szam"}, str(sorted(op.tuned_specs(_ENUM))))
+check("is_enum csak az ertekkeszletre igaz",
+      op.is_enum(_ENUM["belepo_mod"]) and not op.is_enum(_ENUM["szam"]))
+check("grid_values az ertekkeszletet adja vissza",
+      op.grid_values(_ENUM["belepo_mod"]) == ["a", "b", "c"],
+      str(op.grid_values(_ENUM["belepo_mod"])))
+check("grid_size = a keszlet merete", op.grid_size(_ENUM["belepo_mod"]) == 3)
+_rows = [{"key": "belepo_mod", "skipped": False, "values": 3},
+         {"key": "szam", "skipped": False, "values": 3}]
+check("a keresesi terbe BESZAMIT (3 x 3)", op.search_space(_rows) == 9,
+      str(op.search_space(_rows)))
+from ml.optimizer import generate_grid_params                            # noqa: E402
+_g = generate_grid_params(_ENUM, {"belepo_mod": "a", "szam": 1})
+check("a grid MINDHAROM erteket bejarja",
+      sorted({x["belepo_mod"] for x in _g}) == ["a", "b", "c"] and len(_g) == 9,
+      f"{len(_g)} kombinacio")
+
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")
 sys.exit(0 if all(results) else 1)

@@ -32,7 +32,7 @@
     "_comment": "⚠ A BELÉPÉS UTÁNI dolgok NEM ezé a modulé. A forward-teszt kilépése — breakeven_r 0,67, trailing aktiválás és távolság 3,0 ATR (2 R), célár nélkül, off preset — a KOCKÁZATCSÖKKENTŐ modulé (core/risk_reduction.py + data/risk_mode.json, per pár)."
   },
   "optimizer": {
-    "_comment": "Szuk racs. A korr_min az egyetlen erdemi kapcsolo, ami meresre var (3 a felhasznalo olvasata: a 3-4 gyertyas korrekciokat is elfogadja; 5-tel harom altala hianyolt jelzes esett ki). A swing-parameterek (k_hi/k_lo) a szerkezet definicioi - azokat nem hangoljuk.",
+    "_comment": "Szuk racs. Ket erdemi kapcsolo var meresre: a `korr_min` (3 a felhasznalo olvasata: a 3-4 gyertyas korrekciokat is elfogadja; 5-tel harom altala hianyolt jelzes esett ki) es a `belepo_mod`. Az utobbi ERTEKKESZLET-spec (`values`), nem szam-tartomany — a hangolo ezt `suggest_categorical`-lal jarja be. A swing-parameterek (k_hi/k_lo) a szerkezet definicioi: nem hangoljuk.",
     "korr_min": {
       "min": 3,
       "max": 6,
@@ -43,61 +43,77 @@
       "max": 30.0,
       "step": 2.0
     },
-    "constraints": []
+    "constraints": [],
+    "belepo_mod": {
+      "values": [
+        "varj_pirosra",
+        "leszuras",
+        "piros_zaras"
+      ]
+    }
   },
   "param_meta": {
     "_comment": "A Paraméterek ablak csoportosítása + megjegyzései.",
     "categories": [
-      "levels",
-      "entry_m1",
+      "struct",
+      "entry_lo",
       "sltp",
       "other"
     ],
     "params": {
       "tf_pair": {
         "recompute": "signal",
-        "category": "levels",
-        "comment": "Az idosik-par: H1-M15 vagy M15-M1. A felso tori a sajat swingjet, az alson a belepo"
+        "category": "struct",
+        "comment": "Az idosik-par: H1-M15 vagy M15-M1. A felso tori a sajat swingjet, az alson a belepo",
+        "choices": [
+          "H1-M15",
+          "M15-M1"
+        ]
       },
       "k_hi": {
         "recompute": "signal",
-        "category": "levels",
+        "category": "struct",
         "comment": "A FELSO keret swing-felablaka (ennyi gyertyaval kesobb igazolodik a csucs/volgy)"
       },
       "pipa_k": {
         "recompute": "signal",
-        "category": "levels",
+        "category": "struct",
         "comment": "A pipa (2. jelzes) ablaka: ennyi gyertyan belul keressuk a korrekcio tetejet"
       },
       "pipa_w1": {
         "recompute": "signal",
-        "category": "levels",
+        "category": "struct",
         "comment": "A korrekcio kiindulasi szintje (P0) a teto elotti ennyi gyertya legalacsonyabb zarasa"
       },
       "pipa_melyseg": {
         "recompute": "signal",
-        "category": "levels",
+        "category": "struct",
         "comment": "A korrekcio magassaga legalabb ennyi ATR legyen"
       },
       "pipa_min_tart": {
         "recompute": "signal",
-        "category": "levels",
+        "category": "struct",
         "comment": "A jelzo gyertya tartomanya legalabb ennyi ATR (ne egy apro gyertya zarjon)"
       },
       "k_lo": {
         "recompute": "signal",
-        "category": "entry_m1",
+        "category": "entry_lo",
         "comment": "Az ALSO keret fraktal-felablaka"
       },
       "korr_min": {
         "recompute": "signal",
-        "category": "entry_m1",
+        "category": "entry_lo",
         "comment": "A counter-trend korrekcio legalabb ennyi gyertya legyen (a felhasznalo olvasata: 3)"
       },
       "belepo_mod": {
         "recompute": "signal",
-        "category": "entry_m1",
-        "comment": "varj_pirosra (rossz szinu toro gyertyanal a kovetkezo jot varjuk) | leszuras | piros_zaras"
+        "category": "entry_lo",
+        "comment": "varj_pirosra (rossz szinu toro gyertyanal a kovetkezo jot varjuk) | leszuras | piros_zaras",
+        "choices": [
+          "varj_pirosra",
+          "leszuras",
+          "piros_zaras"
+        ]
       },
       "tp_rr_ratio": {
         "recompute": "exec",
