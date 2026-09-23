@@ -1,36 +1,39 @@
-"""CSILLA BESZÁLLÓJA — jelentős napi/heti szint törése, M1-zászló belépővel.
+"""CSILLA BESZÁLLÓJA — szerkezet-törés két idősíkon, DAYTRADE.
 
-Származása: az Obsidian „Stratégiák/Csilla beszállója" jegyzet (Csilla
-diszkrecionális módszere: szerkezet-törés két idősíkon), gépi olvasatban. A
-mérés története a „Csilla beszállója — mérés" jegyzetben; röviden:
+A módszer (az Obsidian „Stratégiák/Csilla beszállója" jegyzet, a felhasználó
+2026-09-22-i olvasatában): választunk EGY idősík-párt, a FELSŐ idősík áttöri a
+SAJÁT utolsó igazolt swingjét, és a belépő az ALSÓ idősík zászló-törése.
 
-  * a nyers szabály (minden fraktál-szint, M1-stop) 14 éven −0,22 R/kötés;
-  * a JELENTŐS (D1/W1) szintek + M15-stop változat −0,07 R (8 pár, 14 év);
-  * a felhasználó ELŐRE megnevezett sávja — Ger40 8–11h, UsaTec és GOLD
-    15–18h (szerver-idő) — fix 1,5 ATR15 stoppal, BE +0,67 R-nél, 2R
-    csúszóval, célár nélkül: **+0,12 R/kötés, t = 1,5, 9/14 év**. Ez NEM
-    bizonyíték (t < 2), ezért 2026-09-15-től FORWARD papírkereskedés.
+    tf_pair = "H1-M15"   a H1 töri a saját csúcsát/völgyét, belépő M15-ön
+    tf_pair = "M15-M1"   a M15 töri a sajátját, belépő M1-en
 
-⚠ A SZABÁLY NEM ITT VAN. A szint-/esemény-/belépő-logika a `strategies/csilla_rules`
-modulban él, és a kutató-labor (`tools/research/csilla_levels.py` → a lezárt
-változatokat őrző `csilla_variants`) UGYANAZT hívja — a paritás szerkezeti, nem
-ígéret (`tests/test_csilla_parity.py`).
-Ez a modul csak a keret hookjait adja: időkeretek, warmup, jelölő-oszlop,
-élő jelzés, backtest-oszlopok, SL/TP, viz. A napszak-sáv (Ger40 8–11,
-UsaTec/GOLD 15–18) a KERET stratégia-hatókörű kereskedési-óra kapuja
-(`data/optimized_params/csilla/<PÁR>_hours.json`), nem a stratégiáé.
+⚠ H4 A PLAFON. A jegyzet négy párt sorol fel (W1-D1, D1-H4, H1-M15, M15-M1);
+a felhasználó kikötése szerint ez a stratégia DAYTRADE, tehát a felső kettő nem
+használható. A kikötés a `csilla_rules.MAX_TF_MIN`-ben ki is van kényszerítve —
+és CSAK erre a stratégiára vonatkozik, más stratégia bármilyen idősíkot
+használhat.
 
-A KILÉPÉS NEM A STRATÉGIÁÉ (lásd `strategy/base.py`): a forward-teszt
-kilépését — `breakeven_r = 0,67`, trailing 2 R (= 3,0 ATR15 aktiválás és
-távolság), `off` preset — a PÁR kockázatcsökkentésében kell beállítani. A
-célár itt szándékosan MESSZE van (`tp_rr_ratio`, alap 30): a mért változatban
-nincs célár, a BE pedig R-alapú, tehát a távoli célár nem kapcsolja ki
-(lásd `be-threshold-is-tp-relative`).
+⚠ AMI 2026-09-22-ig ITT VOLT: egy D1/W1 SZINT-RÉTEG (napi/heti swing-szintek
+élettartammal, amiket az M15 tört). Az nem a módszer volt, hanem az én
+bevezetésem — a felhasználó a jegyzetet újraolvasva mondta ki, hogy a napi/heti
+chart csak egy opció volt, amit nem kér. A kódja a
+`tools/research/csilla_variants.py` fagyasztott modulban él tovább, a rá épülő
+forward-teszt pedig lezárult (lásd `strategies/csilla_forward.py`).
 
-⚠ MÉLY M15-WARMUP: a W1-szintek 365 napig élnek, tehát a M15 keretnek ~1 évet
-kell lefednie (~36 000 gyertya). A M15-kontextus (szintek, események) csak új
-M15-gyertyánál változik, ezért páronként gyorsítótárazzuk — enélkül a
-dashboard minden körben újraszámolna (lásd `display-path-deep-warmup-cost`).
+⚠ A SZABÁLY NEM ITT VAN. A szerkezet-/belépő-logika a `strategies/csilla_rules`
+modulban él, és a kutató-labor UGYANAZT hívja — a paritás szerkezeti, nem
+ígéret (`tests/test_csilla_parity.py`). Ez a modul csak a keret hookjait adja:
+időkeretek, warmup, jelölő-oszlop, élő jelzés, backtest-oszlopok, SL/TP, viz.
+
+A KILÉPÉS NEM A STRATÉGIÁÉ (lásd `strategy/base.py`): a `breakeven_r`, a
+trailing és a preset a PÁR kockázatcsökkentésében áll. A célár itt szándékosan
+MESSZE van (`tp_rr_ratio`, alap 30): a mért változatban nincs célár, a BE pedig
+R-alapú, tehát a távoli célár nem kapcsolja ki (`be-threshold-is-tp-relative`).
+
+⚠ AZ IDŐSÍK-PÁR STRATÉGIA-SZINTŰ, nem instrumentumonkénti: a
+`Strategy.timeframes()` az egész keret adat-szerződése (letöltés,
+visszaszámlálók, portfólió-backtest, viz), és egyik hívója sem tud paramétert
+adni neki. Ugyanaz a megkötés, mint az `ml_ai` jel-idősíkjánál.
 """
 from __future__ import annotations
 
@@ -46,29 +49,146 @@ from strategy.base import (Cell, Column, MarkerColumn, MarketData, Strategy,
 MAGIC_OFFSET = 5          # 0=wpr_sma, 1=ml_ai, 2=bollinger, 3=trend_pullback, 4=straddle
 
 _CIRCLE = "●"
-_STAGES = (("szint", _t("stage.cs_level")), ("tores", _t("stage.cs_break")),
+# ⚠ ÖT ÁLLOMÁS, nem három (2026-09-23, a felhasználó kérése: „látszódjon
+# minél jobban, mi is történik"). A lánc minden lépésének saját pöttye van:
+#   szerk  a felső idősík áttörte a saját swingjét, a setup ÉL
+#   korr   a törés megvolt, a korrekció épül, a pipa MÉG NINCS
+#   pipa   a pipa megvolt → nyitva a belépő-ablak az alsó kereten
+#   zaszlo az alsó kereten épp épül egy elég hosszú counter-trend korrekció
+#   belep  az utolsó ZÁRT alsó gyertya belépőt ad
+_STAGES = (("szerk", _t("stage.cs_struct")), ("korr", _t("stage.cs_corr")),
+           ("pipa", _t("stage.cs_pipa")), ("zaszlo", _t("stage.cs_flag")),
            ("belep", _t("stage.cs_entry")))
 _MARKS_EMPTY = {k: Cell(_CIRCLE, "muted") for k, _ in _STAGES}
 
-HI_TF, LO_TF = 15, 1
-_M15_PER_DAY = 96
+_TF_LABEL = {1: "M1", 5: "M5", 15: "M15", 30: "M30", 60: "H1", 240: "H4"}
+_tf_cache: dict = {}          # (mtime) → tf_pair; a config-fájl változását követi
+
+
+def tf_pair() -> str:
+    """Az idősík-pár a stratégia SAJÁT configjából (`indicators.tf_pair`).
+
+    Közvetlenül a fájlból olvassuk, mert a `timeframes()` hívóinak nincs
+    cfg-jük; az mtime-cache miatt ez körönként egy `stat()`. Ugyanaz a minta,
+    mint az `ml_ai.signal_tf_min`-nél."""
+    import json as _json
+    from strategy.settings import strategy_config_path
+    alap = sw.DEFAULTS["tf_pair"]
+    try:
+        f = strategy_config_path("csilla")
+        mtime = f.stat().st_mtime
+    except OSError:
+        return alap
+    if _tf_cache.get("mtime") == mtime:
+        return _tf_cache["v"]
+    val = alap
+    try:
+        with open(f, encoding="utf-8") as fh:
+            nyers = (_json.load(fh).get("indicators") or {}).get("tf_pair")
+        if nyers:
+            kulcs = str(nyers).strip().upper().replace("_", "-")
+            if kulcs in sw.TF_PAIRS:
+                val = kulcs
+            else:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "csilla — tf_pair=%s nem megengedett (%s) → %s",
+                    nyers, tuple(sw.TF_PAIRS), alap)
+    except Exception:
+        pass
+    _tf_cache.update({"mtime": mtime, "v": val})
+    return val
+
+
+def _tf_min() -> tuple:
+    """`(felső perc, alsó perc)` az aktuális idősík-párból."""
+    return sw.parse_tf_pair(tf_pair())
 
 
 def _P(params: dict) -> dict:
     """A core paraméterei a stratégia-configból (a hiányzókra a DEFAULTS).
     `sl_atr_mult` a keret konvenciója (mint a többi stratégiánál); a core
-    belső neve `stop_atr`. A `level_kinds` ("D1+W1" alak) → `kinds` tuple."""
+    belső neve `stop_atr`."""
     p = dict(sw.DEFAULTS)
-    # ⚠ A H1/H4 szint-fajta paraméterei (k_h1/ttl_h1/k_h4/ttl_h4) 2026-09-22-én
-    # kikerültek: a „páros olvasat" mérve és bukott (H1→M15 −0,049 R, H1→M1
-    # −0,167 R, 0/14 év). A kódjuk a `tools/research/csilla_variants`-ban él.
-    for k in ("k_hi", "k_lo", "k_d1", "k_w1", "ttl_d1", "ttl_w1",
-              "max_wait", "buffer_atr", "min_sl_atr"):
+    for k in ("k_hi", "k_lo", "max_wait", "buffer_atr", "min_sl_atr",
+              "pipa_k", "pipa_w1", "pipa_melyseg", "pipa_min_tart",
+              "korr_min", "belepo_mod", "veg_mod"):
         if params.get(k) is not None:
             p[k] = params[k]
     p["stop_atr"] = float(params.get("sl_atr_mult", params.get("stop_atr", 1.5)) or 1.5)
-    p["kinds"] = sw.parse_kinds(params.get("level_kinds", "D1+W1"))
-    return p
+    # ⚠ Az idősík-pár NEM a `params`-ból jön: stratégia-szintű (lásd a fejlécet).
+    p["tf_pair"] = tf_pair()
+    return sw.with_tf_pair(p)
+
+
+def _spread_ar(params: dict) -> float:
+    """A stophoz adott spread ÁRBAN. A szabály szerint a stop a korrekció
+    teteje + spread — enélkül a stopot a vételi-eladási különbség önmagában
+    kiütné. Ha a keret nem ad spread-becslést, 0 (és a stop pont a tetőn ül)."""
+    ps = float(params.get("point_size", 0) or 0)
+    pt = params.get("spread_points", params.get("backtest_spread_points", 0))
+    try:
+        return max(0.0, float(pt or 0)) * ps
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _korrekcio_epul(lo: pd.DataFrame, d: int, korr_min: int) -> bool:
+    """Épül-e ÉPPEN egy elég hosszú counter-trend korrekció az alsó kereten?
+    Medve setupnál emelkedő aljak sorozata, legalább `korr_min` gyertya — ez az
+    az állapot, amikor a következő belépőre várunk."""
+    l = lo["low"].to_numpy(float)
+    h = lo["high"].to_numpy(float)
+    n = len(l)
+    if n < korr_min + 2:
+        return False
+    db = 0
+    for j in range(n - 1, 0, -1):
+        if (l[j] > l[j - 1]) if d < 0 else (h[j] < h[j - 1]):
+            db += 1
+        else:
+            break
+    return db >= korr_min
+
+
+def _last_swings(hi: pd.DataFrame, k: int) -> list:
+    """A felső keret utolsó IGAZOLT csúcsának és völgyének ára (0–2 elem).
+    A „szint" stádium ezt nézi: az ár közel van-e ahhoz, amit törnie kell.
+    Igazolt = a pivot legfeljebb a (len−1−k)-adik bar (k barral később derül ki)."""
+    h = hi["high"].to_numpy(float)
+    l = hi["low"].to_numpy(float)
+    pc, pv = sw.pivots(h, l, k)
+    hat = len(hi) - 1 - k
+    out = []
+    for arr, tomb in ((pc, h), (pv, l)):
+        j = np.flatnonzero(arr[:max(0, hat + 1)])
+        if len(j):
+            out.append(float(tomb[j[-1]]))
+    return out
+
+
+def _ar(x: float, point_size) -> str:
+    """Ár szövegként, a pár TIZEDESEIVEL. ⚠ Soha nem `%g`: az a nagy indexeken
+    exponenciálisra vált (`2.5e+04`), devizán meg levágja a tizedeseket — a
+    projekt ezt háromszor tanulta meg. A tizedesek a `point_size`-ból jönnek."""
+    import math
+    try:
+        ps = float(point_size or 0)
+        tiz = min(8, max(0, int(round(-math.log10(ps))))) if ps > 0 else 2
+    except (TypeError, ValueError):
+        tiz = 2
+    return f"{float(x):.{tiz}f}"
+
+
+def _frames(md) -> tuple:
+    """`(felső, alsó)` ZÁRT keret az `md.bars`-ból, az aktuális idősík-pár
+    címkéi szerint. EGY hely, ahol a keret-NEVEK feloldódnak — eddig öt helyen
+    állt bedrótozva az „M15"/„M1", és egy pár-váltás némán üres jelzést adott
+    volna (a `bars.get("M15")` egyszerűen None-t ad, hibát nem)."""
+    hi_min, lo_min = _tf_min()
+    bars = (getattr(md, "bars", None) or {})
+    return (_closed(bars.get(_TF_LABEL[hi_min])),
+            _closed(bars.get(_TF_LABEL[lo_min])))
 
 
 def _closed(df: pd.DataFrame | None) -> pd.DataFrame | None:
@@ -102,8 +222,10 @@ class CsillaStrategy(Strategy):
 
     def __init__(self):
         super().__init__()
-        # (symbol, utolsó zárt M15 idő, paraméter-ujjlenyomat) → hi_context
+        # (symbol, utolsó zárt felső idő, paraméter-ujjlenyomat) → lánc-kontextus
         self._ctx_cache: dict = {}
+        # symbol → a legutóbbi belépő stop-távolsága PONTBAN (lásd `bt_on_low_close`)
+        self._pending: dict = {}
 
     # --- Napi feladat: a forward-napló --------------------------------------
 
@@ -117,24 +239,24 @@ class CsillaStrategy(Strategy):
     # --- Megjelenítés -----------------------------------------------------
 
     def timeframes(self) -> list[Timeframe]:
-        return [Timeframe("M15", HI_TF), Timeframe("M1", LO_TF)]
+        hi, lo = _tf_min()
+        return [Timeframe(_TF_LABEL[hi], hi), Timeframe(_TF_LABEL[lo], lo)]
 
     def columns(self) -> list[Column]:
         return [MarkerColumn("marks", self.name, stages=_STAGES)]
 
     def warmup_bars(self, params: dict, timeframe_label: str) -> int:
-        if timeframe_label == "M15":
-            p = _P(params)
-            # a W1-szint élettartama + a heti pivot igazolása + ATR.
-            # ⚠ A warmup GYERTYÁBAN megy, a szintek élettartama NAPBAN: 96 M15 /
-            # nap a 24 órás piacokra (FX, arany) pont 1 év; egy index-CFD-n
-            # (~56 M15 / nap) ugyanez ~1,8 év — több, mint kell, de a motor a
-            # warmupot a keret ELEJÉRŐL vágja, tehát a keretnek ENNÉL hosszabbnak
-            # kell lennie, különben a szimuláció üres (0 kötés, némán).
-            return int(_M15_PER_DAY * (p["ttl_w1"] + 7 * (p["k_w1"] + 1) + 3)) + 50
+        """⚠ EZ MÁR NEM MÉLY. A D1/W1 szint-réteg idején a felső keretnek ~1 évet
+        kellett lefednie (36 000 M15 gyertya), mert egy heti szint 365 napig élt.
+        A páros olvasat csak a SAJÁT utolsó pár swingjét nézi: elég annyi gyertya,
+        amiben két-két swing igazolódik (a trend-címkéhez) + ATR(14). 500 felső
+        gyertya H1-en ~3 hét, M15-ön ~5 nap — bőven fedi."""
         p = _P(params)
-        # M1: a törés utáni ablak + a pivot félablak + ATR(14)
-        return int(p["max_wait"] * HI_TF + 2 * p["k_lo"] + 30)
+        hi_min, lo_min = p["hi_tf"], p["lo_tf"]
+        if timeframe_label == _TF_LABEL[hi_min]:
+            return 500
+        # alsó keret: a törés utáni ablak + a pivot félablak + ATR(14)
+        return int(p["max_wait"] * hi_min // max(1, lo_min) + 2 * p["k_lo"] + 30)
 
     def signal_warmup_bars(self, params: dict, timeframe_label: str) -> int:
         return self.warmup_bars(params, timeframe_label)
@@ -150,45 +272,65 @@ class CsillaStrategy(Strategy):
                float(hi["close"].iloc[-2]), tuple(sorted((k, p[k]) for k in p)))
         ctx = self._ctx_cache.get(key)
         if ctx is None:
-            ctx = sw.hi_context(hi, {k: v for k, v in p.items() if k != "kinds"}, p["kinds"])
+            ctx = dict(P=p, setups=sw.chain_setups(hi, p),
+                       a15=sw.atr(hi["high"].to_numpy(float),
+                                  hi["low"].to_numpy(float),
+                                  hi["close"].to_numpy(float), 14))
             # csak a legutóbbi kontextust tartjuk páronként
             self._ctx_cache = {k: v for k, v in self._ctx_cache.items() if k[0] != symbol}
             self._ctx_cache[key] = ctx
         return ctx
 
     def _signals(self, symbol: str, hi: pd.DataFrame, lo: pd.DataFrame, params: dict):
-        """`(sig, sl_abs, atr15, ctx)` az M1 (lo) sorokra — ZÁRT keretekből."""
+        """`(sig, sl_tav, ctx)` az ALSÓ keret soraira — ZÁRT keretekből.
+
+        `sig` = +1/−1 a belépő baron (0 máshol), `sl_tav` a stop TÁVOLSÁGA
+        ÁRBAN (a korrekció teteje + spread, a belépőtől mérve)."""
         ctx = self._context(symbol, hi, params)
-        sig, sl, a15 = sw.signal_column(lo, ctx=ctx, stop_atr=_P(params)["stop_atr"])
-        return sig, sl, a15, ctx
+        n = len(lo)
+        sig = np.zeros(n, dtype=np.int8)
+        sl = np.full(n, np.nan)
+        et = sw.counter_entries(lo, ctx["setups"], ctx["P"],
+                                spread=_spread_ar(params))
+        if len(et):
+            et = et.drop_duplicates("i", keep="first")
+            ii = et.i.to_numpy(int)
+            sig[ii] = et.dir.to_numpy(int)
+            sl[ii] = et.sl_abs.to_numpy(float)
+        return sig, sl, ctx
 
     def compute_display(self, md: MarketData) -> dict[str, Cell]:
-        # ⚠ A CELLÁK kulcsa a STÁDIUM (nem az oszlopé).
+        """A lánc öt állomása pöttyönként (lásd `_STAGES`). A szín az IRÁNYT
+        mondja: zöld = felfelé, piros = lefelé; a sárga azt, hogy még várunk."""
         empty = dict(_MARKS_EMPTY)
-        hi = _closed(md.bars.get("M15"))
-        lo = _closed(md.bars.get("M1"))
-        if hi is None or lo is None or len(hi) < 200:
+        hi, lo = _frames(md)
+        if hi is None or lo is None or len(hi) < 50:
             return empty
         try:
-            sig, _sl, _a, ctx = self._signals(md.symbol, hi, lo, md.params or {})
+            sig, _sl, ctx = self._signals(md.symbol, hi, lo, md.params or {})
         except Exception:
             return empty
-        p = ctx["P"]
         out = dict(empty)
-        # szint: van-e élő D1/W1 szint az ár 1 ATR15-ös környezetében
-        lv = ctx["lv"]
-        a15 = ctx["a15"][-1] if len(ctx["a15"]) else np.nan
-        close = float(hi["close"].iloc[-1])
         t_now = hi.index[-1]
-        if len(lv) and np.isfinite(a15):
-            alive = lv[(lv.t_conf <= t_now) & (lv.t_exp > t_now)]
-            if ((alive.price - close).abs() <= a15).any():
-                out["szint"] = Cell(_CIRCLE, "yellow")
-        # törés: volt-e esemény az utolsó max_wait M15 gyertyán belül
-        evs = ctx["evs"]
-        if evs and evs[-1]["i"] >= len(hi) - p["max_wait"]:
-            out["tores"] = Cell(_CIRCLE, "green" if evs[-1]["dir"] > 0 else "red")
-        # belépő: az utolsó ZÁRT M1 gyertya jelez-e (az óra-kapu a KERETÉ)
+        elo = [x for x in ctx["setups"] if x["t_veg"] >= t_now]
+        # ⚠ A NYITOTT BELÉPŐ-ABLAK AZ ÉRDEKES, nem a legfrissebb törés. Egyszerre
+        # több setup is élhet; ha mindig az utolsót mutatnánk, a „pipa" pötty
+        # SOHA nem gyulladna ki (a legfrissebb törésnél még nincs pipa).
+        _nyit = [x for x in elo if x["i_pipa"] is not None
+                 and hi.index[x["i_pipa"]] <= t_now]
+        if _nyit or elo:
+            su = _nyit[-1] if _nyit else elo[-1]
+            szin = "green" if su["dir"] > 0 else "red"
+            out["szerk"] = Cell(_CIRCLE, szin)
+            van_pipa = (su["i_pipa"] is not None
+                        and hi.index[su["i_pipa"]] <= t_now)
+            if van_pipa:
+                out["pipa"] = Cell(_CIRCLE, szin)
+            else:
+                out["korr"] = Cell(_CIRCLE, "yellow")
+            # a ZÁSZLÓ: épül-e MÉG le nem tört counter-trend korrekció az alsón
+            if van_pipa and _korrekcio_epul(lo, su["dir"], int(ctx["P"]["korr_min"])):
+                out["zaszlo"] = Cell(_CIRCLE, "yellow")
         if len(sig) and sig[-1] != 0:
             out["belep"] = Cell(_CIRCLE, "green" if sig[-1] > 0 else "red")
         return out
@@ -199,12 +341,11 @@ class CsillaStrategy(Strategy):
         return _State(symbol)
 
     def on_bar_close(self, state: _State, md: MarketData) -> tuple[_State, str]:
-        hi = _closed(md.bars.get("M15"))
-        lo = _closed(md.bars.get("M1"))
-        if hi is None or lo is None or len(hi) < 200:
+        hi, lo = _frames(md)
+        if hi is None or lo is None or len(hi) < 50:
             return state, "NONE"
         try:
-            sig, _sl, _a, _ctx = self._signals(md.symbol, hi, lo, md.params or {})
+            sig, _sl, _ctx = self._signals(md.symbol, hi, lo, md.params or {})
         except Exception:
             return state, "NONE"
         t_last = lo.index[-1]
@@ -234,27 +375,34 @@ class CsillaStrategy(Strategy):
     # --- Backtest-hookok --------------------------------------------------
 
     def bt_indicators(self, df_hi, df_lo, params):
-        """hi: `atr` + `cs_atr_ref` (a törés gyertyájának ATR-je, a törés utáni
-        ablakra kitöltve — az SL ebből jön, mint a laborban); lo: `cs_sig`
-        (+1/−1 a belépő baron), `cs_sl` (a stop ÁRBAN)."""
+        """hi: `atr` (a keret közös ATR-je); lo: `cs_sig` (+1/−1 a belépő baron)
+        és `cs_sl_pts` (a stop TÁVOLSÁGA PONTBAN).
+
+        ⚠ A STOP BELÉPŐNKÉNT MÁS (a korrekció teteje + spread), a keret
+        `sl_tp_points`-ja viszont csak a FELSŐ sort látja. Ezért a belépő
+        pillanatában a `bt_on_low_close` félreteszi a stopot páronként, és a
+        `sl_tp_points` onnan veszi. A `params["symbol"]` mindkét úton megvan
+        (a `run_pair` és a `live_trader` is injektálja)."""
         hi = df_hi.copy()
         lo = df_lo.copy()
         p = _P(params)
         hi["atr"] = sw.atr(hi["high"].to_numpy(float), hi["low"].to_numpy(float),
                            hi["close"].to_numpy(float),
                            int(params.get("atr_period", 14) or 14))
-        # ⚠ A szimbólum a paraméterekből (a motor adja `symbol`-ként), különben
-        # a gyorsítótár kulcsa páronként ütközne.
         sym = str(params.get("symbol", "") or "")
         ctx = self._context(sym, hi, params)
-        sig, sl, _a15 = sw.signal_column(lo, ctx=ctx, stop_atr=p["stop_atr"])
+        n = len(lo)
+        sig = np.zeros(n, dtype=np.int8)
+        slp = np.full(n, np.nan)
+        et = sw.counter_entries(lo, ctx["setups"], ctx["P"], spread=_spread_ar(params))
+        ps = float(params.get("point_size", 0) or 0)
+        if len(et) and ps > 0:
+            et = et.drop_duplicates("i", keep="first")
+            ii = et.i.to_numpy(int)
+            sig[ii] = et.dir.to_numpy(int)
+            slp[ii] = et.sl_abs.to_numpy(float) / ps
         lo["cs_sig"] = sig
-        lo["cs_sl"] = sl
-        ref = np.full(len(hi), np.nan)
-        for e in ctx["evs"]:
-            i0 = int(e["i"])
-            ref[i0:min(len(hi), i0 + p["max_wait"] + 1)] = ctx["a15"][i0]
-        hi["cs_atr_ref"] = ref
+        lo["cs_sl_pts"] = slp
         return hi, lo
 
     def bt_warmup(self, params: dict, timeframe_label: str) -> int:
@@ -268,70 +416,91 @@ class CsillaStrategy(Strategy):
 
     def bt_on_low_close(self, state, prev_lo_row, lo_row, params) -> str:
         try:
-            s = int(lo_row["cs_sig"])
+            s_ = int(lo_row["cs_sig"])
+            sl = float(lo_row["cs_sl_pts"])
         except (KeyError, TypeError, ValueError):
             return "NONE"
-        if s == 0:
+        if s_ == 0 or not (sl > 0):
             return "NONE"
-        return "BUY" if s > 0 else "SELL"
+        # ⚠ A stop félretétele PÁRONKÉNT: a `sl_tp_points` csak a felső sort
+        # kapja, a mi stopunk viszont ehhez az EGY belépőhöz tartozik.
+        self._pending[str(params.get("symbol", "") or state.symbol)] = sl
+        return "BUY" if s_ > 0 else "SELL"
 
     def sl_tp_points(self, hi_row, params, point_size):
-        """SL = sl_atr_mult × a TÖRÉS M15-gyertyájának ATR(14)-e (a laborral azonos;
-        ⚠ NEM a közös `atr_period` — a mérés ATR(14)-gyel készült);
-        ha nincs (ablakon kívül), az aktuális M15 ATR. TP = SL × tp_rr_ratio
-        (alapból messze — a mért változatban nincs célár)."""
-        a = hi_row.get("cs_atr_ref", np.nan)
-        if a is None or pd.isna(a) or a <= 0:
-            a = hi_row.get("atr", 0)
-        if not a or pd.isna(a) or a <= 0 or point_size <= 0:
+        """A stop a LEGUTÓBBI belépő korrekció-tetejéből (+ spread), pontban.
+        TP = SL × `tp_rr_ratio` — alapból messze (a mért változatban nincs célár,
+        a BE pedig R-alapú, tehát a távoli célár nem kapcsolja ki)."""
+        sl = self._pending.get(str(params.get("symbol", "") or ""))
+        if not sl or not (sl > 0):
             return None
-        sl = _P(params)["stop_atr"] * float(a) / point_size
         return sl, sl * float(params.get("tp_rr_ratio", 30.0) or 30.0)
 
     # --- MT5 chart-vizualizáció ------------------------------------------
 
     def visual_lookback_bars(self, params: dict, timeframe_label: str) -> int:
-        if timeframe_label == "M1":
-            return 3 * 1440                 # 3 nap belépő a charton
-        return self.warmup_bars(params, "M15")
+        hi_min, lo_min = _tf_min()
+        if timeframe_label == _TF_LABEL[lo_min]:
+            return 3 * 1440 // max(1, lo_min)      # 3 nap belépő a charton
+        return max(300, 3 * 1440 // max(1, hi_min) + 100)
 
     def visual_objects(self, md: MarketData) -> list:
-        """M15-törések (a tört szint rövid szakaszával) + belépők (a közös
-        rajzolóval, ami a belépő-naplót is tölti). Élő szint-vonalak NINCSENEK."""
-        hi = _closed((md.bars or {}).get("M15"))
-        lo = _closed((md.bars or {}).get("M1"))
-        if hi is None or lo is None or len(hi) < 200:
+        """A LÁNC a charton: a tört H1 szint (a swingjétől a töréséig), a törés
+        függőlegese felirattal, a pipa (2. jelzés), és a belépők a közös
+        rajzolóval (ami a belépő-naplót is tölti).
+
+        ⚠ NINCS teljes ablakon áthúzott vízszintes. A 2026-09-15-i változat az
+        élő D1/W1 szinteket húzta át az egész charton — a felhasználó jogosan
+        „szemétnek" olvasta: egy vonal, aminek se az eredete, se a vége nem
+        látszik. Minden szakasz ONNAN indul, ahol a swing van, és OTT ér véget,
+        ahol törik."""
+        hi, lo = _frames(md)
+        if hi is None or lo is None or len(hi) < 50:
             return []
         p = md.params or {}
         try:
-            sig, sl, a15, ctx = self._signals(md.symbol, hi, lo, p)
+            sig, sl, ctx = self._signals(md.symbol, hi, lo, p)
         except Exception:
             return []
         objs: list = []
         t0 = lo.index[0]
-        # ⚠ NINCS vízszintes szint-vonal az élő charton. Az első változat a
-        # labor-viz mintájára a teljes ablakon áthúzta az élő D1/W1 szinteket
-        # (kék/lila) — a felhasználó jogosan „szemétnek" olvasta (2026-09-15).
-        # A szint csak OTT érdekes, ahol törik: a törés függőlegese mellé egy
-        # rövid (±8 M15) szakasz mutatja, MI tört.
-        for e in ctx["evs"]:
-            tb = hi.index[e["i"]]
+        hi_min = ctx["P"]["hi_tf"]
+        pip = float(p.get("point_size", 0.0001) or 0.0001)
+        for su in ctx["setups"]:
+            tb = hi.index[su["i_break"]]
             if tb < t0:
                 continue
-            tc = int((tb + pd.Timedelta(minutes=HI_TF)).timestamp())
+            tc = int((tb + pd.Timedelta(minutes=hi_min)).timestamp())
+            d = su["dir"]
             objs.append(viz.VLine(name=f"cs_brk_{tc}", t1=tc, color="darkgold", width=2))
-            col = "blue" if e["kind"] == "D1" else "magenta"
-            objs.append(viz.Trend(name=f"cs_lvl_{tc}", t1=tc - 8 * HI_TF * 60, p1=float(e["level"]),
-                                  t2=tc + 8 * HI_TF * 60, p2=float(e["level"]),
-                                  color=col, width=2))
-        # belépők: a közös rekord → napló + rajz
-        pip = float(p.get("point_size", 0.0001) or 0.0001)
+            objs.append(viz.Trend(name=f"cs_lvl_{tc}", t1=int(tb.timestamp()),
+                                  p1=float(su["level"]), t2=tc, p2=float(su["level"]),
+                                  color="blue", width=2))
+            objs.append(viz.Text(
+                name=f"cs_brktxt_{tc}", t1=tc, p1=float(su["level"]),
+                text=(f"{_TF_LABEL[hi_min]} tores {'FEL' if d > 0 else 'LE'} "
+                      f"{_ar(su['level'], pip)}"),
+                color=("green" if d > 0 else "red"), fontsize=9))
+            # ⚠ `i_pipa` lehet None (a törés megvolt, a pipa még nem) — az
+            # `hi.index[None]` nem hibát dob, hanem TÖBBDIMENZIÓS indexelést
+            # próbál, és egy érthetetlen ValueError-ral áll meg.
+            if su["i_pipa"] is None:
+                continue
+            tp_ = hi.index[int(su["i_pipa"])]
+            if tp_ >= t0:
+                tpc = int((tp_ + pd.Timedelta(minutes=hi_min)).timestamp())
+                objs.append(viz.VLine(name=f"cs_pipa_{tpc}", t1=tpc,
+                                      color="magenta", width=2))
+                objs.append(viz.Text(name=f"cs_pipatxt_{tpc}", t1=tpc,
+                                     p1=float(hi["close"].iloc[su["i_pipa"]]),
+                                     text="pipa (2. jelzes)", color="magenta",
+                                     fontsize=8))
         _recs = []
         for i in np.flatnonzero(sig != 0):
             ti = lo.index[int(i)]
             d = "BUY" if sig[i] > 0 else "SELL"
             entry = float(lo["close"].iloc[int(i)])
-            _sl = entry - (1 if d == "BUY" else -1) * float(sl[i])
+            _sl = entry + (1 if d == "SELL" else -1) * float(sl[i])
             _lab = f"{self.short_name} {d}"
             if callable(getattr(md, "lot_of", None)):
                 _l = md.lot_of(float(sl[i]) / pip)

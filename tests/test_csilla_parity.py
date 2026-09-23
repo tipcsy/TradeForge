@@ -6,7 +6,7 @@ az M1-ből képzett M15-tel, a modul a motor `bt_indicators` útján kapja.
 
 Amit őrzünk:
   1. regisztráció, interfész, config, docs, magic, i18n kulcsok;
-  2. a modul belépői == a labor belépői (idő, irány, SL) UGYANAZON az M15-ön;
+  2. a modul belépői == a labor belépői (idő, irány, SL) UGYANAZON a kereten;
   3. a natív MT5 M15 kerettel (amit a motor élesben lát) az eltérés kicsi;
   4. a `run_pair` végigfut a forward-teszt kilépésével (breakeven_r 0,67,
      trailing 3 ATR, off preset), és van kötés;
@@ -53,15 +53,23 @@ from strategy.settings import config_for_strategy                        # noqa:
 cfg = config_for_strategy(raw, NAME)
 cfg_file = ROOT / "strategies" / "config" / f"{NAME}.json"
 check("van strategia-config fajl", cfg_file.exists())
+from strategies import csilla_rules as sw0                                # noqa: E402
 base = s.base_params(cfg)
-for k in ("level_kinds", "k_d1", "k_w1", "ttl_d1", "ttl_w1",
-          "max_wait", "sl_atr_mult", "tp_rr_ratio"):
+for k in ("tf_pair", "k_hi", "k_lo", "korr_min", "belepo_mod",
+          "pipa_k", "pipa_w1", "tp_rr_ratio"):
     check(f"a(z) {k!r} a base_params-ban", k in base)
-# ⚠ TAKARITAS 2026-09-22: a H1/H4 szint-parameterek KIKERULTEK (a „paros
-# olvasat" merve es bukott). Ha visszaszivarognanak a configba, a Parameterek
-# ablak megint olyat kinalna, amit a szabaly nem tud hasznalni.
-for k in ("k_h4", "ttl_h4", "k_h1", "ttl_h1", "fib_ext", "retest_tol"):
+# ⚠ A LANC (2026-09-23) mas parametereken all, mint a korabbi valtozatok. Ha
+# ezek visszaszivarognanak a configba, a Parameterek ablak olyat kinalna, amit
+# a szabaly nem hasznal — ez a csapda mar ketszer elsult ebben a strategiaban.
+for k in ("level_kinds", "k_d1", "k_w1", "ttl_d1", "ttl_w1",
+          "k_h4", "ttl_h4", "k_h1", "ttl_h1", "fib_ext", "retest_tol",
+          "sl_atr_mult"):
     check(f"a(z) {k!r} MAR NINCS a base_params-ban", k not in base)
+check("a tf_pair a megengedettek kozul valo", base["tf_pair"] in sw0.TF_PAIRS,
+      str(base["tf_pair"]))
+check("H4 A PLAFON: a csilla_rules kikenyszeriti",
+      sw0.MAX_TF_MIN == 240 and all(v[0] <= 240 for v in sw0.TF_PAIRS.values()),
+      str(sw0.TF_PAIRS))
 # ⚠ A napszak-sav NEM strategia-parameter: a keret strategia-hatokoru
 # kereskedesi-ora kapuja (params_store.trade_hours). Az elso valtozat sajat
 # `session_hours` parametert vitt — a Parameterek ablakban olvashatatlan
@@ -76,10 +84,18 @@ check("EGYEDI magic",
 check("van leirasa (docs/<nev>.md)", s.doc_path().exists(), s.doc_path().name)
 check("a leiras nem ures", len((s.doc_text() or "").strip()) > 200)
 from core.i18n import t as _t                                            # noqa: E402
-for key in ("stage.cs_level", "stage.cs_break", "stage.cs_entry"):
+for key in ("stage.cs_struct", "stage.cs_corr", "stage.cs_pipa",
+            "stage.cs_flag", "stage.cs_entry"):
     check(f"i18n kulcs {key}", _t(key) != key, _t(key))
-check("a cellak kulcsa a STADIUM (szint/tores/belep)",
-      {k for k, _ in s.columns()[0].stages} == {"szint", "tores", "belep"})
+# ⚠ OT potty, nem harom (a felhasznalo kerese 2026-09-23): a lanc minden
+# allomasa lassek. A szelesseg-minta (`live_row._WIDTHS["stages"]`) is ot.
+check("a cellak kulcsa a LANC OT allomasa",
+      [k for k, _ in s.columns()[0].stages]
+      == ["szerk", "korr", "pipa", "zaszlo", "belep"],
+      str([k for k, _ in s.columns()[0].stages]))
+from dashboard import live_row as _lr                                    # noqa: E402
+check("a stages szelesseg-mintaja legalabb OT pottyot fed",
+      _lr._SAMPLE["stages"][1].count("\u25cf") >= 5, _lr._SAMPLE["stages"][1])
 
 # ---------------------------------------------------------------------------
 print("== Paritas a laborral, valos adaton ==")
@@ -96,70 +112,67 @@ else:
 
     m1_all = pd.read_parquet(_m1p)
     m1_all = m1_all[~m1_all.index.duplicated(keep="last")].sort_index()
-    # a labor: a TELJES M1 (a szintek 1 evet neznek vissza) — az utolso ~500 nap
-    m1_lab = m1_all[m1_all.index >= m1_all.index.max() - pd.Timedelta(days=800)]
-    lab = sw.entry_table(m1_lab, base, stop_atr=float(base["sl_atr_mult"]))
-    check("a mert alap: level_kinds = D1+W1", sw.parse_kinds(base["level_kinds"]) == ("D1", "W1"),
-          str(base["level_kinds"]))
-    check("parse_kinds: 'D1' / 'w1' / ismeretlen",
-          sw.parse_kinds("D1") == ("D1",) and sw.parse_kinds("w1") == ("W1",)
-          and sw.parse_kinds("XX") == ("D1", "W1"))
-    # ⚠ A H1/H4 MAR NEM VALASZTHATO: a bukott valtozat nem szivaroghat vissza egy
-    # config-ertekkel. A H4 kerese most a mert alapra (D1+W1) esik vissza.
-    check("level_kinds='H4' -> a mert alapra esik vissza (nincs H4 szint)",
-          sw.parse_kinds("H4") == ("D1", "W1") and "H4" not in sw.KINDS,
-          str(sw.KINDS))
-    check("a H4 szint-tabla URES az elo modulban",
-          len(sw.level_table(m1_lab[m1_lab.index >= m1_lab.index.max() - pd.Timedelta(days=60)],
-                             ("H4",))) == 0)
-    lab = lab.drop_duplicates("i", keep="first")
-    lab_t = m1_lab.index[lab.i.to_numpy(int)]
+    m1_lab = m1_all[m1_all.index >= m1_all.index.max() - pd.Timedelta(days=400)]
+    P = sw.with_tf_pair({**sw.DEFAULTS, **{k: v for k, v in base.items()
+                                           if k in sw.DEFAULTS}})
+    hi_same = sw.resample(m1_lab, P["hi_tf"])
+    lo = sw.resample(m1_lab, P["lo_tf"])
+
+    # ── a LANC harom allomasa kulon-kulon ──────────────────────────────────
+    evs = sw.own_swing_events(hi_same, P)
+    pipak = sw.pipa_events(hi_same, P)
+    setupok = sw.chain_setups(hi_same, P)
+    check("1. jelzes: a felso keret tori a sajat swingjet", len(evs) > 20, str(len(evs)))
+    check("2. jelzes: van pipa", len(pipak) > 20, str(len(pipak)))
+    check("a lanc setupokat ad", len(setupok) > 10, str(len(setupok)))
+    _pipaval = [x for x in setupok if x["i_pipa"] is not None]
+    check("van pipa NELKULI setup is (a 'korrekcio epul' potty ebbol el)",
+          len(_pipaval) < len(setupok), f"{len(_pipaval)} / {len(setupok)}")
+    check("a pipa MINDIG a tores UTAN van, es az ervenyesseg ALATT",
+          all(x["i_break"] < x["i_pipa"] for x in _pipaval))
+    check("a pipa iranya = a tores iranya",
+          all(next(q["dir"] for q in pipak if q["i"] == x["i_pipa"]) == x["dir"]
+              for x in _pipaval))
+
+    # ── a labor belepoi ────────────────────────────────────────────────────
+    _sp = float(prm.get("backtest_spread_points", 0) or 0) * prm["point_size"]
+    lab = sw.counter_entries(lo, setupok, P, spread=_sp).drop_duplicates("i", keep="first")
     check("a labor ad belepot (nem 0 vs 0)", len(lab) > 50, str(len(lab)))
+    check("a stop a belepo ROSSZ oldalan van (short: folotte, long: alatta)",
+          bool(((lab.dir < 0) & (lab.sl > lab.be)).sum()
+               + ((lab.dir > 0) & (lab.sl < lab.be)).sum() == len(lab)))
+    check("a korrekcio legalabb korr_min gyertya", bool((lab.korr >= P["korr_min"]).all()),
+          str(int(lab.korr.min())))
 
-    # a MODUL utja: bt_indicators(df_hi, df_lo) — UGYANAZ az M15 (az M1-bol
-    # kepezve), a lo pedig az utolso 60 nap M1-e (mint egy backtest-ablak)
-    hi_same = sw.resample(m1_lab, 15)
-    lo = m1_lab[m1_lab.index >= m1_lab.index.max() - pd.Timedelta(days=60)]
+    # ── a MODUL utja: bt_indicators ────────────────────────────────────────
     hi_i, lo_i = s.bt_indicators(hi_same, lo, prm)
-    for c in ("cs_sig", "cs_sl"):
+    for c in ("cs_sig", "cs_sl_pts"):
         check(f"a(z) {c!r} oszlop a lo keretben", c in lo_i.columns)
-    check("a 'cs_atr_ref' oszlop a hi keretben", "cs_atr_ref" in hi_i.columns)
     mod = lo_i[lo_i["cs_sig"] != 0]
-    # az ablak elso 3 orajat kihagyjuk: ott a lo keret ELOTT zart esemenyek
-    # belepoi vannak, amiket a modul (helyesen) nem lat
-    lab_w = lab[lab_t >= lo.index[0] + pd.Timedelta(hours=3)]
-    lab_w_t = m1_lab.index[lab_w.i.to_numpy(int)]
-    check("a modul ad belepot az ablakban", len(mod) > 5, str(len(mod)))
-    same_t = set(mod.index) == set(lab_w_t)
-    check("UGYANAZOK a belepo-idopontok (modul == labor)", same_t,
-          f"modul {len(mod)} / labor {len(lab_w)} / kozos {len(set(mod.index) & set(lab_w_t))}")
-    if same_t:
-        lab_by_t = pd.Series(lab_w.dir.to_numpy(), index=lab_w_t)
-        sl_by_t = pd.Series(lab_w.sl_abs.to_numpy(), index=lab_w_t)
-        check("UGYANAZ az irany", bool((mod["cs_sig"].astype(int) == lab_by_t.reindex(mod.index)).all()))
-        check("UGYANAZ a stop (arban, 1e-9)",
-              bool(np.allclose(mod["cs_sl"].to_numpy(), sl_by_t.reindex(mod.index).to_numpy(), atol=1e-9)))
-    # az SL a MOTOR utjan: sl_tp_points a hi soron, a belepo idejen
-    _bad = 0
-    for t_e, r_ in mod.iterrows():
-        hrow = hi_i[hi_i.index <= t_e].iloc[-1]
-        plan = s.sl_tp_points(hrow, prm, prm["point_size"])
-        if plan is None or abs(plan[0] * prm["point_size"] - float(r_["cs_sl"])) > 1e-6:
-            _bad += 1
-    check("sl_tp_points (a toresi ATR-bol) == a labor stopja minden belepon",
-          _bad == 0, f"elteres: {_bad}/{len(mod)}")
+    check("a modul ad belepot", len(mod) > 50, str(len(mod)))
+    lab_t = lo.index[lab.i.to_numpy(int)]
+    check("UGYANAZOK a belepo-idopontok (modul == labor)",
+          set(mod.index) == set(lab_t),
+          f"modul {len(mod)} / labor {len(lab)} / kozos {len(set(mod.index) & set(lab_t))}")
+    if set(mod.index) == set(lab_t):
+        _lab_by_t = pd.Series(lab.dir.to_numpy(int), index=lab_t)
+        check("UGYANAZ az irany",
+              bool((mod["cs_sig"].astype(int) == _lab_by_t.reindex(mod.index)).all()))
+        _sl_by_t = pd.Series(lab.sl_abs.to_numpy(float) / prm["point_size"], index=lab_t)
+        check("UGYANAZ a stop (pontban, 1e-6)",
+              bool((mod["cs_sl_pts"] - _sl_by_t.reindex(mod.index)).abs().max() < 1e-6))
 
-    # a NATIV MT5 M15 kerettel (amit a motor elesben lat): kis elteres megengedett
-    if _m15p.exists():
-        m15n = pd.read_parquet(_m15p)
-        m15n = m15n[~m15n.index.duplicated(keep="last")].sort_index()
-        m15n = m15n[(m15n.index >= m1_lab.index[0]) & (m15n.index <= hi_same.index[-1])]
-        hi_n, lo_n = s.bt_indicators(m15n, lo, prm)
-        mod_n = set(lo_n[lo_n["cs_sig"] != 0].index)
-        kozos = len(mod_n & set(lab_w_t))
-        arany = kozos / max(1, len(lab_w_t))
-        check("nativ M15-tel a belepok >= 80%-a egyezik", arany >= 0.8,
-              f"{kozos}/{len(lab_w_t)} = {100*arany:.0f}% (modul {len(mod_n)})")
+    # ── a belepoenkenti stop atadasa a keretnek ────────────────────────────
+    st0 = s.bt_new_state(SYM)
+    _sor = mod.iloc[0]
+    _jel = s.bt_on_low_close(st0, None, _sor, prm)
+    _terv = s.sl_tp_points(hi_i.iloc[-1], prm, prm["point_size"])
+    check("a bt_on_low_close jelet ad", _jel in ("BUY", "SELL"), str(_jel))
+    check("a sl_tp_points EZT a belepot adja vissza (nem a felso sorbol szamol)",
+          _terv is not None and abs(_terv[0] - float(_sor["cs_sl_pts"])) < 1e-9,
+          str(_terv))
+    check("a TP = SL x tp_rr_ratio",
+          abs(_terv[1] - _terv[0] * float(prm["tp_rr_ratio"])) < 1e-6)
 
     # ── a strategia MINDEN oraban jelez; az ora-kapu a kerete ──────────
     st = s.bt_new_state(SYM)
@@ -216,34 +229,38 @@ except Exception as _e:                                                  # pragm
     _cv = None
 if _cv is not None and _m1p.exists():
     from strategies import csilla_rules as _sw2                          # noqa: E402
-    _m = m1_all[m1_all.index >= m1_all.index.max() - pd.Timedelta(days=400)]
-    _elo = _sw2.entry_table(_m, None, ("D1", "W1"), stop_atr=1.5)
-    _var = _cv.entry_table(_m, None, ("D1", "W1"), "break", stop_atr=1.5)
-    check("mindket kar ad belepot (nem 0 vs 0)", len(_elo) > 20 and len(_var) > 20,
+    _m = m1_all[m1_all.index >= m1_all.index.max() - pd.Timedelta(days=120)]
+    _hi = _sw2.resample(_m, 15)
+    _h = _hi["high"].to_numpy(float)
+    _l = _hi["low"].to_numpy(float)
+    _c = _hi["close"].to_numpy(float)
+    _a = _sw2.atr(_h, _l, _c, 14)
+    _pc, _pv = _sw2.pivots(_h, _l, 3)
+    # ⚠ KÉT paraméter-készlet: az élő modulé (`_P2`) és a fagyasztott modulé
+    # (`_P3`, amiben a bukott változatok saját kulcsai is benne vannak —
+    # `retest_tol`, `fib_ext`). Az élőben ezek MÁR NINCSENEK, épp ezt őrizzük.
+    _P2 = {**_sw2.DEFAULTS, "max_wait_lo": 120}
+    _P3 = {**_cv.DEFAULTS, "max_wait_lo": 120}
+    _ev = dict(dir=-1, level=float(_h[50]), stop_lvl=float(_h[50]), t_close=_hi.index[50])
+    _elo = _sw2.lo_entries(_ev, 50, len(_c) - 1, _h, _l, _c, _a, _pc, _pv, 3, _P2)
+    _var = _cv.lo_entries(_ev, 50, len(_c) - 1, _h, _l, _c, _a, _pc, _pv, 3, "break", _P3)
+    check("mindket kar ad belepot (nem 0 vs 0)", len(_elo) > 5 and len(_var) > 5,
           f"{len(_elo)} / {len(_var)}")
-    _kozos = ["i", "dir", "sl_abs", "atr15", "kind", "label", "piv", "b", "level", "ev_i"]
     check("a `break` ag BITRE AZONOS (a variants az elo modulba delegal)",
-          len(_elo) == len(_var) and all(
-              (_elo[c].reset_index(drop=True) == _var[c].reset_index(drop=True)).all()
-              for c in _kozos),
-          f"{len(_elo)} vs {len(_var)}")
-    check("a fibo celar CSAK a kutato-modulban van",
-          "tp_abs" in _var.columns and "tp_abs" not in _elo.columns)
-    _ford = _cv.entry_table(_m, None, ("D1", "W1"), "fordulo", stop_atr=1.5)
-    _ret = _cv.entry_table(_m, None, ("D1", "W1"), "retest", stop_atr=1.5)
+          _elo == _var, f"{len(_elo)} vs {len(_var)}")
+    _ford = _cv.lo_entries(_ev, 50, len(_c) - 1, _h, _l, _c, _a, _pc, _pv, 3, "fordulo", _P3)
+    _ret = _cv.lo_entries(_ev, 50, len(_c) - 1, _h, _l, _c, _a, _pc, _pv, 3, "retest", _P3)
     check("a `fordulo` es a `retest` MAS halmazt ad (a delegalas nem nyeli el)",
-          len(_ford) != len(_elo) and len(_ret) != len(_elo),
+          _ford != _elo and _ret != _elo,
           f"break={len(_elo)} fordulo={len(_ford)} retest={len(_ret)}")
-    check("H1 szint: a kutato-modul ad, az elo NEM",
-          len(_cv.level_table(_m, ("H1",))) > 0 and len(_sw2.level_table(_m, ("H1",))) == 0)
-    # az elo modul mar nem is ismeri a bukott kapcsolokat
+    check("H1 szint: a kutato-modul ad, az elo modul NEM is ismeri",
+          len(_cv.level_table(_m, ("H1",))) > 0 and not hasattr(_sw2, "level_table"))
     import inspect                                                       # noqa: E402
     check("az elo `lo_entries`-nek NINCS `mode` parametere",
           "mode" not in inspect.signature(_sw2.lo_entries).parameters,
           str(inspect.signature(_sw2.lo_entries)))
-    check("az elo `entries_from`-nak NINCS `mode` parametere",
-          "mode" not in inspect.signature(_sw2.entries_from).parameters)
-    for _k in ("fib_ext", "retest_tol", "k_h1", "k_h4", "ttl_h1", "ttl_h4"):
+    for _k in ("fib_ext", "retest_tol", "k_h1", "k_h4", "ttl_h1", "ttl_h4",
+               "k_d1", "k_w1", "ttl_d1", "ttl_w1"):
         check(f"a(z) {_k!r} NINCS a csilla_rules.DEFAULTS-ban", _k not in _sw2.DEFAULTS)
 
 # ---------------------------------------------------------------------------

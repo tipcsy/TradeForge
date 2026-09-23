@@ -70,7 +70,9 @@ _SAMPLE = {
     "badge": ("mono", "⛔9"),
     # ⚠ A minta a BETUT is tartalmazza („V"/„J" a pottyok elott): enelkul a
     # betu kilogna a cellabol, vagy raszorulna a pottyokre.
-    "stages": ("mono", "V ●●●●"),
+    # ⚠ ÖT pötty: a csilla lánca öt állomású (2026-09-23). A minta a
+    # LEGSZÉLESEBB stratégiáé kell legyen, különben az utolsó pötty kilóg.
+    "stages": ("mono", "V ●●●●●"),
     # A minta a mostani nyelv minősítés-szava — angolul rövidebb, tehát
     # az oszlop is keskenyebb lehet.
     "quality": ("small", _t("quality.mid")),

@@ -20,6 +20,14 @@ MIT ŐRIZ, ÉS MIÉRT BUKOTT (a vault „Csilla beszállója — mérés" jegyze
                         138,2%-a) — célár NÉLKÜL minden változat jobb volt
                         (−0,013 vs −0,068 R), és 14 éven egyetlen csomag sem
                         ért el 10–20 R-t.
+  D1/W1 SZINT-RÉTEG     igazolt napi/heti swing-szintek élettartammal, amiket
+                        az M15 tör — ez NEM a módszer volt, hanem az én
+                        bevezetésem (2026-09-14). A felhasználó 2026-09-22-én
+                        kimondta: Csilla EGY idősík-párt választ, és a felső a
+                        SAJÁT csúcsát töri; a napi/heti chart csak egy opció
+                        volt, amit nem kér — H4 a plafon, ez daytrade.
+                        A backtestje amúgy is −0,068 R volt.
+                        Az élő szabály helyette: `csilla_rules.own_swing_events`.
 
 ⚠ A `break` BELÉPŐT NEM MÁSOLJA LE: azt a `strategies.csilla_rules`-ból hívja.
 Egy másodszor leírt élő szabály némán elcsúszik az elsőtől — a projekt ezt
@@ -37,14 +45,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from strategies import csilla_rules as sw          # noqa: E402
 
-# A bukott változatok saját paraméterei (a `csilla_rules.DEFAULTS`-ból kikerültek).
-DEFAULTS = dict(sw.DEFAULTS, k_h4=3, ttl_h4=30, k_h1=3, ttl_h1=10,
+# ⚠ A SZINT-RÉTEG PARAMÉTEREI. Ezek 2026-09-22-én KIESTEK az élő
+# `csilla_rules.DEFAULTS`-ból: a szabály azóta a felső idősík saját swingjét
+# töri, és a szint-réteghez semmi köze. Az `sw.DEFAULTS`-ból csak a közös
+# részek jönnek (k_hi/k_lo/max_wait/buffer_atr/min_sl_atr/stop_atr).
+DEFAULTS = dict(sw.DEFAULTS, hi_tf=15, k_d1=2, k_w1=1, ttl_d1=90, ttl_w1=365,
+                k_h4=3, ttl_h4=30, k_h1=3, ttl_h1=10,
                 retest_tol=0.1, fib_ext=1.382)
 KINDS = ("H1", "H4", "D1", "W1")
 
 
 def parse_kinds(spec) -> tuple:
-    """Mint a `csilla_rules.parse_kinds`, de a H1/H4 is megengedett."""
+    """`"D1+W1"` / `"H4+D1"` / `("D1","W1")` → rendezett tuple a KINDS-ból."""
     if isinstance(spec, str):
         parts = [x.strip().upper() for x in spec.replace(",", "+").split("+")]
     else:
@@ -52,45 +64,144 @@ def parse_kinds(spec) -> tuple:
     return tuple(k for k in KINDS if k in parts) or ("D1", "W1")
 
 
-# ── H1 / H4 szintek ─────────────────────────────────────────────────────────
+def resample_week(df: pd.DataFrame) -> pd.DataFrame:
+    o = df.resample("W", label="left", closed="left").agg(
+        open=("open", "first"), high=("high", "max"),
+        low=("low", "min"), close=("close", "last"))
+    return o.dropna(subset=["close"])
+
+
+def _levels_of(d, k, bar_len, ttl, kind):
+    h = d["high"].to_numpy(float)
+    l = d["low"].to_numpy(float)
+    pc, pv = sw.pivots(h, l, k)
+    out = []
+    for j in np.flatnonzero(pc | pv):
+        if j + k >= len(d):
+            continue
+        t_conf = d.index[j + k] + bar_len       # a k-adik követő gyertya ZÁRÁSA
+        if pc[j]:
+            out.append(dict(kind=kind, side=1, price=h[j], t_conf=t_conf,
+                            t_exp=t_conf + ttl, j=j))
+        if pv[j]:
+            out.append(dict(kind=kind, side=-1, price=l[j], t_conf=t_conf,
+                            t_exp=t_conf + ttl, j=j))
+    return out
+
+
 def level_table(m1: pd.DataFrame, kinds=("D1", "W1"), P: dict | None = None) -> pd.DataFrame:
-    """A `csilla_rules.level_table` + a H1/H4 fajták. A D1/W1 sorokat az élő
-    modul adja (nincs második példány)."""
+    """[{kind, side(+1 ellenállás/−1 támasz), price, t_conf, t_exp, j}] —
+    igazolt H1/H4/D1/W1 fraktál-swingek élettartammal."""
     P = {**DEFAULTS, **(P or {})}
     rows = []
     if "H1" in kinds:
-        rows += sw._levels_of(sw.resample(m1, 60), P["k_h1"], pd.Timedelta(hours=1),
-                              pd.Timedelta(days=P["ttl_h1"]), "H1")
+        rows += _levels_of(sw.resample(m1, 60), P["k_h1"], pd.Timedelta(hours=1),
+                           pd.Timedelta(days=P["ttl_h1"]), "H1")
     if "H4" in kinds:
-        rows += sw._levels_of(sw.resample(m1, 240), P["k_h4"], pd.Timedelta(hours=4),
-                              pd.Timedelta(days=P["ttl_h4"]), "H4")
-    elo_kinds = tuple(k for k in ("D1", "W1") if k in kinds)
-    if elo_kinds:
-        elo = sw.level_table(m1, elo_kinds, P)
-        if len(elo):
-            rows += elo.to_dict("records")
+        rows += _levels_of(sw.resample(m1, 240), P["k_h4"], pd.Timedelta(hours=4),
+                           pd.Timedelta(days=P["ttl_h4"]), "H4")
+    if "D1" in kinds:
+        rows += _levels_of(sw.resample(m1, 1440), P["k_d1"], pd.Timedelta(days=1),
+                           pd.Timedelta(days=P["ttl_d1"]), "D1")
+    if "W1" in kinds:
+        rows += _levels_of(resample_week(m1), P["k_w1"], pd.Timedelta(days=7),
+                           pd.Timedelta(days=P["ttl_w1"]), "W1")
     if not rows:
         return pd.DataFrame(columns=["kind", "side", "price", "t_conf", "t_exp", "j"])
     return pd.DataFrame(rows).sort_values("t_conf").reset_index(drop=True)
 
 
+def d1_trend_series(m1: pd.DataFrame, P: dict | None = None) -> pd.Series:
+    """A D1-trend (+1/−1/0) a nap ZÁRÁSÁTÓL érvényes, k_d1-gyel igazolt
+    swingekből — a szint-réteg címkéjéhez."""
+    P = {**DEFAULTS, **(P or {})}
+    d1 = sw.resample(m1, 1440)
+    h = d1["high"].to_numpy(float)
+    l = d1["low"].to_numpy(float)
+    k = P["k_d1"]
+    pc, pv = sw.pivots(h, l, k)
+    tr = np.zeros(len(d1), dtype=int)
+    sh, sl = [], []
+    for i in range(k, len(d1)):
+        j = i - k
+        if pc[j]:
+            sh.append(h[j])
+        if pv[j]:
+            sl.append(l[j])
+        if len(sh) >= 2 and len(sl) >= 2:
+            hh, hl = sh[-1] > sh[-2], sl[-1] > sl[-2]
+            tr[i] = 1 if (hh and hl) else (-1 if (not hh and not hl) else 0)
+    return pd.Series(tr, index=d1.index + pd.Timedelta(days=1))
+
+
 # ── a `leg` (a fibo célárhoz) ───────────────────────────────────────────────
 def hi_events(hi: pd.DataFrame, lv: pd.DataFrame, trend: pd.Series,
               d1_opp: pd.DataFrame, P: dict | None = None) -> list[dict]:
-    """A `csilla_rules.hi_events` + a `leg`: a tört szint és a D1 ellenoldali
-    utolsó igazolt swingje közti táv (ebből lesz a fibo célár). Az élő modulból
-    2026-09-22-én kikerült, mert EGYETLEN fogyasztója a bukott célár volt."""
-    evs = sw.hi_events(hi, lv, trend, P)
-    if not evs:
-        return evs
-    t_open = hi.index.to_numpy()
+    """M15 zárás egy élő SZINTEN túl (a lezárt szint-réteg eseménye). Minden
+    szint egyszer. `leg` a tört szint és a D1 ellenoldali utolsó igazolt
+    swingje közti táv (a fibo célárhoz), `stop_lvl` a törés előtti utolsó
+    igazolt ellenoldali M15-swing."""
+    P = {**DEFAULTS, **(P or {})}
+    c = hi.index
+    close = hi["close"].to_numpy(float)
+    h = hi["high"].to_numpy(float)
+    l = hi["low"].to_numpy(float)
+    k = P["k_hi"]
+    pc, pv = sw.pivots(h, l, k)
+    sw_h: list[tuple[int, float]] = []
+    sw_l: list[tuple[int, float]] = []
+    t_open = c.to_numpy()
+    t_close = (c + pd.Timedelta(minutes=P["hi_tf"])).to_numpy()
+    lv_conf = lv["t_conf"].to_numpy()
+    lv_exp = lv["t_exp"].to_numpy()
+    lv_price = lv["price"].to_numpy(float)
+    lv_side = lv["side"].to_numpy(int)
+    lv_kind = lv["kind"].to_numpy()
+    alive = np.zeros(len(lv), dtype=bool)
+    broken = np.zeros(len(lv), dtype=bool)
+    nxt = 0
+    tr_t = trend.index.to_numpy()
+    tr_v = trend.to_numpy()
     opp_t = d1_opp["t_conf"].to_numpy()
     opp_p = d1_opp["price"].to_numpy(float)
     opp_s = d1_opp["side"].to_numpy(int)
-    for e in evs:
-        m = (opp_t <= t_open[e["i"]]) & (opp_s == -e["dir"])
-        e["leg"] = abs(e["level"] - float(opp_p[m][-1])) if m.any() else 0.0
-    return evs
+    out = []
+    for i in range(k, len(hi)):
+        j = i - k
+        if pc[j]:
+            sw_h.append((j, h[j]))
+        if pv[j]:
+            sw_l.append((j, l[j]))
+        while nxt < len(lv) and lv_conf[nxt] <= t_open[i]:
+            alive[nxt] = True
+            nxt += 1
+        cand = np.flatnonzero(alive & ~broken)
+        if len(cand) == 0:
+            continue
+        cand = cand[lv_exp[cand] > t_open[i]]
+        if len(cand) == 0:
+            continue
+        up = cand[(lv_side[cand] == 1) & (close[i] > lv_price[cand])]
+        dn = cand[(lv_side[cand] == -1) & (close[i] < lv_price[cand])]
+        ti = np.searchsorted(tr_t, t_open[i], side="right") - 1
+        trend_now = int(tr_v[ti]) if ti >= 0 else 0
+        for grp, d in ((up, 1), (dn, -1)):
+            if len(grp) == 0:
+                continue
+            broken[grp] = True
+            g = grp[np.argmin(np.abs(lv_price[grp] - close[i]))]
+            lvl = float(lv_price[g])
+            m = (opp_t <= t_open[i]) & (opp_s == -d)
+            leg = abs(lvl - float(opp_p[m][-1])) if m.any() else 0.0
+            if d > 0:
+                stop_lvl = sw_l[-1][1] if sw_l else np.nan
+            else:
+                stop_lvl = sw_h[-1][1] if sw_h else np.nan
+            lab_ = ("folyt" if trend_now == d else
+                    "ford" if trend_now == -d else "nincs")
+            out.append(dict(i=i, dir=d, level=lvl, leg=leg, kind=str(lv_kind[g]),
+                            stop_lvl=stop_lvl, label=lab_, t_close=t_close[i]))
+    return out
 
 
 # ── a bukott belépő-módok ───────────────────────────────────────────────────
@@ -181,7 +292,7 @@ def hi_context(hi: pd.DataFrame, P: dict | None = None, kinds=("D1", "W1")) -> d
                  hi["close"].to_numpy(float), 14)
     if not len(lv):
         return dict(lv=lv, evs=[], a15=a15, P=P, kinds=tuple(kinds))
-    trend = sw.d1_trend_series(hi, P)
+    trend = d1_trend_series(hi, P)
     d1_opp = lv[lv.kind == "D1"] if "D1" in kinds else level_table(hi, ("D1",), P)
     return dict(lv=lv, evs=hi_events(hi, lv, trend, d1_opp, P), a15=a15, P=P,
                 kinds=tuple(kinds))
@@ -235,3 +346,13 @@ def entry_table(m1: pd.DataFrame, P: dict | None = None, kinds=("D1", "W1"),
     if hi is None:
         hi = sw.resample(m1, P["hi_tf"])
     return entries_from(hi_context(hi, P, kinds), m1, mode, stop_atr)
+
+# ── a VÁLTOZATLAN függvények: az élő modulból, átnevezés nélkül ─────────────
+# ⚠ Ez a modul a régi (takarítás előtti) `csilla_rules` API-t kínálja, hogy a
+# kutató-szkriptek egyetlen import-csere után változatlanul fussanak. Ami nem
+# változott, azt NEM másoljuk — ide csak a NEVE kerül, a kód az élő modulban
+# marad. (Az első változat ezeket kihagyta, és a `csilla_viz` a
+# `d1_trend_series`-en hasalt el — futás közben, nem importáláskor.)
+resample = sw.resample
+atr = sw.atr
+pivots = sw.pivots

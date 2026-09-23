@@ -22,12 +22,18 @@ ELŐRE RÖGZÍTVE (a mérés után nem módosítható):
     ELSŐDLEGES minta  Ger40 8–11h · UsaTec 15–18h · GOLD 15–18h (szerver-idő,
                       a belépő M1 gyertyájának órája), egyszerre EGY pozíció
                       páronként (a mérés is így számolt).
-    szabály           `csilla_rules`: D1/W1 igazolt swing-szint → M15 zárás a
-                      szinten túl → M1-zászló törése (k=3) a törés utáni 2 órán belül.
-    kilépés           stop = 1,5 × ATR15 (a törés M15-gyertyáján); BE (stop a
+    szabály           `csilla_rules` LÁNC: a felső idősík (H1) a saját utolsó
+                      igazolt swingjét töri → érvényes, amíg az ár nem zár a
+                      törés előtti szélsőérték túloldalára → pipa (a korrekciót
+                      elnyelő gyertya) → M15 counter-trend belépők.
+    kilépés           stop = a korrekció teteje + spread; BE (stop a
                       belépőre) +0,67 R-nél; utána 2 R-es csúszó stop; NINCS célár;
                       max 5 nap, utána piaci zárás. Spread + swap.
-    várt érték        +0,12 R/kötés (mintán, 452 kötés, t = 1,53, 9/14 év).
+    várt érték        ~0. A mintán mérve a lánc NEM különböztethető meg a
+                      véletlen belépőtől (z −0,19 … +1,70, 8 instrumentum) — a
+                      nyers +0,038 R a KILÉPÉSÉ. Ez a forward tehát nem egy
+                      ígéretes él megerősítése, hanem annak ellenőrzése, hogy
+                      élesben sem lesz rosszabb a semminél.
     MÁSODLAGOS minta  mind a 8 pár, minden óra (mintán −0,02 … −0,05 R) — csak
                       naplózzuk, a döntésbe nem szól bele.
 
@@ -94,8 +100,15 @@ import lab                                       # noqa: E402
 
 from strategies import csilla_rules as sw         # noqa: E402
 
-START = pd.Timestamp("2026-09-15 00:00", tz="UTC")     # a forward kezdete (szerver-idő)
-JOURNAL = ROOT / "data" / "forward" / "csilla_signals.csv"
+# ⚠ UJ FORWARD 2026-09-23-TOL. Az elso (09-15 – 09-23) a D1/W1 szint-reteges
+# szabalyt merte; a felhasznalo 09-23-an kimondta, hogy az NEM az o modszere
+# (H4 a plafon, ez daytrade), es a strategia atallt a LANCRA. Egy futo
+# forward-teszt szabalya NEM cserelheto ki — eppen az a lenyege, hogy le van
+# fagyasztva —, ezert az elso LEZARULT azzal, amit hozott (8 kotes, semmi
+# erdemi), es EZ egy UJ teszt: uj kezdodatum, uj naplo. A regi naplo
+# (`csilla_signals.csv`) megmarad.
+START = pd.Timestamp("2026-09-23 00:00", tz="UTC")     # a forward kezdete (szerver-idő)
+JOURNAL = ROOT / "data" / "forward" / "csilla_chain_signals.csv"
 STATUS_JSON = ROOT / "data" / "forward" / "csilla_status.json"   # a felületnek
 PRIMARY = {"Ger40": (8, 11), "UsaTec": (15, 18), "GOLD": (15, 18)}
 ALL_SYMS = ["GOLD", "USDJPY", "UsaInd", "UsaTec", "Ger40",
@@ -122,16 +135,26 @@ def _save_journal(j: pd.DataFrame):
 
 
 def _entries(sym: str):
-    """`(m1, belépők)` — a rögzített szabály egy párra: D1+W1 szintek, M15-törés,
-    M1-zászló, fix `STOP_ATR` × ATR15 stop. A stop PONTBAN, mint a naplóban."""
+    """`(alsó keret, belépők)` — a LÁNC egy párra: a felső idősík a saját
+    swingjét töri (1. jelzés) → érvényes az új HH-ig → pipa (2. jelzés) →
+    az alsó kereten counter-trend belépők. A stop PONTBAN, mint a naplóban.
+
+    ⚠ A jelzés IDŐPONTJA az ALSÓ keret gyertyája, ezért a napló ideje is az."""
     m1 = lab.load_m1(sym)
-    et = sw.entry_table(m1, None, ("D1", "W1"), stop_atr=STOP_ATR)
+    P = sw.with_tf_pair(None)
+    hi = sw.resample(m1, P["hi_tf"])
+    lo = m1 if P["lo_tf"] <= 1 else sw.resample(m1, P["lo_tf"])
+    s_ = m1["avg_spread"].dropna()
+    sp = float(s_[s_.index >= s_.index.max() - pd.Timedelta(days=365)].median()) \
+        if len(s_) else 0.0
+    et = sw.counter_entries(lo, sw.chain_setups(hi, P), P, spread=sp)
     if not len(et):
         return None
+    et = et.sort_values("i").drop_duplicates("i", keep="first")
     ps = float(lab.PAIRS[sym]["point_size"])
     ent = pd.DataFrame(dict(i=et.i, dir=et.dir, sl_pts=et.sl_abs / ps,
-                            atr15=et.atr15, kind=et.kind, label=et.label))
-    return m1, ent
+                            atr15=et.sl_abs / ps, kind="lanc", label=et.label))
+    return lo, ent
 
 
 def _in_band(sym: str, t: pd.Timestamp) -> bool:

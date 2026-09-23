@@ -1,22 +1,41 @@
 # Csilla beszállója (`csilla`)
 
-Szerkezet-törés **két idősíkon**: egy **jelentős napi/heti szint** (igazolt D1
-vagy W1 swing-csúcs/-völgy) M15-ös letörése/kitörése után az **M1-en egy
-„zászló" (visszahúzódás) törésére** lépünk be a törés irányába. Csilla
-diszkrecionális módszerének gépi olvasata; a szabály a `strategies/csilla_rules.py`
-modulban van, amit a kutató-labor is ugyanígy hív.
+Szerkezet-törés **két idősíkon**, ahogy a felhasználó 2026-09-23-án chartról
+chartra végigvezette: a **felső idősík áttöri a saját utolsó igazolt swingjét**,
+majd megvárjuk a korrekció végét jelző gyertyát (**pipa**), és onnantól az
+**alsó idősíkon** lépünk be minden counter-trend korrekció törésekor. A szabály
+a `strategies/csilla_rules.py`-ban van, amit a kutató-labor is ugyanígy hív.
 
-## A szabály
+⚠ **H4 a plafon — ez daytrade.** A jegyzet négy idősík-párt sorol fel; a felső
+kettő (W1-D1, D1-H4) nem használható. A `csilla_rules.MAX_TF_MIN` ki is
+kényszeríti, és ez **csak erre a stratégiára** vonatkozik.
+
+## A lánc
 
 | lépés | mi történik |
 |---|---|
-| **szint** | `level_kinds` (alap `D1+W1`; `D1`, `W1` vagy a kettő): igazolt D1 fraktál-swing (`k_d1` = 2 → 2 nappal később ismert) vagy W1 swing (`k_w1` = 1). Csúcs = ellenállás, völgy = támasz. Él `ttl_d1` / `ttl_w1` napig, vagy amíg át nem törik. Minden szint egyszer törhet. |
-| **törés** (M15) | egy M15 gyertya a szint FÖLÖTT zár (BUY-irány) / ALATT zár (SELL-irány) |
-| **belépő** (M1) | a törés utáni `max_wait` × 15 percen belül egy igazolt M1 swing az irány oldalán (`k_lo` = 3), majd zárás azon túl → **belépés a zárón**. Egy töréshez több belépő is jöhet. |
-| **napszak** | NEM a stratégia paramétere: a **Csilla-sáv** (Ger40 8–11h, UsaTec és GOLD 15–18h, szerver-idő) a keret stratégia-hatókörű **kereskedési órái** (a dashboard óra-választója, `data/optimized_params/csilla/<PÁR>_hours.json`). A stratégia minden órában jelez, az óra-kapu dönt. |
+| **1. jelzés** (felső) | a felső idősík egy gyertyája **ZÁR** a saját utolsó igazolt swingjén túl (`k_hi` = 3 → a swing 3 gyertyával később igazolódik). Egy swing egyszer törhet. Címke: folytatás / fordulat / trend nélkül, a két-két utolsó swingből. |
+| **érvényesség** | **időkorlát nincs**: a setup addig él, amíg az ár nem zár a **törés előtti szélsőérték** túloldalára — az az „új HH", ami a trendfordulót érvényteleníti. |
+| **2. jelzés — pipa** (felső) | a korrekciót **elnyelő** gyertya: a korrekció kiindulási szintje (`P0` = a tető előtti `pipa_w1` = 5 gyertya legalacsonyabb zárása) alá zár, és ez az **első** ilyen zárás a tető óta. A korrekció magassága ≥ `pipa_melyseg` (1) ATR, a jelző gyertya ≥ `pipa_min_tart` (0,5) ATR. ⚠ **Szár-arány nincs** (ebben tér el a `candle_lib.pipa` ✓-definíciójától). |
+| **belépők** (alsó) | a pipa gyertya lezárása után **több** belépő: minden counter-trend korrekció (emelkedő aljak, legalább `korr_min` = 3 gyertya) törésekor. Ha a törő gyertya **rossz színű** (short-setupnál zöld), megvárjuk a következő jót, és annak a zárásán lépünk be (`belepo_mod` = `varj_pirosra`). |
+| **napszak** | NEM a stratégia paramétere: a keret stratégia-hatókörű **kereskedési órái** (`data/optimized_params/csilla/<PÁR>_hours.json`). A stratégia minden órában jelez, az óra-kapu dönt. |
 
-**SL** = `sl_atr_mult` (1,5) × a **törés M15-gyertyájának** ATR-je · **TP** =
-SL × `tp_rr_ratio` — alapból 30 R, azaz gyakorlatilag nincs célár.
+**SL** = a **korrekció teteje + spread** — belépőnként más. A keret
+`sl_tp_points`-ja csak a felső sort látja, ezért a `bt_on_low_close` a belépő
+pillanatában páronként félreteszi a stopot, és a `sl_tp_points` onnan veszi.
+**TP** = SL × `tp_rr_ratio` (alap 30 R, azaz gyakorlatilag nincs célár).
+
+## A jelölő-pöttyök (öt állomás)
+
+A live tábla `Csilla` blokkjában öt pötty mutatja, hol tart a lánc:
+
+| pötty | mit jelent |
+|---|---|
+| **szerk** | él egy szerkezet-törés (zöld = felfelé, piros = lefelé) |
+| **korr** | a törés megvolt, a korrekció épül, a pipa még nincs (sárga) |
+| **pipa** | a pipa megvolt → nyitva a belépő-ablak az alsó kereten |
+| **zaszlo** | az alsón épp épül egy elég hosszú counter-trend korrekció (sárga) |
+| **belep** | az utolsó zárt alsó gyertya belépőt ad |
 
 ## A kilépés — NEM a stratégiáé
 

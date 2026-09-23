@@ -1,5 +1,5 @@
 {
-  "_comment": "A csilla stratégia SAJÁT beállításai. Jelentős napi/heti (D1/W1) szint törése M15-ön, majd M1-zászló törése a belépő. A SZABÁLY a strategies/csilla_rules.py-ban van (a kutató-labor ugyanazt hívja). A mért (forward-tesztelt) változat: fix 1,5 ATR15 stop (sl_atr_mult), a Csilla-sáv (Ger40 8–11, UsaTec/GOLD 15–18) a KERET stratégia-hatókörű kereskedési óráiban (data/optimized_params/csilla/<PÁR>_hours.json, a dashboardról), a kilépés a PÁR kockázatcsökkentésében: breakeven_r 0,67 + trailing 3,0 ATR (= 2 R), off preset.",
+  "_comment": "A csilla strategia SAJAT beallitasai. A LANC (2026-09-23, a felhasznaloval lepesrol lepesre osszerakva): a FELSO idosik attori a sajat utolso igazolt swingjet (1. jelzes); a setup addig el, amig az ar nem zar a tores elotti szelsoertek tuloldalara (uj HH); a korrekciot ELNYELO gyertya a 2. jelzes (pipa); onnantol az ALSO idosikon TOBB belepo: minden counter-trend korrekcio toresekor, es ha a toro gyertya rossz szinu, megvarjuk a kovetkezo jot. A STOP a korrekcio teteje + spread. A szabaly a strategies/csilla_rules.py-ban van (a kutato-labor ugyanazt hivja).",
   "quality": {
     "_comment": "Minősítési küszöbök (mint a többi stratégiánál).",
     "min_trades": 50,
@@ -13,42 +13,37 @@
     "winrate_good": 0.45
   },
   "indicators": {
-    "_comment": "A szint- és belépő-szabály paraméterei. ⚠ A mérés ezekkel az értékekkel készült (2026-09-14, előre rögzítve) — a forward teszt alatt NEM hangolhatók. A `level_kinds` mondja meg, MELYIK időkeret szintjeit keressük: D1 / W1 / D1+W1. (A H1 és H4 szintek 2026-09-22-én kikerültek: a „páros olvasat” mérve és bukott — H1→M15 −0,049 R, H1→M1 −0,167 R, 0/14 év; a kódjuk a tools/research/csilla_variants.py-ban.)",
-    "level_kinds": "D1+W1",
-    "k_d1": 2,
-    "k_w1": 1,
-    "ttl_d1": 90,
-    "ttl_w1": 365,
+    "_comment": "A lanc parameterei. A tf_pair mondja meg, MELYIK ket idosikon dolgozunk: a felso tori a sajat swingjet, az alson van a belepo. Megengedett: H1-M15, M15-M1. FIGYELEM: H4 A PLAFON - ez a strategia DAYTRADE (a felhasznalo kikotese, 2026-09-22); a csilla_rules.MAX_TF_MIN ki is kenyszeriti, es ez CSAK erre a strategiara vonatkozik. A tf_pair STRATEGIA-szintu (nem instrumentumonkenti): a keret adat-szerzodese a timeframes()-bol jon, aminek nincs parametere - ugyanaz a megkotes, mint az ml_ai jel-idosikjanal.",
+    "tf_pair": "H1-M15",
     "k_hi": 3,
     "k_lo": 3,
-    "max_wait": 8
+    "pipa_k": 12,
+    "pipa_w1": 5,
+    "pipa_melyseg": 1.0,
+    "pipa_min_tart": 0.5,
+    "korr_min": 3,
+    "belepo_mod": "varj_pirosra"
   },
   "sltp": {
-    "_comment": "SL = sl_atr_mult × a TÖRÉS M15-gyertyájának ATR(14)-e (fix, mint a mérésben; ⚠ szándékosan NEM a közös execution atr_period). TP = SL × tp_rr_ratio — alapból MESSZE (30 R): a mért változatban nincs célár, a BE pedig R-alapú (breakeven_r), tehát a távoli célár nem kapcsolja ki.",
-    "sl_atr_mult": 1.5,
+    "_comment": "FIGYELEM: a STOP NEM ATR-ALAPU. A korrekcio teteje + spread - ezt belepoenkent a counter_entries adja, a bt_on_low_close teszi felre, es a sl_tp_points veszi at (a keret sl_tp_points-ja csak a FELSO sort latja). Az sl_atr_mult ezert kikerult: a regi, zaszlo-toreses valtozatban volt szerepe, azt a forward-teszt meri tovabb (strategies/csilla_forward.py). TP = SL x tp_rr_ratio - alapbol MESSZE (30 R): a mert valtozatban nincs celar, a BE pedig R-alapu, tehat a tavoli celar nem kapcsolja ki.",
     "tp_rr_ratio": 30.0
   },
   "position_mgmt": {
     "_comment": "⚠ A BELÉPÉS UTÁNI dolgok NEM ezé a modulé. A forward-teszt kilépése — breakeven_r 0,67, trailing aktiválás és távolság 3,0 ATR (2 R), célár nélkül, off preset — a KOCKÁZATCSÖKKENTŐ modulé (core/risk_reduction.py + data/risk_mode.json, per pár)."
   },
   "optimizer": {
-    "_comment": "Szűk rács — az Opt gomb működjön, de a forward alatt a mért értékek az érvényesek. A szint-paraméterek (k_d1/k_w1/ttl) szándékosan NEM hangolhatók: azok a „jelentős szint” definíciója.",
-    "max_wait": {
-      "min": 4,
-      "max": 16,
-      "step": 4
+    "_comment": "Szuk racs. A korr_min az egyetlen erdemi kapcsolo, ami meresre var (3 a felhasznalo olvasata: a 3-4 gyertyas korrekciokat is elfogadja; 5-tel harom altala hianyolt jelzes esett ki). A swing-parameterek (k_hi/k_lo) a szerkezet definicioi - azokat nem hangoljuk.",
+    "korr_min": {
+      "min": 3,
+      "max": 6,
+      "step": 1
     },
     "tp_rr_ratio": {
       "min": 2.0,
       "max": 30.0,
       "step": 2.0
     },
-    "constraints": [],
-    "sl_atr_mult": {
-      "min": 1.0,
-      "max": 2.5,
-      "step": 0.25
-    }
+    "constraints": []
   },
   "param_meta": {
     "_comment": "A Paraméterek ablak csoportosítása + megjegyzései.",
@@ -59,50 +54,50 @@
       "other"
     ],
     "params": {
-      "level_kinds": {
+      "tf_pair": {
         "recompute": "signal",
         "category": "levels",
-        "comment": "Melyik időkeret szintjeit keressük: D1 / W1 / D1+W1 („+”-szal kombinálva). Mérve: D1+W1"
-      },
-      "k_d1": {
-        "recompute": "signal",
-        "category": "levels",
-        "comment": "D1 fraktál félablak — a napi swing ennyi nappal később igazolódik"
-      },
-      "k_w1": {
-        "recompute": "signal",
-        "category": "levels",
-        "comment": "W1 fraktál félablak (hetekben)"
-      },
-      "ttl_d1": {
-        "recompute": "signal",
-        "category": "levels",
-        "comment": "Egy D1 szint élettartama napokban (utána lejár, ha nem törték)"
-      },
-      "ttl_w1": {
-        "recompute": "signal",
-        "category": "levels",
-        "comment": "Egy W1 szint élettartama napokban"
+        "comment": "Az idosik-par: H1-M15 vagy M15-M1. A felso tori a sajat swingjet, az alson a belepo"
       },
       "k_hi": {
         "recompute": "signal",
         "category": "levels",
-        "comment": "M15 swing félablak (a szerkezeti stophoz)"
+        "comment": "A FELSO keret swing-felablaka (ennyi gyertyaval kesobb igazolodik a csucs/volgy)"
+      },
+      "pipa_k": {
+        "recompute": "signal",
+        "category": "levels",
+        "comment": "A pipa (2. jelzes) ablaka: ennyi gyertyan belul keressuk a korrekcio tetejet"
+      },
+      "pipa_w1": {
+        "recompute": "signal",
+        "category": "levels",
+        "comment": "A korrekcio kiindulasi szintje (P0) a teto elotti ennyi gyertya legalacsonyabb zarasa"
+      },
+      "pipa_melyseg": {
+        "recompute": "signal",
+        "category": "levels",
+        "comment": "A korrekcio magassaga legalabb ennyi ATR legyen"
+      },
+      "pipa_min_tart": {
+        "recompute": "signal",
+        "category": "levels",
+        "comment": "A jelzo gyertya tartomanya legalabb ennyi ATR (ne egy apro gyertya zarjon)"
       },
       "k_lo": {
         "recompute": "signal",
         "category": "entry_m1",
-        "comment": "M1 zászló (pullback) fraktál félablak"
+        "comment": "Az ALSO keret fraktal-felablaka"
       },
-      "max_wait": {
+      "korr_min": {
         "recompute": "signal",
         "category": "entry_m1",
-        "comment": "A törés után ennyi M15-gyertyányi időn belül jöhet M1-belépő"
+        "comment": "A counter-trend korrekcio legalabb ennyi gyertya legyen (a felhasznalo olvasata: 3)"
       },
-      "sl_atr_mult": {
-        "recompute": "exec",
-        "category": "sltp",
-        "comment": "A stop a törés M15-gyertyájának ATR(14)-e ennyiszerese (mérve: 1,5)"
+      "belepo_mod": {
+        "recompute": "signal",
+        "category": "entry_m1",
+        "comment": "varj_pirosra (rossz szinu toro gyertyanal a kovetkezo jot varjuk) | leszuras | piros_zaras"
       },
       "tp_rr_ratio": {
         "recompute": "exec",

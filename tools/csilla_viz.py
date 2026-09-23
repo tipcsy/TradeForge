@@ -1,31 +1,35 @@
-"""CSILLA BESZÁLLÓJA — a kutató-szabály KIRAJZOLÁSA az MT5 chartra (TradeForgeViz).
+"""CSILLA — A SZABÁLY KIRAJZOLÁSA az MT5 chartra (TradeForgeViz).
 
-A felhasználó kérése (2026-09-14): „nem tudom, mit számolsz pontosan — mutasd
-a DAX összes belépőjét a múlt hétre MT5-ön". Ez az eszköz a
-`tools/research/csilla_levels.py` szabályát (D1/W1 jelentős szintek → M15
-törés → M1-zászló belépő, fix 1,5 ATR15 stop) rajzolja ki egy megadott
-ablakra a `TFV_<symbol>.csv` fájlba, amit a TradeForgeViz indikátor felolvas.
+A felhasználó kérése: „nem tudom, mit számolsz pontosan — rajzold ki, hogy
+tudjam ellenőrizni". Ez az eszköz a `strategies/csilla_rules` FÜGGVÉNYEIT
+hívja (nem másolat), tehát amit a charton látsz, az pontosan az, amit a
+stratégia számol.
 
-⚠ NEM stratégia-modul és nem a motor: a kutató-szkript függvényeit hívja
-(nem másolat), hogy a chart PONTOSAN azt mutassa, amit a mérés számolt.
+LÉPÉSENKÉNT rajzol (`--lepes`), mert a szabályt lépésről lépésre beszéljük meg:
 
-Mit rajzol:
-  * ÉLŐ szintek az ablakban — D1 (kék) / W1 (lila) vízszintes szakasz az
-    igazolástól a törésig (vagy az ablak végéig), felirattal;
-  * M15 törés — sötét-arany függőleges + felirat (irány, szint, folytatás/fordulat);
-  * M1 pullback — kék pont a tört M1-swing csúcsán + kék szaggatott szint a törésig;
-  * belépők — függőleges + a szokásos 6 gyertyás (−3/+3 bar) vízszintes
-    szegmensek: belépő (narancs), SL (piros), fibo-TP (zöld); a kilépés
-    (SL / TP / 8h) a címkében.
-    A megadott óra-sávon KÍVÜLI belépő címkéje jelzi, hogy kívül esik.
+  1  FELSŐ IDŐSÍK — a swing-pontok, a belőlük lett szintek és a törések:
+     * minden IGAZOLT csúcs/völgy: kis jelölő a gyertyán (szürke), a felirat
+       megmondja az árat, a gyertya idejét és azt, MIKOR vált igazolttá;
+     * a TÖRT szint: vízszintes vonal a swing gyertyájától a törésig (kék);
+     * a törés: függőleges (sötét-arany) + felirat (irány, ár, folytatás/
+       fordulat, a törő gyertya ideje és zárása).
+  2  + az ALSÓ idősík belépői — amint megegyeztünk a belépő szabályában.
+
+⚠ 2026-09-22-ig ez a D1/W1 szint-réteget rajzolta. Az kikerült a szabályból
+(nem a módszer volt, hanem az én bevezetésem); a helyén a páros olvasat áll:
+a felső idősík a SAJÁT utolsó igazolt swingjét töri.
 
 Futtatás:
-    python tools/csilla_viz.py --symbol Ger40 --from 2026-09-07 --to 2026-09-11
-    python tools/csilla_viz.py --symbol Ger40 --from 2026-09-07 --to 2026-09-11 --hours 8 11
+    python tools/csilla_viz.py --symbol Ger40 --from 2026-01-23 --to 2026-01-28
+    python tools/csilla_viz.py --symbol Ger40 --from 2026-01-23 --to 2026-01-28 --k-hi 2
+    python tools/csilla_viz.py --symbol Ger40 --from ... --to ... --dry   (csak kiír)
+
+⚠ A `--to` napja MÉG BELEFÉR (a nap végéig rajzol).
 """
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 from pathlib import Path
 
@@ -37,147 +41,97 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools" / "research"))
 
 import lab                                      # noqa: E402
-import csilla_levels as cl                      # noqa: E402
+from strategies import csilla_rules as sw       # noqa: E402
 from strategy import visual as viz              # noqa: E402
 
 STRAT = "csilla"
+_TF_LABEL = {1: "M1", 5: "M5", 15: "M15", 30: "M30", 60: "H1", 240: "H4"}
 
 
 def _ts(t) -> int:
     return int(pd.Timestamp(t).timestamp())
 
 
-def build_objects(symbol: str, t_from: str, t_to: str, hours: tuple[int, int] | None,
-                  stop_atr: float = 1.5) -> tuple[list, str]:
+def _ar(x: float, point_size: float) -> str:
+    """Ár a pár TIZEDESEIVEL. ⚠ Soha nem `%g`: az a nagy indexeken
+    exponenciálisra vált, a devizán meg levágja a tizedeseket."""
+    tiz = min(8, max(0, int(round(-math.log10(point_size))))) if point_size > 0 else 2
+    return f"{float(x):.{tiz}f}"
+
+
+def build_objects(symbol: str, t_from: str, t_to: str, tf_pair: str = "H1-M15",
+                  k_hi: int | None = None, lepes: int = 1) -> tuple[list, str]:
     lab._CACHE.clear()
     m1 = lab.load_m1(symbol)
-    hi = lab.resample(m1, cl.P["hi_tf"])
-    t0 = pd.Timestamp(t_from, tz="UTC")
-    t1 = pd.Timestamp(t_to, tz="UTC") + pd.Timedelta(days=1)
-
-    lv = cl.level_table(m1, ("D1", "W1"))
-    trend = cl.d1_trend_series(m1)
-    evs = cl.hi_events(hi, lv, trend, lv[lv.kind == "D1"])
-    r = cl.entries(symbol, ("D1", "W1"), stop_atr=stop_atr)
-    ent = r[1].drop_duplicates("i") if r else pd.DataFrame()
+    P = dict(sw.DEFAULTS, tf_pair=tf_pair)
+    if k_hi:
+        P["k_hi"] = int(k_hi)
+    P = sw.with_tf_pair(P)
+    hi_min = P["hi_tf"]
+    hi = sw.resample(m1, hi_min)
     ps = float(lab.PAIRS[symbol]["point_size"])
 
+    t0 = pd.Timestamp(t_from, tz="UTC")
+    t1 = pd.Timestamp(t_to, tz="UTC") + pd.Timedelta(days=1)
+    # ⚠ A SZÁMÍTÁS TÖBBET LÁT, MINT A RAJZ: a swingek és a törések a TELJES
+    # előzményből jönnek (különben az ablak első gyertyáinál nem volna mihez
+    # viszonyítani), és csak a KIRAJZOLÁST szűrjük az ablakra. Enélkül a kép
+    # mást mutatna, mint amit a stratégia élesben lát.
+    evs = sw.own_swing_events(hi, P)
+    h = hi["high"].to_numpy(float)
+    l = hi["low"].to_numpy(float)
+    pc, pv = sw.pivots(h, l, P["k_hi"])
+
     objs: list = []
-    close = hi["close"].to_numpy(float)
-    hi_t = hi.index
+    n_sw = n_ev = 0
+    tf_nev = _TF_LABEL.get(hi_min, f"{hi_min}p")
 
-    # ── szintek: mikor törtek? (első M15 zárás a szinten túl az igazolás után)
-    # Csak az ablak ársávjának ±3 %-án belüli szinteket rajzoljuk — a többi élő
-    # szint is szabályos, de a charton csak zsúfolna.
-    _w = m1[(m1.index >= t0) & (m1.index < t1)]
-    lo_p, hi_p = float(_w["low"].min()) * 0.97, float(_w["high"].max()) * 1.03
-    for k, L in enumerate(lv.itertuples()):
-        if L.t_conf > t1 or L.t_exp < t0 or not (lo_p <= L.price <= hi_p):
+    # ── 1a. az IGAZOLT swing-pontok (amiket a k_hi kiválaszt) ──────────────
+    for j in np.flatnonzero(pc | pv):
+        t = hi.index[j]
+        if not (t0 <= t < t1):
             continue
-        j0 = int(np.searchsorted(hi_t, L.t_conf, side="left"))
-        seg = close[j0:]
-        hit = np.flatnonzero(seg > L.price) if L.side > 0 else np.flatnonzero(seg < L.price)
-        t_break = hi_t[j0 + hit[0]] + pd.Timedelta(minutes=cl.P["hi_tf"]) if len(hit) else None
-        t_end = min(t_break or t1, min(L.t_exp, t1))
-        if t_end <= t0:
-            continue                                  # az ablak előtt tört/lejárt
-        a = max(L.t_conf, t0 - pd.Timedelta(days=1))
-        col = "blue" if L.kind == "D1" else "magenta"
-        nev = f"lvl_{L.kind}_{k}"
-        objs.append(viz.Trend(name=nev, t1=_ts(a), p1=float(L.price), t2=_ts(t_end),
-                              p2=float(L.price), color=col,
-                              width=1 if L.kind == "D1" else 2))
-        objs.append(viz.Text(name=f"lvltxt_{L.kind}_{k}", t1=_ts(a), p1=float(L.price),
-                             text=f"{L.kind} {'ellenallas' if L.side > 0 else 'tamasz'} "
-                                  f"{L.price:.1f}", color=col, fontsize=8))
+        # az igazolás ideje: a pivot utáni k_hi-edik gyertya ZÁRÁSA — ettől
+        # kezdve „létezik" a swing, addig nem szabad rá hivatkozni.
+        t_conf = hi.index[min(len(hi) - 1, j + P["k_hi"])] + pd.Timedelta(minutes=hi_min)
+        for csucs in (True, False):
+            if (csucs and not pc[j]) or (not csucs and not pv[j]):
+                continue
+            n_sw += 1
+            ar = h[j] if csucs else l[j]
+            nev = f"{'cs' if csucs else 'vo'}_{_ts(t)}"
+            objs.append(viz.Arrow(name=f"sw_{nev}", t1=_ts(t), p1=float(ar),
+                                  code=159, color="gray", width=1))
+            objs.append(viz.Text(
+                name=f"swtxt_{nev}", t1=_ts(t), p1=float(ar),
+                text=(f"{'csucs' if csucs else 'volgy'} {_ar(ar, ps)} "
+                      f"({str(t)[5:16]}, igazolva {str(t_conf)[5:16]})"),
+                color="gray", fontsize=7))
 
-    # ── M15 törések az ablakban
-    n_ev = 0
+    # ── 1b. a TÖRÉSEK: a tört szint vonala + a törés függőlegese ───────────
     for e in evs:
-        tb = hi_t[e["i"]]
+        tb = hi.index[e["i"]]
         if not (t0 <= tb < t1):
             continue
         n_ev += 1
-        tc = _ts(tb + pd.Timedelta(minutes=cl.P["hi_tf"]))
+        t_sw = hi.index[int(e["piv_hi"])]
+        tc = _ts(tb + pd.Timedelta(minutes=hi_min))
+        col = "green" if e["dir"] > 0 else "red"
+        objs.append(viz.Trend(name=f"lvl_{tc}", t1=_ts(t_sw), p1=float(e["level"]),
+                              t2=tc, p2=float(e["level"]), color="blue", width=2))
         objs.append(viz.VLine(name=f"brk_{tc}", t1=tc, color="darkgold", width=2))
-        cim = {"folyt": "folytatas", "ford": "fordulat", "nincs": "trend nelkul"}[e["label"]]
-        objs.append(viz.Text(name=f"brktxt_{tc}", t1=tc, p1=float(e["level"]),
-                             text=f"M15 tores {'FEL' if e['dir'] > 0 else 'LE'} - "
-                                  f"{e['kind']} {e['level']:.1f} ({cim})",
-                             color="darkgold", fontsize=9))
+        cim = {"folyt": "folytatas", "ford": "fordulat"}.get(e["label"], "trend nelkul")
+        objs.append(viz.Text(
+            name=f"brktxt_{tc}", t1=tc, p1=float(e["level"]),
+            text=(f"{tf_nev} TORES {'FEL' if e['dir'] > 0 else 'LE'} "
+                  f"{_ar(e['level'], ps)} - {cim} "
+                  f"[{str(tb)[5:16]} zaras {_ar(hi['close'].iloc[e['i']], ps)}]"),
+            color=col, fontsize=9))
 
-    # ── M1 zászlók (pullback) + belépők a POZÍCIÓ vonalaival
-    # A vonalak a pozícióhoz tartoznak: a belépőtől a kilépésig (SL vagy TP
-    # elérése, legfeljebb 8 óra) — nem ±3 perces szegmensek.
-    h1 = m1["high"].to_numpy(float)
-    l1 = m1["low"].to_numpy(float)
-    sp1 = m1["avg_spread"].to_numpy(float)
-    sp1 = np.where(np.isfinite(sp1) & (sp1 > 0), sp1, 0.0)
-    n_in = n_out = 0
-    for x in ent.itertuples():
-        i = int(x.i)
-        ti = m1.index[i]
-        if not (t0 <= ti < t1):
-            continue
-        d = int(x.dir)
-        entry = float(m1["close"].iloc[i])
-        sl = entry - d * x.sl_pts * ps
-        tp = entry + d * x.tp_pts * ps if x.tp_pts > 0 else None
-        # kilépés: SL vagy TP első érintése (a stop nyer), max 8 óra
-        j_end = min(len(m1) - 1, i + 480)
-        j_exit, mi = j_end, ""
-        for j in range(i + 1, j_end + 1):
-            bh, bl = (h1[j], l1[j]) if d > 0 else (h1[j] + sp1[j], l1[j] + sp1[j])
-            if (d > 0 and bl <= sl) or (d < 0 and bh >= sl):
-                j_exit, mi = j, "SL"
-                break
-            if tp is not None and ((d > 0 and bh >= tp) or (d < 0 and bl <= tp)):
-                j_exit, mi = j, "TP"
-                break
-        t_ent = _ts(ti) + 60
-        # A vonalak a SZOKÁSOS 6 gyertyás szegmensek (−3 / +3 bar a belépő
-        # körül), mint a közös `entry_marks` — a kilépésig húzott vonal napokon
-        # át zavaró volt. A kilépés ténye a címkében marad (-> SL / TP / 8h).
-        t_a, t_ex = t_ent - 180, t_ent + 180
-        h = ti.hour
-        inside = hours is None or (hours[0] <= h <= hours[1])
-        n_in += inside
-        n_out += (not inside)
-        dn = "BUY" if d > 0 else "SELL"
-        col = "green" if d > 0 else "red"
-        lab_ = (f"Csilla {dn} {h:02d}:{ti.minute:02d}"
-                + ("" if inside else " (savon kivul)")
-                + (f" -> {mi}" if mi else " -> 8h"))
-        objs.append(viz.VLine(name=f"m1sig_{t_ent}", t1=t_ent, color=col, width=2))
-        objs.append(viz.Trend(name=f"pos_entry_{t_ent}", t1=t_a, p1=entry, t2=t_ex,
-                              p2=entry, color="orange", width=2))
-        objs.append(viz.Trend(name=f"pos_sl_{t_ent}", t1=t_a, p1=float(sl), t2=t_ex,
-                              p2=float(sl), color="red", width=2))
-        objs.append(viz.Text(name=f"pos_sltxt_{t_ent}", t1=t_ent, p1=float(sl),
-                             text=f"SL {x.sl_pts * ps:.0f} pt", color="red", fontsize=8))
-        if tp is not None:
-            objs.append(viz.Trend(name=f"pos_tp_{t_ent}", t1=t_a, p1=float(tp), t2=t_ex,
-                                  p2=float(tp), color="green", width=2))
-            objs.append(viz.Text(name=f"pos_tptxt_{t_ent}", t1=t_ent, p1=float(tp),
-                                 text=f"TP fibo 138.2 ({x.tp_pts * ps:.0f} pt)",
-                                 color="green", fontsize=8))
-        objs.append(viz.Text(name=f"m1lbl_{t_ent}", t1=t_ent, p1=entry, text=lab_,
-                             color=col, fontsize=9))
-        # a PULLBACK: a tört M1-swing (zászló) csúcsa jelölővel + a szint a törésig
-        if x.piv is not None:
-            tp_iv = _ts(m1.index[int(x.piv)])
-            p_piv = float(x.level)
-            objs.append(viz.Arrow(name=f"flagpk_{t_ent}", t1=tp_iv, p1=p_piv,
-                                  code=159, color="blue", width=2))
-            objs.append(viz.Text(name=f"flagtxt_{t_ent}", t1=tp_iv, p1=p_piv,
-                                 text="pullback", color="blue", fontsize=8))
-            objs.append(viz.Trend(name=f"flag_{t_ent}", t1=tp_iv, p1=p_piv,
-                                  t2=_ts(m1.index[int(x.b)]) + 60, p2=p_piv,
-                                  color="blue", width=1, style=1))
-
-    msg = (f"{symbol} {t_from}→{t_to}: {n_ev} M15-törés, {n_in + n_out} M1-belépő "
-           f"({n_in} a {hours[0]}–{hours[1]}h sávban, {n_out} kívül)" if hours else
-           f"{symbol} {t_from}→{t_to}: {n_ev} M15-törés, {n_in + n_out} M1-belépő")
+    msg = (f"{symbol} {tf_nev} {t_from}->{t_to}  (tf_pair={P['tf_pair']}, "
+           f"k_hi={P['k_hi']}): {n_sw} igazolt swing, {n_ev} tores")
+    if lepes >= 2:
+        msg += "  [a 2. lepes (belepok) meg nincs bekotve]"
     return objs, msg
 
 
@@ -186,12 +140,12 @@ def main():
     ap.add_argument("--symbol", default="Ger40")
     ap.add_argument("--from", dest="t_from", required=True)
     ap.add_argument("--to", dest="t_to", required=True, help="a nap végéig")
-    ap.add_argument("--hours", nargs=2, type=int, default=(8, 11),
-                    help="a megbeszélt óra-sáv (szerver-idő), pl. 8 11")
-    ap.add_argument("--stop-atr", type=float, default=1.5)
+    ap.add_argument("--tf-pair", default="H1-M15", choices=sorted(sw.TF_PAIRS))
+    ap.add_argument("--k-hi", type=int, default=None)
+    ap.add_argument("--lepes", type=int, default=1, choices=(1, 2))
     ap.add_argument("--dry", action="store_true", help="csak kiír, nem ír fájlt")
     a = ap.parse_args()
-    objs, msg = build_objects(a.symbol, a.t_from, a.t_to, tuple(a.hours), a.stop_atr)
+    objs, msg = build_objects(a.symbol, a.t_from, a.t_to, a.tf_pair, a.k_hi, a.lepes)
     print(msg)
     if a.dry:
         for o in objs:
@@ -200,7 +154,7 @@ def main():
     from core import mt5_visual
     lines = [viz.tag_line(o.line(), STRAT) for o in objs]
     path = mt5_visual.write_lines(a.symbol, lines, clear_first=True)
-    print(f"{len(lines)} objektum → {path}")
+    print(f"{len(lines)} objektum -> {path}")
 
 
 if __name__ == "__main__":
