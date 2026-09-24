@@ -34,22 +34,46 @@ from core import gates as _g
 from core.i18n import t as _t
 
 
-def _sessions_cell(ctx, on_click, symbol):
-    """A „Piacok" cella: a világ tőzsdéinek állapota EGY szóban, színnel.
+def _sessions_cell(ds, on_gate, symbol):
+    """A „Tőzsdék" cella: a világ tőzsdéinek állapota EGY szóban, színnel.
 
     ⚠ A SZÍN AZ ÁLLAPOT, nem a blokkolás. A kapu alapból NEM tilt (minden állapot
     `none`), tehát a piros itt azt jelenti, hogy „nyitási rángás", nem azt, hogy
     „kimarad". Ha a felhasználó blokkolásra állítja, azt a `badge` és a
-    blokkoló-számláló mutatja, mint a többi kapunál."""
-    ds = ctx.get("ds")
+    blokkoló-számláló mutatja, mint a többi kapunál.
+
+    ⚠ A `ds`-BŐL OLVAS, NEM A `ctx`-BŐL. Ez a cella egy körig ÜRESEN („—")
+    látszott minden soron: a `ctx.get("ds")` mindig `None`-t adott, mert a
+    `gates.ctx_from_state` NEVESÍTETT mezőket ad vissza, nem magát az
+    állapot-objektumot. A testvér-cellák (`market`) is a `ds`-ből olvasnak —
+    ez a sor kilógott, és a hiba pont úgy nézett ki, mintha a kapu nem mérne.
+
+    ⚠ A KATTINTÁS GENERIKUS (`on_gate(symbol, kulcs)`). A többi kapu cellája
+    kapunként külön visszahívást kap (`on_spread`, `on_market`, …) — egy
+    BEHELYEZETT kapu nem tud ilyet felvenni a `gui`-ba, tehát kattinthatatlan
+    maradna. Ugyanaz a minta, mint az `_EVAL`-nál: a keret ne kapunként
+    felsorolva tudja, mit kell tennie."""
+    _kat = (lambda: on_gate(symbol, "sessions")) if on_gate else None
     st = getattr(ds, "sessions_state", None)
-    if not st:
-        return {"text": "—", "state": None, "market": None,
-                "on_click": (lambda: on_click(symbol)) if on_click else None}
-    return {"text": _t(f"sessions.short.{st}"),
+    lista = list(getattr(ds, "sessions_list", None) or [])
+    if not st and not lista:
+        return {"text": "—", "state": None, "market": None, "marks": [],
+                "tip": "", "on_click": _kat}
+    # ⚠ PIACONKÉNT EGY BETŰ, nem egy összevont szó. A felhasználó leletje:
+    # „Az hogy zárva az nem mond semmit" — melyik tőzsde zárva? A betűk a
+    # FIGYELT piacokat mutatják (páronként állítható), mindegyik a saját
+    # állapota szerint színezve; a buborék kiírja szóban is.
+    from gates import sessions as _sess
+    marks = [(_sess.MARKET_LETTER.get(m, m[:1].upper()), s) for m, s in lista]
+    tip = "  ·  ".join(
+        f"{_sess.MARKET_LABEL.get(m, m)}: {_sess.STATE_LABEL.get(s, s)}"
+        for m, s in lista)
+    return {"text": ("" if marks else _t(f"sessions.short.{st}")),
             "state": st,
             "market": getattr(ds, "sessions_market", None),
-            "on_click": (lambda: on_click(symbol)) if on_click else None}
+            "marks": marks,
+            "tip": tip,
+            "on_click": _kat}
 
 
 def _spread_cell(ctx: dict) -> dict:
@@ -221,7 +245,7 @@ def _sum_money_r(parts) -> dict:
 def row_data(symbol: str, ds, strategy_names, cfg: dict = None,
              params: dict = None, pair_cfg: dict = None, *,
              positions=None, owner_of=None, risk_of=None, quality_of=None,
-             on_sessions=None,
+             on_gate=None,
              opt_of=None, live_of=None, stage_order_of=None,
              opt_enabled_of=None, opt_state_of=None, enabled_of=None,
              on_toggle=None, on_opt=None, on_stages=None,
@@ -348,7 +372,7 @@ def row_data(symbol: str, ds, strategy_names, cfg: dict = None,
                       "on_click": (lambda: on_align(symbol)) if on_align else None},
             "market": {"text": getattr(ds, "market_state_label", "") or "—",
                        "on_click": (lambda: on_market(symbol)) if on_market else None},
-            "sessions": _sessions_cell(ctx, on_sessions, symbol),
+            "sessions": _sessions_cell(ds, on_gate, symbol),
             "momentum": _momentum_cell(ctx, on_momentum, symbol),
             "cost": _cost_cell(ctx, on_cost, symbol),
             "volatility": _volatility_cell(ctx, on_volatility, symbol),

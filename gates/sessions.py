@@ -66,7 +66,68 @@ MARKETS = {
     "ausztralia": {"zone": "Australia/Sydney", "open": (10, 0), "close": (16, 0)},
 }
 MARKET_KEYS = tuple(MARKETS)
-MARKET_LABEL = _LabelMap("sessions.market", MARKET_KEYS)
+# ⚠ A „mindig nyitva" (kriptó) PSZEUDO-PIAC is kap feliratot: a cellában és a
+# buborékban egyetlen jelölőként szerepel, tehát a katalógusban is léteznie
+# kell — enélkül a nyers kulcsot írnánk ki a felhasználónak.
+MARKET_LABEL = _LabelMap("sessions.market", MARKET_KEYS + ("mindig",))
+
+# ── A MÁSIK naptár: a DEVIZA-SZEKCIÓK ──────────────────────────────────────
+# ⚠ A felhasználó döntése (2026-09-24): „Mindkettő, instrumentum szerint." Egy
+# részvényindex-CFD-nek a TŐZSDE nyitvatartása a valóság (a Ger40 tüskéje
+# 09:00-kor, az UsaTec-é 15:30-kor van); egy devizapárnak viszont nincs tőzsdéje
+# — ott a pénzügyi központ MUNKANAPJA a szekció, és ez szélesebb.
+#
+# A definíció szándékosan EGYSZERŰ és egységes: 08:00–17:00 HELYI idő minden
+# központban. Nem „kerek" számokat írunk be szerver-időben, mert azok a nyári
+# időszámítással évente kétszer elcsúsznának — a `zoneinfo` intézi.
+#
+# Amit ez a gyakorlatban jelent (szerver-időben, 2026 szeptemberében):
+#     tőzsde:  Ausztrália 02:00–08:00 · Japán 02:00–08:00 · Amerika 15:30–22:00
+#     szekció: Ausztrália 00:00–09:00 · Japán 01:00–10:00 · Amerika 14:00–23:00
+# → a „minden zárva" ablak a tőzsdei naptárral 22:00–02:00, a szekcióssal
+#   23:00–00:00. Vagyis a szekciós naptár SEM mondja, hogy éjjel 11-kor nyitva
+#   van bármi: a NY-szekció 23:00-kor zár, Sydney 00:00-kor nyit.
+FX_HOURS = {m: {"zone": spec["zone"], "open": (8, 0), "close": (17, 0)}
+            for m, spec in MARKETS.items()}
+
+# A „mindig nyitva" naptár: kriptó. Nincs nyitóharang, tehát nyitási rángás sem.
+CAL_EXCHANGE, CAL_FX, CAL_ALWAYS, CAL_AUTO = "tozsde", "fx", "mindig", "auto"
+CALENDARS = (CAL_AUTO, CAL_EXCHANGE, CAL_FX, CAL_ALWAYS)
+CALENDAR_LABEL = _LabelMap("sessions.calendar", CALENDARS)
+
+_PENZNEM = ("USD", "EUR", "GBP", "JPY", "CHF", "AUD", "NZD", "CAD", "HUF",
+            "PLN", "CZK", "SEK", "NOK", "DKK", "TRY", "ZAR", "MXN", "SGD",
+            "HKD", "CNH")
+_KRIPTO = ("BTC", "ETH", "LTC", "XRP", "ADA", "SOL", "DOGE", "BCH")
+_FEM = ("XAU", "XAG", "GOLD", "SILVER", "EZUST", "ARANY")
+
+
+def calendar_for(symbol: str) -> str:
+    """Melyik naptár illik EHHEZ az instrumentumhoz (az `auto` feloldása)?
+
+    ⚠ NÉV ALAPJÁN, és ez tudatos kompromisszum. A bróker saját besorolása
+    (`symbol_info().path`) pontosabb volna, de a kapunak nem szabad MT5-öt
+    importálnia (tiszta modul, `.tfg`-be csomagolható). A heurisztika ezért
+    szűk és kiszámítható — és bármikor FELÜLÍRHATÓ a páron a `naptar` mezővel,
+    ami a végső szó."""
+    s = (symbol or "").upper()
+    if any(k in s for k in _KRIPTO):
+        return CAL_ALWAYS
+    if any(k in s for k in _FEM):
+        return CAL_FX                     # a nemesfém a deviza-naptárral megy
+    mag = "".join(c for c in s if c.isalpha())
+    if len(mag) == 6 and mag[:3] in _PENZNEM and mag[3:] in _PENZNEM:
+        return CAL_FX
+    return CAL_EXCHANGE
+
+
+def hours_of(market: str, params: dict | None = None) -> dict:
+    """Egy piac nyitvatartása a BEÁLLÍTOTT naptár szerint (`None`, ha nincs)."""
+    cal = (params or {}).get("naptar") or CAL_EXCHANGE
+    if cal == CAL_ALWAYS:
+        return None
+    tabla = FX_HOURS if cal == CAL_FX else MARKETS
+    return tabla.get(market)
 
 # ── Az állapotok, ÉLESSÉG szerint csökkenő sorrendben ───────────────────────
 # ⚠ A SORREND A PRECEDENCIA. Egy párhoz több piac is tartozhat, és egyszerre
@@ -81,10 +142,15 @@ NYITVA = "nyitva"              # nyitva, de egyik különleges ablakban sem
 ZARVA = "zarva"                # a figyelt piacok MINDEGYIKE zárva
 
 STATES = (NYITAS, NYITAS_UTAN, NYITAS_ELOTT, ZARAS_ELOTT, NYITVA, ZARVA)
+# A live tábla EGY-KÉT BETŰS jelölői. ⚠ A felhasználó leletje (2026-09-24): egy
+# összevont „zárva" felirat NEM MOND SEMMIT — melyik tőzsde zárva? Piaconként
+# egy betű, a saját állapota szerint színezve, ránézésre megmondja.
+MARKET_LETTER = _LabelMap("sessions.letter", MARKET_KEYS + ("mindig",))
 STATE_LABEL = _LabelMap("sessions.state", STATES)
 
 DEFAULTS = {
     "markets": list(MARKET_KEYS),   # melyik piacok számítanak ezen a páron
+    "naptar": CAL_AUTO,             # tőzsde / deviza-szekció / mindig / auto
     "elott_perc": 10,               # a felhasználó 5–15-ös sávjából
     "utan_perc": 10,
     "zaras_elott_perc": 10,
@@ -103,6 +169,8 @@ GATE = {"key": "sessions", "default_effect": "none", "phase": "signal",
 # részvény-CFD-nek az ázsiai nyitás nem mond semmit, egy JPY-párnak viszont
 # igen. Ezért nem találjuk ki szimbólum-névből — megadja.
 PARAMS = (
+    {"key": "naptar", "kind": "choice", "default": CAL_AUTO,
+     "choices": lambda: [(c, CALENDAR_LABEL.get(c, c)) for c in CALENDARS]},
     {"key": "markets", "kind": "multi", "default": list(MARKET_KEYS),
      # ⚠ HÍVHATÓ, nem kész lista: a feliratot a MEGNYITÁS pillanatában oldja
      # fel. Egy import-időben kiszámolt címke befagyna a betöltéskori nyelvbe.
@@ -121,6 +189,8 @@ def _P(params: dict | None) -> dict:
         if k in DEFAULTS and v is not None:
             p[k] = v
     p["markets"] = [m for m in (p["markets"] or []) if m in MARKETS]
+    if p.get("naptar") not in CALENDARS:
+        p["naptar"] = DEFAULTS["naptar"]
     for k in ("elott_perc", "utan_perc", "zaras_elott_perc"):
         try:
             p[k] = max(0, int(p[k]))
@@ -143,10 +213,15 @@ def to_utc(server_time) -> _dt.datetime:
 
 def market_state(utc_time: _dt.datetime, market: str, params: dict | None = None) -> str:
     """EGY piac állapota. A hétvége zárva (a piac SAJÁT helyi naptára szerint)."""
-    spec = MARKETS.get(market)
+    P = _P(params)
+    # ⚠ A „mindig nyitva" naptárnál (kriptó) NINCS nyitóharang: se nyitás, se
+    # nyitási rángás. A `NYITVA` a helyes válasz, nem a `ZARVA` — különben a
+    # kapu a kriptót éjjel-nappal „alvó piacnak" mutatná.
+    if P.get("naptar") == CAL_ALWAYS:
+        return NYITVA if market in MARKETS else ZARVA
+    spec = hours_of(market, P)
     if spec is None:
         return ZARVA
-    P = _P(params)
     helyi = utc_time.astimezone(ZoneInfo(spec["zone"]))
     if helyi.weekday() >= 5:                      # szombat/vasárnap
         return ZARVA
@@ -187,6 +262,23 @@ def state_of_server(server_time, params: dict | None = None) -> tuple:
     return state_at(to_utc(server_time), params)
 
 
+def states_of_server(server_time, params: dict | None = None) -> list:
+    """`[(piac, állapot), …]` a FIGYELT piacokra, kanonikus sorrendben.
+
+    ⚠ EZ A KIJELZÉS BEMENETE, és szándékosan NEM az összevont állapot. A kapu
+    DÖNTÉSÉHEZ egyetlen (a legélesebb) állapot kell — a felhasználónak viszont
+    az a kérdése, hogy MELYIK tőzsde tart hol. A kettő ugyanabból a mérésből
+    jön, tehát nem csúszhat szét."""
+    P = _P(params)
+    # ⚠ A „mindig nyitva" naptárnál EGY jelölő, nem hat. Hat zöld betű azt
+    # állítaná, hogy „Tokió nyitva" — ami kriptónál értelmetlen: ott nincs
+    # tőzsdei szekció. Egy jel mondja azt, ami igaz: folyamatosan megy.
+    if P.get("naptar") == CAL_ALWAYS:
+        return [(CAL_ALWAYS, NYITVA)]
+    u = to_utc(server_time)
+    return [(m, market_state(u, m, P)) for m in MARKET_KEYS if m in P["markets"]]
+
+
 # ---------------------------------------------------------------------------
 # A kapu-szerződés
 # ---------------------------------------------------------------------------
@@ -202,7 +294,7 @@ def measure(ctx) -> tuple:
     now = getattr(ctx, "now", None)
     if now is None:
         return False, None
-    P = params_of(ctx.pair_cfg, ctx.cfg)
+    P = params_of(ctx.pair_cfg, ctx.cfg, getattr(ctx, "symbol", None))
     st, _m = state_of_server(now, P)
     return failed(st, adverse_of(ctx.pair_cfg, ctx.cfg)), st
 
@@ -212,7 +304,7 @@ def block_log(ctx) -> str:
     now = getattr(ctx, "now", None)
     if now is None:
         return "piaci nyitások: nincs idő a kontextusban"
-    P = params_of(ctx.pair_cfg, ctx.cfg)
+    P = params_of(ctx.pair_cfg, ctx.cfg, getattr(ctx, "symbol", None))
     st, m = state_of_server(now, P)
     # ⚠ A `LabelMap` SZÓTÁR-ként viselkedik (indexelés/`get`), nincs `.label()`
     # metódusa — a feliratot a hívás pillanatában oldja fel, hogy nyelvváltásnál
@@ -229,7 +321,7 @@ def evaluate(ctx: dict) -> tuple:
 
     ⚠ ITT NEM SZÁMOLUNK ÚJRA. Az állapotot a kijelzés-út már kimérte (az utolsó
     zárt M15 gyertya idejéből), és azt a `ctx` hozza. Ha itt a mostani óráról
-    kérdeznénk, a „Piacok" oszlop és a sor-jelvény MÁS pillanatot mutatna, mint
+    kérdeznénk, a „Tőzsdék" oszlop és a sor-jelvény MÁS pillanatot mutatna, mint
     a cella melletti szöveg — pont az a néma szétcsúszás, amit a projekt már
     többször megfizetett.
 
@@ -249,15 +341,23 @@ def evaluate(ctx: dict) -> tuple:
 # ---------------------------------------------------------------------------
 # Config — a szokásos öröklődéssel (pár → globális → beépített)
 # ---------------------------------------------------------------------------
-def params_of(pair_cfg: dict | None, cfg: dict | None) -> dict:
-    """A kapu beállításai: `pairs.<SYM>.sessions` → `sessions` → `DEFAULTS`."""
+def params_of(pair_cfg: dict | None, cfg: dict | None,
+              symbol: str = None) -> dict:
+    """A kapu beállításai: `pairs.<SYM>.sessions` → `sessions` → `DEFAULTS`.
+
+    ⚠ A `symbol` az `auto` naptár feloldásához kell. Ha nincs megadva, az `auto`
+    a TŐZSDEI naptárra esik — a konzervatívabb (szűkebb) olvasat: inkább
+    mondjon zártat ott, ahol nem tudja, mint hogy nyitottnak lásson valamit."""
     p = dict(DEFAULTS)
     for forras in ((cfg or {}).get("sessions"), (pair_cfg or {}).get("sessions")):
         if isinstance(forras, dict):
             for k in DEFAULTS:
                 if forras.get(k) is not None:
                     p[k] = forras[k]
-    return _P(p)
+    p = _P(p)
+    if p["naptar"] == CAL_AUTO:
+        p["naptar"] = calendar_for(symbol) if symbol else CAL_EXCHANGE
+    return p
 
 
 def adverse_of(pair_cfg: dict | None, cfg: dict | None) -> set:

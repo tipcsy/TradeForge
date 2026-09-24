@@ -2954,10 +2954,14 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
         spread_points=current_spread_points, spread_cap=_cap_pips,
         closes=lambda tfs, n: mt5_connector.tf_closes(symbol, tfs, n),
         bands=_gate_bands,
-        # A SZERVER órája (a gyertya-idők is ebben vannak) — a piaci-nyitás
-        # kapunak ez a bemenete.
-        now=(hi_row.name if hi_row is not None and getattr(hi_row, "name", None)
-             is not None else None))
+        # A SZERVER FALIÓRÁJA — a piaci-nyitás kapu bemenete.
+        #
+        # ⚠ NEM A GYERTYA IDEJE. Itt eredetileg `hi_row.name` állt, ami a
+        # legutóbb ZÁRT M15 gyertya NYITÓ ideje: akár 15 perccel korábbi a
+        # valóságnál. Egy perc-pontos ablakokkal dolgozó kapunak
+        # („nyitás perce", ±10 perc) ez rendszeresen ROSSZ választ adott volna —
+        # és némán, mert az állapot attól még értelmesnek látszik.
+        now=mt5_connector.server_now())
     for _gk in _gates.keys_in_phase(_gates.PHASE_SIGNAL):
         if not _gates.active(_gate_eff, _gk):
             _gate_failed[_gk] = False

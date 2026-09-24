@@ -429,8 +429,16 @@ class CanvasTable:
             # múljon; a felhasználó eldobta: a zöld/piros pötty a megszokott, és
             # a nyilak zsúfoltabbá tették a cellát.)
             fdot = self._f["mono"]
+            # ⚠ EGY ELEM LEHET BETŰ IS. A `dots` eleme vagy szín (a jel ilyenkor
+            # a megszokott ●), vagy `(jel, szín)` pár — így a „Tőzsdék" oszlop
+            # piaconkénti betűi ugyanezen a rajzolón mennek át, és a pöttyös
+            # cellák viselkedése bitre a régi marad.
+            _items = [(d if isinstance(d, (tuple, list)) else (_lr._DOT, d))
+                      for d in cell.dots]
+            _dws = [fdot.measure(_gl) + (0 if _gl == _lr._DOT else 5)
+                    for _gl, _c in _items]
             dw = fdot.measure(_lr._DOT)
-            total = dw * max(1, len(cell.dots))
+            total = sum(_dws) if _dws else dw
             # ⚠ A pöttyök ELŐTT egy betű (a jelzés-cellában „V"/„J": valódi
             # kötés vagy csak jelzés). A betű és a pötty-blokk EGYÜTT kerül
             # középre — korábban a betű a már középre tett blokk BALJÁRA került,
@@ -452,9 +460,11 @@ class CanvasTable:
                                         dash=st.get("dash", ()),
                                         width=st.get("width", 1), tags=(rtag,))
                 ids.append(r)
-            for k, col in enumerate(cell.dots):
-                ids.append(bc.create_text(sx + k * dw + dw / 2, cy, text=_lr._DOT,
-                                          fill=col, font=fdot, tags=(tag, rtag)))
+            _cx = sx
+            for (_gl, _col), _wi in zip(_items, _dws):
+                ids.append(bc.create_text(_cx + _wi / 2, cy, text=_gl,
+                                          fill=_col, font=fdot, tags=(tag, rtag)))
+                _cx += _wi
         elif cell.kind == "ctrl":
             fsm = self._f["small"]
             widths = [fsm.measure(p[1]) + 2 * _lr.CTRL_PADX for p in cell.parts]
@@ -686,8 +696,13 @@ class CanvasTable:
             if cell.text and texts:
                 bc.itemconfigure(texts[0], text=cell.text, fill=cell.fg)
                 texts = texts[1:]
-            for t, col in zip(texts, cell.dots):
-                bc.itemconfigure(t, fill=col)
+            for t, d in zip(texts, cell.dots):
+                # `(jel, szín)` párnál a JELET is frissíteni kell — különben az
+                # állapotváltás csak a színt cserélné, a betű befagyna.
+                if isinstance(d, (tuple, list)):
+                    bc.itemconfigure(t, text=d[0], fill=d[1])
+                else:
+                    bc.itemconfigure(t, fill=d)
             rects = [t for t in ids if bc.type(t) == "rectangle"]
             if cell.frame and rects:
                 st = _FRAME_STYLE.get(cell.frame) or {}

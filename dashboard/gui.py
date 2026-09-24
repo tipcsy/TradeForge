@@ -3235,7 +3235,11 @@ class DashboardWindow:
                 on_market=self._show_market_gate,
                 on_momentum=self._show_momentum_gate,
                 on_cost=self._show_cost_gate,
-                on_volatility=self._show_volatility_gate))
+                on_volatility=self._show_volatility_gate,
+                # ⚠ GENERIKUS kapu-megnyitó: a behelyezett (`.tfg`) kapuk
+                # cellái ezen keresztül nyílnak, mert rájuk nincs — és nem is
+                # lehet — külön `on_<kapu>` visszahívás a felületen.
+                on_gate=self._open_gate_dialog))
         return rows
 
     def _strategy_enabled(self, symbol: str, name: str) -> bool:
@@ -6496,17 +6500,23 @@ class DashboardWindow:
                         ds.market_state_label, ds.market_state_color = _ms.display(_cat)
             except Exception:
                 pass
-        # PIACI NYITÁSOK → a „Piacok" oszlop. A kapu TISZTA modul (nincs benne
-        # óra), ezért az időt innen kapja: az utolsó zárt M15 gyertya ideje —
-        # ugyanaz, amit a motor is ad neki, tehát a kijelzés és a döntés nem
-        # csúszhat szét. SZERVER időt hordoz (lásd `gates.sessions.to_utc`).
+        # PIACI NYITÁSOK → a „Tőzsdék" oszlop. A kapu TISZTA modul (nincs benne
+        # óra), ezért az időt a hívó adja.
+        #
+        # ⚠ A BRÓKER FALIÓRÁJA, NEM A GYERTYA IDEJE. Először az utolsó zárt M15
+        # gyertya idejét adtuk — az viszont akár 15 perccel korábbi, és ezzel a
+        # perc-pontos ablakok (nyitás ±10 perc) találomra sültek volna el. A
+        # motor is ugyanezt az órát kapja (`live_trader`), tehát a kijelzés és a
+        # döntés nem csúszik szét.
         try:
+            from core import mt5_connector as _mcs
             from gates import sessions as _sess
-            _now = (_df15.index[-1] if _df15 is not None and len(_df15) else None)
-            if _now is not None:
-                _sp = _sess.params_of(self.cfg.get("pairs", {}).get(symbol, {}) or {},
-                                      self.cfg)
-                ds.sessions_state, ds.sessions_market = _sess.state_of_server(_now, _sp)
+            _sp = _sess.params_of(self.cfg.get("pairs", {}).get(symbol, {}) or {},
+                                  self.cfg, symbol)
+            _snow = _mcs.server_now()
+            ds.sessions_state, ds.sessions_market = _sess.state_of_server(_snow, _sp)
+            # PIACONKÉNT is — ebből lesz a betű-sor az oszlopban.
+            ds.sessions_list = _sess.states_of_server(_snow, _sp)
         except Exception:
             pass
         # TF-együttállás (M1/M5/M15 SMA-irány) → az „Együtt" oszlop. Idősíkonként

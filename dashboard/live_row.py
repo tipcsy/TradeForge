@@ -70,7 +70,11 @@ _SAMPLE = {
     # ⚠ A BEHELYEZETT KAPUNAK IS KELL MINTA. Enélkül a `layout` a `_SAMPLE`-ben
     # keresve KeyError-t dob — az oszlop megjelenik a listában, de a tábla
     # felépítése elszáll. A leghosszabb felirat a „NYITÁS".
-    "sessions": ("small", "NYITÁS"),
+    # A hat piac betűje + a térközök. ⚠ MONO a minta, mert a cellát is a `dots`
+    # rajzoló teszi ki MONO betűvel (+5 px térköz jelenként). `small`-lal mérve
+    # a hat betű 4 px-re fért volna be az oszlopba — egy hosszabb jelölő vagy
+    # egy nagyobb betűméret azonnal levágta volna a végét.
+    "sessions": ("mono", "E L NY Á JP AU"),
     "badge": ("mono", "⛔9"),
     # ⚠ A minta a BETUT is tartalmazza („V"/„J" a pottyok elott): enelkul a
     # betu kilogna a cellabol, vagy raszorulna a pottyokre.

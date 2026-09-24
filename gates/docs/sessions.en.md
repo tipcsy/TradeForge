@@ -1,4 +1,4 @@
-# Markets — where is the world's trading day?
+# Market sessions — where is the world's trading day?
 
 Tracks the opening hours of six exchanges (Europe/Frankfurt, London, America,
 Asia/Hong Kong, Japan, Australia) and distinguishes six states. It is a gate, not
@@ -36,6 +36,44 @@ re-enable a deliberately disabled gate.
 So the order is: **1.** set the gate's effect to `block`, **2.** use the bands to
 say what each state does (a state with no band passes). The gate's effect acts as
 a master switch; the bands decide the detail.
+
+## Two calendars: exchange vs. FX session
+
+The user's decision (2026-09-24): **both, by instrument.**
+
+| calendar | for | window |
+|---|---|---|
+| **Exchange hours** | index CFDs (Ger40, UsaTec, …) | the real opening bell: Frankfurt 09:00, NYSE 09:30 local |
+| **FX session** | FX pairs, metals | the financial centre's business day: **08:00–17:00 local** |
+| **Always open** | crypto | no opening bell, so no opening churn — a single "24/5" marker |
+
+The `naptar` field defaults to `auto`: decided from the symbol NAME (six letters
+from two known currency codes → session; XAU/GOLD → session; BTC/ETH → always
+open; otherwise exchange). The broker's own classification
+(`symbol_info().path`) would be more precise, but the gate must not import MT5
+(pure module, packable into `.tfg`). So the heuristic is narrow, predictable and
+**overridable per pair** — that is the final word.
+
+### What this means in server time (September 2026)
+
+| market | exchange | session |
+|---|---|---|
+| Australia | 02:00–08:00 | 00:00–09:00 |
+| Japan | 02:00–08:00 | 01:00–10:00 |
+| Asia | 03:30–10:00 | 02:00–11:00 |
+| Europe | 09:00–17:30 | 08:00–17:00 |
+| London | 09:00–17:30 | 09:00–18:00 |
+| America | 15:30–22:00 | 14:00–23:00 |
+
+⇒ the "all closed" window is 22:00–02:00 with the **exchange** calendar and
+23:00–00:00 with the **session** one. So the session calendar does not claim
+anything is open at 23:00 either: New York closes at 23:00, Sydney opens at
+00:00. The difference is in the night hours (Sydney/Tokyo start earlier and
+close later).
+
+⚠ The server-time column holds for summer time. Boundaries are always computed
+from local time (`zoneinfo`), so they shift by themselves in winter — there are
+no hand-written "round" server hours to fix twice a year.
 
 ## Settings
 

@@ -451,6 +451,28 @@ def open_positions_detailed() -> list:
         return []
 
 
+def server_now():
+    """A BRÓKER FALIÓRÁJA MOST (`datetime`, UTC-nek címkézve).
+
+    Ugyanaz a konvenció, mint a `server_day_bounds()`-nál: a mezők a szerver
+    helyi idejét hordozzák, a `tzinfo` csak címke. A gyertya-időbélyegek is így
+    jönnek — tehát ez a függvény és egy gyertya `name`-je UGYANAZT a skálát
+    használja.
+
+    ⚠ MIÉRT KELL. A piaci-nyitás kapu PERC-pontos ablakokkal dolgozik (a nyitás
+    perce, ±10 perc). Ha a legutolsó ZÁRT M15 gyertya idejét kapná, akár 15
+    percet tévedne — a „Nyitás" állapotot (ami egy perc) gyakorlatilag SOSEM
+    látná, a ±10 perces ablakokat pedig találomra találná el. A napi P&L-nél
+    ugyanez az eltolás már egyszer megharapott minket (`server_day_bounds`).
+
+    Eltolás nélkül (még nincs tick, hétvégi indulás) a valós UTC-re esünk
+    vissza — az is közelebb van, mint a gép helyi ideje."""
+    from datetime import datetime, timezone
+    off = _load_offset() or 0.0
+    return datetime.fromtimestamp(
+        datetime.now(timezone.utc).timestamp() + off, tz=timezone.utc)
+
+
 def server_today():
     """A BRÓKER mai dátuma (`datetime.date`) — nem a gép helyi dátuma.
 

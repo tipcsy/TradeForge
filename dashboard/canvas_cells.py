@@ -151,10 +151,20 @@ def cells_for(d: dict, collapsed: dict, on_close=None) -> dict:
         # oszlopa magától megjelenik (`enabled_columns`), de cella nélkül minden
         # soron ÜRES marad — ez a volatilitásnál már megtörtént egyszer.
         se = g.get("sessions") or {}
-        out["sessions"] = Cell("sessions", text=se.get("text", "—"),
-                               anchor="center", font="small",
-                               on_click=se.get("on_click"),
-                               fg=_SESSION_FG.get(se.get("state"), FG_GRAY_DIM))
+        _marks = se.get("marks") or []
+        if _marks:
+            # ⚠ A „dots" fajta: piaconként EGY JEL, saját színnel. A betűket
+            # ugyanaz a rajzoló teszi ki, ami a pöttyöket — csak a jel más.
+            out["sessions"] = Cell(
+                "sessions", kind="dots", anchor="center", font="small",
+                on_click=se.get("on_click"), tip=se.get("tip", ""),
+                dots=[(b, _SESSION_FG.get(s, FG_GRAY_DIM)) for b, s in _marks])
+        else:
+            out["sessions"] = Cell("sessions", text=se.get("text", "—"),
+                                   anchor="center", font="small",
+                                   on_click=se.get("on_click"),
+                                   tip=se.get("tip", ""),
+                                   fg=_SESSION_FG.get(se.get("state"), FG_GRAY_DIM))
         vo = g.get("volatility") or {}
         out["volatility"] = Cell("volatility", text=vo.get("text", "—"),
                                  anchor="center", on_click=vo.get("on_click"),
