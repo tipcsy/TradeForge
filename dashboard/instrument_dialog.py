@@ -3066,6 +3066,23 @@ class InstrumentParamsDialog:
             text=_t("idlg.a_pont_parameterei_betoltve"),
             fg=FG_GREEN)
 
+    def _opt_cfg_ujra(self):
+        """A stratégia optimalizáló-configjának ÚJRAOLVASÁSA a lemezről.
+
+        ⚠ A SÖPRÉS EBBŐL ÉPÍTI A RÁCSOT (`core.sweep.combos` az `opt_cfg`
+        `values`-ait járja be), nem a felületi sorokból. A gyorsítótár a
+        dialógus megnyitásakor töltődik; ha egy tartomány-szerkesztés után nem
+        frissítjük, a TERV szövege már az új számot mutatja (az a `rows`-ból
+        jön), a ténylegesen lefutó söprés viszont a RÉGI rácsot járja be. A
+        felhasználó leletje: „26 futást állítottam be, 53-at ír és futtat"."""
+        try:
+            from strategy.settings import load_strategy_config as _lsc
+            self._opt_cfg_cache = _lsc(self.strategy.name).get("optimizer", {}) or {}
+        except Exception:
+            pass
+        self._refresh_opt_space()
+        self._refresh_section_summaries()
+
     def _refresh_opt_space(self):
         """A terv-sáv frissítése a PILLANATNYI pipák szerint.
 
@@ -3180,7 +3197,7 @@ class InstrumentParamsDialog:
                 self._range_err.config(
                     text=_t("idlg.range_values_saved", key=key,
                             vals=", ".join(_uj), n=len(_uj)), fg=FG_GREEN)
-                self._refresh_opt_space()
+                self._opt_cfg_ujra()
             else:
                 self._range_err.config(text=_t("idlg.range_save_failed", key=key),
                                        fg=FG_RED)
@@ -3223,7 +3240,7 @@ class InstrumentParamsDialog:
             self._range_err.config(
                 text=_t("idlg.range_saved", key=key, min=f"{spec['min']:g}",
                      max=f"{spec['max']:g}", step=f"{spec['step']:g}", n=n), fg=FG_GREEN)
-            self._refresh_opt_space()
+            self._opt_cfg_ujra()
         else:
             self._range_err.config(text=_t("idlg.range_save_failed", key=key), fg=FG_RED)
 

@@ -79,8 +79,13 @@ check("a sorok osztalyozva vannak (jel/vegrehajtas)",
 check("a jelenlegi ertek atjon", next(r for r in rows if r["key"] == "sma_period")
       ["current"] == 123)
 _sma = next(r for r in rows if r["key"] == "sma_period")
-check("a racs-meret helyes (sma 50..300/10 -> 26)", _sma["values"] == 26,
-      str(_sma["values"]))
+# ⚠ NEM konkret szamot varunk: a tartomany az ELES strategia-configbol jon,
+# es azt a felhasznalo barmikor athangolhatja a Parameterek ablakban. Egy
+# bedrotozott „26" minden jogos hangolasnal elbukna — a lelet ez az INVARIANS:
+# a sor rács-merete pontosan a spec ertekeinek szama.
+check("a racs-meret = a spec ertekeinek szama",
+      _sma["values"] == op.grid_size(OCFG["sma_period"]),
+      f'{_sma["values"]} vs {op.grid_size(OCFG["sma_period"])}')
 
 _c2 = _cfg(); op.set_skip_keys(_c2, SYM, "wpr_sma", ["sma_period"])
 _rows2 = op.param_rows(_c2, SYM, "wpr_sma", OCFG)
@@ -368,6 +373,38 @@ check("az ERTEKKESZLET-ag is kilep, ha nem valtozott",
 _ST = (ROOT / "strategy" / "settings.py").read_text(encoding="utf-8")
 check("a config-irok zaro ujsort tesznek a fajl vegere",
       _ST.count("f.write(chr(10))") >= 2, str(_ST.count("f.write(chr(10))")))
+
+# ---------------------------------------------------------------------------
+print("== A TERV es a TENYLEGESEN LEFUTO RACS egyezzen ==")
+# ⚠ A felhasznalo leletje (2026-09-24): „26 futast allitottam be, 53-at ir ki
+# es 53-at futtat". Ok: a TERV szovege a felulet SORAIBOL jon (azok frissulnek
+# egy tartomany-szerkesztesnel), a sopres racsa viszont a dialogus nyitasakor
+# beolvasott `opt_cfg` gyorsitotarbol (`core.sweep.combos` az `opt_cfg`
+# `values`-ait jarja be). Ha a gyorsitotar nem frissul, a ket szam SZETCSUSZIK
+# — es nem csak a kijelzes rossz, a sopres MAST futtat, mint amit igert.
+from core import sweep as _swp                                           # noqa: E402
+for _spec, _vart in (({"a": {"min": 5, "max": 30, "step": 1}}, 26),
+                     ({"a": {"min": 5, "max": 30, "step": 2}}, 13),
+                     ({"a": {"values": ["x", "y", "z"]}}, 3)):
+    _sorok = [{"key": "a", "skipped": False, "values": op.grid_size(_spec["a"]),
+               "cls": "signal", "min": _spec["a"].get("min"),
+               "max": _spec["a"].get("max"), "step": _spec["a"].get("step")}]
+    _terv = op.run_plan(_sorok, 0)["runs"]
+    _ax, _comb = _swp.combos(_sorok, _spec)
+    check(f"terv == racs ({_vart} futas)",
+          _terv == len(_comb) == _vart, f"terv={_terv} racs={len(_comb)}")
+
+# A felulet oldala: a tartomany-mentes UTAN ujra kell olvasni a gyorsitotarat.
+_ID2 = (ROOT / "dashboard" / "instrument_dialog.py").read_text(encoding="utf-8")
+check("van kozos ujraolvaso (`_opt_cfg_ujra`)", "def _opt_cfg_ujra" in _ID2)
+check("az ujraolvaso TENYLEG a lemezrol olvas",
+      "_lsc(self.strategy.name).get(\"optimizer\"" in
+      _ID2[_ID2.index("def _opt_cfg_ujra"):_ID2.index("def _opt_cfg_ujra") + 1200])
+_ork = _ID2[_ID2.index("def _on_range_change"):]
+_ork = _ork[:_ork.index("def _on_skip_change")]
+check("a tartomany-mentes MINDKET aga ujraolvassa a configot",
+      _ork.count("self._opt_cfg_ujra()") == 2 and "self._refresh_opt_space()" not in _ork,
+      f"ujra={_ork.count('self._opt_cfg_ujra()')}")
 
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")
