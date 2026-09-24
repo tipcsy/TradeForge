@@ -31,6 +31,25 @@ engedélyt („engem ez blokkol-e"). A kettő szándékosan más kérdésre vál
 from __future__ import annotations
 
 from core import gates as _g
+from core.i18n import t as _t
+
+
+def _sessions_cell(ctx, on_click, symbol):
+    """A „Piacok" cella: a világ tőzsdéinek állapota EGY szóban, színnel.
+
+    ⚠ A SZÍN AZ ÁLLAPOT, nem a blokkolás. A kapu alapból NEM tilt (minden állapot
+    `none`), tehát a piros itt azt jelenti, hogy „nyitási rángás", nem azt, hogy
+    „kimarad". Ha a felhasználó blokkolásra állítja, azt a `badge` és a
+    blokkoló-számláló mutatja, mint a többi kapunál."""
+    ds = ctx.get("ds")
+    st = getattr(ds, "sessions_state", None)
+    if not st:
+        return {"text": "—", "state": None, "market": None,
+                "on_click": (lambda: on_click(symbol)) if on_click else None}
+    return {"text": _t(f"sessions.short.{st}"),
+            "state": st,
+            "market": getattr(ds, "sessions_market", None),
+            "on_click": (lambda: on_click(symbol)) if on_click else None}
 
 
 def _spread_cell(ctx: dict) -> dict:
@@ -202,6 +221,7 @@ def _sum_money_r(parts) -> dict:
 def row_data(symbol: str, ds, strategy_names, cfg: dict = None,
              params: dict = None, pair_cfg: dict = None, *,
              positions=None, owner_of=None, risk_of=None, quality_of=None,
+             on_sessions=None,
              opt_of=None, live_of=None, stage_order_of=None,
              opt_enabled_of=None, opt_state_of=None, enabled_of=None,
              on_toggle=None, on_opt=None, on_stages=None,
@@ -328,6 +348,7 @@ def row_data(symbol: str, ds, strategy_names, cfg: dict = None,
                       "on_click": (lambda: on_align(symbol)) if on_align else None},
             "market": {"text": getattr(ds, "market_state_label", "") or "—",
                        "on_click": (lambda: on_market(symbol)) if on_market else None},
+            "sessions": _sessions_cell(ctx, on_sessions, symbol),
             "momentum": _momentum_cell(ctx, on_momentum, symbol),
             "cost": _cost_cell(ctx, on_cost, symbol),
             "volatility": _volatility_cell(ctx, on_volatility, symbol),

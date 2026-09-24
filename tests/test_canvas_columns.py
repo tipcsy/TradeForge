@@ -32,6 +32,8 @@ except Exception as e:
     print(f"KIHAGYVA: nincs hasznalhato tkinter ({type(e).__name__}: {e})")
 
 if TK_OK:
+    from core import gate_layout as _gl0
+    from core import gates as _g0
     from dashboard import canvas_columns as cc
     from dashboard import live_row as lr
     from dashboard import theme as _theme
@@ -45,18 +47,23 @@ if TK_OK:
     keys = cc.column_keys(STRATS, {})
     check("a fix oszlopok elol allnak, a megszokott sorrendben",
           keys[:4] == ["symbol", "bid", "ask", "change"], str(keys[:4]))
+    # ⚠ NEVSOR HELYETT SZABALY. Ez a sor a HAT akkori kaput sorolta fel: egy uj
+    # kapu (barmely `.tfg`) attol buktatta, hogy letezik. Amit orizni akarunk,
+    # az az ALLITAS: a kapu-blokk a registry sorrendjeben all, es a K.Ossz.
+    # UTANA jon — nem az, hogy epp hany kapu van.
+    _kapuk = [_gl0.column_key(k) for k in _g0.KEYS]
     check("a kapu-blokk a REGISTRY sorrendjeben, majd K.Ossz.",
-          keys[4:11] == ["spread", "align", "market", "momentum", "cost",
-                         "volatility", "badge"],
-          str(keys[4:11]))
+          keys[4:4 + len(_kapuk) + 1] == _kapuk + ["badge"],
+          str(keys[4:4 + len(_kapuk) + 1]))
     # ⚠ 2026-09-22: a „Min." (quality) es az „Opt" oszlop KIKERULT a
     # fokepernyorol (a felhasznalo kerese: ott csak ijeszto, es nem lehet vele
     # kezdeni semmit; a ket ertek a Parameterek ablakban latszik). A blokk
     # igy negy oszlop: jelzes · pozicio · napi P&L · vezerles.
+    _i0 = keys.index("badge") + 1          # a strategia-blokk a K.Ossz. utan
     check("a strategia-oszlopok kulcsa '<nev>|<mezo>' (a rendezes blokkra hat)",
-          keys[11:15] == ["wpr_sma|stages", "wpr_sma|position", "wpr_sma|daily",
-                          "wpr_sma|ctrl"],
-          str(keys[11:15]))
+          keys[_i0:_i0 + 4] == ["wpr_sma|stages", "wpr_sma|position",
+                                "wpr_sma|daily", "wpr_sma|ctrl"],
+          str(keys[_i0:_i0 + 4]))
     check("a „Min.” es az „Opt” oszlop NINCS a fokepernyon",
           not any(k.endswith("|quality") or k.endswith("|opt") for k in keys),
           str([k for k in keys if k.endswith(("|quality", "|opt"))]))
@@ -89,8 +96,7 @@ if TK_OK:
     check("ures lista -> csak a K.Ossz.",
           cc.column_keys(STRATS, {"gate_columns": []})[4] == "badge")
     check("hianyzo config -> MINDEN kapu, a REGISTRY sorrendjeben",
-          gl.enabled_columns(None) == ["spread", "align", "market", "momentum",
-                                       "cost", "volatility"],
+          gl.enabled_columns(None) == [gl.column_key(k) for k in _g0.KEYS],
           str(gl.enabled_columns(None)))
 
     # ── A SZELESSEGEK a meglevo live_row.widths()-bol jonnek ──────────────

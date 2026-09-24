@@ -40,9 +40,14 @@ check("...es semmi nincs kikapcsolva", gl.disabled_gates({}) == [])
 cfg = {"dashboard": {"gate_order": ["cost", "spread"]}}
 check("csak a listaban szereplok engedelyezettek",
       gl.enabled_gates(cfg) == ["cost", "spread"], str(gl.enabled_gates(cfg)))
+# ⚠ NEVSOR HELYETT SZABALY. Ez a sor eddig a NEGY akkori kaput sorolta fel —
+# egy uj kapu (barmely `.tfg`) attol BUKTATTA a tesztet, hogy letezik, pedig a
+# viselkedes valtozatlan volt. Amit orizni akarunk, az a ZARTSAG: ami nincs a
+# listaban, az kikapcsolt, es a ketto egyutt PONTOSAN a registry.
 check("a tobbi KIKAPCSOLT",
-      set(gl.disabled_gates(cfg)) == {g.TF_ALIGN, g.MARKET, g.MOMENTUM,
-                                      g.VOLATILITY},
+      set(gl.disabled_gates(cfg)) == set(g.KEYS) - set(gl.enabled_gates(cfg))
+      and set(gl.disabled_gates(cfg)) and not (set(gl.disabled_gates(cfg))
+                                               & set(gl.enabled_gates(cfg))),
       str(gl.disabled_gates(cfg)))
 check("a SORREND a listat koveti (nem a REGISTRY-t)",
       gl.enabled_gates(cfg)[0] == "cost")

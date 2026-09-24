@@ -67,6 +67,10 @@ _SAMPLE = {
     "market": ("small", "Sz.Bika"), "momentum": ("mono", "↑9.99"),
     "cost": ("mono", "99.9:1 +999%"),
     "volatility": ("mono", "9.99×↓"),
+    # ⚠ A BEHELYEZETT KAPUNAK IS KELL MINTA. Enélkül a `layout` a `_SAMPLE`-ben
+    # keresve KeyError-t dob — az oszlop megjelenik a listában, de a tábla
+    # felépítése elszáll. A leghosszabb felirat a „NYITÁS".
+    "sessions": ("small", "NYITÁS"),
     "badge": ("mono", "⛔9"),
     # ⚠ A minta a BETUT is tartalmazza („V"/„J" a pottyok elott): enelkul a
     # betu kilogna a cellabol, vagy raszorulna a pottyokre.
@@ -116,6 +120,7 @@ _HEADER_KEYS = {
     "change": "col.change", "align": "col.align", "market": "col.market",
     "momentum": "col.momentum", "cost": "col.cost",
     "volatility": "col.volatility", "badge": "col.badge",
+    "sessions": "col.sessions",
     "stages": "col.stages", "position": "col.position", "daily": "col.daily",
     "quality": "col.quality", "ctrl": "col.ctrl",
     "total_pos": "col.position", "total_daily": "col.daily",

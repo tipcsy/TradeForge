@@ -259,8 +259,14 @@ for _lang in ("hu", "en"):
 
 
 # ── 6. A KERET epsege a teszt UTAN ─────────────────────────────────────
+# ⚠ A BEEPITETTEKRE allitunk, nem a TELJES listara. A `KEYS` a behelyezett
+# (`.tfg`) kapukat is tartalmazza — egy uj kapu telepitese attol buktatta ezt a
+# sort, hogy letezik, pedig epp ez a keret igerete. Amit orizni kell: a teszt
+# NEM nyult a beepitettekhez (se torles, se sorrend-csere).
 check_("a beépített kapuk sértetlenek maradtak",
-       G.KEYS == ("spread", "tf_align", "market", "momentum", "cost", "volatility"),
+       tuple(e["key"] for e in G._BUILTIN)
+       == ("spread", "tf_align", "market", "momentum", "cost", "volatility")
+       and all(k in G.KEYS for k in (e["key"] for e in G._BUILTIN)),
        str(G.KEYS))
 
 print()

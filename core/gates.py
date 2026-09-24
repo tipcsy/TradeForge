@@ -203,13 +203,13 @@ class GateCtx:
 
     __slots__ = ("symbol", "strategy", "signal", "cfg", "pair_cfg", "params",
                  "ds", "hi_row", "spread_ok", "spread_points", "spread_cap",
-                 "closes", "bands", "sl_points", "tp_points", "sym_info")
+                 "closes", "bands", "sl_points", "tp_points", "sym_info", "now")
 
     def __init__(self, symbol="", strategy="", signal="NONE", cfg=None,
                  pair_cfg=None, params=None, ds=None, hi_row=None,
                  spread_ok=True, spread_points=0.0, spread_cap=0.0,
                  closes=None, bands=None, sl_points=None, tp_points=None,
-                 sym_info=None):
+                 sym_info=None, now=None):
         self.symbol = symbol
         self.strategy = strategy
         self.signal = signal
@@ -226,6 +226,12 @@ class GateCtx:
         self.sl_points = sl_points
         self.tp_points = tp_points
         self.sym_info = sym_info
+        # ⚠ AZ IDŐ IS VARRAT, mint a `closes`. A piaci-nyitás kapunak ez az
+        # EGYETLEN bemenete, és élesben a szerver órája, backtestben a GYERTYA
+        # ideje — ha a kapu magától olvasna faliórát, a backtest a mai napot
+        # mérné minden 2021-es gyertyára. SZERVER időt hordoz (a gyertya-fájlok
+        # is azt tárolják); a `gates.sessions.to_utc` váltja át.
+        self.now = now
 
     def has_band(self, key: str) -> bool:
         """Van-e SÁV-létra erre a kapura? (Ha nincs, a szintet ki sem számoljuk.)"""
@@ -829,6 +835,37 @@ _EVAL = {SPREAD: _eval_spread, TF_ALIGN: _eval_tf_align, MARKET: _eval_market,
          VOLATILITY: _eval_volatility}
 
 
+def _eval_plugged(key: str):
+    """A KIJELZÉS-állapot egy BEHELYEZETT (nem beépített) kapuhoz.
+
+    ⚠ EZ EGY VALÓDI LYUK VOLT A BEHELYEZHETŐSÉGBEN. Az `_EVAL` kézzel írt
+    szótár, a hat beépített kapu kulcsaival — egy `.tfg`-ből jövő kapu nem volt
+    benne, és az `_EVAL[key]` `KeyError`-ral ÖSSZEDÖNTÖTTE a sor felépítését.
+    Nem a kapu maradt ki némán: az EGÉSZ live tábla állt meg. Pontosan az a
+    fajta hiány, amit a `gate_bands.kind_of`-nál már egyszer befoltoztunk (ott a
+    sáv-fajta hiányzott) — a keret két helyen is a beépítettek listájából
+    indult ki, ahelyett hogy a kapu MODULJÁT kérdezte volna meg.
+
+    A sorrend: a kapu saját `evaluate(ctx)`-e (ha van — ez tud emberi mondatot
+    adni), különben a szerződés szerinti `measure(ctx)`-ből vezetjük le. Mindkét
+    ág FAIL-OPEN: hiba esetén `UNKNOWN`, nem blokkolás."""
+    def _fn(ctx: dict):
+        mod = gate_module(key)
+        fn = getattr(mod, "evaluate", None) if mod is not None else None
+        if callable(fn):
+            try:
+                out = fn(ctx or {})
+                return out[0], out[1]
+            except Exception:
+                log.debug("a(z) %r kapu kijelzése elszállt", key, exc_info=True)
+                return UNKNOWN, _t("gate.why.not_enough")
+        bukott, szint = measure(key, ctx or {})
+        if szint is None:
+            return UNKNOWN, _t("gate.why.not_enough")
+        return (BLOCKING if bukott else PASS), str(szint)
+    return _fn
+
+
 def evaluate(ctx: dict, effects: dict = None) -> list:
     """Minden regisztrált kapu állapota, a REGISTRY sorrendjében.
 
@@ -847,7 +884,8 @@ def evaluate(ctx: dict, effects: dict = None) -> list:
                         "state": OFF,
                         "detail": _t("gate.why.off_for_strategy")})
             continue
-        state, detail = _EVAL[key](ctx or {})
+        _fn = _EVAL.get(key) or _eval_plugged(key)
+        state, detail = _fn(ctx or {})
         out.append({"key": key, "label": label_of(key), "effect": eff,
                     "state": state, "detail": detail})
     return out
@@ -1019,6 +1057,15 @@ def ctx_from_state(ds, params: dict, pair_cfg: dict) -> dict:
         "plan_sl_points": getattr(ds, "plan_sl_points", None),
         "plan_tp_points": getattr(ds, "plan_tp_points", None),
         "cost_max_distortion": cost_max_distortion(pair_cfg),
+        # ⚠ A BEHELYEZETT kapuk NYERS bemenete. A beépítettek mezőit ez a
+        # függvény nevesíti; egy `.tfg`-ből jövő kapu viszont nem írhatja át —
+        # ezért a pár configja és a kijelzés-úton MÁR KIMÉRT állapotok is
+        # átjönnek, és a kapu a sajátját szedi ki belőle. Így a sor és a motor
+        # ugyanazt a számot látja (a `sessions` állapotát a `dashboard/gui`
+        # méri, az utolsó zárt M15 gyertya idejéből).
+        "pair_cfg": pair_cfg or {},
+        "sessions_state": getattr(ds, "sessions_state", None),
+        "sessions_market": getattr(ds, "sessions_market", None),
     }
 
 

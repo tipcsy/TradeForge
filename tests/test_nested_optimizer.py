@@ -126,6 +126,27 @@ BASE = {"sma_period": 200, "wpr_m15_period": 21, "wpr_m1_period": 21,
         "atr_avg_ref": 10.0, "atr_baseline_bars": 0}
 
 
+# ⚠ A VEGPONTTOL-VEGPONTIG FUTAS SAJAT TARTOMANYOKBOL DOLGOZIK, nem a felhasznalo
+# elo hangolasi tartomanyaibol. A teszt eddig a `strategies/config/wpr_sma.json`
+# `optimizer` szekciojat hasznalta a futtatashoz is — es amint a felhasznalo
+# atallitotta a sajat tartomanyait (2026-09-24: sma 50..300 -> 10..60 stb.), a
+# szintetikus adaton egyetlen trial sem talalt kotest, a futas `None`-t adott, es
+# a teszt UGY bukott, mintha a beagyazott ag romlott volna el. A FELOSZTAST es a
+# kenyszereket tovabbra is az ELO configon merjuk (fent) — az a lenyeg ott; a
+# FUTAS viszont a `BASE` ertekek kore epitett, szuk racsbol megy, ami a teszt
+# sajatja, es nem valtozik a hangolassal.
+def _mini(v):
+    """Ket ertekes tartomany a `BASE` ertek korul (a racs igy 2^n helyett kicsi)."""
+    if isinstance(v, float):
+        return {"min": v, "max": v + 0.5, "step": 0.5}
+    return {"min": int(v), "max": int(v) + 1, "step": 1}
+
+
+RUN_OCFG = {k: v for k, v in OCFG.items()
+            if not (isinstance(v, dict) and "min" in v)}
+RUN_OCFG.update({k: _mini(BASE[k]) for k in (SIG + EXE) if k in BASE})
+
+
 def _wipe(f):
     """A fajl torlese, a Windows-fajlzart kivarva.
 
@@ -154,7 +175,7 @@ def _run(nested, seed_reset=True):
             if f.is_file():
                 _wipe(f)
     return opt.optimize_pair_optuna(
-        "TEST", M15, M1, OCFG, BASE, PAIR, TRADING, 10000.0, ST,
+        "TEST", M15, M1, RUN_OCFG, BASE, PAIR, TRADING, 10000.0, ST,
         n_trials=4, n_splits=2, train_months=6, test_months=2, nested=nested)
 
 

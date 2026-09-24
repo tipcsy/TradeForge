@@ -230,11 +230,19 @@ check("minden kapunak van MODULJA", all(G.gate_module(k) is not None for k in G.
       str([k for k in G.KEYS if G.gate_module(k) is None]))
 check("...és mindegyiknek `measure(ctx)`-e",
       all(callable(getattr(G.gate_module(k), "measure", None)) for k in G.KEYS))
+# ⚠ SZABALY, NEM NEVSOR. A hat beepitett kapu fazisa rogzitett (a KOLTSEG az
+# egyetlen terv-fazisu: a mérőszámához a strategia mar megtervezett stopja
+# kell). A behelyezett kapuk viszont barmelyik fazist valaszthatjak — a listas
+# forma attol buktatta ezt, hogy valaki telepitett egy uj kaput.
+_sig, _plan = G.keys_in_phase(G.PHASE_SIGNAL), G.keys_in_phase(G.PHASE_PLAN)
+_beep = [e["key"] for e in G._BUILTIN]
 check("a FÁZISOK a valóságot tükrözik",
-      G.keys_in_phase(G.PHASE_SIGNAL) == ("spread", "tf_align", "market",
-                                          "momentum", "volatility")
-      and G.keys_in_phase(G.PHASE_PLAN) == ("cost",),
-      f"{G.keys_in_phase(G.PHASE_SIGNAL)} | {G.keys_in_phase(G.PHASE_PLAN)}")
+      tuple(k for k in _sig if k in _beep) == ("spread", "tf_align", "market",
+                                               "momentum", "volatility")
+      and tuple(k for k in _plan if k in _beep) == ("cost",)
+      and set(_sig) | set(_plan) == set(G.KEYS)
+      and not (set(_sig) & set(_plan)),
+      f"{_sig} | {_plan}")
 
 # ⚠ A MOTOR NE MERJEN TOBBE KAPUNKENT. Ez a regresszio-or: a kezi blokkok
 # konnyen visszakerulnek egy kesobbi szerkesztessel, es akkor a `.tfg`-vel

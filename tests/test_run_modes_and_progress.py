@@ -133,11 +133,20 @@ def _func_src(src: str, header: str) -> str:
 
 
 def _run(mode, n_ticked):
-    d._run_mode.set(mode)
-    d._on_run_mode()
+    # ⚠ AMIT A FELHASZNÁLÓ TESZ: fület kattint (`_show_run_tab`) — ez állítja a
+    # módot ÉS cseréli a lapot. A `_run_mode.set()` önmagában csak a változót
+    # írta át, a LAP a régi maradt: a teszt olyan állapotot mért, ami a
+    # felületen nem áll elő (a mód „optimalizálás", a látható lap „backtest").
+    d._show_run_tab(mode)
     for k in KEYS:
         d._skip_vars[k].set(k in KEYS[:n_ticked])
-    d._refresh_run_mode_ui()          # ezt hívja a pipa parancsa is
+    # ⚠ AMIT A PIPA PARANCSA TÉNYLEGESEN HÍV (`_on_skip_change`): MINDKETTŐT.
+    # A harness eddig csak a másodikat hívta, és ezzel egy VALÓDI hibát fedett
+    # el: a `_refresh_opt_space` az, ami a Hangolás fül tiltását/visszaadását
+    # eldönti. Nélküle a teszt olyan sorrendben mérte a felületet, ami a
+    # kezelőfelületen nem áll elő.
+    d._refresh_opt_space()
+    d._refresh_run_mode_ui()
     CALLS.clear()
     d._start_planned()
     return list(CALLS)
@@ -171,39 +180,76 @@ for _n in (0, 1, 3):
 # ── 3. A NÉMA FELÜLÍRÁS VÉGE ────────────────────────────────────────────
 # ⚠ EZ A LELET GYÓGYSZERE. A mód figyelmen kívül hagyhatja a pipákat — de nem
 # csendben.
-_run(M.RUN_BACKTEST, 3)
-_txt = d._mode_lbl.cget("text")
-check("Backtest + pipák → KIMONDJA, hogy a pipák nem számítanak",
-      "nem számít" in _txt and "3" in _txt, _txt[:80])
-_run(M.RUN_BACKTEST, 0)
-check("...pipa nélkül viszont nincs mit mondani", d._mode_lbl.cget("text") == "",
-      d._mode_lbl.cget("text"))
-_run(M.RUN_OPTIMIZE, 1)
-check("Optimalizálás → kimondja, hogy a TELJES tér megy",
-      "teljes tér" in d._mode_lbl.cget("text"), d._mode_lbl.cget("text")[:80])
+#
+# ⚠ A HORDOZÓ MEGVÁLTOZOTT (v3.96.0): a három mód FÜL lett, és a mód-konfliktus
+# felirata (`_mode_lbl`) megszűnt — fülekkel nincs mit feloldani, mert a Backtest
+# lap nem ígér pipát. Ez a szakasz ezért a MAI szerződést méri:
+#   * ha nincs bepipált paraméter, a Hangolás fül LETILTVA, és a felirata
+#     MEGMONDJA, miért (a régi választó feliratában is ott volt az ok);
+#   * a futás ilyenkor egyetlen backtest — a `_effective_mode` intézi;
+#   * ÉS a felhasználó mód-választása NEM VESZIK EL: a pipák pillanatnyi
+#     kiszedése nem mentheti át a Backtest módot (ez volt a hiba).
 _run(M.RUN_PLANNED, 0)
-check("Hangolás pipa nélkül → megmondja, hogy így ez backtest",
-      "Nincs pipa" in d._mode_lbl.cget("text"), d._mode_lbl.cget("text")[:80])
+check("Hangolás pipa nélkül → egyetlen backtest fut",
+      d._effective_mode() == M.RUN_BACKTEST, d._effective_mode())
+check("...a Hangolás fül LETILTVA",
+      str(d._rb_planned.cget("state")) == "disabled")
+check("...és a felirata MEGMONDJA, miért",
+      "nincs bepipált" in str(d._rb_planned.cget("text")),
+      str(d._rb_planned.cget("text")))
+# ⚠ NEM a `_load_run_mode()`-ot kérdezzük: a mód-mentés SZÁNDÉKOSAN stubolt
+# (egy teszt soha ne írja a felhasználó `backtest_prefs.json`-ját), tehát az a
+# felhasználó VALÓDI fájljából olvasna — bármit mondhatna. Amit mérni kell: a
+# pipák kiszedése NEM MENT Backtest módot. Ez volt a hiba.
+_saved, _save_orig = [], d._save_run_mode
+d._save_run_mode = lambda v: _saved.append(v)
+_run(M.RUN_PLANNED, 0)
+check("...de a választás NEM tűnik el (nem ment Backtest módot)",
+      M.RUN_BACKTEST not in _saved, str(_saved))
+d._save_run_mode = _save_orig
+check("...és egy pipa visszatétele UTÁN újra hangol (nem ragad Backtesten)",
+      _run(M.RUN_PLANNED, 1) == ["sweep"], str(_run(M.RUN_PLANNED, 1)))
+check("...a fül felirata is visszaáll",
+      "nincs bepipált" not in str(d._rb_planned.cget("text")),
+      str(d._rb_planned.cget("text")))
 
-# A pipa átállítása FRISSÍTI a figyelmeztetést (nem csak a mód-váltás).
+# A pipa átállítása FRISSÍTI a felületet (nem csak a mód-váltás) — ÉS a
+# fül-tiltást eldöntő `_refresh_opt_space`-t is hívja.
 _src = (ROOT / "dashboard" / "instrument_dialog.py").read_text(encoding="utf-8")
-check("a pipa parancsa is frissíti a figyelmeztetést",
+check("a pipa parancsa frissíti a mód-felületet",
       "_refresh_run_mode_ui()" in _func_src(_src, "def _on_skip_change"))
+check("...és a hangolási teret is (ez tiltja/engedi a Hangolás fület)",
+      "_refresh_opt_space()" in _func_src(_src, "def _on_skip_change"))
 
 
 # ── 4. A FELTÉTELEK csak OPTIMALIZÁLÁS módban ──────────────────────────
 # ⚠ A kérés: a magyarázó szöveg „csak ekkor" jelenjen meg. Backtest módban egy
 # walk-forward magyarázat félrevezető: ott nincs tanuló/vizsga ablak.
+# ⚠ A HORDOZÓ ITT IS MEGVÁLTOZOTT (v3.96.0). Korábban a feltétel-blokkot
+# mód-váltáskor `pack`/`pack_forget` mozgatta, ezért a `winfo_manager()` mérte,
+# hogy látszik-e. FÜLEKKEL a blokk az Optimalizálás LAPJÁN lakik, és a LAP
+# jelenik meg vagy nem: a blokk `winfo_manager()`-e ilyenkor mindig igaz. Amit
+# mérni kell: a feltételek AZON a lapon vannak, ami csak ebben a módban látszik
+# — így az ígéret ugyanaz, csak a mechanizmusa más.
 if d._cond_box is not None:
+    def _lapon(w, page):
+        while w is not None:
+            if w is page:
+                return True
+            w = w.master
+        return False
+    _opt_page = d._tab_pages[M.RUN_OPTIMIZE]
+    check("a feltételek az OPTIMALIZÁLÁS lapján vannak",
+          _lapon(d._cond_box, _opt_page))
     _run(M.RUN_OPTIMIZE, 1)
-    check("Optimalizálás → a feltételek LÁTSZANAK",
-          bool(d._cond_box.winfo_manager()))
+    check("Optimalizálás → az a lap LÁTSZIK (tehát a feltételek is)",
+          bool(_opt_page.winfo_manager()))
     _run(M.RUN_BACKTEST, 1)
-    check("Backtest → a feltételek ELTŰNNEK",
-          not d._cond_box.winfo_manager())
+    check("Backtest → a lap ELTŰNIK (a feltételek sem látszanak)",
+          not _opt_page.winfo_manager())
     _run(M.RUN_PLANNED, 1)
     check("Hangolás → szintén nem látszanak",
-          not d._cond_box.winfo_manager())
+          not _opt_page.winfo_manager())
 else:
     check("nincs walk-forward terv (a feltétel-mérés kihagyva)", True)
 
@@ -220,9 +266,17 @@ d.popup.update_idletasks()
 check("haladásra megjelenik", bool(d._prog_box.winfo_manager()))
 check("...a helyes értékkel", abs(float(d._prog.cget("value")) - 42.0) < 0.01,
       str(d._prog.cget("value")))
+# ⚠ NEM PIXELT MÉRÜNK, ÉS EZ SZÁNDÉKOS. Az állapotsor csak akkor látszik, ha
+# van mit mondania (v3.x), a lapok közül pedig egyszerre egy van kitéve —
+# vagyis a mérés pillanatában EGYIK sincs feltétlenül a képernyőn, és egy ki
+# nem tett widget `winfo_y()`-ja 0. A régi sor ezért 0-hoz mért, és bármilyen
+# elrendezést „igaznak" talált volna. Amit ténylegesen őrizni kell: a
+# haladás-sáv a FORRÁSBAN is a gomb alatt, az állapotsor ELŐTT épül — ez a
+# „közvetlen az indítás gomb alatt" kérés szerkezete.
 check("...és a gomb ALATT (nem a szakasz végén)",
-      d._prog_box.winfo_y() < d._run_status.winfo_y(),
-      f"sáv y={d._prog_box.winfo_y()} status y={d._run_status.winfo_y()}")
+      _src.index("self._prog_box = tk.Frame") < _src.index("self._run_status = "),
+      f"prog@{_src.index('self._prog_box = tk.Frame')} "
+      f"status@{_src.index('self._run_status = ')}")
 # ⚠ Ismeretlen haladásnál HATÁROZATLAN sáv — nem hazudunk 0%-ot egy dolgozó
 # futásra (az optimalizálás első trialja előtt nincs mit százalékolni).
 d._prog_show(None, "előkészítés…")

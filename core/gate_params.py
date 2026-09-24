@@ -153,9 +153,40 @@ for _gate_key, _gate_specs in _SPECS.items():
     for _spec in _gate_specs:
         _spec.gate = _gate_key
 
+_PLUG_CACHE = {}
+
+
+def _specs_from_module(key: str) -> tuple:
+    """Egy BEHELYEZETT kapu mezői — a kapu SAJÁT `PARAMS` listájából.
+
+    ⚠ A `_SPECS` a hat beépített kapu kézzel írt táblája. Egy `.tfg`-ből jövő
+    kapu nem tud beleírni, tehát a beállító ablak „Beállítások" szakasza ÜRES
+    maradt neki: a kapu megjelent, mért, színezett — és egyetlen számát sem
+    lehetett állítani a felületről. Ugyanaz a hiány, mint az `_EVAL`-nál és a
+    `kind_of`-nál: a keret a beépítettek listájából indult ki.
+
+    A kapu OLDALÁN ez sima adat (dictek), nem `ParamSpec` — szándékosan: így a
+    kapu-modul nem importálja a keretet, és egy darabban marad csomagolható."""
+    if key in _PLUG_CACHE:
+        return _PLUG_CACHE[key]
+    out = []
+    try:
+        mod = _g.gate_module(key)
+        for d in (getattr(mod, "PARAMS", None) or ()):
+            sp = ParamSpec(d["key"], d["kind"], d.get("default"),
+                           choices=d.get("choices"), lo=d.get("lo"),
+                           hi=d.get("hi"))
+            sp.gate = key
+            out.append(sp)
+    except Exception:
+        out = []
+    _PLUG_CACHE[key] = tuple(out)
+    return _PLUG_CACHE[key]
+
+
 def specs_for(key: str) -> tuple:
     """Egy kapu szerkeszthető paraméterei (üres, ha a kapunak nincs saját száma)."""
-    return _SPECS.get(key, ())
+    return _SPECS.get(key) or _specs_from_module(key)
 
 
 def choices_of(spec: ParamSpec) -> list:

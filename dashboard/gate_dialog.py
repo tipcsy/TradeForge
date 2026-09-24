@@ -170,6 +170,27 @@ _STORE = {
 }
 
 
+def _plug_store(key: str):
+    """Egy BEHELYEZETT kapu beállításainak tárolója: `pairs.<SYM>.<kulcs>`.
+
+    ⚠ UGYANAZ A HELY, AHONNAN A KAPU OLVAS. A `.tfg`-kapuk a saját
+    `params_of()`-jukban a `pairs.<SYM>.<kulcs>` → `<kulcs>` láncot nézik; ha a
+    felület máshova mentene, a beállítás elmentődne és NEM HATNA — a
+    leglassabban észrevehető hibafajta. A `register_store` továbbra is él: egy
+    kapu felülírhatja ezt, ha máshol tartja a számait."""
+    def _load(cfg, symbol):
+        pc = ((cfg or {}).get("pairs") or {}).get(symbol) or {}
+        out = dict((cfg or {}).get(key) or {})
+        out.update(pc.get(key) or {})
+        return out
+
+    def _save(cfg, symbol, values, all_symbols):
+        for sym in (all_symbols or [symbol]):
+            pc = cfg.setdefault("pairs", {}).setdefault(sym, {})
+            pc.setdefault(key, {}).update(values or {})
+    return _load, _save
+
+
 def register_store(key: str, load, save):
     """Új kapu bekötése (a `core/gates.REGISTRY` bővítése mellé). A `save` a
     `(cfg, symbol, values, all_symbols)` négyest kapja — az „összes
@@ -291,7 +312,7 @@ class GateDialog:
         specs = _gp.specs_for(self.key)
         if not specs:
             return
-        load, _save = _STORE.get(self.key, (None, None))
+        load, _save = _STORE.get(self.key) or _plug_store(self.key)
         cur = load(self.cfg, self.symbol) if load else {}
         box = _section(self._page, _t("gate.section.settings"))
         for spec in specs:
@@ -473,8 +494,15 @@ class GateDialog:
         tk.Label(row, text=_t(lbl), bg=BG, fg=FG_GRAY, font=self._f["small"],
                  anchor="w", width=22).pack(side="left")
         if kind == _gb.CATEGORY:
+            # ⚠ A SAJAT kapu kategoriai. Ez a sor a PIAC-kapu listajat kerte
+            # el — barmelyik masik kategoria-kapu (pl. a piaci nyitasok) a
+            # piac-cimkeket kapta volna a sajatjai helyett, es a mentett sav
+            # SOHA nem illeszkedett volna semmire.
             cats = [c for c, _l in _gp.choices_of(
-                next(sp for sp in _gp.specs_for(_g.MARKET) if sp.key == "adverse"))]
+                next((sp for sp in _gp.specs_for(self.key)
+                      if sp.key == "adverse"),
+                     next(sp for sp in _gp.specs_for(_g.MARKET)
+                          if sp.key == "adverse")))]
             cv = tk.StringVar(value=str(value) if value is not None
                               else (cats[0] if cats else ""))
             w = tk.OptionMenu(row, cv, *(cats or [""]))
@@ -538,6 +566,7 @@ class GateDialog:
     # ── Lábléc: „összes instrumentumra” + gombok ─────────────────────────
     def _build_footer(self):
         self._all_var = tk.BooleanVar(value=False)
+        self._global_var = tk.BooleanVar(value=False)
         _foot = tk.Frame(self.top, bg=BG)
         _foot.pack(side="bottom", fill="x")
         tk.Checkbutton(_foot,
@@ -546,6 +575,23 @@ class GateDialog:
                        selectcolor=BG_HEADER, font=self._f["small"],
                        activebackground=BG, activeforeground=FG_WHITE).pack(
                        anchor="w", padx=12, pady=(12, 0))
+        # ⚠ A LÁNC TETEJE. A felület eddig CSAK a `pairs.<SYM>.gates.…` szintre
+        # tudott írni: az „összes instrumentumra" is páronként fejtette ki az
+        # értéket. A `gates.<kapu>.…` GLOBÁLIS szint — ahonnan az öröklés
+        # indul — nem volt sehonnan állítható, tehát az „örökölt — globális
+        # alapérték" állapot csak a KÓDBÓL jöhetett. A felhasználó leletje:
+        # „pont az első állapot (a forrás!) az, ami nincs kivezetve".
+        tk.Checkbutton(_foot,
+                       text=_t("gate.global_default"),
+                       variable=self._global_var, bg=BG, fg=FG_WHITE,
+                       selectcolor=BG_HEADER, font=self._f["small"],
+                       activebackground=BG, activeforeground=FG_WHITE,
+                       command=self._on_global_toggle).pack(
+                       anchor="w", padx=12, pady=(2, 0))
+        self._global_note = tk.Label(
+            _foot, text="", bg=BG, fg=FG_GRAY, font=self._f["small"],
+            anchor="w", justify="left", wraplength=460)
+        self._global_note.pack(anchor="w", padx=28, pady=(0, 0))
         self.lbl_err = tk.Label(_foot, text="", bg=BG, fg=FG_RED,
                                 font=self._f["small"], anchor="w",
                                 justify="left", wraplength=460)
@@ -590,7 +636,7 @@ class GateDialog:
             return
         targets = self._all_symbols if self._all_var.get() else [self.symbol]
         try:
-            _load, save = _STORE.get(self.key, (None, None))
+            _load, save = _STORE.get(self.key) or _plug_store(self.key)
             if save:
                 save(self.cfg, self.symbol, values, targets)
             self._save_effects(targets)
@@ -602,6 +648,23 @@ class GateDialog:
             self.on_saved()
         self.top.destroy()
 
+    def _on_global_toggle(self):
+        """A két kapcsoló KIZÁRJA egymást, és a különbséget ki is mondjuk.
+
+        „Az összes instrumentumra" páronként beírja ugyanazt az értéket — az
+        onnantól PÁR-szintű felülírás, ami elnyomja a globálisat. A „globális
+        alapérték" ezzel szemben a lánc tetejét állítja: ott marad, amíg valaki
+        párra nem állít mást. A kettő nem ugyanaz, és eddig csak az első
+        létezett."""
+        g = bool(self._global_var.get())
+        if g:
+            self._all_var.set(False)
+        try:
+            self._global_note.config(
+                text=(_t("gate.global_default_note") if g else ""))
+        except tk.TclError:
+            pass
+
     def _save_effects(self, targets: list):
         """A per-stratégia hatás a `pairs.<SYM>.gates.<kapu>.<stratégia>`-ba megy —
         ugyanaz a hely, amit az instrumentum-ablak is ír, tehát a két felület
@@ -611,8 +674,12 @@ class GateDialog:
         kitakarítja az üresen maradt szótárakat), nem pedig beírja az örökölt
         értéket: a config csak az ELTÉRÉST rögzítse."""
         by_label = {lb: e for e, lb in _g.EFFECT_LABEL.items()}
-        for sym in targets:
-            pc = self.cfg.setdefault("pairs", {}).setdefault(sym, {})
+        # ⚠ A GLOBÁLIS szint NEM egy pár: a `gates.<kapu>.<stratégia>` a lánc
+        # teteje. Ezért nem a `targets`-en megyünk végig, hanem EGY gazdán.
+        _gazdak = ([self.cfg] if self._global_var.get()
+                   else [self.cfg.setdefault("pairs", {}).setdefault(sym, {})
+                         for sym in targets])
+        for pc in _gazdak:
             for name, sv in self._eff_vars.items():
                 txt = sv.get()
                 gates = pc.setdefault("gates", {})
@@ -636,7 +703,9 @@ class GateDialog:
                         gg[name] = {"effect": eff, "mode": mode}
                 if not gg:
                     gates.pop(self.key, None)
-                if not gates:
+                # ⚠ A GLOBÁLIS gazda a `cfg` MAGA — abból nem törölhetjük a
+                # `gates` kulcsot, mert ott a többi kapu beállítása is lakik.
+                if not gates and pc is not self.cfg:
                     pc.pop("gates", None)
 
 

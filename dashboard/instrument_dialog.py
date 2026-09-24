@@ -3127,9 +3127,26 @@ class InstrumentParamsDialog:
                 _has = bool(rp["tuned"])
                 _rb = getattr(self, "_rb_planned", None)
                 if _rb is not None:
-                    _rb.config(state=("normal" if _has else "disabled"))
+                    # ⚠ A TILTÁS MONDJA MEG, MIÉRT. A korábbi választó
+                    # feliratában ott volt az ok („nincs bepipált paraméter");
+                    # a fülekre áttéréskor (v3.96.0) ez elveszett, és egy
+                    # szürke gomb maradt, ami nem magyaráz semmit.
+                    _rb.config(state=("normal" if _has else "disabled"),
+                               text=(_t("idlg3.hangolas") if _has
+                                     else _t("idlg3.hangolas_tiltva")))
                 if not _has and self._run_mode.get() == self.RUN_PLANNED:
-                    self._show_run_tab(self.RUN_BACKTEST)
+                    # ⚠ A VÁLASZTÁS NEM VESZHET EL. Ez eddig `save=True`-val
+                    # ment: a pipák pillanatnyi kiszedése MENTETTE a Backtest
+                    # módot, és a pipa visszatétele után is ott maradt — a
+                    # felhasználó „Hangolás" választása némán eltűnt. A LAPOT
+                    # váltjuk (a Hangolás lap üres ígéret volna), a MENTETT
+                    # módot nem; a futás amúgy is a `_effective_mode`-ból megy.
+                    self._pref_planned = True
+                    self._show_run_tab(self.RUN_BACKTEST, save=False)
+                elif (_has and getattr(self, "_pref_planned", False)
+                        and self._run_mode.get() == self.RUN_BACKTEST):
+                    self._pref_planned = False
+                    self._show_run_tab(self.RUN_PLANNED, save=False)
             except (tk.TclError, AttributeError):
                 pass
         except (tk.TclError, AttributeError):

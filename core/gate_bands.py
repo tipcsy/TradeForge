@@ -77,8 +77,21 @@ MAX_COUNT = 8             # ennyi idősíkot figyelhet a TF-kapu (a spec 2..6)
 
 
 def kind_of(key: str) -> str:
-    """Milyen fajta mérőszáma van ennek a kapunak? (`""` ismeretlen kapura.)"""
-    return KIND.get(key, "")
+    """Milyen fajta mérőszáma van ennek a kapunak? (`""` ismeretlen kapura.)
+
+    ⚠ A BEHELYEZETT KAPU MAGA MONDJA MEG. A `KIND` tábla a keret által előre
+    ismert kapukat sorolja fel; egy `gates/` alá telepített (vagy `.tfg`-ből
+    kicsomagolt) kapu nincs benne, és üres fajtával a SÁV-mechanizmus némán
+    kimaradna — vagyis az állapotonkénti hatás beállíthatatlan volna. Ezért a
+    modul `GATE["kind"]` mezőjére esünk vissza."""
+    k = KIND.get(key)
+    if k:
+        return k
+    try:
+        mod = _g.gate_module(key)
+        return str((getattr(mod, "GATE", None) or {}).get("kind") or "")
+    except Exception:
+        return ""
 
 
 # ---------------------------------------------------------------------------

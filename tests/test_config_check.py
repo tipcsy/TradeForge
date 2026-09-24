@@ -368,8 +368,20 @@ real_codes = {f["code"] for f in cc.check(real)}
 check_("az eles configon lefut", isinstance(cc.check(real), list))
 # A P2-kor UTAN: az inert Piac-kapu kikerult, a hazirend beallt. Ami maradt, az a
 # ket TUDOTT, felhasznaloi dontesre varo tetel (Euro50 koltsegek + a holt pct).
-check_("az UsaInd inert Piac-kapuja MEGSZUNT (P2 #1 lezarva)",
-       "market_gate_no_classifier" not in real_codes, str(sorted(real_codes)))
+# ⚠ EZ A SOR KORABBAN AZT ALLITOTTA, hogy a `market_gate_no_classifier` lelet
+# NINCS az eles configon (a P2 #1 takaritas utan igy is volt). Csakhogy ez egy
+# PILLANATKEP egy fajlrol, amit a felhasznalo barmikor atir — es at is irt: a
+# GOLD-on `block`, az EURGBP-n `reduce` a Piac-kapu, osztalyozo nelkul. A lelet
+# tehat IGAZ es HASZNOS, nem regresszio. Amit allitani ertelmes: a modul az eles
+# configon is csak ISMERT kodokat ad (nem keletkezett uj, ertelmezhetetlen
+# lelet-fajta), es nem szall el. A detektalast a fenti SZINTETIKUS esetek
+# oriznek (66–93. sor), amik nem fuggenek a user beallitasaitol.
+_ismert = {"build_target_idle", "daily_limit_pct_dead", "market_gate_no_classifier",
+           "missing_costs", "optimizer_skip", "signal_mode_invisible",
+           "stale_strategy_key", "untuned_pair", "independent_multi_strategy",
+           "tp_preset_mismatch", "symbol_policy"}
+check_("az eles config leletei mind ISMERT kodok",
+       not (real_codes - _ismert), str(sorted(real_codes - _ismert)))
 check_("a hazirend beallt -> nincs 'independent' lelet (P2 #3 lezarva)",
        "independent_multi_strategy" not in real_codes, str(sorted(real_codes)))
 # ⚠ A `stale_strategy_key` NEM hiba, es NEM allitunk a hianyara. A modul

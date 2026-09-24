@@ -2953,7 +2953,11 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
         hi_row=hi_row, spread_ok=spread_ok,
         spread_points=current_spread_points, spread_cap=_cap_pips,
         closes=lambda tfs, n: mt5_connector.tf_closes(symbol, tfs, n),
-        bands=_gate_bands)
+        bands=_gate_bands,
+        # A SZERVER órája (a gyertya-idők is ebben vannak) — a piaci-nyitás
+        # kapunak ez a bemenete.
+        now=(hi_row.name if hi_row is not None and getattr(hi_row, "name", None)
+             is not None else None))
     for _gk in _gates.keys_in_phase(_gates.PHASE_SIGNAL):
         if not _gates.active(_gate_eff, _gk):
             _gate_failed[_gk] = False

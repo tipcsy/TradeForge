@@ -518,8 +518,49 @@ def _check_build_target_idle(cfg: dict, out: list) -> None:
                    pct=_pct), symbol=sym))
 
 
+def _check_plugged_gate_backtest_blind(cfg: dict, out: list) -> None:
+    """BEHELYEZETT kapu BLOKKOLÓRA állítva — a backteszt viszont nem ismeri.
+
+    ⚠ A LELET (2026-09-24). Az ÉLŐ motor v3.29 óta a `REGISTRY`-t járja végig, és
+    minden kapu SAJÁT `measure(ctx)`-ét hívja — egy `.tfg`-ből telepített kapu
+    tehát élesben tényleg szűr. A BACKTESZT viszont máig kézzel, egyesével
+    importálja a hat beépített kaput (`from gates import spread_gate …`), vagyis
+    egy behelyezett kapuról NEM TUD.
+
+    A következmény a projekt legdrágább hibafajtája: NÉMA ELTÉRÉS az él és a
+    mérés között. A backteszt megkötne olyan jeleket, amiket élesben a kapu
+    kiszűr — és a különbség sehol nem látszana, csak az eredmények nem
+    stimmelnének. Ugyanaz a szerkezet, mint az optimalizáló↔él kapu-eltérésnél.
+
+    Amíg a backteszt is a `REGISTRY`-t járja, ez a lelet SZÓL. Nem tilt: egy
+    csak-mutató (`none`) kapu teljesen rendben van — épp ezért indul minden
+    behelyezett kapu `none`-nal."""
+    from core import gates as _g
+    from strategy import enabled_strategy_names
+
+    _beepitett = {e["key"] for e in _g._BUILTIN}
+    _plug = [k for k in _g.KEYS if k not in _beepitett]
+    if not _plug:
+        return
+    for sym, pc in (cfg.get("pairs") or {}).items():
+        if not isinstance(pc, dict):
+            continue
+        for sname in enabled_strategy_names(cfg, sym) or []:
+            eff = _g.effects_for(cfg, sym, sname)
+            for k in _plug:
+                if not _g.active(eff, k):
+                    continue
+                out.append(_finding(
+                    WARN, "plugged_gate_backtest_blind",
+                    _t("cfgchk.plugged_gate_backtest_blind", sym=sym,
+                       sname=sname, gate=_g.label_of(k),
+                       effect=_g.effect_for(cfg, sym, sname, k)),
+                    sym))
+
+
 _CHECKS = (
     _check_gate_preconditions,
+    _check_plugged_gate_backtest_blind,
     _check_stale_strategy_keys,
     _check_costs,
     _check_sizing,

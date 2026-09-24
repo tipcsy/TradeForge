@@ -6496,6 +6496,19 @@ class DashboardWindow:
                         ds.market_state_label, ds.market_state_color = _ms.display(_cat)
             except Exception:
                 pass
+        # PIACI NYITÁSOK → a „Piacok" oszlop. A kapu TISZTA modul (nincs benne
+        # óra), ezért az időt innen kapja: az utolsó zárt M15 gyertya ideje —
+        # ugyanaz, amit a motor is ad neki, tehát a kijelzés és a döntés nem
+        # csúszhat szét. SZERVER időt hordoz (lásd `gates.sessions.to_utc`).
+        try:
+            from gates import sessions as _sess
+            _now = (_df15.index[-1] if _df15 is not None and len(_df15) else None)
+            if _now is not None:
+                _sp = _sess.params_of(self.cfg.get("pairs", {}).get(symbol, {}) or {},
+                                      self.cfg)
+                ds.sessions_state, ds.sessions_market = _sess.state_of_server(_now, _sp)
+        except Exception:
+            pass
         # TF-együttállás (M1/M5/M15 SMA-irány) → az „Együtt" oszlop. Idősíkonként
         # NATIVE copy_rates (nincs resample-torzítás); sign(close − SMA(n)).
         try:

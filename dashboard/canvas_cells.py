@@ -23,7 +23,8 @@ from __future__ import annotations
 from core.i18n import t as _t
 
 from dashboard import live_row as _lr
-from dashboard.theme import (FG_WHITE, FG_GREEN, FG_RED, FG_GRAY, FG_GRAY_DIM)
+from dashboard.theme import (FG_WHITE, FG_GREEN, FG_RED, FG_GRAY, FG_GRAY_DIM,
+                             FG_YELLOW)
 
 
 class Cell:
@@ -55,6 +56,20 @@ class Cell:
         Ha nem változott, egyetlen `itemconfigure` sem fut."""
         return (self.text, self.fg, tuple(self.dots), self.frame,
                 tuple((p[0], p[1], p[2]) for p in self.parts))
+
+
+# A PIACOK-oszlop színei — a felhasználó kérése szerint (2026-09-24):
+# szürke = zárva · sárga = nyitás előtt · zöld = nyitva · piros = nyitás után.
+# A „nyitás" pillanata a legélesebb, ezért az is piros; a zárás előtti ablak
+# figyelmeztetés, ezért sárga.
+_SESSION_FG = {
+    "zarva": FG_GRAY_DIM,
+    "nyitas_elott": FG_YELLOW,
+    "nyitas": FG_RED,
+    "nyitas_utan": FG_RED,
+    "zaras_elott": FG_YELLOW,
+    "nyitva": FG_GREEN,
+}
 
 
 def _pane_of(key: str) -> str:
@@ -131,6 +146,15 @@ def cells_for(d: dict, collapsed: dict, on_close=None) -> dict:
         # állapotát, tehát a sor „⛔1"-et mutatott LÁTHATÓ ok nélkül. Pontosan az
         # a hibaosztály, ami miatt ez az oszlop egyáltalán megszületett: a
         # BTCUSD hetekig némán nem kereskedett 0,51× aránnyal.
+        # ── PIACOK: a világ tőzsdéinek állapota ───────────────────────
+        # ⚠ A CELLÁT IS MEG KELL ÍRNI, nem csak a fejlécet: egy behelyezett kapu
+        # oszlopa magától megjelenik (`enabled_columns`), de cella nélkül minden
+        # soron ÜRES marad — ez a volatilitásnál már megtörtént egyszer.
+        se = g.get("sessions") or {}
+        out["sessions"] = Cell("sessions", text=se.get("text", "—"),
+                               anchor="center", font="small",
+                               on_click=se.get("on_click"),
+                               fg=_SESSION_FG.get(se.get("state"), FG_GRAY_DIM))
         vo = g.get("volatility") or {}
         out["volatility"] = Cell("volatility", text=vo.get("text", "—"),
                                  anchor="center", on_click=vo.get("on_click"),
