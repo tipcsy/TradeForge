@@ -1626,6 +1626,22 @@ def run_pair(
     # ⚠ `for_backtest=True`: a kapu-tablaban KIPIPALATLAN kapuk kimaradnak a
     # modellezesbol. Az eles hatasbol indulunk, es legfeljebb KIVESZUNK —
     # a backtest sosem alkalmazhat olyan kaput, ami elesben nem szol bele.
+    # ── A BEHELYEZETT (`.tfg`) KAPUK — a registryből ────────────────────
+    # ⚠ EZ VOLT A LYUK. A motor mind a hat BEÉPÍTETT kaput kézzel, egyesével
+    # importálva mérte — egy `.tfg`-vel telepített kapuról tehát NEM TUDOTT,
+    # miközben az élő motor v3.29 óta a `REGISTRY`-t járja. Vagyis: élesben
+    # szűrt volna, a visszamérésben nem — NÉMA eltérés az él és a mérés között,
+    # a projekt legdrágább hibafajtája.
+    #
+    # A beépítettek gyors útját NEM cseréljük általános hurokra (a belső ciklus
+    # jelenkénti, és a paritás bitre bizonyított); a behelyezettek a saját
+    # `measure(ctx)`-ükön mennek. A kettő ugyanabba a `_failed`/`_lvl` szótárba
+    # ír, tehát a sávok és a `decide` ugyanúgy látja őket.
+    #
+    # ⚠ `_gt.active(...)` az EGYETLEN kapcsoló: az `effects_for` már elintézte a
+    # backtest-pipát ÉS az `exec_gates=False` maszkot — egy behelyezett kapu nem
+    # PARAM_DRIVEN, tehát söprésben magától kimarad. Külön `if _exec_gates`
+    # ágat írni ide hiba volna: két helyen kellene ugyanazt karbantartani.
     # ⚠ `exec_gates=False` MELLETT IS a közös feloldó dönt — nem egy külön
     # „mind none" szótár. A volatilitás ugyanis PARAMÉTER-VEZÉRELT kapu: a
     # küszöbeit a stratégia söpört paraméterei adják, ezért a söprésben is élnie
@@ -1644,6 +1660,10 @@ def run_pair(
     # A piac-kapu per-gyertya besorolása — EGYSZER, mint a TF-kiértékelő
     # (paraméter-független). None, ha a kapu ki van kapcsolva vagy nincs osztályozó.
     _mkt_series, _mkt_adverse = None, set()
+    _plug_sig = tuple(k for k in _gt.plugged_keys(_gt.PHASE_SIGNAL)
+                      if _gt.active(_gate_eff, k))
+    _plug_plan = tuple(k for k in _gt.plugged_keys(_gt.PHASE_PLAN)
+                       if _gt.active(_gate_eff, k))
     if _exec_gates and _gt.active(_gate_eff, _gt.MARKET):
         try:
             from core import market_strategy as _msx
@@ -1825,6 +1845,21 @@ def run_pair(
                 if _bands.get(_gt.MOMENTUM):
                     _lvl[_gt.MOMENTUM] = _gb.momentum_level(
                         _mv, signal, _mom_mode, _mom_cfg)
+        # A BEHELYEZETT kapuk — a saját `measure(ctx)`-ükön.
+        # ⚠ AZ IDŐ A GYERTYA IDEJE, és ez itt HELYES (szemben az élő úttal,
+        # ahol a falióra kell): a backtest DÖNTÉSI pillanata maga a belépő
+        # M1-gyertya nyitása. Élesben ugyanez a pillanat ≈ „most", tehát a két
+        # út ugyanarra a percre kérdez rá.
+        if _plug_sig:
+            _pctx = _gt.GateCtx(
+                symbol=symbol, strategy=strategy.name, signal=signal,
+                cfg=cfg or {}, pair_cfg=pair_cfg, params=params,
+                hi_row=m15_row, bands=_bands, now=m1_time)
+            for _pk in _plug_sig:
+                _pf, _pl = _gt.measure(_pk, _pctx)
+                _failed[_pk] = _pf
+                if _pl is not None:
+                    _lvl[_pk] = _pl
         # A SÁVOK feloldása: a létra a mért szintből hatást csinál; ahol
         # nincs létra, ott a kapu saját ítélete (`_failed`) dönt, mint eddig.
         _eff_now = _gb.effects_at(_gate_eff, _bands, _failed, _lvl)
@@ -1901,6 +1936,25 @@ def run_pair(
                 if _cdec["blocked"]:
                     return None
                 _gate_risk = min(_gate_risk, _cdec["risk_factor"])
+            # A TERV-fázisú BEHELYEZETT kapuk (a költség-kapuval egy sorban):
+            # ezek a kész SL/TP ismeretében döntenek.
+            if _plug_plan:
+                _ppctx = _gt.GateCtx(
+                    symbol=symbol, strategy=strategy.name, signal=signal,
+                    cfg=cfg or {}, pair_cfg=pair_cfg, params=params,
+                    hi_row=m15_row, bands=_bands, now=m1_time,
+                    sl_points=sl_points, tp_points=tp_points)
+                _pf2, _pl2 = {}, {}
+                for _pk in _plug_plan:
+                    _a, _b = _gt.measure(_pk, _ppctx)
+                    _pf2[_pk] = _a
+                    if _b is not None:
+                        _pl2[_pk] = _b
+                _pe = _gb.effects_at(_gate_eff, _bands, _pf2, _pl2)
+                _pd = _gt.decide(_gb.failed_at(_pe, _pf2), _pe)
+                if _pd["blocked"]:
+                    return None
+                _gate_risk = min(_gate_risk, _pd["risk_factor"])
             # ⚠ A BELEPO M15-ATR-je is a BAR adata, nem a szamlae — ezert itt
             # a helye. A kotes ezt tarolja (`entry_atr`), es ebbol szamol a
             # breakeven/trailing; a hivonak nem kell ujra M15-sort epitenie.
@@ -2874,6 +2928,9 @@ def run_portfolio_backtest(
             # ⚠ `exec_gates=False` mellett is a közös feloldó dönt: a
             # volatilitás PARAMÉTER-VEZÉRELT kapu, a küszöbeit a stratégia
             # söpört paraméterei adják (lásd `gates.PARAM_DRIVEN`).
+            # A behelyezett kapuk listája páronként — ugyanaz a szabály, mint
+            # a `run_pair`-ben (lásd az ottani hosszú megjegyzést).
+            "plug_sig": None,        # lent töltjük, a `gate_eff` ismeretében
             "gate_eff":  _gt.effects_for(cfg, sym, strategy.name,
                                          for_backtest=True,
                                          exec_gates=_exec_gates),
@@ -3235,6 +3292,25 @@ def run_portfolio_backtest(
                                     _lvl[_gt.MOMENTUM] = _gb.momentum_level(
                                         _mv, signal, info["mom_mode"],
                                         info["mom_cfg"])
+                        # A BEHELYEZETT kapuk — a saját `measure(ctx)`-ükön,
+                        # ugyanúgy, mint a `run_pair`-ben. (A lista páronként
+                        # egyszer áll össze, lásd `info["plug_sig"]`.)
+                        _pls = info.get("plug_sig")
+                        if _pls is None:
+                            _pls = info["plug_sig"] = tuple(
+                                k for k in _gt.plugged_keys(_gt.PHASE_SIGNAL)
+                                if _gt.active(_eff, k))
+                        if _pls:
+                            _pctx = _gt.GateCtx(
+                                symbol=sym, strategy=strategy.name,
+                                signal=signal, cfg=cfg or {},
+                                pair_cfg=pair_cfg, params=params,
+                                hi_row=m15_row, bands=_bnd, now=m1_time)
+                            for _pk in _pls:
+                                _pf, _pl = _gt.measure(_pk, _pctx)
+                                _failed[_pk] = _pf
+                                if _pl is not None:
+                                    _lvl[_pk] = _pl
                         _eff_now = _gb.effects_at(_eff, _bnd, _failed, _lvl)
                         _dec = _gt.decide(_gb.failed_at(_eff_now, _failed), _eff_now)
                         _gate_ok = not _dec["blocked"]

@@ -116,6 +116,24 @@ The project's own measurements disagree:
 So the gate SHOWS. Before any state is set to `block`, its effect **must be
 measured**.
 
+## The backtest measures it too (v3.102.0)
+
+At first only the live engine knew about plugged gates: the backtest measured
+the six BUILT-IN gates one by one, hand-imported. That would have meant a silent
+divergence between live and backtest — the backtest taking signals this gate
+filters out live.
+
+Now **both backtest paths** (single-pair and portfolio) walk the gate registry,
+and plugged gates measure through their own `measure(ctx)`. What the gate gets
+in a backtest: the symbol, the direction, the pair config, the strategy
+parameters, and **the entry M1 bar's time as "now"** — that is the backtest's
+decision moment (live, the same moment is ≈ "now", so both paths ask about the
+same minute).
+
+The built-ins' fast path (precomputed series, array indexing) is unchanged: with
+effect `none` a plugged gate gives **bit-identical** results to before it was
+wired in — and is not even called.
+
 ## What it adds
 
 The spread gate is **reactive**: it sees once the spread has already widened. This

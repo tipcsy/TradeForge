@@ -114,6 +114,24 @@ A projekt saját mérései ellentmondanak egymásnak:
 Ezért a kapu MUTAT. Mielőtt bármelyik állapot `block`-ra kerül, **meg kell mérni**,
 mit tesz.
 
+## A backteszt is méri (v3.102.0)
+
+Eleinte csak az élő motor ismerte a behelyezett kapukat: a backteszt a hat
+BEÉPÍTETT kaput egyesével, kézzel importálva mérte. Ez néma eltérést jelentett
+volna az él és a visszamérés között — a backteszt megkötött volna olyan jeleket,
+amiket élesben ez a kapu kiszűr.
+
+Mostantól **mindkét backteszt-út** (egypáros és portfólió) végigkérdezi a
+kapu-registryt, és a behelyezett kapuk a saját `measure(ctx)`-ükön mérnek. Amit
+a kapu a backtesztben kap: a szimbólum, az irány, a pár configja, a stratégia
+paraméterei, és **idő gyanánt a belépő M1-gyertya ideje** — ez a backteszt
+döntési pillanata (élesben ugyanez a pillanat ≈ „most", tehát a két út ugyanarra
+a percre kérdez rá).
+
+A beépítettek gyors útja (előre számolt sorozatok, tömb-indexelés) változatlan:
+a behelyezett kapu `none` hatással **bitre ugyanazt** adja, mint a bekötése
+előtt — és meg sem szólal.
+
 ## Amit hozzátesz
 
 A spread-kapu **reaktív**: akkor lát, amikor a spread már kinyílt. Ez **előre tud**

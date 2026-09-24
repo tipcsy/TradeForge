@@ -302,6 +302,23 @@ REGISTRY = _BUILTIN + _felderites()
 KEYS = tuple(g["key"] for g in REGISTRY)
 
 
+BUILTIN_KEYS = tuple(g["key"] for g in _BUILTIN)
+
+
+def plugged_keys(phase: str = None) -> tuple:
+    """A BEHELYEZETT (nem beépített) kapuk kulcsai — fázisra szűrve.
+
+    ⚠ MIÉRT KELL KÜLÖN LISTA. A motorok a hat beépített kapu mérését KÉZZEL,
+    kioptimalizálva végzik (előre számolt sorozatok, tömb-indexelés) — ezt nem
+    akarjuk általános hurokra cserélni, mert a backteszt belső ciklusa
+    jelenkénti, és a paritás bitre bizonyított. A behelyezett kapuk viszont
+    csak a saját `measure(ctx)`-ükön át mérhetők. A kettő EGYÜTT adja a teljes
+    képet; ez a függvény mondja meg, mi maradt a generikus ágra."""
+    return tuple(g["key"] for g in REGISTRY
+                 if g["key"] not in BUILTIN_KEYS
+                 and (phase is None or (g.get("phase") or PHASE_SIGNAL) == phase))
+
+
 def refresh_registry() -> tuple:
     """A registry ÚJRAÉPÍTÉSE — egy frissen telepített kapu után.
 
