@@ -376,10 +376,21 @@ check_("az eles configon lefut", isinstance(cc.check(real), list))
 # configon is csak ISMERT kodokat ad (nem keletkezett uj, ertelmezhetetlen
 # lelet-fajta), es nem szall el. A detektalast a fenti SZINTETIKUS esetek
 # oriznek (66–93. sor), amik nem fuggenek a user beallitasaitol.
+# ⚠ 2026-09-25: a lista ket OLYAN kodot is tartalmazott, amit a modul sosem ad
+# ki (`tp_preset_mismatch` — a valodi neve `tp_vs_preset` —, es `symbol_policy`),
+# az `empty_strategies_fallback` viszont hianyzott, ezert a teszt az eles
+# configon (HKInd/Jp225 strategia nelkul) bukott. Az alabbi or ezt fogja meg:
+# a lista minden eleme LETEZO kod legyen.
 _ismert = {"build_target_idle", "daily_limit_pct_dead", "market_gate_no_classifier",
            "missing_costs", "optimizer_skip", "signal_mode_invisible",
            "stale_strategy_key", "untuned_pair", "independent_multi_strategy",
-           "tp_preset_mismatch", "symbol_policy"}
+           "tp_vs_preset", "empty_strategies_fallback"}
+import re as _re
+_modul_kodok = set(_re.findall(
+    r'_finding\(\s*\w+,\s*"(\w+)"',
+    (ROOT / "core" / "config_check.py").read_text(encoding="utf-8")))
+check_("az ismert-lista minden eleme a modul VALODI kodja (nem elavult nev)",
+       _ismert <= _modul_kodok, str(sorted(_ismert - _modul_kodok)))
 check_("az eles config leletei mind ISMERT kodok",
        not (real_codes - _ismert), str(sorted(real_codes - _ismert)))
 check_("a hazirend beallt -> nincs 'independent' lelet (P2 #3 lezarva)",
