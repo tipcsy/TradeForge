@@ -34,6 +34,32 @@ from core import gates as _g
 from core.i18n import t as _t
 
 
+def _plugged_cells(ctx, on_gate, symbol) -> dict:
+    """A saját cella NÉLKÜLI behelyezett kapuk cella-adata: `{kulcs: {...}}`.
+
+    A szöveg a kapu `cell_text(ctx)`-éből jön (ha van — rövid beállítás-
+    összefoglaló), különben „·". Kattintásra a kapu SAJÁT ablaka nyílik, mint a
+    Tőzsdéknél. ⚠ Enélkül az oszlop minden soron üresen állna — ez a
+    volatilitásnál már megtörtént egyszer."""
+    from core import gates as _g
+    from dashboard import live_row as _lr
+    out = {}
+    for col in _lr.plugged_columns():
+        key = col
+        txt = "·"
+        mod = _g.gate_module(key)
+        fn = getattr(mod, "cell_text", None) if mod is not None else None
+        if callable(fn):
+            try:
+                txt = str(fn(ctx or {}))
+            except Exception:
+                txt = "·"
+        out[col] = {"text": txt, "generic": True,
+                    "on_click": ((lambda k=key: on_gate(symbol, k))
+                                 if on_gate else None)}
+    return out
+
+
 def _sessions_cell(ds, on_gate, symbol):
     """A „Tőzsdék" cella: a világ tőzsdéinek állapota EGY szóban, színnel.
 
@@ -373,6 +399,8 @@ def row_data(symbol: str, ds, strategy_names, cfg: dict = None,
             "market": {"text": getattr(ds, "market_state_label", "") or "—",
                        "on_click": (lambda: on_market(symbol)) if on_market else None},
             "sessions": _sessions_cell(ds, on_gate, symbol),
+            # A többi BEHELYEZETT kapu általános cellája (lásd `_plugged_cells`).
+            **_plugged_cells(ctx, on_gate, symbol),
             "momentum": _momentum_cell(ctx, on_momentum, symbol),
             "cost": _cost_cell(ctx, on_cost, symbol),
             "volatility": _volatility_cell(ctx, on_volatility, symbol),

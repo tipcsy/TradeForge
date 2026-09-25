@@ -49,7 +49,10 @@ from strategy.base import Strategy, STRATEGY_API, STRATEGY_API_MIN              
 # betoltese ettol kezdve hibat ad — ez a szandek).
 # 2026-09-22: `daily_jobs()` hook alapertelmezessel — NEM toro (uj hook, a regi
 # strategia nem tud rola), az API szam marad 1.
-UJJLENYOMAT = "5a3d400ad829"
+# 2026-09-25 (v3.105.0): uj `MarketData`-mezok (`gate_cfg`, `pair_cfg`) es
+# metodus (`plugged_blocks`) alapertelmezessel — NEM toro: aki nem hivja, a
+# regi viselkedest kapja (a behelyezett kapuk a rajzon nem szurnek). API marad 1.
+UJJLENYOMAT = "4cb90136cbe6"
 API_AKKOR = 1
 
 

@@ -1854,7 +1854,8 @@ def run_pair(
             _pctx = _gt.GateCtx(
                 symbol=symbol, strategy=strategy.name, signal=signal,
                 cfg=cfg or {}, pair_cfg=pair_cfg, params=params,
-                hi_row=m15_row, bands=_bands, now=m1_time)
+                hi_row=m15_row, bands=_bands, now=m1_time,
+                bars=_gt.bars_from_m1(m1, m1_time))
             for _pk in _plug_sig:
                 _pf, _pl = _gt.measure(_pk, _pctx)
                 _failed[_pk] = _pf
@@ -1943,7 +1944,8 @@ def run_pair(
                     symbol=symbol, strategy=strategy.name, signal=signal,
                     cfg=cfg or {}, pair_cfg=pair_cfg, params=params,
                     hi_row=m15_row, bands=_bands, now=m1_time,
-                    sl_points=sl_points, tp_points=tp_points)
+                    sl_points=sl_points, tp_points=tp_points,
+                    bars=_gt.bars_from_m1(m1, m1_time))
                 _pf2, _pl2 = {}, {}
                 for _pk in _plug_plan:
                     _a, _b = _gt.measure(_pk, _ppctx)
@@ -3305,7 +3307,8 @@ def run_portfolio_backtest(
                                 symbol=sym, strategy=strategy.name,
                                 signal=signal, cfg=cfg or {},
                                 pair_cfg=pair_cfg, params=params,
-                                hi_row=m15_row, bands=_bnd, now=m1_time)
+                                hi_row=m15_row, bands=_bnd, now=m1_time,
+                                bars=_gt.bars_from_m1(info["m1"], m1_time))
                             for _pk in _pls:
                                 _pf, _pl = _gt.measure(_pk, _pctx)
                                 _failed[_pk] = _pf
@@ -3356,6 +3359,37 @@ def run_portfolio_backtest(
                                     plan = None
                                 else:
                                     _gate_risk = min(_gate_risk, _cd["risk_factor"])
+                            # ── A TERV-fázisú BEHELYEZETT kapuk ──────────────
+                            # ⚠ KERET-LYUK VOLT (v3.105.0-ig): a `run_pair` és
+                            # az él ezeket kiértékelte, a PORTFÓLIÓ nem — egy
+                            # terv-kapu tehát élesben blokkolt volna, itt nem,
+                            # és a portfólió-eredmény némán optimistább lett
+                            # volna. Ugyanaz a hurok, mint a `run_pair`-ben.
+                            _plp = info.get("plug_plan")
+                            if _plp is None:
+                                _plp = info["plug_plan"] = tuple(
+                                    k for k in _gt.plugged_keys(_gt.PHASE_PLAN)
+                                    if _gt.active(info["gate_eff"], k))
+                            if plan is not None and _plp:
+                                _ppc = _gt.GateCtx(
+                                    symbol=sym, strategy=strategy.name,
+                                    signal=signal, cfg=cfg or {},
+                                    pair_cfg=pair_cfg, params=params,
+                                    hi_row=m15_row, bands=_bnd, now=m1_time,
+                                    sl_points=sl_points, tp_points=tp_points,
+                                    bars=_gt.bars_from_m1(info["m1"], m1_time))
+                                _pf2, _pl2 = {}, {}
+                                for _pk in _plp:
+                                    _a, _b = _gt.measure(_pk, _ppc)
+                                    _pf2[_pk] = _a
+                                    if _b is not None:
+                                        _pl2[_pk] = _b
+                                _pe = _gb.effects_at(info["gate_eff"], _bnd, _pf2, _pl2)
+                                _pd = _gt.decide(_gb.failed_at(_pe, _pf2), _pe)
+                                if _pd["blocked"]:
+                                    plan = None
+                                else:
+                                    _gate_risk = min(_gate_risk, _pd["risk_factor"])
                         if plan is not None:
                             sl_points, tp_points = plan
                             # Óvatos (felezett) méret? A kockázatcsökkentő preset dönti

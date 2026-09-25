@@ -1432,6 +1432,9 @@ def pair_visual_objects(symbol: str, params: dict, strategy, point_size: float,
     if _cfg:
         md.gate_effects = _gt.effects_for(_cfg, symbol, strategy.name)
         md.gate_bands = _gate_bands_mod.ladders_for(_cfg, symbol, strategy.name)
+        # A BEHELYEZETT kapuk a rajzon is döntenek (`MarketData.plugged_blocks`).
+        md.gate_cfg = _cfg
+        md.pair_cfg = pair_cfg or {}
     _tf_eff = md.gate_effects.get(_gt.TF_ALIGN, _gt.EFFECT_BLOCK)
     if not exec_gates or _tf_eff != _gt.EFFECT_BLOCK:
         md.entry_gate = None            # NYERS jelzesek / nem blokkoló kapu
@@ -2958,6 +2961,9 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
         hi_row=hi_row, spread_ok=spread_ok,
         spread_points=current_spread_points, spread_cap=_cap_pips,
         closes=lambda tfs, n: mt5_connector.tf_closes(symbol, tfs, n),
+        # A LEZÁRT gyertyák OHLC-vel (a formálódó nélkül) — ugyanaz a konvenció,
+        # mint a backtest `bars_from_m1`-je (v3.105.0).
+        bars=lambda tf, n: mt5_connector.tf_bars(symbol, tf, n),
         bands=_gate_bands,
         # A SZERVER FALIÓRÁJA — a piaci-nyitás kapu bemenete.
         #
@@ -3114,11 +3120,17 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
             _plan_keys = [k for k in _gates.keys_in_phase(_gates.PHASE_PLAN)
                           if _gates.active(_gate_eff, k)]
             if _plan_keys:
+                # ⚠ A TERV-fázis is kapja a gyertyákat és az időt (v3.105.0):
+                # egy terv-kapu (pl. célár-elérés) a KÉSZ célár ismeretében
+                # nézi meg, járt-e ott az ár — ehhez high/low kell.
                 _pctx = _gates.GateCtx(
                     symbol=symbol, strategy=strategy.name, signal=signal,
                     cfg=_run_cfg or {}, pair_cfg=pair_cfg, params=params,
-                    ds=ds, bands=_gate_bands, sl_points=sl_points,
-                    tp_points=tp_points, sym_info=sym_info)
+                    ds=ds, hi_row=hi_row, bands=_gate_bands, sl_points=sl_points,
+                    tp_points=tp_points, sym_info=sym_info,
+                    closes=lambda tfs, n: mt5_connector.tf_closes(symbol, tfs, n),
+                    bars=lambda tf, n: mt5_connector.tf_bars(symbol, tf, n),
+                    now=mt5_connector.server_now())
                 _cf, _cl = {}, {}
                 for _pk in _plan_keys:
                     _pf, _pl = _gates.measure(_pk, _pctx)

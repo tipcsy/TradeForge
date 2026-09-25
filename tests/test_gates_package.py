@@ -49,7 +49,7 @@ from gates import paths as gp        # noqa: E402
 # aminek epp az lett volna a dolga, hogy „egy kapu egy darabban moz­ithato
 # legyen", ezt az egy kaput nem tartalmazta.
 MEROK = {"spread_gate", "cost_gate", "momentum", "tf_align", "vol_baseline",
-         "market", "sessions"}
+         "market", "sessions", "target_reach", "sma_chop"}
 
 
 def _imports(p: Path) -> set:

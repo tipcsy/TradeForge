@@ -169,6 +169,14 @@ def cells_for(d: dict, collapsed: dict, on_close=None) -> dict:
         out["volatility"] = Cell("volatility", text=vo.get("text", "—"),
                                  anchor="center", on_click=vo.get("on_click"),
                                  fg=(FG_RED if vo.get("blocking") else FG_GREEN))
+        # A BEHELYEZETT kapuk ÁLTALÁNOS cellái (`row_source._plugged_cells`).
+        # ⚠ MINDEN ilyen oszlopra készül cella, adat nélkül is („—") — mint a
+        # beépítetteknél: egy hiányzó cella egy ÜRES oszlopot jelentene.
+        for _gk in _lr.plugged_columns():
+            _gv = g.get(_gk) or {}
+            out[_gk] = Cell(_gk, text=_gv.get("text", "—"), anchor="center",
+                            font="small", fg=FG_GRAY,
+                            on_click=_gv.get("on_click"))
     badge = g.get("badge", "✓")
     out["badge"] = Cell("badge", text=badge, anchor="center",
                         fg=(FG_RED if badge != "✓" else FG_GREEN))

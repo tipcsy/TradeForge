@@ -202,6 +202,49 @@ class MarketData:
     # mögött valódi kötés van. (Ugyanez a hiba fordítva már megtörtént
     # 2026-08-25-én: 12 riasztás mellett 5 jelölő.)
     gate_bands: dict = field(default_factory=dict)
+    # A BEHELYEZETT kapuk kiértékeléséhez kell a futásidejű config és a pár
+    # szótára (a kapu ezekből olvassa a SAJÁT beállításait). A keret tölti;
+    # `None` → a `plugged_blocks` semmit nem szűr (a régi viselkedés).
+    gate_cfg: "dict | None" = None
+    pair_cfg: "dict | None" = None
+
+    def plugged_blocks(self, phase: str, t, signal: str,
+                       sl_points=None, tp_points=None) -> bool:
+        """Blokkolná-e egy BEHELYEZETT kapu (`gates/` alatti, nem beépített)
+        ezt a belépőt a rajzon?
+
+        ⚠ MIÉRT KELL (v3.105.0). A rajz a beépített kapukat (volatilitás,
+        spread, TF-együttállás) maga ismételte meg — a behelyezetteket (Tőzsdék,
+        Célár-elérés, SMA-oldalazás…) NEM ismerte. Egy `block` hatású
+        behelyezett kapu mellett a chart tehát olyan belépőt mutatott volna,
+        amit a motor sosem köt meg. Ez a kérdés a KERETÉ, nem a stratégiáé: a
+        stratégia csak megkérdezi a jelzés (`phase="signal"`), ill. a kész terv
+        (`phase="plan"`, SL/TP-vel) pillanatában.
+
+        `t`: a jelzést adó M1-gyertya NYITÓ ideje (Timestamp) — ugyanaz a
+        konvenció, mint a backtestben (`m1_time`). Csak a `block` hatás szűr."""
+        if not self.exec_gates or self.gate_cfg is None:
+            return False
+        from core import gates as _g
+        from core import gate_bands as _gb
+        keys = [k for k in _g.plugged_keys(phase)
+                if _g.active(self.gate_effects or {}, k)]
+        if not keys:
+            return False
+        ctx = _g.GateCtx(
+            symbol=self.symbol, signal=signal, cfg=self.gate_cfg,
+            pair_cfg=self.pair_cfg or {}, params=self.params,
+            bands=self.gate_bands, now=t, sl_points=sl_points,
+            tp_points=tp_points, bars=_g.bars_from_m1(self.bars.get("M1"), t))
+        failed, level = {}, {}
+        for k in keys:
+            f, lv = _g.measure(k, ctx)
+            failed[k] = f
+            if lv is not None:
+                level[k] = lv
+        eff = _gb.effects_at(self.gate_effects or {}, self.gate_bands or {},
+                             failed, level)
+        return bool(_g.decide(_gb.failed_at(eff, failed), eff)["blocked"])
 
     def gate_blocks(self, key: str) -> bool:
         """Blokkol-e ez a kapu, ha a SAJÁT küszöbén bukik? Csak a `block` szűr."""

@@ -206,17 +206,26 @@ class GateCtx:
     ⚠ A `closes` FÜGGVÉNY, nem adat: `(timeframes, n) -> {tf: [záróárak]}`. Így a
     kapu nem importál MT5-öt (a backtest és a teszt mást ad be), és csak akkor
     kér adatot, ha tényleg kell neki.
+
+    ⚠ A `bars` IS FÜGGVÉNY (v3.105.0): `(tf_perc, n) -> DataFrame | None` — az
+    utolsó `n` LEZÁRT gyertya `open/high/low/close` oszlopokkal, a döntés
+    pillanatáig (a jelző M1-gyertya zárásáig, azt is beleértve). A `closes`
+    csak záróárat ad, és a backtest a behelyezett kapuknak még azt sem adta —
+    egy „járt-e ott az ár" kérdéshez viszont high/low kell. Élőben MT5-ből,
+    backtestben és vizben az M1-keretből jön (`bars_from_m1`), UGYANAZZAL az
+    időpont-konvencióval, különben a három út más gyertyákat látna.
     """
 
     __slots__ = ("symbol", "strategy", "signal", "cfg", "pair_cfg", "params",
                  "ds", "hi_row", "spread_ok", "spread_points", "spread_cap",
-                 "closes", "bands", "sl_points", "tp_points", "sym_info", "now")
+                 "closes", "bands", "sl_points", "tp_points", "sym_info", "now",
+                 "bars")
 
     def __init__(self, symbol="", strategy="", signal="NONE", cfg=None,
                  pair_cfg=None, params=None, ds=None, hi_row=None,
                  spread_ok=True, spread_points=0.0, spread_cap=0.0,
                  closes=None, bands=None, sl_points=None, tp_points=None,
-                 sym_info=None, now=None):
+                 sym_info=None, now=None, bars=None):
         self.symbol = symbol
         self.strategy = strategy
         self.signal = signal
@@ -239,10 +248,61 @@ class GateCtx:
         # mérné minden 2021-es gyertyára. SZERVER időt hordoz (a gyertya-fájlok
         # is azt tárolják); a `gates.sessions.to_utc` váltja át.
         self.now = now
+        self.bars = bars or (lambda tf, n: None)
 
     def has_band(self, key: str) -> bool:
         """Van-e SÁV-létra erre a kapura? (Ha nincs, a szintet ki sem számoljuk.)"""
         return bool((self.bands or {}).get(key))
+
+
+def bars_from_m1(df_m1, t_last):
+    """`bars(tf_perc, n)` függvény egy M1-keretből — a `GateCtx.bars` backtest-
+    és viz-oldali forrása.
+
+    `t_last`: a DÖNTÉST hozó (a jelzést adó) M1-gyertya NYITÓ ideje. Ez a gyertya
+    a döntéskor már LEZÁRT (a jelzés a zárásán születik), tehát BELEÉRTENDŐ —
+    ugyanaz a konvenció, mint élőben (`mt5_connector.tf_bars`, a formálódó
+    gyertya nélkül) és a TF-kapunál (`_bar_c` = ennek a gyertyának a záróára).
+
+    Nagyobb idősíkra (`tf > 1`) az M1-ből aggregálunk, és CSAK a lezárt
+    csoportokat adjuk vissza (a csoport vége ≤ a jelző gyertya vége): egy
+    félkész M15 gyertya high/low-ja a jövőt még nem ismerné, de a teljes
+    csoport címkéjével look-ahead lenne.
+
+    ⚠ LUSTA és OLCSÓ: a kapu csak a jelzés pillanatában kér adatot, és csak
+    `n × tf` sort vág ki (bináris kereséssel), nem az egész keretet."""
+    import numpy as np
+    import pandas as pd
+
+    def _fn(tf, n):
+        try:
+            tf, n = int(tf), int(n)
+            if df_m1 is None or n <= 0 or tf <= 0 or not len(df_m1):
+                return None
+            t = pd.Timestamp(t_last)
+            idx = df_m1.index
+            if t.tzinfo is None and idx.tz is not None:
+                t = t.tz_localize(idx.tz)
+            pos = int(idx.searchsorted(t, side="right"))
+            if tf == 1:
+                out = df_m1.iloc[max(0, pos - n):pos]
+                return out[["open", "high", "low", "close"]] if len(out) else None
+            w = df_m1.iloc[max(0, pos - (n + 1) * tf):pos]
+            if not len(w):
+                return None
+            g = w[["open", "high", "low", "close"]].groupby(
+                w.index.floor(f"{tf}min"))
+            agg = pd.DataFrame({"open": g["open"].first(), "high": g["high"].max(),
+                                "low": g["low"].min(), "close": g["close"].last()})
+            _vege = agg.index + pd.Timedelta(minutes=tf)
+            agg = agg[np.asarray(_vege <= t + pd.Timedelta(minutes=1))]
+            agg = agg.iloc[-n:]
+            return agg if len(agg) else None
+        except Exception:
+            log.debug("bars_from_m1 elszállt — a kapu adat nélkül marad",
+                      exc_info=True)
+            return None
+    return _fn
 
 
 def _felderites() -> tuple:

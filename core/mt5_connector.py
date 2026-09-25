@@ -836,6 +836,33 @@ def _breakeven_plan(p, info):
 _TF_CONST = None   # perc → MT5 timeframe konstans (lazán, első híváskor töltve)
 
 
+def tf_bars(symbol: str, tf: int, count: int):
+    """Az utolsó `count` LEZÁRT gyertya (`open/high/low/close`, DataFrame) egy
+    idősíkon — a formálódó gyertya NÉLKÜL (`copy_rates_from_pos` 1-es pozíciótól).
+
+    ⚠ A kapuk `GateCtx.bars` élő forrása. A backtest ugyanezt az M1-keretből
+    vágja (`core.gates.bars_from_m1`): a döntést hozó, épp lezárt M1-gyertya
+    mindkettőben benne van. `None`, ha nincs adat (a kapu ilyenkor fail-open)."""
+    global _TF_CONST
+    if _TF_CONST is None:
+        _TF_CONST = {1: mt5.TIMEFRAME_M1, 5: mt5.TIMEFRAME_M5, 15: mt5.TIMEFRAME_M15,
+                     30: mt5.TIMEFRAME_M30, 60: mt5.TIMEFRAME_H1, 240: mt5.TIMEFRAME_H4}
+    const = _TF_CONST.get(int(tf))
+    if const is None or int(count) <= 0:
+        return None
+    try:
+        import pandas as pd
+        with MT5_LOCK:
+            r = mt5.copy_rates_from_pos(symbol, const, 1, int(count))
+        if r is None or not len(r):
+            return None
+        df = pd.DataFrame(r)
+        df.index = pd.to_datetime(df["time"], unit="s", utc=True)
+        return df[["open", "high", "low", "close"]].astype(float)
+    except Exception:
+        return None
+
+
 def tf_closes(symbol: str, timeframes: list, count: int) -> dict:
     """Idősíkonként (perc) az utolsó `count` ZÁRÓár, NATIVE copy_rates-ből
     (nincs resample-torzítás). {perc: [close,…]}; a nem elérhetőt kihagyja. A

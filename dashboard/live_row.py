@@ -134,10 +134,39 @@ _HEADER_FIXED = {"symbol": "Symbol", "bid": "BID", "ask": "ASK",
 
 
 def header_text(key: str) -> str:
-    """Oszlop-kulcs → fejlécszöveg az aktív nyelven (szakszó esetén változatlan)."""
+    """Oszlop-kulcs → fejlécszöveg az aktív nyelven (szakszó esetén változatlan).
+
+    Egy BEHELYEZETT kapu fejléce a saját `col.<kulcs>` feliratából jön (ha van);
+    enélkül az oszlop fejléc nélkül állna."""
     if key in _HEADER_FIXED:
         return _HEADER_FIXED[key]
-    return _t(_HEADER_KEYS[key]) if key in _HEADER_KEYS else ""
+    if key in _HEADER_KEYS:
+        return _t(_HEADER_KEYS[key])
+    _k = f"col.{key}"
+    _txt = _t(_k)
+    return _txt if _txt != _k else ""
+
+
+# A BEHELYEZETT kapuk ÁLTALÁNOS cellájának mintája (a `row_source` rövid
+# beállítás-összefoglalót ír bele, pl. „70%·22").
+_PLUGGED_SAMPLE = ("mono", "999%·999")
+
+
+def plugged_columns() -> tuple:
+    """A behelyezett kapuk OSZLOP-kulcsai, amiknek NINCS saját mintája/cellája.
+
+    ⚠ MIÉRT KELL. A keret a behelyezett kaput felveszi a kapu-listába, az
+    oszlopa megjelenik (`gate_layout.enabled_columns`) — de a szélesség-tábla, a
+    fejléc és a cella kézzel volt írva a hét ismert kapura. Egy új kapu oszlopa
+    így `KeyError`-ral döntötte volna össze a tábla felépítését (a Tőzsdéknél
+    ezt kézzel pótoltuk; v3.105.0 óta általános ág van rá)."""
+    try:
+        from core import gates as _g
+        from core import gate_layout as _gl
+        return tuple(_gl.column_key(k) for k in _g.plugged_keys()
+                     if _gl.column_key(k) not in _SAMPLE)
+    except Exception:
+        return ()
 
 
 def _mode_mark(st: dict) -> tuple:
@@ -239,6 +268,11 @@ def widths(fonts: dict, strategy_names=(), collapsed: dict = None) -> dict:
         # aktiv oszlop feliratanak vege levagodna.
         head = header_text(k)
         w = max(fonts[fkey].measure(txt),
+                small.measure(head + " ▲") if head else 0)
+        out[k] = w + 2 * PAD
+    for k in plugged_columns():
+        head = header_text(k)
+        w = max(fonts[_PLUGGED_SAMPLE[0]].measure(_PLUGGED_SAMPLE[1]),
                 small.measure(head + " ▲") if head else 0)
         out[k] = w + 2 * PAD
     # A Vezérlés a mintaszövegnél SZÉLESEBB: két külön vezérlő, saját margóval és

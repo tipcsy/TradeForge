@@ -571,6 +571,10 @@ class WprSmaStrategy(Strategy):
                 if md.entry_gate is not None and not md.entry_gate(
                         t, float(m1_close[j]), sig):
                     continue
+                # A BEHELYEZETT jelzés-fázisú kapuk (pl. SMA-oldalazás) — a
+                # keret dönt, ugyanazzal a méréssel, mint a motor.
+                if md.plugged_blocks("signal", m1.index[j], sig):
+                    continue
                 atr_v = tl_atr[p]
                 if math.isnan(atr_v):
                     continue
@@ -625,6 +629,11 @@ class WprSmaStrategy(Strategy):
                     sl_points, tp_points = _sw
                 else:
                     sl_points, tp_points = calc_sl_tp_points(float(atr_v), {**md.params, "point_size": pip})
+                # A BEHELYEZETT terv-fázisú kapuk (pl. célár-elérés) — a kész
+                # SL/TP ismeretében, mint a motorban.
+                if md.plugged_blocks("plan", m1.index[j], sig,
+                                     sl_points, tp_points):
+                    continue
                 if sig == "BUY":
                     sl, tp = entry - sl_points * pip, entry + tp_points * pip
                 else:
