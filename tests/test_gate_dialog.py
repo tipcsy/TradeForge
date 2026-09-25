@@ -33,8 +33,10 @@ def check(name, ok, detail=""):
 # ══ 1. A kapuk sajat szamai ════════════════════════════════════════════════
 sp = {s.key: s for s in gp.specs_for(g.SPREAD)}
 check("a Spread kapunak SAJAT szamai vannak (nem a strategiae)",
-      set(sp) == {"max_spread_atr_ratio", "min_spread_mult", "atr_period"},
+      set(sp) == {"max_spread_atr_ratio", "min_spread_mult"},
       str(sorted(sp)))
+# ⚠ Az `atr_period` v3.104.0 ota NEM a Spread-kape: az instrumentume (minden
+# strategia stopja ebbol szamol) — az instrumentum-ablakban allithato.
 check("a spread ATR-hanyada a kapu parametere, alap 0.20",
       sp["max_spread_atr_ratio"].default == 0.20)
 check("minden regisztralt kapunak van leiroja vagy tudatosan ures",
@@ -49,18 +51,18 @@ check("magyar tizedesvesszo is elfogadott (0,35 -> 0.35)", v == 0.35 and not err
 v, err = gp.parse(sp["max_spread_atr_ratio"], "20")
 check("a tartomanyon KIVULI ertek hibat ad (20 > 5.0)", bool(err), str(err))
 
-v, err = gp.parse(sp["atr_period"], "nem szam")
+v, err = gp.parse(sp["min_spread_mult"], "nem szam")
 check("a nem-szam hibat ad", bool(err), str(err))
 
-v, err = gp.parse(sp["atr_period"], "")
+v, err = gp.parse(sp["min_spread_mult"], "")
 check("az ures mezo hibat ad", bool(err), str(err))
 
-v, err = gp.parse(sp["atr_period"], "14")
+_tfa = {s.key: s for s in gp.specs_for(g.TF_ALIGN)}
+v, err = gp.parse(_tfa["sma_period"], "14")
 check("az ervenyes egesz atmegy", v == 14 and not err)
 
 vals, errs = gp.parse_all(g.SPREAD, {"max_spread_atr_ratio": "0.25",
-                                     "min_spread_mult": "2",
-                                     "atr_period": "-3"})
+                                     "min_spread_mult": "-3"})
 check("parse_all osszegyujti a hibakat, a jokat viszont ertelmezi",
       len(errs) == 1 and vals["max_spread_atr_ratio"] == 0.25, f"{vals} {errs}")
 
@@ -146,9 +148,9 @@ if TK_OK:
         # ── Spread ablak ──────────────────────────────────────────────────
         d = gd.GateDialog(root, cfg, "GOLD", g.SPREAD, ["wpr_sma", "ml_ai"],
                           ctx=ctx, all_symbols=["GOLD", "Ger40"])
-        check("a Spread ablak a harom kapu-szamot tolti be",
-              set(d.raw_values()) == {"max_spread_atr_ratio", "min_spread_mult",
-                                      "atr_period"}, str(d.raw_values()))
+        check("a Spread ablak a ket kapu-szamot tolti be",
+              set(d.raw_values()) == {"max_spread_atr_ratio", "min_spread_mult"},
+              str(d.raw_values()))
         check("...es minden strategiara van hatas-valaszto",
               set(d._eff_vars) == {"wpr_sma", "ml_ai"}, str(set(d._eff_vars)))
 

@@ -3309,7 +3309,8 @@ class DashboardWindow:
         MIÉRT NEM a stratégia paraméter-ablaka. A `Spread` cella korábban a teljes
         wpr_sma-paraméterlistát nyitotta meg abban a reményben, hogy a felhasználó
         megtalálja benne a „Végrehajtás" kategóriát — miközben a spread-kapunak
-        mindössze három saját száma van, és azok stratégia-FÜGGETLENEK. Most
+        mindössze két saját száma van (v3.104.0 óta; az `atr_period` az
+        instrumentumé), és azok stratégia-FÜGGETLENEK. Most
         minden kapu ugyanazt a vázat kapja: mért állapot → saját számok →
         per-stratégia hatás."""
         from dashboard.gate_dialog import open_gate_dialog
@@ -4692,6 +4693,27 @@ class DashboardWindow:
                 _om3["menu"].entryconfig(_i, state="disabled")
         _om3.pack(anchor="w", padx=20)
 
+        # ── ATR-ablak — az INSTRUMENTUM volatilitás-mércéje (v3.104.0) ────────
+        # ⚠ MIÉRT ITT. Eddig a stratégia paraméter-ablakának „Végrehajtás"
+        # szakaszában ÉS a Spread-kapu ablakában is állítható volt — holott nem
+        # a spreadé és nem a stratégiáé: MINDEN stratégia ATR-je (a stop mérete
+        # is!), a spread-kapu és a volatilitás-kapu is ebből számol. Egy
+        # „spread-beállításként" átírt érték némán átméretezte volna a pár
+        # összes stopját. Tárolás: `data/execution_params/<SYM>.json`.
+        from core import execution_params as _ep
+        _atr_cur = int((_ep.load_execution_params(symbol, self.cfg) or {})
+                       .get("atr_period", 14))
+        tk.Label(popup, text=_t("gui.atr_period_label"),
+                 bg=BG, fg=FG_GRAY, font=self._small_font).pack(anchor="w", padx=12,
+                                                                pady=(8, 2))
+        atr_var = tk.StringVar(value=str(_atr_cur))
+        tk.Entry(popup, textvariable=atr_var, width=6, bg=BG_HEADER, fg=FG_WHITE,
+                 font=self._small_font, insertbackground=FG_WHITE).pack(anchor="w",
+                                                                        padx=20)
+        tk.Label(popup, text=_t("gui.atr_period_help"),
+                 bg=BG, fg=FG_GRAY_DIM, font=self._small_font,
+                 wraplength=360, justify="left").pack(anchor="w", padx=20, pady=(0, 2))
+
         # ── „Minden instrumentumra" ─────────────────────────────────────────
         # SZÁNDÉKOSAN nem az egész ablakot viszi át, hanem CSAK AZT, AMIT ITT
         # MEGVÁLTOZTATTÁL. Egy mindent-átmásoló pipa ugyanis a nem piszkált
@@ -4710,6 +4732,7 @@ class DashboardWindow:
             "market":     (_ms.market_name_of(_pc0) or "Nincs"),
             "market_viz": bool(_pc0.get("market_viz", True)),
             "rr_preset":  _rr_cur,
+            "atr_period": _atr_cur,
         }
         all_var = tk.BooleanVar(value=False)
         tk.Checkbutton(popup, text=_t("gui.a_modositott_sorokat_minden"),
@@ -4742,7 +4765,17 @@ class DashboardWindow:
                 "market":     ms_var.get(),
                 "market_viz": bool(viz_var.get()),
                 "rr_preset":  _rr_by_label.get(rr_var.get(), _rr_cur),
+                "atr_period": _parse_atr(),
             }
+
+        def _parse_atr():
+            """Az ATR-ablak mező egész számként, vagy `None`, ha érvénytelen
+            (a `_save` ilyenkor NEM ment — részleges mentés nincs)."""
+            try:
+                v = int(str(atr_var.get()).strip())
+            except ValueError:
+                return None
+            return v if 2 <= v <= 500 else None
 
         # A sor-metaadat és a „mi terjed" döntés a core.bulk_apply-ban él (tiszta
         # függvények, tkinter nélkül) — így egy sorban tesztelhető, hogy egy
@@ -4796,6 +4829,13 @@ class DashboardWindow:
                     pc.pop("market_viz", None)     # True az alap → ne szennyezze
                 else:
                     pc["market_viz"] = False
+            if "atr_period" in rows:
+                # ⚠ CSAK AZ ELTÉRÉST írjuk: a mentés egy párra MINDEN sort
+                # alkalmaz, és egy változatlan (a globálisból örökölt) érték
+                # kiírása a párt örökre leválasztaná a globális alapértékről.
+                _eff = (_ep.load_execution_params(sym, self.cfg) or {}).get("atr_period")
+                if cur_vals["atr_period"] != _eff:
+                    _ep.save_execution_params(sym, {"atr_period": cur_vals["atr_period"]})
             if "rr_preset" in rows:
                 # NEM a config.json-ba megy: a preset a per-pár `data/risk_mode.json`-ban
                 # él (`rr_state`). Ugyanazt az utat járjuk, mint a Pozíciók-fül menüje
@@ -4836,6 +4876,10 @@ class DashboardWindow:
                 lbl.config(text=_t("gui.legalabb_egy_strategia_legyen"), fg=FG_RED)
                 return
             now = _current()
+            if now["atr_period"] is None:
+                lbl.config(text=_t("gui.atr_period_bad", value=atr_var.get()),
+                           fg=FG_RED)
+                return
             changed = _ba.changed_rows(_init, now)
 
             targets = [symbol]

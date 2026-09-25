@@ -43,6 +43,9 @@ ROWS = {
     # zárás, stop-húzás, méret). Nem a config.json-ban él, hanem a per-pár
     # `data/risk_mode.json`-ban — a tömeges alkalmazás mégis ugyanúgy működik rá.
     "rr_preset":  (_t("bulk.rr_preset"),    True),
+    # PÉNZT ÉRINT: minden stratégia STOPJÁNAK mérete ebből az ATR-ből jön
+    # (`sl_atr_mult × ATR`), és a spread- meg a volatilitás-kapu is ezzel mér.
+    "atr_period": (_t("bulk.atr_period"),   True),
 }
 
 

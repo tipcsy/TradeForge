@@ -44,7 +44,6 @@
       "indicator_m15",
       "indicator_m1",
       "sltp",
-      "risk",
       "other"
     ],
     "params": {
@@ -115,7 +114,7 @@
       },
       "no_trade_resets_signal": {
         "recompute": "signal",
-        "category": "risk",
+        "category": "indicator_m15",
         "comment": "A no-trade (szürke) óra resetelje-e az M15 ablakot (alap: KI)"
       }
     }

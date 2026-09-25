@@ -12,15 +12,17 @@ ok    = jelenlegi_spread ≤ határ
 
 A cellában a `250/1312` alak: **jelenlegi / határ**, pontban.
 
-## A három szám
+## A két szám
 
 - **Spread ATR-hányada** (`max_spread_atr_ratio`, alap 0,20) — a megengedett
   spread az ATR ekkora része.
 - **Padló** (`min_spread_mult`, alap 1,5) — az alsó küszöb az instrumentum
   SAJÁT tipikus spreadjének ennyiszerese.
-- **ATR-ablak** (`atr_period`, alap 14) — a volatilitás mércéje.
+- Az **ATR** a pár ATR-je (`atr_period`, alap 14). ⚠ v3.104.0 óta ezt NEM itt,
+  hanem az **instrumentum-ablakban** (a névre kattintva) állítod: minden
+  stratégia stopja is ebből számol, tehát nem a spread saját száma.
 
-Mindhárom **stratégia-független**, instrumentumonként:
+Mindkét küszöb **stratégia-független**, instrumentumonként:
 `data/execution_params/<SYMBOL>.json`.
 
 ## Miért relatív a padló

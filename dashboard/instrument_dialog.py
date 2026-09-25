@@ -47,30 +47,19 @@ from strategy import settings as _sset
 
 log = logging.getLogger(__name__)
 
-# A közös, stratégia-független "Végrehajtás" kategória (atr_period + spread-kapu)
-# — minden stratégia-configból kikerült, itt jelenik meg egységesen.
-# `_EXEC_KEYS` a `core.execution_params.DEFAULTS` kulcsai.
+# Az INSTRUMENTUM számai — a paraméter-szótárban utaznak (a backtest ezen az
+# ablakon át fut, és nélkülük más eredményt adna, mint az él), de ITT NEM
+# SZERKESZTHETŐK és NEM mentődnek a stratégia-készletbe.
 #
-# ⚠ A BE/trailing v1.96.0 óta NEM ITT van: a kockázatcsökkentő beállító ablakban
-# jelenik meg, és CSAK azokon a preseteken, ahol tényleg hat (Fibo/Harmados
-# preseten például semmit nem csinált — lásd `core.risk_reduction.be_trail_active`).
-# ⚠ AZONOSÍTÓ, NEM FELIRAT (0011). Korábban itt a magyar szó állt, és a config
-# is azt tárolta — a csoportosítás tehát a MAGYAR SZÓRA hasonlított. Ez
-# lefordíthatatlan volt (angol felületen minden paraméter az „Egyéb" ágra esett
-# volna), kódolás-érzékeny (az ékezet és a gondolatjel „–" nem kötőjel), és már
-# el is tört: a configokban `"SL / TP"` ÉS `"SL/TP"` is szerepelt, két külön
-# csoportot adva ugyanarra a fogalomra. A feliratot most az i18n adja
-# (`param_cat.*`), a config azonosítót tárol.
-_EXEC_CATEGORY = _sset.CAT_EXEC
-_EXEC_KEYS = frozenset(_execp.DEFAULTS)
-_EXEC_PARAM_META = {
-    "atr_period": {"category": _EXEC_CATEGORY,
-                   "comment": _t("idlg3.atr_periodus_spread_kapu")},
-    "max_spread_atr_ratio": {"category": _EXEC_CATEGORY,
-                              "comment": _t("idlg3.spread_kapu_max_spread")},
-    "min_spread_mult": {"category": _EXEC_CATEGORY,
-                         "comment": _t("idlg3.spread_kapu_also_kuszobe")},
-}
+# ⚠ v3.104.0-ig volt itt egy „Végrehajtás" szakasz (`atr_period` + a két
+# spread-küszöb). Megszűnt, mert mindhárom máshol lakik, és a duplikátum
+# félrevezetett:
+#   • a spread-küszöbök a SPREAD-KAPU ablakáé (`core/gate_params.py`);
+#   • az `atr_period` az INSTRUMENTUM-ablaké (a névre kattintva) — minden
+#     stratégia stopja ebből számol, tehát nem stratégia-paraméter.
+# A volatilitás-kapu számai (`VOL_KEYS`) v3.103.0 óta ugyanígy a kapué.
+# (A BE/trailing v1.96.0 óta a kockázatcsökkentő blokkban van.)
+_INSTRUMENT_KEYS = frozenset(_execp.INSTRUMENT_KEYS)
 
 # ELAVULT paraméter-kulcsok a régi, mentett `optimized_params/<strat>/<SYM>.json`
 # fájlokban. Ezeket a motor SOHA nem paraméterként olvassa — a `max_open_slots`
@@ -324,13 +313,12 @@ class InstrumentParamsDialog:
         # optimalizált JSON-ban.
         self._orig_exec_params = _execp.load_execution_params(symbol, cfg)
         self._src = {**self._src, **self._orig_exec_params}
-        # ⚠ A VOLATILITÁS-KAPU számai (v3.103.0) a `_src`-ben MARADNAK — a
-        # backtest ezen az ablakon át fut, és nélkülük a kapu nem szűrne, tehát
-        # az eredmény eltérne az élőtől —, de NEM szerkeszthetők itt: a kapu
-        # ablakáé. (Régen „Piac-szűrő" kategóriaként itt voltak, és a stratégia-
-        # készletbe mentődtek.)
+        # ⚠ Az INSTRUMENTUM számai (spread-kapu, `atr_period`, volatilitás-kapu)
+        # a `_src`-ben MARADNAK — a backtest ezen az ablakon át fut, és nélkülük
+        # az eredmény eltérne az élőtől —, de NEM szerkeszthetők itt (lásd
+        # `_INSTRUMENT_KEYS`).
         self._keys  = sorted(k for k in self._src
-                             if not k.startswith("_") and k not in _execp.VOL_KEYS)
+                             if not k.startswith("_") and k not in _INSTRUMENT_KEYS)
         # Típus-minta a mentéskori konverzióhoz (int/float/bool/str)
         self._types = {k: self._src[k] for k in self._keys}
 
@@ -562,11 +550,7 @@ class InstrumentParamsDialog:
         # AZONOSÍTÓK (a régi magyar feliratot a `category_order` is elfogadja —
         # egy `.tfs` csomag hozhat régi formátumú configot).
         _cat_ord = _sset.category_order(self.cfg)
-        _pmeta  = {**(_pm.get("params") or {}), **_EXEC_PARAM_META}
-        if _EXEC_CATEGORY not in _cat_ord:
-            _insert_at = (_cat_ord.index(_sset.CAT_OTHER)
-                          if _sset.CAT_OTHER in _cat_ord else len(_cat_ord))
-            _cat_ord.insert(_insert_at, _EXEC_CATEGORY)
+        _pmeta  = dict(_pm.get("params") or {})
 
         def _cat_of(k):
             return _sset.category_id((_pmeta.get(k, {}) or {}).get("category"))
@@ -3866,12 +3850,12 @@ class InstrumentParamsDialog:
         (param_meta.params.<kulcs>.comment). Stratégia-szintű (minden szimbólumra közös).
         Csak akkor ír, ha változott (a helper ellenőrzi). A közös "Végrehajtás"
         kategória kulcsai (BE/trailing/atr_period/spread-kapu) NEM a stratégia-
-        configé — a megjegyzésük itt fixen `_EXEC_PARAM_META`-ból jön, nem menthető
+        configé — itt nem is látszanak (`_INSTRUMENT_KEYS`), tehát nincs mit menteni
         szerkesztve (kockázat/végrehajtási dokumentáció, nem stratégia-specifikus)."""
         if not getattr(self, "_comment_entries", None):
             return
         comments = {k: e.get().strip() for k, e in self._comment_entries.items()
-                   if k not in _EXEC_KEYS}
+                   if k not in _INSTRUMENT_KEYS}
         if not comments:
             return
         try:
@@ -3915,10 +3899,9 @@ class InstrumentParamsDialog:
         if not saved:
             return False
         for k in self.entries:
-            # A közös végrehajtási kulcsok NEM a stratégia-JSON-ban vannak (lásd
-            # `_persist`) — az EREDETI (dialog-nyitáskori) execution-config érték
-            # ellenében vetjük össze, nem a `saved` stratégia-params ellen.
-            sv = self._orig_exec_params.get(k) if k in _EXEC_KEYS else saved.get(k)
+            # Az `entries` csak a stratégia saját kulcsai (az instrumentuméi
+            # nem szerkeszthetők itt — `_INSTRUMENT_KEYS`).
+            sv = saved.get(k)
             pv = params.get(k)
             if sv is None or pv is None:
                 return False
@@ -3960,19 +3943,14 @@ class InstrumentParamsDialog:
             self._rank_rows[new_rank] = rec
             self._ranks = sorted(self._rank_rows)
             extra = {"manual_rank": new_rank}
-        # A közös, stratégia-független végrehajtási kulcsok (BE/trailing/atr_period/
-        # spread-kapu) a data/execution_params/<SYMBOL>.json-ba mennek — MINDEN
-        # stratégia ugyanazt olvassa vissza. A stratégia-JSON csak a saját (jelzés+
-        # SL/TP) paramétereit kapja, hogy ne duplikálódjanak.
-        _exec_vals = {k: params[k] for k in _EXEC_KEYS if k in params}
-        if _exec_vals:
-            try:
-                _execp.save_execution_params(self.symbol, _exec_vals)
-            except Exception as ex:
-                self.lbl_err.config(text=_t("idlg.exec_save_error", error=ex), fg=FG_RED)
-                return
+        # Az INSTRUMENTUM számai (`_INSTRUMENT_KEYS`) nem innen mentődnek: itt
+        # nem is szerkeszthetők, és a stratégia-készletben csak elavult másolat
+        # lenne belőlük (a motor az instrumentum értékét fésüli rá). ⚠ v3.104.0
+        # előtt ez az ág az `atr_period`-ot és a spread-küszöböt is kiírta —
+        # egy stratégia-mentés tehát némán átírhatta a pár többi stratégiájának
+        # stopméretét is.
         strat_params = {k: v for k, v in params.items()
-                        if k not in _EXEC_KEYS and k not in _execp.VOL_KEYS}
+                        if k not in _INSTRUMENT_KEYS}
         if not self._write_json(strat_params, extra=extra):
             return
         # ⚠ A MENTÉS UTÁN A CHART IS FRISSÜL. A spec külön kiköti: „a küldés nem

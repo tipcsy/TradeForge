@@ -112,8 +112,10 @@ for lang in ("hu", "en"):
 # ⚠ A migracio VISELKEDES-SEMLEGES: ugyanazok a csoportok, ugyanabban a
 # sorrendben, ugyanazokkal a feliratokkal — csak mar nem a felirat AZ adat.
 _VART = {
-    "wpr_sma": ["Indikátor – M15", "Indikátor – M1", "SL / TP",
-                "Kockázatkezelés", "Egyéb"],
+    "wpr_sma": ["Indikátor – M15", "Indikátor – M1", "SL / TP", "Egyéb"],
+    # ⚠ A „Kockázatkezelés" v3.104.0-ban KIKERÜLT: egyetlen lakója, a
+    # `no_trade_resets_signal`, jelzés-logika (az M15 ablakot reseteli) →
+    # „Indikátor – M15".
     # ⚠ A „Piac-szűrő" v3.103.0-ban KIKERÜLT (wpr_sma, candle_level_break):
     # pontosan a Volatilitás-kapu küszöbe volt → az instrumentumé lett.
     "trend_pullback": ["Belépő – M5", "Volatilitás – M30", "Trend – H1",
@@ -161,8 +163,10 @@ for _tiltott in ("Egyéb", "Végrehajtás"):
           _tiltott not in _literalok,
           "kommentben/docstringben szabad")
 _kod = _dlg
+# ⚠ A `CAT_EXEC` („Végrehajtás") v3.104.0 óta nem jelenik meg az ablakban: a
+# szakasz kivezetve, a kulcsai az instrumentuméi (`_INSTRUMENT_KEYS`).
 check("...hanem az azonosito-konstansokat hasznalja",
-      "_sset.CAT_OTHER" in _kod and "_sset.CAT_EXEC" in _kod)
+      "_sset.category_id(" in _kod and "_INSTRUMENT_KEYS" in _kod)
 check("...es a feliratot a megjelenitesnel oldja fel",
       "_sset.category_label(" in _kod)
 

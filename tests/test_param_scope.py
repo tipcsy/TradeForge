@@ -117,9 +117,14 @@ if TK_OK:
     ml_keys = dialog_keys("GOLD", "ml_ai")
     _leak2 = sorted(k for k in WPR_ONLY if k in ml_keys)
     check("az ml_ai ablakaban nincs wpr_sma-parameter", not _leak2, str(_leak2))
-    check("...de a SAJAT + a kozos vegrehajtasi kulcsok ott vannak",
-          all(k in ml_keys for k in ("ml_warmup_bars", "sl_atr_mult",
-                                     "atr_period", "max_spread_atr_ratio")),
+    check("...de a SAJAT kulcsai ott vannak",
+          all(k in ml_keys for k in ("ml_warmup_bars", "sl_atr_mult")),
+          str(ml_keys))
+    # ⚠ v3.104.0 ota az INSTRUMENTUM kulcsai (atr_period, spread-kuszob,
+    # volatilitas-kapu) EGYETLEN strategia ablakaban sem szerkeszthetok.
+    check("...az instrumentum kulcsai viszont NEM",
+          not any(k in ml_keys for k in ("atr_period", "max_spread_atr_ratio",
+                                         "min_spread_mult", "atr_min_pct")),
           str(ml_keys))
 
     wpr_keys = dialog_keys("GOLD", "wpr_sma")
@@ -127,8 +132,10 @@ if TK_OK:
           "max_open_slots" not in wpr_keys)
     check("...de a valodi parameterei megmaradtak",
           all(k in wpr_keys for k in ("sma_period", "wpr_m1_buy_trigger",
-                                      "sl_atr_mult", "atr_period")),
+                                      "sl_atr_mult")),
           str(wpr_keys))
+    check("...az atr_period pedig mar az instrumentume (nincs itt)",
+          "atr_period" not in wpr_keys, str(wpr_keys))
 
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")

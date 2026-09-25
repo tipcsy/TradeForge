@@ -111,7 +111,10 @@ _SPECS = {
     _g.SPREAD: (
         ParamSpec("max_spread_atr_ratio", FLOAT, 0.20, lo=0.0, hi=5.0),
         ParamSpec("min_spread_mult", FLOAT, 1.5, lo=0.0, hi=50.0),
-        ParamSpec("atr_period", INT, 14, lo=2, hi=500),
+        # ⚠ Az `atr_period` v3.104.0 óta NINCS itt: nem a spreadé, hanem az
+        # INSTRUMENTUMÉ (minden stratégia stopja ebből számol) — az instrumentum-
+        # ablakban állítható. Itt átírva egy „spread-beállítás" némán
+        # átméretezte volna a pár összes stopját.
     ),
     _g.TF_ALIGN: (
         ParamSpec("enabled", BOOL, True),

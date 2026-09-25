@@ -13,15 +13,17 @@ ok    = current_spread ≤ limit
 
 The `250/1312` form in the cell means **current / limit**, in points.
 
-## The three numbers
+## The two numbers
 
 - **Spread as a share of ATR** (`max_spread_atr_ratio`, default 0.20) — the
   allowed spread is this share of the ATR.
 - **Floor** (`min_spread_mult`, default 1.5) — the lower threshold is this many
   times the instrument's OWN typical spread.
-- **ATR window** (`atr_period`, default 14) — the volatility baseline.
+- The **ATR** is the pair's ATR (`atr_period`, default 14). ⚠ Since v3.104.0
+  it is set NOT here but in the **instrument window** (click the name): every
+  strategy's stop is sized from it too, so it is not the spread's own number.
 
-All three are **strategy-independent**, per instrument:
+Both thresholds are **strategy-independent**, per instrument:
 `data/execution_params/<SYMBOL>.json`.
 
 ## Why the floor is relative
