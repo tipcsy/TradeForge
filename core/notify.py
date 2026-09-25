@@ -62,6 +62,13 @@ DAILY     = "daily"       # napi zárás-összefoglaló
 _TRADE_KINDS = (OPEN, CLOSE, SL_MOVE)
 _PAIR_KINDS = _TRADE_KINDS + (SIGNAL,)
 
+# A szűrő (`Notifier.kimehet`) INDOKLÁSAI — konstansként, mert a Jelzések fül
+# kézbesítés-állapota ezekből képződik (`core.signal_delivery`). Egy átfogalmazott
+# indoklás különben némán „ismeretlen" állapotot adna a fülön.
+OK_NINCS_BEALLITVA = "nincs beállítva"
+OK_NEMITVA = "a pár/stratégia némítva"
+OK_CSEND_JELZES = "csendes óra (a jelzés elvész)"
+
 # Percenként ennyi üzenetnél többet nem küldünk; a fölötte lévők EGY
 # összevont sorban mennek. ⚠ Nem a Telegram korlátja a lényeg, hanem hogy egy
 # zajos nap ne tegye olvashatatlanná a beszélgetést.
@@ -222,20 +229,20 @@ class Notifier:
                 most: "datetime | None" = None) -> tuple:
         """`(kimehet_e, ok)`. Az `ok` a naplóé és a teszté."""
         if not self.cfg.kesz:
-            return False, "nincs beállítva"
+            return False, OK_NINCS_BEALLITVA
         most = most or datetime.fromtimestamp(self.ora())
         # 1. Pár + stratégia kapcsoló
         if ev.kind in _PAIR_KINDS and ev.symbol and ev.strategy:
             be = (viz_prefs.notify_signal_on if ev.kind == SIGNAL
                   else viz_prefs.notify_trade_on)(cfg_json, ev.symbol, ev.strategy)
             if not be:
-                return False, "a pár/stratégia némítva"
+                return False, OK_NEMITVA
         # 2. Csendes órák
         if csendben(self.cfg, most):
             if ev.kind == SIGNAL:
                 # ⚠ A felhasználó döntése: a csendben keletkezett JELZÉS
                 # ELVESZIK. Reggel egy lejárt ajánlat csak bosszúság volna.
-                return False, "csendes óra (a jelzés elvész)"
+                return False, OK_CSEND_JELZES
             if ev.kind in _TRADE_KINDS:
                 # ⚠ NEM VESZIK EL: reggel, a csend végén EGY összesítőben jön.
                 # (A jelzés viszont igen — arra reggel már úgysem lépnél be.)
@@ -533,12 +540,40 @@ def trade_event(row: dict) -> bool:
         _ch = None
         if kind in (OPEN, SIGNAL) and "chart_spec" in row and not row.get("offered"):
             _ch = chart_of(row, row.get("chart_spec"))
-        return _kuld(Event(kind=kind, text=szoveg, symbol=sym, strategy=strat,
-                           chart=_ch))
+        ev = Event(kind=kind, text=szoveg, symbol=sym, strategy=strat, chart=_ch)
+        if kind != SIGNAL:
+            return _kuld(ev)
+        # ⚠ JELZÉSNÉL A DÖNTÉST RÖGZÍTJÜK IS (`core.signal_delivery`): a
+        # Jelzések fül enélkül minden jelzést „kiküldöttnek" mutatott — azt is,
+        # amit a csendes óra szándékosan elnyelt (2026-09-25).
+        return _jelzes_kuld(ev, row)
     except Exception:
         # ⚠ Az értesítés SOHA nem viheti el a napló-írást, ami hívja.
         log.debug("értesítés: a kereskedési esemény kihagyva", exc_info=True)
         return False
+
+
+def _jelzes_kuld(ev: Event, row: dict) -> bool:
+    """A jelzés küldése + a kézbesítés-DÖNTÉS rögzítése."""
+    from core import signal_delivery as _sd
+    n = _aktiv
+    kiment = False
+    if n is None:
+        allapot = _sd.OFF
+    else:
+        ok, indok = n.kimehet(ev, _cfg_json)
+        if ok:
+            kiment = n.push(ev)
+            allapot = _sd.SENT if kiment else _sd.DROPPED
+        else:
+            allapot = {OK_NINCS_BEALLITVA: _sd.OFF, OK_NEMITVA: _sd.MUTED,
+                       OK_CSEND_JELZES: _sd.QUIET}.get(indok, _sd.DROPPED)
+    # A jóváhagyó ajánlat (gombos) a pár-némítástól függetlenül megy ki — ha
+    # kiment, a jelzés KIMENT, akkor is, ha a sima jelzés-üzenet némítva van.
+    if row.get("offered"):
+        allapot = _sd.SENT
+    _sd.record(row.get("time"), ev.symbol, ev.strategy, allapot)
+    return kiment
 
 
 def sl_moved(symbol: str, strategy: str, ticket: int, sl: float,

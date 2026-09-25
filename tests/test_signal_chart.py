@@ -188,8 +188,11 @@ check("config: signal_chart alapbol BE",
 
 # trade_event: a kep-adat a sorbol, es NINCS masodik kep az ajanlat utan
 _elkapott = []
-_orig_kuld = nt._kuld
+_orig_kuld, _orig_jk = nt._kuld, nt._jelzes_kuld
 nt._kuld = lambda e: _elkapott.append(e) or True
+# ⚠ A JELZES a kezbesites-naplot is irja (`_jelzes_kuld`) — a teszt itt csak
+# az esemenyt nezi, es a VALODI data/-ba nem irhat.
+nt._jelzes_kuld = lambda e, row: _elkapott.append(e) or True
 try:
     row = {"event": "signal", "symbol": "X", "strategy": "wpr_sma",
            "direction": "BUY", "lot": 0.1, "price": 100.0, "sl": 99.0,
@@ -207,7 +210,7 @@ try:
     nt.trade_event({**row, "event": "close", "pnl_usd": 1.0})
     check("zaras soha nem kepes", _elkapott[-1].chart is None)
 finally:
-    nt._kuld = _orig_kuld
+    nt._kuld, nt._jelzes_kuld = _orig_kuld, _orig_jk
 
 # ══ 5. A jovahagyo ajanlat: kep + gombok, KULON szalon ═════════════════════
 print("== 5. signal_offer ==")

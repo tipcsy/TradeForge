@@ -49,6 +49,21 @@ FRISS_PERC = 15          # ennél régebbi jelzésnél a kor már nem zöld
 ALAP_MAX_ORA = 4.0       # ennél régebbi jelzésre nem enged kötni (configból)
 
 
+def _helyi(iso):
+    """A napló UTC ISO-időbélyege HELYI időben (`datetime`), vagy `None`.
+
+    ⚠ A fül eddig a nyers UTC-t írta ki (20:31), miközben a csendes óra, a
+    napló és a felhasználó HELYI időben gondolkodik (22:31). Így a 22:00-kor
+    induló csendes óra jelzései „nappaliaknak" látszottak (2026-09-25)."""
+    try:
+        t = datetime.fromisoformat(str(iso))
+    except (TypeError, ValueError):
+        return None
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=timezone.utc)
+    return t.astimezone()
+
+
 def _kor_perc(iso) -> float:
     """A jelzés kora percben. `inf`, ha az időbélyeg értelmezhetetlen."""
     try:
@@ -138,7 +153,8 @@ class SignalsTab:
                           (_t("signals.col.strategy"), 20),
                           (_t("signals.col.dir"), 7),
                           (_t("signals.col.price"), 13),
-                          ("SL", 13), ("TP", 13), ("Lot", 7), ("", 10)]
+                          ("SL", 13), ("TP", 13), ("Lot", 7),
+                          (_t("signals.col.telegram"), 15), ("", 10)]
         fej = tk.Frame(p, bg=BG_HEADER)
         fej.pack(fill="x", padx=10)
         for cim, w in self._oszlopok:
@@ -181,11 +197,23 @@ class SignalsTab:
             return []
         self._lbl_hiba.config(text="")
         tol, ig = tart
-        # A jelzés ideje UTC ISO; a NAPOT abból vesszük (a Lezárt fül a bróker
-        # napját használja — itt a naplózás ideje az egyetlen forrás).
-        napok = pd.to_datetime(d["time"], errors="coerce", utc=True).dt.date
+        # A jelzés ideje UTC ISO; a NAPOT a HELYI időből vesszük — a „Ma" a
+        # felhasználó napja (egy 00:30-as helyi jelzés UTC-ben még „tegnap").
+        # ⚠ `tzlocal()`, nem a mostani eltolás: 30 napos szűrésnél a nyári/téli
+        # időszámítás váltása is a tartományba eshet.
+        from dateutil.tz import tzlocal
+        napok = (pd.to_datetime(d["time"], errors="coerce", utc=True)
+                 .dt.tz_convert(tzlocal()).dt.date)
         d = d[(napok >= tol) & (napok <= ig)]
-        return d.tail(MAX_SOR).iloc[::-1].to_dict("records")
+        sorok = d.tail(MAX_SOR).iloc[::-1].to_dict("records")
+        # A Telegram-kézbesítés DÖNTÉSE (`core.signal_delivery`) — a jelzés
+        # naplósorával azonos időbélyegen.
+        from core import signal_delivery as _sd
+        _kez = _sd.load()
+        for r in sorok:
+            r["_kezbesites"] = _kez.get(_sd.key(r.get("time"), r.get("symbol"),
+                                                r.get("strategy")), "")
+        return sorok
 
     # ── megjelenítés ──────────────────────────────────────────────────────
     def _ujratolt(self):
@@ -299,7 +327,12 @@ class SignalsTab:
         irany = str(r.get("direction", ""))
         dig = self._digits_of(sym)
 
-        cellak = [(ido[:16].replace("T", " "), FG_WHITE),
+        _h = _helyi(ido)
+        _kez = str(r.get("_kezbesites") or "")
+        _kez_szin = {"sent": FG_GREEN, "quiet": FG_YELLOW, "muted": FG_GRAY,
+                     "off": FG_GRAY_DIM, "dropped": FG_RED}.get(_kez, FG_GRAY_DIM)
+        cellak = [(_h.strftime("%Y-%m-%d %H:%M") if _h else ido[:16].replace("T", " "),
+                   FG_WHITE),
                   ("", FG_GRAY),                       # a Kor — alább töltjük
                   (sym, FG_WHITE),
                   (str(r.get("strategy", "")), FG_GRAY),
@@ -307,7 +340,8 @@ class SignalsTab:
                   (self._ar(r.get("price"), dig), FG_WHITE),
                   (self._ar(r.get("sl"), dig), FG_GRAY),
                   (self._ar(r.get("tp"), dig), FG_GRAY),
-                  (self._lot(r.get("lot")), FG_WHITE)]
+                  (self._lot(r.get("lot")), FG_WHITE),
+                  (_t(f"signals.delivery.{_kez}") if _kez else "—", _kez_szin)]
         lbl_kor = None
         for j, ((szoveg, szin), (_, w)) in enumerate(zip(cellak, self._oszlopok)):
             lbl = tk.Label(keret, text=szoveg, width=w, anchor="w", bg=bg,
