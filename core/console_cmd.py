@@ -62,6 +62,9 @@ class Result:
     ok: bool = True
     confirm: str = ""
     quit: bool = False
+    # KÉP (PNG-bájtok) — a `/photo` válasza. A Telegram képként küldi, a
+    # `lines` az aláírás. A konzol/TUI a sorokat írja ki (képet nem tud).
+    photo: bytes = b""
 
 
 @dataclass
@@ -94,6 +97,10 @@ class Context:
     # lakik — a parancs-réteg viszont MT5-mentes marad. Aki nem köti be, annál a
     # hangolatlan indulás jelzése egyszerűen elmarad (nem hazudik, csak hallgat).
     params_source: Callable[[str, str], str] = lambda s, n: ""
+    # A pár PILLANATKÉPE: `(szimbólum, idősíkok) -> (png, stratégia)`. ⚠
+    # FÜGGVÉNYKÉNT, mert MT5-öt és matplotlibet húz — a parancs-réteg mentes
+    # marad tőlük. Aki nem köti be, annál a `/photo` megmondja, hogy nem elérhető.
+    chart_png: Callable[..., tuple] = lambda s, t, only=None: (b"", "")
 
 
 # ---------------------------------------------------------------------------
@@ -1197,6 +1204,80 @@ def cmd_quit(ctx: Context, args: list, confirmed: bool = False) -> Result:
     return Result([_t("console.quit")], quit=True)
 
 
+_PHOTO_TF = {"m15": (15,), "15": (15,), "m1": (1,), "1": (1,),
+             "mind": (15, 1), "all": (15, 1), "both": (15, 1)}
+# Csak EGY oszcillátor-fajta a képen (ár nélkül): `/photo UsaTec M15 wpr`.
+_PHOTO_ONLY = ("wpr",)
+
+
+def cmd_photo(ctx: Context, args: list, confirmed: bool = False) -> Result:
+    """`photo <pár> [M1|M15] [wpr]` — a pár PILLANATKÉPE (gyertyák + a
+    stratégia indikátorai). Idősík nélkül mindkettő; `wpr` → CSAK a WPR-panel
+    (ár nélkül). A pár utáni szavak sorrendje mindegy.
+
+    ⚠ ELGÉPELÉS-TŰRŐ: telefonon könnyű „UsaTech"-et írni „UsaTec" helyett.
+    Egyértelmű közeli találatnál azt használjuk (és kiírjuk, melyiket); több
+    jelöltnél felsoroljuk őket, nem találgatunk."""
+    if not args:
+        return Result([_t("console.photo.usage")], ok=False)
+    sym = _resolve_symbol(ctx, args[0])
+    megjegyzes = ""
+    if sym is None:
+        jeloltek = _close_symbols(ctx, args[0])
+        if len(jeloltek) == 1:
+            sym = jeloltek[0]
+            megjegyzes = _t("console.photo.guessed", given=args[0], symbol=sym)
+        else:
+            return Result([_t("console.photo.unknown", given=args[0],
+                              candidates=", ".join(jeloltek) or "—")], ok=False)
+    tfs, only = (15, 1), None
+    for szo in args[1:]:
+        w = str(szo).lower()
+        if w in _PHOTO_TF:
+            tfs = _PHOTO_TF[w]
+        elif w in _PHOTO_ONLY:
+            only = w
+        else:
+            return Result([_t("console.photo.usage")], ok=False)
+    try:
+        _ki = (ctx.chart_png(sym, tfs, only=only) if only
+               else ctx.chart_png(sym, tfs))
+        # `(png, stratégia)` vagy `(png, stratégia, értékek)` — a régi alak
+        # (teszt-stub, más hívó) is működjön.
+        png, sn = _ki[0], _ki[1]
+        _vals = _ki[2] if len(_ki) > 2 else []
+    except ValueError as ex:
+        if only:
+            return Result([_t("console.photo.no_panel", symbol=sym,
+                              kind=only.upper())], ok=False)
+        return Result([_t("console.photo.failed", symbol=sym, error=ex)], ok=False)
+    except Exception as ex:
+        return Result([_t("console.photo.failed", symbol=sym, error=ex)], ok=False)
+    if not png:
+        return Result([_t("console.photo.failed", symbol=sym,
+                          error=_t("console.photo.no_data"))], ok=False)
+    sorok = ([megjegyzes] if megjegyzes else []) + [
+        _t("console.photo.caption", symbol=sym, strategy=sn or "—",
+           tf=" + ".join(f"M{t}" for t in tfs) + (f" · {only.upper()}"
+                                                   if only else ""))
+        + ("".join(f" · {n}: {v:.0f}" for n, v in _vals))]
+    return Result(sorok, photo=png)
+
+
+def _close_symbols(ctx: Context, name: str) -> list:
+    """A beírt névhez KÖZELI párok (kisbetűsen, elöl-egyezés + difflib)."""
+    import difflib
+    parok = _pairs(ctx)
+    kicsi = str(name).lower()
+    elol = [s for s in parok if s.lower().startswith(kicsi)
+            or kicsi.startswith(s.lower())]
+    if elol:
+        return elol
+    m = difflib.get_close_matches(kicsi, [s.lower() for s in parok], n=3,
+                                  cutoff=0.75)
+    return [s for s in parok if s.lower() in m]
+
+
 def _resolve_symbol(ctx: Context, name: str) -> Optional[str]:
     """Kis/nagybetűtől független pár-feloldás — a `ger40` is találjon."""
     parok = _pairs(ctx)
@@ -1241,6 +1322,7 @@ COMMANDS: dict = {
     "today":   cmd_today,
     "state":   cmd_state,
     "heart":   cmd_heart,
+    "photo":   cmd_photo,
     "quit":    cmd_quit,
 }
 
@@ -1272,6 +1354,7 @@ _HELP = (
     ("today", "console.help.today"),
     ("state", "console.help.state"),
     ("heart", "console.help.heart"),
+    ("photo <pár> [M1|M15] [wpr]", "console.help.photo"),
     ("quit", "console.help.quit"),
 )
 
@@ -1332,4 +1415,5 @@ def live_context(cfg: dict, config_path) -> Context:
         today_rows=lt.today_trade_rows,
         mt5_ok=lambda: bool(mt5_connector.is_connected()),
         licence_status=licence.status,
+        chart_png=lambda s, tfs, only=None: lt.pair_chart_png(s, cfg, tfs, only),
     )

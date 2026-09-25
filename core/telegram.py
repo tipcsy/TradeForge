@@ -120,6 +120,68 @@ def send(token: str, chat_ids, szoveg: str) -> bool:
     return ment
 
 
+# A Telegram a KÉPALÁÍRÁST 1024 karakterre korlátozza (a sima üzenetet 4096-ra).
+MAX_CAPTION = 1024
+
+
+def _multipart(fields: dict, file_field: str, filename: str, data: bytes,
+               mime: str = "image/png") -> tuple:
+    """`(törzs, content_type)` egy `multipart/form-data` kéréshez — a képfeltöltés
+    egyetlen módja a Bot API-ban (a JSON-törzs nem hordozhat bináris fájlt)."""
+    import uuid
+    hatar = uuid.uuid4().hex
+    sorok = []
+    for k, v in fields.items():
+        sorok.append(f"--{hatar}\r\nContent-Disposition: form-data; "
+                     f"name=\"{k}\"\r\n\r\n{v}\r\n".encode("utf-8"))
+    sorok.append(f"--{hatar}\r\nContent-Disposition: form-data; "
+                 f"name=\"{file_field}\"; filename=\"{filename}\"\r\n"
+                 f"Content-Type: {mime}\r\n\r\n".encode("utf-8"))
+    sorok.append(data)
+    sorok.append(f"\r\n--{hatar}--\r\n".encode("utf-8"))
+    return b"".join(sorok), f"multipart/form-data; boundary={hatar}"
+
+
+def send_photo(token: str, chat_id, png: bytes, caption: str = "",
+               gombok=None) -> bool:
+    """KÉP küldése (képaláírással, opcionálisan GOMBOKKAL — a jóváhagyó
+    ajánlathoz). `True`, ha kiment.
+
+    ⚠ A 1024 karakternél hosszabb aláírás levágódna — ilyenkor a kép rövid
+    aláírással megy, a teljes szöveg utána KÜLÖN üzenetben (a gombokkal
+    együtt, hogy a döntés a szöveg mellett legyen)."""
+    if not token:
+        return False
+    szoveg = str(caption or "")
+    hosszu = len(szoveg) > MAX_CAPTION
+    fields = {"chat_id": str(chat_id),
+              "caption": (szoveg.split(chr(10))[0][:MAX_CAPTION] if hosszu
+                          else szoveg)}
+    if gombok and not hosszu:
+        fields["reply_markup"] = json.dumps({"inline_keyboard": [[
+            {"text": str(f), "callback_data": str(a)[:64]} for f, a in gombok]]})
+    body, ctype = _multipart(fields, "photo", "jelzes.png", png)
+    req = urllib.request.Request(
+        f"{API}/bot{token}/sendPhoto", data=body,
+        headers={"Content-Type": ctype, "User-Agent": _user_agent()},
+        method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=TIMEOUT_SEC * 2) as r:
+            res = json.loads(r.read().decode("utf-8"))
+    except Exception as ex:
+        log.warning("telegram: a kép nem ment ki (%s): %s", chat_id, ex)
+        return False
+    if not (isinstance(res, dict) and res.get("ok")):
+        log.warning("telegram: a kép nem ment ki (%s): %s", chat_id, res)
+        return False
+    if hosszu:
+        if gombok:
+            send_buttons(token, chat_id, szoveg, gombok)
+        else:
+            send(token, [chat_id], szoveg)
+    return True
+
+
 def send_buttons(token: str, chat_id, szoveg: str, gombok) -> bool:
     """Üzenet GOMBOKKAL (`inline_keyboard`). `gombok`: `[(felirat, adat), …]`.
 
@@ -161,6 +223,15 @@ def edit_message(token: str, chat_id, message_id: int, szoveg: str) -> bool:
     ok, res = _hivas(token, "editMessageText", {
         "chat_id": str(chat_id), "message_id": int(message_id),
         "text": str(szoveg)[:MAX_HOSSZ]})
+    if ok and isinstance(res, dict) and res.get("ok"):
+        return True
+    # ⚠ KÉPES üzenetnek nincs „szövege", csak ALÁÍRÁSA: az `editMessageText`
+    # ott hibát ad („there is no text in the message to edit"). A jóváhagyó
+    # ajánlat v3.106.0 óta képpel megy — enélkül a gombnyomás után a gombok
+    # a képen maradnának, és újra meg lehetne nyomni őket.
+    ok, res = _hivas(token, "editMessageCaption", {
+        "chat_id": str(chat_id), "message_id": int(message_id),
+        "caption": str(szoveg)[:MAX_CAPTION]})
     return bool(ok and isinstance(res, dict) and res.get("ok"))
 
 

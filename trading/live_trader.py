@@ -141,6 +141,42 @@ def params_source(symbol: str, strategy_name: str) -> str:
     return "tuned" if params_file(symbol, strategy_name).exists() else "default"
 
 
+def pair_chart_png(symbol: str, cfg: dict, tfs=(15, 1), only=None) -> tuple:
+    """`(png, stratégia_név, [(név, érték), …])` — a pár PILLANATKÉPE a
+    `/photo` parancshoz, és a képen látszó oszcillátorok utolsó értéke
+    (az aláírásba: „WPR M15: -44 · WPR M1: -80").
+
+    A pár ELSŐ engedélyezett stratégiájának indikátoraival (`chart_spec`, pl.
+    wpr_sma: M15 SMA + két WPR), belépő-szintek NÉLKÜL. A gyertyák MT5-ből
+    (lezártak), a rajz a jelzés-képével azonos (`core.signal_chart`)."""
+    import math
+    from core import signal_chart
+    from strategy import enabled_strategy_names, get_strategy_by_name
+    from strategy.settings import config_for_strategy, default_params
+    nevek = enabled_strategy_names(cfg, symbol) or []
+    spec, sn = {}, ""
+    if nevek:
+        sn = nevek[0]
+        try:
+            st = get_strategy_by_name(sn)
+            cs = config_for_strategy(cfg, sn)
+            p = strategy_params(symbol, sn, cs, fallback=default_params(st, cs)) or {}
+            spec = st.chart_spec(p) or {}
+        except Exception:
+            log.debug("/photo: a stratégia indikátorai kimaradnak", exc_info=True)
+    bars = signal_chart.fetch_bars(
+        symbol, spec, lambda tf, n: mt5_connector.tf_bars(symbol, tf, n))
+    _ps = float(((cfg.get("pairs") or {}).get(symbol) or {}).get("point_size") or 0)
+    digits = min(8, max(0, int(round(-math.log10(_ps))))) if _ps > 0 else 5
+    _ido = datetime.now().strftime("%H:%M")
+    png = signal_chart.render_png(
+        symbol, "", None, None, None, bars, spec, digits=digits, tfs=tfs,
+        only=only, title=f"{symbol}{' · ' + sn if sn else ''} · {_ido}")
+    _vals = [(n, v) for n, v in signal_chart.panel_values(bars, spec)
+             if int(n.rsplit("M", 1)[-1]) in tuple(tfs)]
+    return png, sn, _vals
+
+
 def strategy_params(symbol: str, strategy_name: str, cfg: dict,
                     fallback: dict = None) -> Optional[dict]:
     """A paraméter-készlet, AHOGY A STRATÉGIA LÁTJA: mentett params + a KÖZÖS
@@ -2099,7 +2135,8 @@ def _signal_bar_ts(df_lo, strategy, params) -> tuple:
 def _execute_entry(symbol: str, strategy_name: str, direction: str, lot: float,
                    sl_price: float, tp_price: float, sl_points: float,
                    magic: int, risk_ccy: float, pv1_point: float,
-                   open_price: float, slot_mgr) -> "int | None":
+                   open_price: float, slot_mgr,
+                   chart_spec: "dict | None" = None) -> "int | None":
     """A BELÉPŐ VÉGREHAJTÁSA — fedezet-ellenőrzés, megbízás, nyilvántartás.
 
     ⚠ MIÉRT KÜLÖN FÜGGVÉNY. Két hívója van: a motor saját belépője
@@ -2143,7 +2180,7 @@ def _execute_entry(symbol: str, strategy_name: str, direction: str, lot: float,
         ticket, symbol, strategy_name,
         position_meta.risk_from_points(lot, sl_points, pv1_point),
         lot=lot, sl_points=sl_points, entry_price=open_price)
-    log_trade({
+    _row = {
         "time":      datetime.now(timezone.utc).isoformat(),
         "event":     "open",
         "strategy":  strategy_name,
@@ -2155,7 +2192,11 @@ def _execute_entry(symbol: str, strategy_name: str, direction: str, lot: float,
         "tp":        tp_price,
         "ticket":    ticket,
         "magic":     magic,
-    })
+    }
+    # A Telegram-kép adata (nem kerül a trades.csv-be: a séma kiszűri).
+    if chart_spec is not None:
+        _row["chart_spec"] = chart_spec
+    log_trade(_row)
     return ticket
 
 
@@ -3218,6 +3259,14 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
                     tp_price   = order_exec.normalize_price(
                         open_price - points_to_price(tp_points, point_size), sym_info)
 
+                # A Telegram jelzés-kép TARTALMA — a stratégia mondja meg, mit
+                # rajzoljon a gyertyák mellé (SMA, WPR…). Hiba → üres: a kép
+                # akkor is elkészül, csak indikátor nélkül.
+                try:
+                    _chart_spec = strategy.chart_spec(params) or {}
+                except Exception:
+                    _chart_spec = {}
+                _offered = False
                 # ── „Csak jelzés" mód: megbízás NEM megy ki ────────────────
                 # Minden fenti számítás (kapuk, SL/TP, lot) ugyanúgy lefutott —
                 # csak a végrehajtás marad el. Így a chart-riasztás és a napló
@@ -3262,7 +3311,8 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
                                 magic=magic, risk_ccy=_risk_ccy,
                                 pv1_point=_sizing_cfg.get("pv1_point", 0.0))
                             from core import notify as _nf
-                            _nf.signal_offer(_ajanlat)
+                            _offered = _nf.signal_offer(
+                                _ajanlat, chart_spec=_chart_spec)
                     except Exception:
                         # ⚠ Az ajánlat elmaradása NEM viheti el a jelzés
                         # naplózását: a chart és a `trades.csv` attól még
@@ -3280,13 +3330,18 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
                         "tp":        tp_price,
                         "ticket":    None,
                         "magic":     magic,
+                        # A Telegram-kép (a trades.csv sémája kiszűri): ha a
+                        # jóváhagyó ajánlat már képpel ment, itt nincs második.
+                        "chart_spec": _chart_spec,
+                        "offered":    bool(_offered),
                     })
                     return
 
                 _ticket = _execute_entry(
                     symbol, strategy.name, signal, lot, sl_price, tp_price,
                     sl_points, magic, _risk_ccy,
-                    _sizing_cfg.get("pv1_point", 0.0), open_price, slot_mgr)
+                    _sizing_cfg.get("pv1_point", 0.0), open_price, slot_mgr,
+                    chart_spec=_chart_spec)
                 # ⚠ A KIMENET a ticketből dől el, nem a szándékból: a fedezet-
                 # ellenőrzés és a bróker elutasítása is IDE fut be (`None`). Ha a
                 # telemetria a hívás tényét számolná kötésnek, a jelentés

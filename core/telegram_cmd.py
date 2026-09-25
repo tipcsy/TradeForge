@@ -49,8 +49,9 @@ log = logging.getLogger(__name__)
 # gombos megerositessel), nem egy parancs-listas dontes. A `reject`/`defer` is
 # kimarad: egy felig hasznalhato postalada (latod, de nem donthetsz) zavarobb,
 # mint egy tisztan olvaso nezet.
+# ⚠ A `photo` OLVASÓ parancs (pillanatkép a párról) — semmit nem állít.
 ENGEDETT = ("help", "balance", "pos", "today", "report", "why", "health",
-            "plan", "inbox", "optq", "state", "heart", "play", "stop")
+            "plan", "inbox", "optq", "state", "heart", "photo", "play", "stop")
 
 # Meddig él egy megerősítő gomb.
 AJANLAT_MP = 600
@@ -64,8 +65,9 @@ POLL_MP = 25
 # A parancs-menü sorrendje. ⚠ NEM ábécé: a leggyakrabban használt kerül előre,
 # és a két ÁLLÍTÓ parancs (`play`/`stop`) a végére — hogy ne azokra essen a
 # mutatóujj, amikor csak megnézni akarsz valamit.
-MENU_SORREND = ("state", "pos", "today", "report", "inbox", "optq", "why",
-                "health", "plan", "balance", "heart", "help", "play", "stop")
+MENU_SORREND = ("state", "pos", "today", "photo", "report", "inbox", "optq",
+                "why", "health", "plan", "balance", "heart", "help", "play",
+                "stop")
 
 
 def parancs_lista(nyelv: str = "") -> list:
@@ -88,7 +90,7 @@ def parancs_lista(nyelv: str = "") -> list:
     for nev in sorrend:
         leiras = _szoveg(f"console.help.{nev}")
         # A paraméteres parancsoknál a menüben is látszódjon, mit vár.
-        if nev in ("play", "stop", "why"):
+        if nev in ("play", "stop", "why", "photo"):
             leiras = _szoveg("tg.menu.arg_pair", leiras=leiras)
         ki.append((nev, leiras))
     return ki
@@ -115,6 +117,7 @@ class Kimenet:
     buttons: tuple = ()
     callback_id: str = ""        # gombnyomás nyugtázása
     edit_message_id: int = 0     # meglévő üzenet átírása (a gombok eltűnnek)
+    photo: bytes = b""           # KÉP (a `text` az aláírása) — a `/photo`
 
 
 @dataclass
@@ -168,7 +171,8 @@ class Bot:
             return [Kimenet(chat_id=chat, text=res.confirm,
                             buttons=((_t("tg.btn.yes"), f"i:{azon}"),
                                      (_t("tg.btn.no"), f"n:{azon}")))]
-        return [Kimenet(chat_id=chat, text=self._szoveg(res))]
+        return [Kimenet(chat_id=chat, text=self._szoveg(res),
+                        photo=res.photo or b"")]
 
     def _gomb(self, cq: dict, chat: str, uz: dict) -> list:
         adat = str(cq.get("data") or "")
@@ -241,6 +245,10 @@ class Bot:
             # tehát nincs mit még egyszer megnyomni.
             if telegram.edit_message(self.token, k.chat_id,
                                      k.edit_message_id, k.text):
+                return
+        if k.photo:
+            # A kép ha nem megy ki (hálózat, túl nagy), az aláírás akkor is.
+            if telegram.send_photo(self.token, k.chat_id, k.photo, k.text):
                 return
         if k.buttons:
             telegram.send_buttons(self.token, k.chat_id, k.text, k.buttons)

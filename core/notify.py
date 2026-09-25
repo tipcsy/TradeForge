@@ -77,6 +77,11 @@ class Event:
     # Dedup-kulcs: azonos kulcsú esemény NAPONTA egyszer megy ki (a négy
     # kritikus hibánál ez a lényeg). Üres → nincs dedup.
     key: str = ""
+    # KÉP-ADAT (v3.106.0): ha van, az értesítés KÉPKÉNT megy (M15 + M1 a
+    # belépő szintjeivel), a `text` a képaláírás. `None` → sima szöveg.
+    # Alak: `{"symbol", "direction", "entry", "sl", "tp", "spec"}` — a `spec`
+    # a stratégia `chart_spec()`-je (mit rajzoljon még: SMA, WPR…).
+    chart: "dict | None" = None
 
 
 @dataclass
@@ -89,6 +94,9 @@ class Config:
     quiet_to: str = ""              # "07:00"
     heartbeat_times: tuple = ()     # ("08:00", "12:00", "15:00")
     daily_time: str = ""            # "23:00" — a napi összefoglaló ideje
+    # A jelzés/kötés KÉPPEL menjen-e (M15 + M1). Alapból IGEN: a felhasználó
+    # kérte (2026-09-25); ha a kép nem készül el, a szöveg akkor is kimegy.
+    signal_chart: bool = True
 
     @property
     def kesz(self) -> bool:
@@ -112,6 +120,7 @@ def read_config(cfg: dict) -> Config:
         quiet_to=str(csend.get("to") or ""),
         heartbeat_times=tuple(str(x) for x in (n.get("heartbeat_times") or [])),
         daily_time=str(n.get("daily_summary_time") or ""),
+        signal_chart=bool(n.get("signal_chart", True)),
     )
 
 
@@ -152,9 +161,15 @@ class Notifier:
     lejátszható tesztben."""
 
     def __init__(self, cfg: Config, transport=None, ora=None, health=None,
-                 daily=None):
+                 daily=None, photo_transport=None, chart_maker=None):
         self.cfg = cfg
         self.transport = transport
+        # KÉP-út (v3.106.0): `photo_transport(png, aláírás) -> bool` és
+        # `chart_maker(chart_dict) -> png`. Mindkettő cserélhető → tesztelhető
+        # hálózat és MT5 nélkül. Bármelyik hiánya/hibája → sima szöveg.
+        self.photo_transport = photo_transport
+        self.chart_maker = chart_maker
+        self.kepek = 0
         self.ora = ora or time.time
         # ⚠ AZ ÁLLAPOT-FIGYELŐ NEM A MOTORÉ. Egy elhalt szál nem tud üzenni
         # magáról — ezért a NÉGY kritikus eseményt ez a (külön) szál kérdezi
@@ -357,7 +372,7 @@ class Notifier:
         if len(self._perc_ablak) >= PERC_LIMIT:
             self.eldobva += 1
             return False
-        ok = bool(self.transport and self.transport(ev.text))
+        ok = self._kep(ev) or bool(self.transport and self.transport(ev.text))
         if ok:
             self.kuldve += 1
             self._perc_ablak.append(_most)
@@ -365,6 +380,71 @@ class Notifier:
                 self._elkuldve[ev.key] = datetime.fromtimestamp(
                     _most).strftime("%Y-%m-%d")
         return ok
+
+
+    def _kep(self, ev: Event) -> bool:
+        """A jelzés KÉPKÉNT. `False` → a hívó a sima szöveget küldi.
+
+        ⚠ A KÉP SOSEM NYELHETI EL AZ ÜZENETET: bármi hiba (nincs MT5-adat, a
+        rajz elszáll, a Telegram elutasítja) → `False`, és megy a szöveg."""
+        if not (ev.chart and self.cfg.signal_chart and self.photo_transport
+                and self.chart_maker):
+            return False
+        try:
+            png, extra = _png_es_ertekek(self.chart_maker(ev.chart))
+            if not png:
+                return False
+            ok = bool(self.photo_transport(
+                png, ev.text + (chr(10) + extra if extra else "")))
+            if ok:
+                self.kepek += 1
+            return ok
+        except Exception:
+            log.warning("értesítés: a jelzés-kép nem készült el — szövegként "
+                        "megy (%s)", ev.symbol, exc_info=True)
+            return False
+
+
+def _png_es_ertekek(ki) -> tuple:
+    """A kép-készítő kimenete: `png` VAGY `(png, értékek_szövege)`."""
+    if isinstance(ki, tuple):
+        return ki[0], (ki[1] if len(ki) > 1 else "")
+    return ki, ""
+
+
+def make_chart(chart: dict) -> tuple:
+    """A jelzés-kép ÉLŐBEN: a gyertyák MT5-ből (lezártak, `tf_bars`), a rajz a
+    `core.signal_chart`-é. A tizedesek a `point_size`-ból (soha `%.5g`).
+
+    `(png, „WPR M15: -44 · WPR M1: -80")` — az értékek az aláírásba mennek."""
+    import math
+    from core import mt5_connector, signal_chart
+    sym = str(chart.get("symbol") or "")
+    spec = chart.get("spec") or {}
+    bars = signal_chart.fetch_bars(
+        sym, spec, lambda tf, n: mt5_connector.tf_bars(sym, tf, n))
+    _ps = float(((_cfg_json.get("pairs") or {}).get(sym) or {})
+                .get("point_size") or 0.0)
+    digits = (min(8, max(0, int(round(-math.log10(_ps))))) if _ps > 0 else 5)
+    png = signal_chart.render_png(
+        sym, str(chart.get("direction") or ""), float(chart["entry"]),
+        float(chart["sl"]), chart.get("tp"), bars, spec, digits=digits,
+        title=str(chart.get("title") or f"{sym} {chart.get('direction', '')}"))
+    return png, signal_chart.values_text(signal_chart.panel_values(bars, spec))
+
+
+def chart_of(row: dict, spec: dict | None = None) -> "dict | None":
+    """A kép-adat egy `log_trade`-sorból (vagy `None`, ha hiányos)."""
+    try:
+        return {"symbol": str(row.get("symbol") or ""),
+                "direction": str(row.get("direction") or ""),
+                "entry": float(row["price"]), "sl": float(row["sl"]),
+                "tp": (None if row.get("tp") in (None, "") else float(row["tp"])),
+                "spec": dict(spec or {}),
+                "title": f"{row.get('symbol', '')} · {row.get('strategy', '')} · "
+                         f"{row.get('direction', '')}"}
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 # ── Modul-szintű egyke (a motor ezt hívja) ────────────────────────────────
@@ -383,8 +463,14 @@ def setup(cfg: dict, health=None, daily=None) -> "Notifier | None":
         _aktiv = None
         return None
     from core import telegram
+    def _foto(png, felirat):
+        # ⚠ MINDEN címzettnek (lista, nem `any` — az rövidre zárna).
+        return any([telegram.send_photo(c.token, cid, png, felirat)
+                    for cid in c.chat_ids])
+
     _aktiv = Notifier(c, transport=lambda szoveg: telegram.send(
-        c.token, c.chat_ids, szoveg), health=health, daily=daily)
+        c.token, c.chat_ids, szoveg), health=health, daily=daily,
+        photo_transport=_foto, chart_maker=make_chart)
     _aktiv.start()
     log.info("értesítés: BEKAPCSOLVA (%d címzett)", len(c.chat_ids))
     return _aktiv
@@ -440,7 +526,14 @@ def trade_event(row: dict) -> bool:
                         price=_szam(row.get("price"), sym),
                         sl=_szam(row.get("sl"), sym),
                         tp=_szam(row.get("tp"), sym))
-        return _kuld(Event(kind=kind, text=szoveg, symbol=sym, strategy=strat))
+        # KÉP a jelzéshez és a kötés-nyitáshoz (a sor `chart_spec`-je a
+        # stratégiáé). ⚠ Ha ugyanerre a jelzésre a JÓVÁHAGYÓ ajánlat már képpel
+        # kiment (`offered`), itt nincs második kép — elég a szöveg.
+        _ch = None
+        if kind in (OPEN, SIGNAL) and "chart_spec" in row and not row.get("offered"):
+            _ch = chart_of(row, row.get("chart_spec"))
+        return _kuld(Event(kind=kind, text=szoveg, symbol=sym, strategy=strat,
+                           chart=_ch))
     except Exception:
         # ⚠ Az értesítés SOHA nem viheti el a napló-írást, ami hívja.
         log.debug("értesítés: a kereskedési esemény kihagyva", exc_info=True)
@@ -470,7 +563,7 @@ def sl_moved(symbol: str, strategy: str, ticket: int, sl: float,
                        text=_t(kulcs, **mezok)))
 
 
-def signal_offer(ajanlat) -> bool:
+def signal_offer(ajanlat, chart_spec: "dict | None" = None) -> bool:
     """JÓVÁHAGYÁSRA VÁRÓ belépő — gombokkal.
 
     ⚠ MIÉRT KÜLÖN ÚT a sima jelzés-értesítéstől: ez nem hír, hanem KÉRDÉS, és
@@ -503,12 +596,43 @@ def signal_offer(ajanlat) -> bool:
                     sl=ajanlat.fmt(_sl), tp=ajanlat.fmt(_tp), minutes=_perc)
         gombok = ((_t("tg.btn.yes"), f"a:{ajanlat.id}"),
                   (_t("tg.btn.no"), f"x:{ajanlat.id}"))
+        if chart_spec is not None and n.cfg.signal_chart:
+            # ⚠ KÜLÖN SZÁLON: ez a hívás a KERESKEDŐ MOTOR szálán jön, a kép
+            # pedig MT5-lekérés + rajz (~0,5–1 mp). A motor köre nem várhat rá.
+            _ch = {"symbol": ajanlat.symbol, "direction": ajanlat.direction,
+                   "entry": float(ajanlat.entry), "sl": float(_sl),
+                   "tp": float(_tp), "spec": dict(chart_spec),
+                   "title": f"{ajanlat.symbol} · {ajanlat.strategy} · "
+                            f"{ajanlat.direction}"}
+            threading.Thread(target=_offer_kuld, args=(n, szoveg, gombok, _ch),
+                             daemon=True, name="TradeForgeOfferChart").start()
+            return True
         for cid in n.cfg.chat_ids:
             telegram.send_buttons(n.cfg.token, cid, szoveg, gombok)
         return True
     except Exception:
         log.warning("jelzés-ajánlat: a küldés hibára futott", exc_info=True)
         return False
+
+
+def _offer_kuld(n, szoveg: str, gombok, chart: dict) -> None:
+    """A jóváhagyó ajánlat KÉPPEL + gombokkal. Ha a kép nem készül el, a mai
+    gombos szöveg megy ki — az ajánlat SOSEM veszhet el a kép miatt."""
+    from core import telegram
+    png, extra = None, ""
+    try:
+        png, extra = _png_es_ertekek((n.chart_maker or make_chart)(chart))
+        if extra:
+            szoveg = szoveg + chr(10) + extra
+    except Exception:
+        log.warning("jelzés-ajánlat: a kép nem készült el — szövegként megy",
+                    exc_info=True)
+    for cid in n.cfg.chat_ids:
+        ok = False
+        if png:
+            ok = telegram.send_photo(n.cfg.token, cid, png, szoveg, gombok)
+        if not ok:
+            telegram.send_buttons(n.cfg.token, cid, szoveg, gombok)
 
 
 def error(key: str, text: str) -> bool:

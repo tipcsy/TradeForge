@@ -52,7 +52,10 @@ from strategy.base import Strategy, STRATEGY_API, STRATEGY_API_MIN              
 # 2026-09-25 (v3.105.0): uj `MarketData`-mezok (`gate_cfg`, `pair_cfg`) es
 # metodus (`plugged_blocks`) alapertelmezessel — NEM toro: aki nem hivja, a
 # regi viselkedest kapja (a behelyezett kapuk a rajzon nem szurnek). API marad 1.
-UJJLENYOMAT = "4cb90136cbe6"
+# 2026-09-25 (v3.106.0): uj `chart_spec(params)` hook alapertelmezessel (a
+# Telegram jelzes-kep tartalma) — NEM toro: a regi strategia ures spec-et ad,
+# a kep akkor is elkeszul. API marad 1.
+UJJLENYOMAT = "60db0f1d10e9"
 API_AKKOR = 1
 
 

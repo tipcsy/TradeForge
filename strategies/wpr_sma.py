@@ -704,6 +704,32 @@ class WprSmaStrategy(Strategy):
 
         return objects
 
+    # --- Telegram jelzés-kép --------------------------------------------
+
+    def chart_spec(self, params: dict) -> dict:
+        """A jelzés-képre: az M15 SMA (a trendirány) és a két WPR a saját
+        szintjeivel — ugyanazok, amikből a jelzés született."""
+        p = params or {}
+        _m15t = p.get("wpr_m15_trigger", -50)
+        _m1t = p.get("wpr_m1_trigger", -50)
+        return {
+            "sma": {"tf": 15, "period": int(p.get("sma_period", 200) or 200)},
+            "panels": [
+                {"kind": "wpr", "tf": 15,
+                 "period": int(p.get("wpr_m15_period", 21) or 21),
+                 "levels": [p.get("wpr_m15_sell_extreme", -20),
+                            p.get("wpr_m15_sell_trigger", _m15t),
+                            p.get("wpr_m15_buy_trigger", _m15t),
+                            p.get("wpr_m15_buy_extreme", -80)]},
+                {"kind": "wpr", "tf": 1,
+                 "period": int(p.get("wpr_m1_period", 21) or 21),
+                 "levels": [p.get("wpr_m1_sell_extreme", -20),
+                            p.get("wpr_m1_sell_trigger", _m1t),
+                            p.get("wpr_m1_buy_trigger", _m1t),
+                            p.get("wpr_m1_buy_extreme", -80)]},
+            ],
+        }
+
     # --- Optimalizálás ----------------------------------------------------
 
     def base_params(self, cfg: dict) -> dict:

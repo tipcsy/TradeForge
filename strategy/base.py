@@ -533,6 +533,22 @@ class Strategy(ABC):
     default_sl_method = "swing20"
 
     # ── Napi feladatok (opcionális hook) ──────────────────────────────────
+    def chart_spec(self, params: dict) -> dict:
+        """MIT RAJZOLJON a Telegram jelzés-képe a gyertyák és a belépő szintjei
+        MELLÉ (`core.signal_chart`). Alap: semmit (üres szótár) — a kép így is
+        elkészül (M15 + M1 gyertyák, Entry/SL/TP).
+
+        Alak (minden kulcs opcionális):
+
+            {"sma": {"tf": 15, "period": 200},
+             "panels": [{"kind": "wpr", "tf": 15, "period": 21,
+                         "levels": [felső_extrém, sell_trig, buy_trig, alsó_extrém]}]}
+
+        ⚠ A KERET NEM TUDJA, mi számít egy stratégiánál — ezért kérdezi meg.
+        Új hook alapértelmezéssel: a régi stratégia nem tud róla, és nem is
+        kell tudnia (a szerződés NEM törik)."""
+        return {}
+
     def daily_jobs(self) -> list:
         """A stratégia SAJÁT napi feladatai — amit a keret naponta egyszer,
         alprocesszben elvégez helyette (pl. egy forward-napló frissítése).
