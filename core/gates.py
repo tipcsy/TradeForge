@@ -22,10 +22,12 @@ HATÓKÖRÖK (2026-07-31 állapot, v1.80.0 után):
   • **Idősík-együttállás** — a mért állapot instrumentum-tulajdonság (az
     SMA-irányok), a KAPUZÁS viszont per stratégia (`tf_align.gate`).
   • **Piac-állapot** — instrumentum-szintű (`pairs.<sym>.market_strategy`).
-  • **Volatilitás** — a küszöbök a STRATÉGIA optimalizált paraméterei
-    (`atr_min_pct`/`atr_max_pct`), tehát páronként ÉS stratégiánként mások. Ez az
-    egyetlen `PARAM_DRIVEN` kapu; v3.27.0 előtt nem is volt kapu, hanem a
-    stratégia `bt_entry` hookjában futó, kikapcsolhatatlan szűrő.
+  • **Volatilitás** — a küszöbök és a mérce v3.103.0 óta az INSTRUMENTUMÉI
+    (`core.execution_params.VOL_KEYS`, `data/execution_params/<SYM>.json`);
+    előtte a wpr_sma optimalizált paraméterei voltak. A motor a stratégia
+    paraméter-készletére fésüli rá őket, ezért `PARAM_DRIVEN` maradt; v3.27.0
+    előtt nem is volt kapu, hanem a stratégia `bt_entry` hookjában futó,
+    kikapcsolhatatlan szűrő.
 
 Ebből következik a 2.0 elrendezése: a kapu-oszlopok az instrumentum szintjén
 mondják meg, hogy „mi a helyzet", és a stratégia jelzés-cellájának KERETE mondja
@@ -158,11 +160,14 @@ _BUILTIN = (
     # a hibaosztály, ami miatt a többi kapu `none`-nal indul.
     #
     # A „kikapcsolt" állapotot eddig is a NULLA KÜSZÖB jelentette
-    # (`atr_min_pct`/`atr_max_pct`), és ez így is marad: a `bollinger_squeeze`,
-    # az `ml_ai` és a `trend_pullback` mentett készleteiben nincs küszöb, tehát
-    # ott a kapu `block` hatással sem szűr semmit. Mérve a bevezetéskor: küszöbe
-    # CSAK a `wpr_sma`-nak van, mind a 13 páron — vagyis pontosan az a halmaz,
-    # amelyik eddig is szűrt.
+    # (`atr_min_pct`/`atr_max_pct`), és ez így is marad.
+    #
+    # ⚠ v3.103.0 óta a küszöb az INSTRUMENTUMÉ, tehát egy páron MINDEN
+    # stratégiára ott van. Hogy a többi stratégia (amelyik eddig sosem szűrt)
+    # ne kezdjen némán szűrni, a config rögzíti a halmazt:
+    # `gates.volatility = {default: none, wpr_sma: block}`
+    # (`tools/migrate_vol_gate.py` írta be). A beépített `block` ezért csak ott
+    # él, ahol a config nem mond semmit.
     #
     # Miért kell az oszlop is: 2026-08-08-ig ez volt az EGYETLEN blokkoló ok, ami
     # nem látszott sehol. A BTCUSD hetekig némán nem kereskedett, mert az ATR a
@@ -173,10 +178,12 @@ _BUILTIN = (
      "module": "vol_baseline", "phase": PHASE_SIGNAL},
 )
 
-# ── PARAMÉTER-VEZÉRELT kapuk: a küszöbük a STRATÉGIA mentett készletében van ──
+# ── PARAMÉTER-VEZÉRELT kapuk: a küszöbük a stratégia PARAMÉTER-SZÓTÁRÁBAN jön ──
 # A többi kapu küszöbét a kapu configja adja (spread-szorzó, lendület-küszöb,
-# költség-plafon). A volatilitásé viszont a stratégia OPTIMALIZÁLT paramétere
-# (`atr_min_pct`/`atr_max_pct`) — ugyanaz, amit a söprés és az optimalizáló söpör.
+# költség-plafon). A volatilitásé a paraméter-szótárból (`ctx.params`): v3.103.0
+# óta az instrumentum számai (`core.execution_params.VOL_KEYS`), amiket a
+# motor minden úton ráfésül a stratégia készletére — ugyanúgy, mint az
+# `atr_period`-ot. Az optimalizáló NEM hangolja őket.
 #
 # ⚠ EBBŐL EGY DOLOG KÖVETKEZIK, és azt itt mondjuk ki: az `exec_gates=False`
 # („ne modellezd a végrehajtási kapukat") EZT a kaput NEM kapcsolja ki. Ha
@@ -836,8 +843,8 @@ def _eval_volatility(ctx: dict):
     """Az ATR a stratégia kalibrált sávjában van-e (`gates.vol_baseline`).
 
     v3.27.0 óta VALÓDI kapu: a hatása (blokkol / kockázatcsökkentés / ki) dönt,
-    mint bárhol máshol. Ami NEM változott: a küszöbök a stratégia optimalizált
-    paraméterei (`atr_min_pct`/`atr_max_pct`) — lásd `PARAM_DRIVEN`."""
+    mint bárhol máshol. A küszöbök (`atr_min_pct`/`atr_max_pct`) v3.103.0 óta
+    az instrumentuméi — lásd `PARAM_DRIVEN`."""
     from gates import vol_baseline as _vb
     atr, base = ctx.get("atr_price"), ctx.get("atr_baseline")
     if not atr or not base:

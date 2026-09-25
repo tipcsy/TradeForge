@@ -113,10 +113,12 @@ for lang in ("hu", "en"):
 # sorrendben, ugyanazokkal a feliratokkal — csak mar nem a felirat AZ adat.
 _VART = {
     "wpr_sma": ["Indikátor – M15", "Indikátor – M1", "SL / TP",
-                "Kockázatkezelés", "Piac-szűrő", "Egyéb"],
+                "Kockázatkezelés", "Egyéb"],
+    # ⚠ A „Piac-szűrő" v3.103.0-ban KIKERÜLT (wpr_sma, candle_level_break):
+    # pontosan a Volatilitás-kapu küszöbe volt → az instrumentumé lett.
     "trend_pullback": ["Belépő – M5", "Volatilitás – M30", "Trend – H1",
                        "SL / TP", "Egyéb"],
-    "candle_level_break": ["Szint", "Belépő", "SL / TP", "Piac-szűrő", "Egyéb"],
+    "candle_level_break": ["Szint", "Belépő", "SL / TP", "Egyéb"],
 }
 for nev, vart in _VART.items():
     c = S.load_strategy_config(nev)

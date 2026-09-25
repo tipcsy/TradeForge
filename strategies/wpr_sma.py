@@ -779,8 +779,10 @@ class WprSmaStrategy(Strategy):
 
     # ⚠ NINCS SAJÁT `bt_entry`. v3.27.0 előtt itt állt a volatilitás-szűrő
     # (`atr_min_pct`/`atr_max_pct`); mostantól a VOLATILITÁS-KAPU dönt
-    # (`core.gates` + `gates.vol_baseline.failed`), a küszöbök viszont továbbra is
-    # ennek a stratégiának az optimalizált paraméterei. Így a `none` hatás
+    # (`core.gates` + `gates.vol_baseline.failed`). A küszöbök v3.103.0 óta az
+    # INSTRUMENTUMÉI (`core.execution_params.VOL_KEYS`) — ⚠ de wpr_sma-ra a
+    # kapu használata FONTOS: a hangolt készletek ezzel együtt kalibráltak
+    # (`gates.volatility.wpr_sma = block`). Így a `none` hatás
     # tényleg azt jelenti, hogy nincs szűrés — és a stratégia egy hookkal
     # egyszerűbb. Az `atr_avg` oszlopot a `bt_indicators` továbbra is előállítja:
     # a kapu MÉRÉSE abból dolgozik.

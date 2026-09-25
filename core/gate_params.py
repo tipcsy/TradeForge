@@ -128,6 +128,16 @@ _SPECS = {
     _g.COST: (
         ParamSpec("max_rr_distortion", FLOAT, 0.25, lo=0.0, hi=10.0),
     ),
+    # ⚠ v3.103.0-ig a Volatilitásnak NEM volt itt sora: a számai a wpr_sma
+    # paraméter-ablakában („Piac-szűrő") laktak, a kapu ablaka csak mutatott.
+    # Most az instrumentumé (`core.execution_params.VOL_KEYS`). 0 = kikapcsolva
+    # (a `vol_baseline` 0-t „nincs határ"-nak / „nincs mérce"-nek olvas).
+    _g.VOLATILITY: (
+        ParamSpec("atr_min_pct", FLOAT, 0.0, lo=0.0, hi=10.0),
+        ParamSpec("atr_max_pct", FLOAT, 0.0, lo=0.0, hi=50.0),
+        ParamSpec("atr_baseline_bars", INT, 0, lo=0, hi=200000),
+        ParamSpec("atr_avg_ref", FLOAT, 0.0, lo=0.0, hi=None),
+    ),
     _g.MOMENTUM: (
         ParamSpec("basis", CHOICE, "sma",
                   choices=lambda: [("sma", _t("gp.basis.sma")),
@@ -252,6 +262,10 @@ def extra_errors(key: str, values: dict) -> list:
         tfs = values.get("timeframes")
         if tfs is not None and not (2 <= len(tfs) <= 6):
             out.append(_t("gp.err.tf_count", n=len(tfs)))
+    if key == _g.VOLATILITY:
+        lo, hi = values.get("atr_min_pct"), values.get("atr_max_pct")
+        if lo and hi and float(lo) >= float(hi):
+            out.append(_t("gp.err.vol_order", lo=lo, hi=hi))
     if key == _g.MOMENTUM:
         out += extra_errors_momentum(values)
         if str(values.get("basis")) == "tf" and not values.get("timeframes"):

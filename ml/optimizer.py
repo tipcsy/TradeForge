@@ -38,6 +38,7 @@ sys.path.insert(0, str(ROOT))
 
 from core.indicator_engine import compute_indicators
 from core.execution_params import load_execution_params
+from core import execution_params as _ep_mod
 from trading.backtest import load_data, run_pair
 
 logging.basicConfig(
@@ -1664,21 +1665,11 @@ def _optimize_symbol_locked(symbol, df_m15, df_m1, cfg, initial_balance,
         log.warning("  %s — TEST hiba: %s", symbol, e)
         test_summary = {}
 
-    # Fix volatilitás-MÉRCE mentése a paraméterek közé: az optimalizált atr_period-del
-    # számolt ATR ÁTLAGA a betöltött adaton — EGY szám, amit a backtest, a viz és az él
-    # is használ (ablak-függetlenül) → a három egyezik, és a backtest reprodukálható
-    # (több letöltött előzmény nem billenti el az eredményt). Fallback marad az ablak-
-    # átlag, ha ez hiányzik (régi params / a stratégia nem ad atr_avg-ot).
-    try:
-        _m15_ind, _ = strategy.bt_indicators(
-            df_m15, df_m1, {**result["params"], "symbol": symbol,
-                            "point_size": pair_cfg.get("point_size", 0.0001)})
-        if "atr_avg" in _m15_ind.columns and len(_m15_ind):
-            _av = float(_m15_ind["atr_avg"].iloc[0])
-            if _av > 0:
-                result["params"]["atr_avg_ref"] = _av
-    except Exception:
-        pass
+    # ⚠ A volatilitás-MÉRCÉT (`atr_avg_ref`) v3.103.0 óta NEM ez írja. Eddig
+    # minden wpr_sma-hangolás a stratégia-készletbe mentette — holott az
+    # instrumentum M15 ATR-átlaga, és a küszöbökkel EGYÜTT kalibrált szám. A
+    # gazdája az instrumentum (`core.execution_params.VOL_KEYS`), frissíteni a
+    # Volatilitás-kapu ablakából lehet (`gates.vol_baseline.calibrate`).
 
     return {
         "train_summary": result["train_summary"],
@@ -1864,7 +1855,10 @@ def run_optimizer(cfg: dict, symbols: Optional[list[str]] = None,
             "exec_gates":    result.get("exec_gates", True),
             "train_summary": train_summary,
             "test_summary":  test_summary,
-            "params":        result["params"],
+            # A volatilitás-kapu számai az INSTRUMENTUMÉI (execution_params) —
+            # a `result["params"]` a ráfésült execution configból tartalmazza
+            # őket, de a stratégia-készletben csak elavult másolat lenne.
+            "params":        _ep_mod.without_vol_keys(result["params"]),
         }
         _rr = result.get("rr")
         if _rr:

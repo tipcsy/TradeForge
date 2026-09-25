@@ -34,7 +34,9 @@ from dashboard.instrument_dialog import default_params, _OBSOLETE_PARAM_KEYS
 # A `wpr_sma` SAJAT kulcsai — ezek egyike sem tartozik az `ml_ai`-hoz.
 WPR_ONLY = ("sma_period", "wpr_m15_period", "wpr_m1_period", "wpr_m1_buy_trigger",
             "wpr_m15_buy_extreme", "wpr_m15_sell_extreme",
-            "atr_min_pct", "atr_max_pct", "no_trade_resets_signal")
+            "no_trade_resets_signal")
+# ⚠ Az `atr_min_pct`/`atr_max_pct` v3.103.0 ota NEM a wpr_sma kulcsa: a
+# Volatilitas-kapu kuszobe, az instrumentume (`core.execution_params.VOL_KEYS`).
 
 
 def base_cfg():

@@ -23,6 +23,13 @@ charton egyetlen jelölő sem jelent meg, és élesben egyetlen kötés sem szü
 A többi páron ez nem látszott (Ger40 1,00×, GOLD 0,97×, UsaTec 1,34×) — a BTC
 volt az egyetlen, ahol rezsimváltás történt.
 
+⚠ A SZÁMOK GAZDÁJA AZ INSTRUMENTUM (v3.103.0). A küszöbök és a mérce a
+`data/execution_params/<SYM>.json`-ban laknak (`core.execution_params.VOL_KEYS`),
+nem a stratégia mentett készletében. Korábban a wpr_sma optimalizálója hangolta
+és mentette őket — de a kapu dönt velük, és az `atr_avg_ref` az instrumentum M15
+ATR-átlaga (`calibrate`), amihez a stratégia jelzés-paramétereinek semmi köze.
+Hogy egy stratégiára HAT-e a kapu, azt a per-stratégia HATÁS dönti el.
+
 ⚠ A GÖRDÜLŐ MÉRCE NEM AZ ALAPÉRTELMEZÉS. Megmérve (7 pár, 2026-07-01…08-07):
 a BTCUSD 0 kötés helyett 5–8 kötést ad, de azok VESZTESÉGESEK (−11…−19$), és a
 teljes portfólió eredménye zajszinten változik (+1053$ → +1050…+1103$). Nincs
@@ -57,6 +64,27 @@ def series(atr: pd.Series, params: dict) -> pd.Series:
     if n <= 0:
         return pd.Series(float(atr.mean()), index=atr.index)
     return atr.rolling(n, min_periods=max(20, n // 8)).mean().bfill()
+
+
+def calibrate(df_m15: pd.DataFrame, atr_period: int):
+    """A befagyasztott mérce (`atr_avg_ref`) MÉRÉSE: az M15 ATR(`atr_period`)
+    átlaga a teljes átadott előzményen. `None`, ha nincs értelmes szám.
+
+    ⚠ UGYANAZ A KÉPLET, amit v3.102.0-ig az optimalizáló a wpr_sma
+    `bt_indicators`-án át számolt (`core.indicator_engine.atr` → `series` →
+    `atr.mean()`, NaN nélkül) — a `test_vol_gate_instrument` ezt bitre
+    ellenőrzi. Így egy újrakalibrálás ugyanazt a számot adja ugyanazon az
+    adaton, mint amit a régi készletek kaptak, csak most stratégia nélkül.
+
+    ⚠ Az újraoptimalizálás EZT NEM frissíti (v3.103.0 óta nem is ír ide):
+    a mérce és a küszöbök EGYÜTT kalibráltak, és az egyik néma cseréje a
+    másik jelentését is elmozdítaná. Frissíteni a kapu ablakából lehet."""
+    from core.indicator_engine import atr as _atr
+    if df_m15 is None or not len(df_m15):
+        return None
+    a = _atr(df_m15["high"], df_m15["low"], df_m15["close"], int(atr_period))
+    v = float(a.mean())
+    return v if (v == v and v > 0) else None
 
 
 def value_at(atr_values, i: int, params: dict, fallback: float = 0.0) -> float:
@@ -119,9 +147,9 @@ def failed(atr, params: dict, row_atr_avg=0.0) -> bool:
     `bt_entry`-jében állt külön-külön (`wpr_sma`, `bollinger_squeeze`,
     `candle_level_break`), a `trend_pullback`-ben és az `ml_ai`-ban viszont NEM
     — vagyis a szűrés attól függött, melyik stratégia másolta be. Most a kapu
-    dönt, a küszöböket pedig továbbra is a stratégia optimalizált paraméterei
-    adják (`atr_min_pct`/`atr_max_pct`), ezért az `effective` precedenciája
-    (gördülő mérce a befagyasztott fölött) itt is érvényes.
+    dönt; a küszöbök (`atr_min_pct`/`atr_max_pct`) v3.103.0 óta az
+    instrumentuméi, a paraméter-szótárba ráfésülve. Az `effective`
+    precedenciája (gördülő mérce a befagyasztott fölött) itt is érvényes.
 
     Nincs mérce (0 küszöb, hiányzó `atr_avg_ref`) → `False`: a kapu nem szól
     bele. Ez pontosan a régi viselkedés — a szűrő „kikapcsolt" állapota mindig

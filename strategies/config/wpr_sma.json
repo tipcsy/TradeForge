@@ -1,5 +1,6 @@
 {
   "_comment": "A wpr_sma stratégia SAJÁT beállításai (a vázról leválasztva). quality/indicators/sltp/position_mgmt + az optimizer paramétertér.",
+  "_comment_volatility_gate": "⚠ A VOLATILITÁS-KAPU a wpr_sma-nál FONTOS (v3.103.0). A korábbi „Piac-szűrő” (atr_min_pct/atr_max_pct/atr_baseline_bars + atr_avg_ref) PONTOSAN a Volatilitás-kapu küszöbe volt, ezért kikerült innen: az instrumentumé lett (data/execution_params/<SYM>.json), és a kapu ablakában állítható. A 14 hangolt wpr_sma-készlet ezzel a szűrővel EGYÜTT lett kalibrálva — a kapu hatása wpr_sma-ra alapból `block` (config gates.volatility.wpr_sma). `none`-ra állítva a stratégia más szabályrendszerrel fut, mint amire hangolva lett. Az optimalizáló a küszöböket már NEM hangolja.",
   "quality": {
     "_comment": "Optimalizált instrumentum minősítési küszöbei (Minőség oszlop). Legrosszabb-elv: a pár a legrosszabb elért kategóriát kapja. ⚠ A min_trades MÉRT érték (2026-08-23): a Ger40 998 valódi kötéséből bootstrappelve egy 1,10-es PF-ű stratégia 15 kötésen a minták 14,8%-ában mutat 2 FÖLÖTTI PF-et, 5 kötésen 14,2%-ában 3 fölöttit. A régi 15-ös küszöb tehát semmitől nem védett — az EURGBP „PF 5,11 hat kötésen” pontosan ilyen zaj volt. 50-nél a 95%-os sáv 1,82-ig ér (P(PF>2) ~ 2,9%).",
     "min_trades": 50,
@@ -44,7 +45,6 @@
       "indicator_m1",
       "sltp",
       "risk",
-      "market_filter",
       "other"
     ],
     "params": {
@@ -117,40 +117,25 @@
         "recompute": "signal",
         "category": "risk",
         "comment": "A no-trade (szürke) óra resetelje-e az M15 ablakot (alap: KI)"
-      },
-      "atr_min_pct": {
-        "recompute": "execution",
-        "category": "market_filter",
-        "comment": "Min. ATR — túl csendes piac kizárása"
-      },
-      "atr_max_pct": {
-        "recompute": "execution",
-        "category": "market_filter",
-        "comment": "Max. ATR — kaotikus piac kizárása"
-      },
-      "atr_baseline_bars": {
-        "recompute": "signal",
-        "category": "market_filter",
-        "comment": "A min/max ATR MÉRCÉJE: 0 = a mentett atr_avg_ref (befagyasztott), >0 = gördülő ablak ennyi M15 gyertyára (96 = 1 nap, 8640 = 90 nap). Rezsimváltásnál a befagyasztott mérce némán lekapcsolhatja a párt. | ⚠ JEL-osztály: a bt_indicators SZÁMOLJA az atr_avg oszlopot belőle, tehát a gyorsítótárazott indikátor-táblát is megváltoztatja — végrehajtásinak minősítve a söprés némán hamis eredményt adna. (Az optimalizáló nem hangolja, így ez nem kerül sebességet.)"
       }
     }
   },
   "optimizer": {
     "_comment": "AI paraméter optimalizálás tartományai",
     "sma_period": {
-      "min": 50,
-      "max": 300,
-      "step": 10
+      "min": 10,
+      "max": 60,
+      "step": 5
     },
     "wpr_m15_period": {
-      "min": 3,
-      "max": 50,
+      "min": 5,
+      "max": 71,
       "step": 2
     },
     "wpr_m1_period": {
-      "min": 3,
-      "max": 30,
-      "step": 1
+      "min": 4,
+      "max": 55,
+      "step": 2
     },
     "wpr_m15_sell_extreme": {
       "min": -35,
@@ -206,20 +191,9 @@
       "step": 0.25
     },
     "tp_rr_ratio": {
-      "min": 2.0,
+      "min": 1.0,
       "max": 15.0,
       "step": 0.5
-    },
-    "_comment_market": "Piaci minőség szűrők — az Optuna instrumentumonként optimalizálja",
-    "atr_min_pct": {
-      "min": 0.2,
-      "max": 1.0,
-      "step": 0.1
-    },
-    "atr_max_pct": {
-      "min": 1.2,
-      "max": 4.0,
-      "step": 0.2
     },
     "_comment_constraints": "Paraméter-érvényességi kényszerek (WPR szint-sorrend). Az optimizer ezzel szűr, ÉS a fenti gt/lt metaadatból a suggeszt-tartományt eleve leszűkíti (érvénytelen kombó elő sem áll). A constraints_ok is EZT értékeli.",
     "constraints": [

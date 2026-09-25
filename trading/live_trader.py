@@ -1642,6 +1642,11 @@ def _write_symbol_viz(symbol, pair_cfg, strats, params_by_strat: dict):
             # stratégia saját számait írja felül.
             _snap = params_by_strat[st.name]
             _fresh = load_pair_params(symbol, st.name)
+            # ⚠ A friss json CSAK a stratégia számait írhatja felül: egy régi
+            # készletben maradt volatilitás-kulcs (v3.103.0 előtt ott laktak)
+            # különben felülírná az instrumentum érvényes értékét a vizben.
+            if _fresh:
+                _fresh = execution_params.without_vol_keys(_fresh)
             vparams = {**_snap, **_fresh} if _fresh else _snap
             # journal=True: EZ az élő út — csak innen kerülhet bejegyzés a
             # perzisztens belépő-naplóba (lásd a pair_visual_lines docstringjét).

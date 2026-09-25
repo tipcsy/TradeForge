@@ -137,13 +137,32 @@ def category_label(cid: str, cfg: "dict | None" = None) -> str:
     return str(sajat.get(cid) or cid)
 
 
+# A KERET saját kulcsainak osztálya — amik nem a stratégia paraméterei, de a
+# paraméter-szótárban utaznak. ⚠ v3.103.0-ig a volatilitás-kapu számai a wpr_sma
+# `param_meta`-jában kapták az osztályukat; onnan kikerülve a „biztonságos"
+# `signal` ágra estek volna — helyes, de a jel-gyorsítótárat minden küszöb-
+# változásnál eldobta volna. A kapu a jel UTÁN dönt, tehát `execution`; kivétel
+# az `atr_baseline_bars`, mert abból a `bt_indicators` SZÁMOLJA az `atr_avg`
+# oszlopot (a gyorsítótárazott indikátor-tábla része).
+# A stratégia saját `param_meta`-ja felülírhatja (az nyer).
+_FRAME_PARAM_CLASS = {
+    "atr_min_pct": EXEC_PARAM,
+    "atr_max_pct": EXEC_PARAM,
+    "atr_avg_ref": EXEC_PARAM,
+    "atr_baseline_bars": SIGNAL_PARAM,
+}
+
+
 def param_class(cfg: dict, key: str) -> str:
     """Egy paraméter osztálya: `"signal"` vagy `"execution"`.
 
-    Ismeretlen/hiányzó/érvénytelen → `"signal"` (a biztonságos oldal, lásd fent)."""
+    Sorrend: a stratégia `param_meta`-ja → a keret kulcsai
+    (`_FRAME_PARAM_CLASS`) → `"signal"` (a biztonságos oldal, lásd fent)."""
     meta = ((cfg.get("param_meta") or {}).get("params") or {}).get(key) or {}
     val = meta.get("recompute")
-    return val if val in (SIGNAL_PARAM, EXEC_PARAM) else SIGNAL_PARAM
+    if val in (SIGNAL_PARAM, EXEC_PARAM):
+        return val
+    return _FRAME_PARAM_CLASS.get(key, SIGNAL_PARAM)
 
 
 def split_params(cfg: dict, keys) -> tuple[list, list]:

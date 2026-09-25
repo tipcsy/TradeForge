@@ -383,8 +383,8 @@ class CandleLevelBreakStrategy(Strategy):
         return sl, tp
 
     # ⚠ NINCS SAJÁT `bt_entry`: a volatilitás-szűrés v3.27.0 óta a
-    # VOLATILITÁS-KAPU dolga (`core.gates`), a küszöbök (`atr_min_pct` /
-    # `atr_max_pct`) továbbra is ennek a stratégiának a paraméterei.
+    # VOLATILITÁS-KAPU dolga (`core.gates`); a küszöbök (`atr_min_pct` /
+    # `atr_max_pct`) v3.103.0 óta az instrumentuméi.
 
     # ── Megjelenítés ─────────────────────────────────────────────────────
     def compute_display(self, md: MarketData) -> dict:

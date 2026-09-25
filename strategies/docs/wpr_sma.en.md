@@ -45,15 +45,24 @@ One bar is not enough: the entry is decided in **two phases**.
 | `wpr_entry` | the extreme that ARMS |
 | `wpr_trigger` | the break-through level that FIRES |
 | `tp_rr_ratio` | the TP as a multiple of the stop distance |
-| `atr_max_pct` | volatility filter: above this it does not enter |
+
+> **⚠ Using the Volatility gate matters.** The old "Market filter"
+> (`atr_min_pct`/`atr_max_pct`/`atr_baseline_bars` + `atr_avg_ref`) was exactly
+> the **Volatility gate's** threshold, so in v3.103.0 it left the strategy: it
+> belongs to the instrument now and is edited in the gate window. The 14 tuned
+> sets were calibrated **together** with this filter, so for wpr_sma the gate
+> **blocks the entry** by default. Set to `Off`, the strategy runs under
+> different rules than it was tuned for. The optimiser no longer tunes the
+> thresholds.
 
 > The search range of `tp_rr_ratio` is **0.5–3.0** — deliberately open downwards
 > as well, because of the „quick in / quick out" principle.
 
 ## Known limits
 
-- The `atr_max_pct` filter was the **root cause of missing afternoon entries** —
-  if you see few trades in a band, this is worth checking first.
+- The volatility gate's upper threshold (`atr_max_pct`) was the **root cause of
+  missing afternoon entries** — if you see few trades in a band, check the
+  `Volatility` column first.
 - Trailing works with an **ATR multiplier** (`trail_activation_atr` /
   `trail_distance_atr`); the old absolute point values were not comparable across
   instruments.

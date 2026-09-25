@@ -779,7 +779,7 @@ class PendingStraddleStrategy(Strategy):
 
     # ⚠ NINCS SAJÁT `bt_entry`. A volatilitás-szűrés v3.27.0 óta a KAPUÉ
     # (`core.gates` + `gates.vol_baseline`) — az `atr_min_pct`/`atr_max_pct`
-    # továbbra is ennek a stratégiának a paramétere, de a hatást a kapu dönti.
+    # v3.103.0 óta az instrumentumé, a hatást a kapu dönti (alapból `none`).
 
     # ── Optimalizálás ─────────────────────────────────────────────────────
 

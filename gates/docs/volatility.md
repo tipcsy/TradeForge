@@ -22,12 +22,38 @@ Mostantól itt, a kapu-ablakban kap hatást, mint a többi:
 | **Kockázatcsökkentés** | belép, de fele mérettel |
 | **Ki** | a kapu **tényleg** nem szűr — a stratégia sem |
 
-> **A küszöbök továbbra is a stratégia paraméterei** (`atr_min_pct`,
-> `atr_max_pct`), nem a kapu configjában laknak. Ezért ez az egyetlen
-> **paraméter-vezérelt** kapu: az optimalizáló és a söprés ugyanezeket a
-> számokat söpri, és emiatt az `exec_gates=False` („ne modellezd a végrehajtási
-> kapukat") ezt a kaput **nem** kapcsolja ki — különben a söprés olyan
-> paramétert mérne, aminek nincs hatása.
+## A számok az instrumentuméi (v3.103.0)
+
+A küszöbök (`atr_min_pct`, `atr_max_pct`), a mérce-választó
+(`atr_baseline_bars`) és a befagyasztott mérce (`atr_avg_ref`) **az
+instrumentumhoz tartoznak**: `data/execution_params/<SYM>.json`, a spread-kapu
+számai mellett. A kapu ablakának **Beállítás** lapján szerkeszthetők.
+
+Korábban a wpr_sma paraméter-ablakában laktak „Piac-szűrő" néven, és az
+optimalizáló hangolta őket. Ez két okból volt rossz:
+
+- **A kapu dönt velük, nem a jelzés.** A „Piac-szűrő" pontosan ennek a kapunak
+  a küszöbe volt, csak máshol lehetett állítani.
+- **Az `atr_avg_ref` az instrumentum M15 ATR-átlaga.** A stratégia jelzés-
+  paramétereihez semmi köze; egy második stratégia ugyanazon a páron külön,
+  más időpontban befagyasztott mércét kapott volna.
+
+| | |
+|---|---|
+| **Kié a szám?** | az instrumentumé — minden stratégia ugyanazt látja |
+| **Kire hat?** | a **Hatás** fül dönti el, stratégiánként |
+| **Alapbeállítás** | `gates.volatility = {default: none, wpr_sma: block}` |
+| **Hangolja-e az optimalizáló?** | **nem** (sem a küszöböt, sem a mércét) |
+
+> **A wpr_sma-nál a kapu használata fontos.** A 14 hangolt wpr_sma-készlet ezzel
+> a szűrővel **együtt** lett kalibrálva; `none` hatással a stratégia más
+> szabályrendszerrel fut, mint amire hangolva lett. A többi stratégia
+> (csilla, trend_pullback, pending_straddle…) sosem futott ezzel a szűrővel,
+> ezért náluk alapból **ki** van — a költöztetés így bitre semmit nem változtatott.
+
+> Ez továbbra is **paraméter-vezérelt** kapu: az `exec_gates=False` („ne
+> modellezd a végrehajtási kapukat") ezt **nem** kapcsolja ki. A kikapcsolás a
+> HATÁSSAL történik (`none`), vagy a küszöb nullázásával.
 
 > **⚠ A Beállításokban kikapcsolt oszlop most már a szűrést is leveszi.**
 > v3.27.0 előtt a `gate_order`-ből kivenni pusztán megjelenítési döntés volt. Ha
@@ -57,7 +83,7 @@ elmozdult.
 
 | `atr_baseline_bars` | mérce | mikor |
 |---|---|---|
-| **0** (alap) | az optimalizáláskor mentett `atr_avg_ref` — **befagyasztott** | a backtest reprodukálható, több letöltött előzmény nem billenti el |
+| **0** (alap) | az instrumentum `atr_avg_ref`-je — **befagyasztott** | a backtest reprodukálható, több letöltött előzmény nem billenti el |
 | **> 0** | gördülő ablak N M15 gyertyára (96 = 1 nap) | követi a rezsimváltást |
 
 A befagyasztott mérce hátránya pont a fenti eset: ha az instrumentum
@@ -78,8 +104,10 @@ van definiálva, nem a letöltött előzmény hosszában).
 2. **Ha tartósan a sáv alatt van**, az instrumentum kikerült abból a
    volatilitási rezsimből, amire hangolva lett. Két út: gördülő mérce
    (`atr_baseline_bars`), vagy a `atr_min_pct` újragondolása.
-3. **Újraoptimalizálás önmagában nem elég**: az `atr_avg_ref` a teljes
-   előzményből számol, tehát ugyanaz a szám jönne ki újra.
+3. **A mérce újramérése:** a kapu ablakában a **Mérce újramérése az
+   előzményből** gomb (tömegesen: `tools/backfill_atr_avg_ref.py --force`). Az
+   újraoptimalizálás v3.103.0 óta **nem** nyúl a mércéhez. ⚠ A küszöb és a mérce
+   együtt kalibrált: új mércével a küszöb jelentése is elmozdul.
 
 ## Sávos hatás (v3.28.0)
 

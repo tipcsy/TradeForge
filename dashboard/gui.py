@@ -6620,6 +6620,13 @@ class DashboardWindow:
             with open(params_f, encoding="utf-8") as f:
                 data = json.load(f)
             params = data.get("params", {})
+            # ⚠ Az INSTRUMENTUM számai (spread-kapu, atr_period, volatilitás-
+            # kapu) nem a stratégia-készletben laknak — ugyanúgy ráfésüljük,
+            # mint a motor (`live_trader.strategy_params`). Enélkül a
+            # Volatilitás-oszlop v3.103.0 óta küszöb nélkül számolna, és „rendben"
+            # jelezne ott, ahol a motor blokkol.
+            from core.execution_params import load_execution_params as _lep
+            params = {**params, **(_lep(symbol, self.cfg) or {})}
             ds.trained = True
             # Minősítés a test_summary (out-of-sample) alapján — a stratégián át
             txt, col, reason = self.strategy.grade(data.get("test_summary", {}), self.cfg)
@@ -6703,6 +6710,10 @@ class DashboardWindow:
                         _f = params_file(symbol, sn)
                         if _f.exists():
                             sp = json.load(open(_f, encoding="utf-8")).get("params", {})
+                            # Az instrumentum számai — mint fent a `params`-nál.
+                            from core.execution_params import (
+                                load_execution_params as _lep)
+                            sp = {**sp, **(_lep(symbol, self.cfg) or {})}
                         else:
                             # A stratégia SAJÁT config-nézetéből (a cfg a primary
                             # szekcióival van merge-elve — az nem az övé).

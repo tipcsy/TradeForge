@@ -7,10 +7,7 @@
     "retest_atr": 0.5,
     "cons_bars": 4,
     "_comment_cons": "⚠ MÉRVE (2026-08-23), nem tippelve. A 4 gyertyás M15 sáv szélessége MEDIÁNBAN 1,85–1,93 ATR (négy páron feltűnően egyforma) — az első változat 0,8-as küszöbe a sorok 1,1%-át fogadta el konszolidációnak, és a stratégia 5 hónap alatt 10 kötést adott. 1,4 = a sorok ~22%-a, azaz a szokásosnál SZŰKEBB negyed.",
-    "cons_max_atr": 1.4,
-    "_comment_vol": "Volatilitás-szűrő a KÖZÖS mércéhez képest (core.vol_baseline). 0 = kikapcsolva.",
-    "atr_min_pct": 0.0,
-    "atr_max_pct": 0.0
+    "cons_max_atr": 1.4
   },
   "sltp": {
     "_comment": "⚠ A stop a KONSZOLIDÁCIÓS SÁV alja alá kerül, nem a szint-gyertya alja alá. Mérve: a strukturális hozam/kockázat minden idősíkon 0,6–0,9 (1 ALATT), tehát az él CSAKIS a szűk stopból jöhet — ezért a stop_buffer_atr az ELSŐ mérendő paraméter. A tp_rr_ratio csak TARTALÉK: elsődlegesen a következő szintig megyünk (szinttől szintig).",
@@ -34,7 +31,6 @@
       "level",
       "entry",
       "sltp",
-      "market_filter",
       "other"
     ],
     "params": {
@@ -72,16 +68,6 @@
         "recompute": "execution",
         "category": "sltp",
         "comment": "TARTALÉK célár, ha nincs érvényes következő szint"
-      },
-      "atr_min_pct": {
-        "recompute": "signal",
-        "category": "market_filter",
-        "comment": "Alsó volatilitás-küszöb a közös mércéhez képest (0 = ki)"
-      },
-      "atr_max_pct": {
-        "recompute": "signal",
-        "category": "market_filter",
-        "comment": "Felső volatilitás-küszöb (0 = ki)"
       }
     }
   },
@@ -121,16 +107,6 @@
       "min": 1.0,
       "max": 3.0,
       "step": 0.25
-    },
-    "atr_min_pct": {
-      "min": 0.0,
-      "max": 1.0,
-      "step": 0.1
-    },
-    "atr_max_pct": {
-      "min": 0.0,
-      "max": 4.0,
-      "step": 0.2
     },
     "_comment_constraints": "Paraméter-érvényességi kényszerek. Az optimizer ezzel szűr, ÉS a gt/lt metaadatból a suggeszt-tartományt eleve leszűkíti. A stop nem eshet a konszolidációs sávon BELÜLRE — különben a belépő pillanatában már ki is ütné.",
     "constraints": [

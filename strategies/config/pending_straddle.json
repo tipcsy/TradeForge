@@ -50,7 +50,6 @@
       "entry",
       "straddle",
       "sltp",
-      "market_filter",
       "other"
     ],
     "params": {
@@ -143,21 +142,6 @@
         "recompute": "signal",
         "category": "other",
         "comment": "A chart-rajz visszatekintése napokban (M1 ablak) — nagyobb érték zsúfoltabb és lassabb"
-      },
-      "atr_min_pct": {
-        "recompute": "execution",
-        "category": "market_filter",
-        "comment": "Min. ATR — túl csendes piac kizárása (a VOLATILITÁS-KAPU méri)"
-      },
-      "atr_max_pct": {
-        "recompute": "execution",
-        "category": "market_filter",
-        "comment": "Max. ATR — kaotikus piac kizárása (a VOLATILITÁS-KAPU méri)"
-      },
-      "atr_baseline_bars": {
-        "recompute": "signal",
-        "category": "market_filter",
-        "comment": "A min/max ATR MÉRCÉJE: 0 = a mentett atr_avg_ref (befagyasztott), >0 = gördülő ablak ennyi M15 gyertyára. | ⚠ JEL-osztály: a bt_indicators SZÁMOLJA belőle az atr_avg oszlopot."
       }
     }
   },
@@ -207,17 +191,6 @@
     "tp_rr_ratio": {
       "min": 0.5,
       "max": 3.0,
-      "step": 0.2
-    },
-    "_comment_market": "Piaci minőség szűrők — az Optuna instrumentumonként optimalizálja",
-    "atr_min_pct": {
-      "min": 0.2,
-      "max": 1.0,
-      "step": 0.1
-    },
-    "atr_max_pct": {
-      "min": 1.2,
-      "max": 4.0,
       "step": 0.2
     },
     "_comment_constraints": "Paraméter-érvényességi kényszerek (WPR szint-sorrend). Az optimizer ezzel szűr, ÉS a fenti gt/lt metaadatból a suggeszt-tartományt eleve leszűkíti (érvénytelen kombó elő sem áll). A constraints_ok is EZT értékeli.",

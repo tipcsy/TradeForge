@@ -43,15 +43,23 @@ Nem elég egy gyertya: a belépő **két fázisban** dől el.
 | `wpr_entry` | a szélsőség, ami FELFEGYVEREZ |
 | `wpr_trigger` | az átütési szint, ami TÜZEL |
 | `tp_rr_ratio` | a TP a stop-távolság szorzójaként |
-| `atr_max_pct` | volatilitás-szűrő: efölött nem lép be |
+
+> **⚠ A Volatilitás-kapu használata fontos.** A régi „Piac-szűrő"
+> (`atr_min_pct`/`atr_max_pct`/`atr_baseline_bars` + `atr_avg_ref`) pontosan a
+> **Volatilitás-kapu** küszöbe volt, ezért v3.103.0-ban kikerült a stratégiából:
+> az instrumentumé lett, és a kapu ablakában állítható. A 14 hangolt készlet
+> ezzel a szűrővel **együtt** lett kalibrálva, ezért wpr_sma-ra a kapu alapból
+> **akadályozza a beszállást**. `Ki`-re állítva a stratégia más szabályokkal fut,
+> mint amire hangolva lett. Az optimalizáló a küszöböket már nem hangolja.
 
 > A `tp_rr_ratio` keresési tartománya **0,5–3,0** — szándékosan lefelé is nyitott,
 > a „gyors beszálló / gyors kiszálló" elv miatt.
 
 ## Ismert korlátok
 
-- A `atr_max_pct` szűrő volt a **délutáni belépők hiányzásának gyökere** — ha
-  kevés kötést látsz egy sávban, ezt érdemes először megnézni.
+- A volatilitás-kapu felső küszöbe (`atr_max_pct`) volt a **délutáni belépők
+  hiányzásának gyökere** — ha kevés kötést látsz egy sávban, a `Volatilitás`
+  oszlopot érdemes először megnézni.
 - A trailing **ATR-szorzóval** működik (`trail_activation_atr` /
   `trail_distance_atr`); a régi, abszolút pontos értékek instrumentumonként
   összemérhetetlenek voltak.

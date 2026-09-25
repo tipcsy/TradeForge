@@ -324,7 +324,13 @@ class InstrumentParamsDialog:
         # optimalizált JSON-ban.
         self._orig_exec_params = _execp.load_execution_params(symbol, cfg)
         self._src = {**self._src, **self._orig_exec_params}
-        self._keys  = sorted(k for k in self._src if not k.startswith("_"))
+        # ⚠ A VOLATILITÁS-KAPU számai (v3.103.0) a `_src`-ben MARADNAK — a
+        # backtest ezen az ablakon át fut, és nélkülük a kapu nem szűrne, tehát
+        # az eredmény eltérne az élőtől —, de NEM szerkeszthetők itt: a kapu
+        # ablakáé. (Régen „Piac-szűrő" kategóriaként itt voltak, és a stratégia-
+        # készletbe mentődtek.)
+        self._keys  = sorted(k for k in self._src
+                             if not k.startswith("_") and k not in _execp.VOL_KEYS)
         # Típus-minta a mentéskori konverzióhoz (int/float/bool/str)
         self._types = {k: self._src[k] for k in self._keys}
 
@@ -1278,6 +1284,13 @@ class InstrumentParamsDialog:
             pass
 
     def _on_run_mode(self):
+        # ⚠ KIFEJEZETT VÁLASZTÁS: az automatikus fülváltás megjegyzett
+        # „a Hangolást akartad" emléke (`_pref_planned`) itt érvényét veszti.
+        # Enélkül egy üres pipa-listával nyitott ablakban a KÉZZEL választott
+        # Backtest az első pipa visszatételénél némán visszaváltott Hangolásra
+        # (v3.103.0-ban jött elő, amikor a Ger40 terv egyetlen pipája — a
+        # volatilitás-küszöb — kikerült a stratégiából).
+        self._pref_planned = False
         self._save_run_mode(self._run_mode.get())
         self._refresh_opt_space()
         self._refresh_run_mode_ui()
@@ -3958,7 +3971,8 @@ class InstrumentParamsDialog:
             except Exception as ex:
                 self.lbl_err.config(text=_t("idlg.exec_save_error", error=ex), fg=FG_RED)
                 return
-        strat_params = {k: v for k, v in params.items() if k not in _EXEC_KEYS}
+        strat_params = {k: v for k, v in params.items()
+                        if k not in _EXEC_KEYS and k not in _execp.VOL_KEYS}
         if not self._write_json(strat_params, extra=extra):
             return
         # ⚠ A MENTÉS UTÁN A CHART IS FRISSÜL. A spec külön kiköti: „a küldés nem

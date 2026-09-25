@@ -23,12 +23,38 @@ From now on it gets an effect here, like every other gate:
 | **Reduce risk** | enters, but at half size |
 | **Off** | the gate **really** does not filter — and neither does the strategy |
 
-> **The thresholds are still strategy parameters** (`atr_min_pct`,
-> `atr_max_pct`), not gate config. That makes this the only
-> **parameter-driven** gate: the optimiser and the sweep sweep those very
-> numbers, which is why `exec_gates=False` ("do not model the execution gates")
-> does **not** switch this gate off — otherwise the sweep would be measuring a
-> parameter that has no effect.
+## The numbers belong to the instrument (v3.103.0)
+
+The thresholds (`atr_min_pct`, `atr_max_pct`), the baseline selector
+(`atr_baseline_bars`) and the frozen baseline (`atr_avg_ref`) **belong to the
+instrument**: `data/execution_params/<SYM>.json`, next to the spread gate's
+numbers. They are edited on this gate window's **Settings** tab.
+
+They used to live in the wpr_sma parameter window as "Market filter", tuned by
+the optimiser. That was wrong for two reasons:
+
+- **The gate decides with them, not the signal.** The "Market filter" was
+  exactly this gate's threshold, just editable somewhere else.
+- **`atr_avg_ref` is the instrument's mean M15 ATR.** It has nothing to do with
+  the strategy's signal parameters; a second strategy on the same pair would
+  have got its own baseline, frozen at a different time.
+
+| | |
+|---|---|
+| **Whose number?** | the instrument's — every strategy sees the same |
+| **Whom does it act on?** | the **Effect** tab decides, per strategy |
+| **Default** | `gates.volatility = {default: none, wpr_sma: block}` |
+| **Does the optimiser tune it?** | **no** (neither threshold nor baseline) |
+
+> **For wpr_sma, using this gate matters.** The 14 tuned wpr_sma sets were
+> calibrated **together** with this filter; with effect `none` the strategy runs
+> under different rules than it was tuned for. The other strategies (csilla,
+> trend_pullback, pending_straddle…) never ran with this filter, so for them it
+> is **off** by default — the move therefore changed nothing, bit for bit.
+
+> It is still a **parameter-driven** gate: `exec_gates=False` ("do not model the
+> execution gates") does **not** switch it off. Switch it off with the EFFECT
+> (`none`) or by zeroing the threshold.
 
 > **⚠ Disabling the column in Settings now removes the filtering too.**
 > Before v3.27.0, taking it out of `gate_order` was purely a display decision. If
@@ -58,7 +84,7 @@ regime had moved.
 
 | `atr_baseline_bars` | baseline | when |
 |---|---|---|
-| **0** (default) | the `atr_avg_ref` saved at optimisation time — **frozen** | the backtest is reproducible; more downloaded history does not tilt it |
+| **0** (default) | the instrument's `atr_avg_ref` — **frozen** | the backtest is reproducible; more downloaded history does not tilt it |
 | **> 0** | rolling window over N M15 bars (96 = 1 day) | it follows a regime change |
 
 The drawback of the frozen baseline is exactly the case above: if the
@@ -80,8 +106,11 @@ history).
 2. **If it stays below the band**, the instrument has left the volatility regime
    it was tuned for. Two routes: a rolling baseline (`atr_baseline_bars`), or
    rethinking `atr_min_pct`.
-3. **Re-optimising alone is not enough**: `atr_avg_ref` is computed from the
-   whole history, so the same number would come out again.
+3. **Re-measuring the baseline:** the **Re-measure baseline from history**
+   button in the gate window (in bulk: `tools/backfill_atr_avg_ref.py --force`).
+   Since v3.103.0 re-optimising does **not** touch the baseline. ⚠ Threshold and
+   baseline are calibrated together: a new baseline shifts what the threshold
+   means.
 
 ## Banded effect (v3.28.0)
 

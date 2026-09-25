@@ -161,8 +161,32 @@ def _save_cost(cfg: dict, symbol: str, values: dict, all_symbols: list):
             g["max_rr_distortion"] = v
 
 
+def _load_volatility(cfg: dict, symbol: str) -> dict:
+    """A volatilitás-kapu számai — az INSTRUMENTUMÉI (v3.103.0), ugyanabból a
+    fájlból, amit a motor is ráfésül a paraméterekre (`load_execution_params`).
+    Hiányzó kulcs = 0 = kikapcsolva."""
+    from core.execution_params import load_execution_params, VOL_KEYS
+    cur = load_execution_params(symbol, cfg) or {}
+    return {k: cur.get(k, 0) or 0 for k in VOL_KEYS}
+
+
+def _save_volatility(cfg: dict, symbol: str, values: dict, all_symbols: list):
+    """⚠ Az `atr_avg_ref` a pár SAJÁT mért száma (ár-egységben!): az „összes
+    instrumentumra" mentés NEM másolhatja — egy Ger40-mérce EURUSD-n minden
+    gyertyát „túl csendes"-nek ítélne. A küszöbök arányok, azok másolhatók.
+    A 0 érték törli a kulcsot (a config csak az ELTÉRÉST rögzíti; a hiány
+    ugyanazt jelenti: nincs határ / nincs mérce)."""
+    from core.execution_params import save_execution_params
+    for sym in all_symbols:
+        vals = {k: (v if v else None) for k, v in (values or {}).items()}
+        if sym != symbol:
+            vals.pop("atr_avg_ref", None)
+        save_execution_params(sym, vals)
+
+
 _STORE = {
     _g.SPREAD:   (_load_spread,   _save_spread),
+    _g.VOLATILITY: (_load_volatility, _save_volatility),
     _g.TF_ALIGN: (_load_tf_align, _save_tf_align),
     _g.MARKET:   (_load_market,   _save_market),
     _g.MOMENTUM: (_load_momentum, _save_momentum),
@@ -189,6 +213,25 @@ def _plug_store(key: str):
             pc = cfg.setdefault("pairs", {}).setdefault(sym, {})
             pc.setdefault(key, {}).update(values or {})
     return _load, _save
+
+
+def recalibrate_vol_ref(cfg: dict, symbol: str) -> tuple:
+    """`(új_mérce, gyertyák_száma, atr_period)` a pár letöltött M15-
+    előzményéből — a `gates.vol_baseline.calibrate` képletével, a pár
+    érvényes `atr_period`-jével. Nem ír semmit."""
+    import pandas as pd
+    from pathlib import Path
+    from core.execution_params import load_execution_params
+    from gates import vol_baseline as _vb
+    f = Path(__file__).resolve().parents[1] / "data" / "m15" / f"{symbol}.parquet"
+    if not f.exists():
+        raise FileNotFoundError(f.name)
+    df = pd.read_parquet(f)
+    period = int((load_execution_params(symbol, cfg) or {}).get("atr_period", 14))
+    v = _vb.calibrate(df, period)
+    if v is None:
+        raise ValueError("nincs érvényes ATR")
+    return v, len(df), period
 
 
 def register_store(key: str, load, save):
@@ -318,6 +361,41 @@ class GateDialog:
         for spec in specs:
             val = cur.get(spec.key, spec.default)
             self._build_one(box, spec, val)
+        if self.key == _g.VOLATILITY:
+            self._build_vol_extras(box, cur)
+
+    def _build_vol_extras(self, box, cur: dict):
+        """A mérce ÚJRAMÉRÉSE + a „kié ez a szám" megjegyzés.
+
+        Az újramérés csak a MEZŐT tölti ki — a Mentés írja ki. Így a régi és az
+        új szám egymás mellett látszik, és egy félrekattintás nem írja át némán
+        a pár mércéjét (a küszöbök jelentése vele együtt mozdul)."""
+        tk.Label(box, text=_t("gp.vol.note"), bg=BG, fg=FG_GRAY,
+                 font=self._f["small"], anchor="w", justify="left",
+                 wraplength=560).pack(anchor="w", pady=(10, 0))
+        row = tk.Frame(box, bg=BG)
+        row.pack(fill="x", pady=(6, 0))
+        self._vol_msg = tk.Label(box, text="", bg=BG, fg=FG_GRAY,
+                                 font=self._f["small"], anchor="w",
+                                 justify="left", wraplength=560)
+        tk.Button(row, text=_t("gp.vol.recalibrate"),
+                  command=self._recalibrate_vol, bg=BTN_DIS_BG, fg=BTN_DIS_FG,
+                  font=self._f["small"], bd=0, padx=10, pady=3).pack(side="left")
+        self._vol_msg.pack(anchor="w", pady=(4, 0))
+
+    def _recalibrate_vol(self):
+        try:
+            new, n, period = recalibrate_vol_ref(self.cfg, self.symbol)
+        except Exception as ex:
+            self._vol_msg.config(text=_t("gp.vol.recalibrate_fail", error=ex),
+                                 fg=FG_RED)
+            return
+        sv = self._vars.get("atr_avg_ref")
+        old = sv.get() if sv is not None else "—"
+        if sv is not None:
+            sv.set(repr(float(new)))
+        self._vol_msg.config(text=_t("gp.vol.recalibrated", new=f"{new:.6g}",
+                                     old=old, n=n, period=period), fg=FG_GREEN)
 
     def _build_one(self, box, spec, val):
         row = tk.Frame(box, bg=BG)
