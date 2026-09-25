@@ -423,6 +423,7 @@ def make_chart(chart: dict) -> tuple:
     spec = chart.get("spec") or {}
     bars = signal_chart.fetch_bars(
         sym, spec, lambda tf, n: mt5_connector.tf_bars(sym, tf, n))
+    # (az idősíkok a stratégia spec-jéből — `signal_chart.spec_tfs`)
     _ps = float(((_cfg_json.get("pairs") or {}).get(sym) or {})
                 .get("point_size") or 0.0)
     digits = (min(8, max(0, int(round(-math.log10(_ps))))) if _ps > 0 else 5)

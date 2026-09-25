@@ -18,13 +18,23 @@ A belépő (kék), az SL (piros) és a TP (zöld) vízszintes vonal mindkét
 a KERET része: nem tudja, mi az a WPR vagy melyik SMA számít. A spec egy sima
 szótár, pl.
 
-    {"sma": {"tf": 15, "period": 200},
+    {"tfs": [15, 1],                                   # a kép idősíkjai
+     "sma": {"tf": 15, "period": 200},                 # (régi alak, = overlay)
+     "overlays": [{"kind": "ema", "tf": 60, "period": 200},
+                  {"kind": "bb", "tf": 60, "period": 20, "std": 2.0},
+                  {"kind": "keltner", "tf": 60, "period": 20,
+                   "atr_period": 10, "mult": 1.5, "atr": "ema"}],
      "panels": [{"kind": "wpr", "tf": 15, "period": 21,
                  "levels": [-20, -50, -50, -80]},
-                {"kind": "wpr", "tf": 1, "period": 21,
-                 "levels": [-20, -50, -50, -80]}]}
+                {"kind": "stoch", "tf": 5, "period": 14, "d": 3,
+                 "levels": [80, 20]}]}
 
-Üres spec → csak gyertyák + szintek (minden stratégiára működik).
+Üres spec → M15 + M1 gyertyák + szintek (minden stratégiára működik).
+
+⚠ A KÉPLETEK A STRATÉGIÁÉI: a Keltner ATR-je a trend_pullbacknél egyszerű
+mozgóátlag, a bollingernél EMA (`"atr": "sma"|"ema"`), a Bollinger szórása
+`ddof=0`. Egy „szabványos" képlet a képen más sávot rajzolna, mint amiből a
+jelzés született — és a felhasználó a képről ítél.
 
 ⚠ SZÁLBIZTOS RAJZ: `matplotlib.figure.Figure` + Agg vászon, NEM `pyplot`. A
 pyplot globális állapotot tart (az „aktuális ábra"), és az értesítés-szál meg
@@ -45,7 +55,29 @@ import numpy as np
 import pandas as pd
 
 # Mennyi gyertya látsszon idősíkonként.
-SHOW = {15: 70, 1: 90}
+SHOW = {1: 90, 5: 80, 15: 70, 30: 70, 60: 60, 240: 60}
+DEFAULT_TFS = (15, 1)
+
+
+def spec_tfs(spec: dict | None) -> tuple:
+    """A kép idősíkjai (felülről lefelé) — a spec `tfs`-e, különben M15 + M1."""
+    t = (spec or {}).get("tfs")
+    try:
+        out = tuple(int(x) for x in (t or ()))
+    except (TypeError, ValueError):
+        out = ()
+    return out or DEFAULT_TFS
+
+
+def _overlays(spec: dict | None) -> list:
+    """Az ár-panelre rajzolandó vonalak — a régi `sma` kulccsal együtt."""
+    spec = spec or {}
+    out = list(spec.get("overlays") or ())
+    sma = spec.get("sma") or {}
+    if sma and sma.get("period"):
+        out.insert(0, {"kind": "sma", "tf": int(sma.get("tf", 15)),
+                       "period": int(sma["period"])})
+    return out
 
 _UP, _DOWN = "#2a9d4b", "#d33a2c"
 _ENTRY, _SL, _TP = "#1f6fd1", "#d33a2c", "#2a9d4b"
@@ -56,13 +88,61 @@ def bars_needed(spec: dict | None, tf: int) -> int:
     leghosszabb indikátor bemelegítése (különben a vonal eleje hiányozna)."""
     spec = spec or {}
     warm = 0
-    sma = spec.get("sma") or {}
-    if int(sma.get("tf", 15)) == tf:
-        warm = max(warm, int(sma.get("period", 0) or 0))
+    for o in _overlays(spec):
+        if int(o.get("tf", 0)) == tf:
+            warm = max(warm, int(o.get("period", 0) or 0),
+                       int(o.get("atr_period", 0) or 0))
     for p in spec.get("panels") or ():
         if int(p.get("tf", 0)) == tf:
-            warm = max(warm, int(p.get("period", 0) or 0))
-    return SHOW.get(tf, 80) + warm + 2
+            warm = max(warm, int(p.get("period", 0) or 0)
+                       + int(p.get("d", 0) or 0))
+    # Az EMA-knak több bemelegítés kell (exponenciális emlékezet): ×2.
+    return SHOW.get(tf, 80) + 2 * warm + 2
+
+
+def _atr_series(df: pd.DataFrame, n: int, mode: str) -> pd.Series:
+    prev = df["close"].shift(1)
+    tr = pd.concat([(df["high"] - df["low"]).abs(), (df["high"] - prev).abs(),
+                    (df["low"] - prev).abs()], axis=1).max(axis=1)
+    if mode == "ema":
+        return tr.ewm(span=int(n), adjust=False).mean()
+    return tr.rolling(int(n)).mean()
+
+
+def _draw_overlay(ax, df: pd.DataFrame, o: dict, show: int) -> None:
+    """Egy ár-panel vonal (SMA/EMA/Bollinger/Keltner) — a stratégia képletével."""
+    kind = str(o.get("kind") or "")
+    per = int(o.get("period") or 20)
+    c = df["close"]
+    x = np.arange(min(len(df), show))
+
+    def _v(s):
+        return s.iloc[-show:].to_numpy(float)
+
+    if kind == "sma":
+        ax.plot(x, _v(c.rolling(per).mean()), color="#e69f00", linewidth=1.2,
+                label=f"SMA({per})")
+    elif kind == "ema":
+        ax.plot(x, _v(c.ewm(span=per, adjust=False).mean()),
+                color=o.get("color", "#8e44ad"), linewidth=1.1,
+                label=f"EMA({per})")
+    elif kind == "bb":
+        k = float(o.get("std", 2.0))
+        mb = c.rolling(per).mean()
+        sd = c.rolling(per).std(ddof=0)
+        ax.plot(x, _v(mb + k * sd), color="#1f77b4", linewidth=0.9,
+                label=f"BB({per}, {k:g})")
+        ax.plot(x, _v(mb - k * sd), color="#1f77b4", linewidth=0.9)
+        ax.plot(x, _v(mb), color="#1f77b4", linewidth=0.6, linestyle=":")
+    elif kind == "keltner":
+        m = float(o.get("mult", 2.0))
+        mid = c.ewm(span=per, adjust=False).mean()
+        a = _atr_series(df, int(o.get("atr_period") or per),
+                        str(o.get("atr", "sma")))
+        ax.plot(x, _v(mid + m * a), color="#16a085", linewidth=0.9,
+                linestyle="--", label=f"Keltner({per}, {m:g})")
+        ax.plot(x, _v(mid - m * a), color="#16a085", linewidth=0.9,
+                linestyle="--")
 
 
 def _candles(ax, df: pd.DataFrame) -> None:
@@ -115,16 +195,32 @@ def _levels(ax, direction: str, entry: float, sl: float, tp: float,
 def _osc_panel(ax, df: pd.DataFrame, panel: dict) -> None:
     kind = str(panel.get("kind") or "")
     per = int(panel.get("period") or 14)
+    v2 = None
     if kind == "wpr":
         from core.indicator_engine import wpr
         v = wpr(df["high"], df["low"], df["close"], per)
         ax.set_ylim(-102, 2)
         name = f"WPR({per})"
+    elif kind == "stoch":
+        v, v2 = _stoch(df, per, int(panel.get("d") or 3))
+        ax.set_ylim(-2, 102)
+        name = f"Stoch({per},{int(panel.get('d') or 3)})"
     else:
         return
-    v = v.iloc[-SHOW.get(int(panel.get("tf", 1)), 80):]
+    _n = SHOW.get(int(panel.get("tf", 1)), 80)
+    v = v.iloc[-_n:]
     ax.plot(np.arange(len(v)), v.to_numpy(float), color="#333333", linewidth=1.0)
+    if v2 is not None:
+        v2 = v2.iloc[-_n:]
+        ax.plot(np.arange(len(v2)), v2.to_numpy(float), color="#d35400",
+                linewidth=0.9)
     levels = list(panel.get("levels") or ())
+    if kind == "stoch":
+        for lv in levels:
+            ax.axhline(float(lv), color="#888888", linewidth=0.8, linestyle=":")
+        ax.set_ylabel(name, fontsize=7)
+        ax.tick_params(labelsize=7)
+        return
     # A szintek jelentése a wpr_sma sorrendjében: felső extrém, SELL trigger,
     # BUY trigger, alsó extrém — az extrémek szürkék, a triggerek színesek.
     stilus = ["#888888", _SL, _UP, "#888888"]
@@ -135,9 +231,19 @@ def _osc_panel(ax, df: pd.DataFrame, panel: dict) -> None:
     ax.tick_params(labelsize=7)
 
 
+def _stoch(df: pd.DataFrame, n: int, d: int) -> tuple:
+    """%K és %D — a trend_pullback képletével (a legalacsonyabb low / legmagasabb
+    high `n` gyertyán, %D = %K egyszerű átlaga `d`-re)."""
+    hh = df["high"].rolling(n, min_periods=n).max()
+    ll = df["low"].rolling(n, min_periods=n).min()
+    rng = (hh - ll).where(lambda r: r > 0)
+    k = 100.0 * (df["close"] - ll) / rng
+    return k, k.rolling(d, min_periods=d).mean()
+
+
 def render_png(symbol: str, direction: str, entry, sl, tp,
                bars: dict, spec: dict | None = None, digits: int = 5,
-               title: str = "", tfs=(15, 1), only: "str | None" = None) -> bytes:
+               title: str = "", tfs=None, only: "str | None" = None) -> bytes:
     """A kép PNG-bájtjai. `bars`: `{15: DataFrame, 1: DataFrame}` (OHLC).
 
     `entry=None` → NINCS belépő (a `/photo` parancs pillanatképe): csak a
@@ -152,8 +258,8 @@ def render_png(symbol: str, direction: str, entry, sl, tp,
     from matplotlib.backends.backend_agg import FigureCanvasAgg
 
     spec = spec or {}
-    tfs = [tf for tf in (15, 1) if tf in tuple(tfs)
-           and bars.get(tf) is not None and len(bars[tf])]
+    _kert = tuple(tfs) if tfs else spec_tfs(spec)
+    tfs = [tf for tf in _kert if bars.get(tf) is not None and len(bars[tf])]
     if not tfs:
         raise ValueError("nincs gyertya a képhez")
     panels_by_tf = {tf: [p for p in (spec.get("panels") or ())
@@ -178,7 +284,7 @@ def render_png(symbol: str, direction: str, entry, sl, tp,
     fig = Figure(figsize=(9, 2.2 * _n_ar + (0.9 if only is None else 1.8)
                           * (len(rows) - _n_ar) + 0.6), dpi=110)
     FigureCanvasAgg(fig)
-    gs = fig.add_gridspec(len(rows), 1, height_ratios=ratios, hspace=0.12)
+    gs = fig.add_gridspec(len(rows), 1, height_ratios=ratios, hspace=0.3)
     is_buy = str(direction).upper() == "BUY"
     for r, (fajta, tf, panel) in enumerate(rows):
         ax = fig.add_subplot(gs[r, 0])
@@ -187,12 +293,12 @@ def render_png(symbol: str, direction: str, entry, sl, tp,
         if fajta == "price":
             d = df.iloc[-show:]
             _candles(ax, d)
-            sma = spec.get("sma") or {}
-            if sma and int(sma.get("tf", 15)) == tf and sma.get("period"):
-                s = df["close"].rolling(int(sma["period"])).mean().iloc[-show:]
-                ax.plot(np.arange(len(s)), s.to_numpy(float), color="#e69f00",
-                        linewidth=1.2, label=f"SMA({int(sma['period'])})")
-                ax.legend(loc="upper left", fontsize=7, frameon=False)
+            _ov = [o for o in _overlays(spec) if int(o.get("tf", 0)) == tf]
+            for o in _ov:
+                _draw_overlay(ax, df, o, show)
+            if _ov:
+                ax.legend(loc="upper left", fontsize=7, frameon=True,
+                          framealpha=0.75, edgecolor="none")
             if entry is not None:
                 y0, y1 = _levels(ax, direction, float(entry), float(sl),
                                  None if tp is None else float(tp),
@@ -207,7 +313,7 @@ def render_png(symbol: str, direction: str, entry, sl, tp,
                 _c = float(d["close"].iloc[-1])
                 ax.text(1.002, _c, fmt(_c), transform=ax.get_yaxis_transform(),
                         color="#333333", fontsize=7, va="center", ha="left")
-            ax.set_title(f"M{tf}", loc="left", fontsize=8, pad=2)
+            ax.set_title(tf_label(tf), loc="left", fontsize=8, pad=2)
             ax.tick_params(labelsize=7)
             _time_ticks(ax, d.index)
             # Ha alatta az idősík oszcillátora jön, az időtengely ott látszik —
@@ -216,7 +322,7 @@ def render_png(symbol: str, direction: str, entry, sl, tp,
                 ax.set_xticklabels([])
         elif only is not None:
             _osc_panel(ax, df, panel)
-            ax.set_title(f"M{tf}", loc="left", fontsize=8, pad=2)
+            ax.set_title(tf_label(tf), loc="left", fontsize=8, pad=2)
             _time_ticks(ax, df.index[-show:])
         else:
             _osc_panel(ax, df, panel)
@@ -247,8 +353,18 @@ def panel_values(bars: dict, spec: dict | None) -> list:
             v = wpr(df["high"], df["low"], df["close"],
                     int(p.get("period") or 14)).iloc[-1]
             if v == v:
-                out.append((f"WPR M{tf}", float(v)))
+                out.append((f"WPR {tf_label(tf)}", float(v)))
+        elif str(p.get("kind")) == "stoch":
+            k, dd = _stoch(df, int(p.get("period") or 14), int(p.get("d") or 3))
+            if k.iloc[-1] == k.iloc[-1]:
+                out.append((f"Stoch {tf_label(tf)}", float(k.iloc[-1])))
     return out
+
+
+def tf_label(tf: int) -> str:
+    """`1` → „M1", `60` → „H1", `240` → „H4"."""
+    tf = int(tf)
+    return f"H{tf // 60}" if tf >= 60 and tf % 60 == 0 else f"M{tf}"
 
 
 def values_text(values: list) -> str:
@@ -256,11 +372,12 @@ def values_text(values: list) -> str:
     return " · ".join(f"{n}: {v:.0f}" for n, v in (values or ()))
 
 
-def fetch_bars(symbol: str, spec: dict | None, fetch) -> dict:
-    """`{tf: DataFrame}` a két idősíkra. `fetch(tf, n)` → DataFrame | None
-    (élesben `mt5_connector.tf_bars`). Hiba → az adott idősík kimarad."""
+def fetch_bars(symbol: str, spec: dict | None, fetch, tfs=None) -> dict:
+    """`{tf: DataFrame}` a kép idősíkjaira (`tfs`, különben a spec-éi).
+    `fetch(tf, n)` → DataFrame | None (élesben `mt5_connector.tf_bars`). Hiba →
+    az adott idősík kimarad."""
     out = {}
-    for tf in (15, 1):
+    for tf in (tuple(tfs) if tfs else spec_tfs(spec)):
         try:
             df = fetch(tf, bars_needed(spec, tf))
         except Exception:

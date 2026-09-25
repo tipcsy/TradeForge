@@ -79,9 +79,9 @@ try:
     check("gyertya nelkul ValueError (a hivo szoveget kuld)", False)
 except ValueError:
     check("gyertya nelkul ValueError (a hivo szoveget kuld)", True)
-check("bars_needed: lathato resz + a leghosszabb bemelegites",
-      sc.bars_needed(SPEC, 15) == sc.SHOW[15] + 50 + 2
-      and sc.bars_needed(SPEC, 1) == sc.SHOW[1] + 21 + 2)
+check("bars_needed: lathato resz + 2x a leghosszabb bemelegites (EMA-memoria)",
+      sc.bars_needed(SPEC, 15) == sc.SHOW[15] + 2 * 50 + 2
+      and sc.bars_needed(SPEC, 1) == sc.SHOW[1] + 2 * 21 + 2)
 check("fetch_bars: a hibas idosik kimarad, a masik megmarad",
       set(sc.fetch_bars("X", SPEC, lambda tf, n: b[1] if tf == 1 else 1 / 0)) == {1})
 
@@ -270,8 +270,9 @@ check("wpr_sma: M15 SMA a sajat periodusaval", w["sma"] == {"tf": 15, "period": 
 check("wpr_sma: KET WPR-panel (M15 + M1) a sajat szintjeivel",
       [(p["tf"], p["period"]) for p in w["panels"]] == [(15, 13), (1, 9)]
       and w["panels"][0]["levels"][0] == -15 and w["panels"][0]["levels"][3] == -85)
-check("egy mas strategia alapbol ures spec-et ad (a kep akkor is keszul)",
-      get_strategy_by_name("trend_pullback").chart_spec({}) == {})
+from strategy.base import Strategy as _Base              # noqa: E402
+check("a KERET alapertelmezese ures spec (a kep akkor is keszul)",
+      _Base.chart_spec(get_strategy_by_name("ml_ai"), {}) == {})
 
 # ══ 7. /photo parancs ══════════════════════════════════════════════════════
 print("== 7. /photo ==")
@@ -294,8 +295,8 @@ def _ctx(chart=None):
 r = cc.dispatch(_ctx(), "photo UsaTec M15")
 check("/photo UsaTec M15 -> kep, csak M15", r.photo == PNG and _kert[-1] == ("UsaTec", (15,)))
 r = cc.dispatch(_ctx(), "/photo ger40")
-check("idosik nelkul MINDKETTO, kisbetus nev is jo",
-      r.photo == PNG and _kert[-1] == ("Ger40", (15, 1)))
+check("idosik nelkul a STRATEGIA sajat idosikjai (None), kisbetus nev is jo",
+      r.photo == PNG and _kert[-1] == ("Ger40", None))
 r = cc.dispatch(_ctx(), "photo UsaTech M1")
 check("ELGEPELES (UsaTech) -> UsaTec, es kiirja, melyiket",
       r.photo == PNG and _kert[-1] == ("UsaTec", (1,)) and "UsaTec" in r.lines[0],
@@ -307,6 +308,8 @@ r = cc.dispatch(_ctx(), "photo Usa")
 check("tobb jelolt -> NEM talalgat, felsorolja",
       not r.photo and "UsaTec" in r.lines[0] and "UsaInd" in r.lines[0], r.lines)
 r = cc.dispatch(_ctx(), "photo UsaTec H4")
+check("H4 is kerheto", r.photo == PNG and _kert[-1] == ("UsaTec", (240,)))
+r = cc.dispatch(_ctx(), "photo UsaTec D7")
 check("ismeretlen idosik -> hasznalati sugo", not r.photo and not r.ok)
 r = cc.dispatch(_ctx(), "photo")
 check("argumentum nelkul -> hasznalati sugo", not r.photo and not r.ok)
@@ -343,6 +346,9 @@ check("/photo UsaTech M15 wpr -> CSAK a WPR, M15",
       (_kert, r.lines))
 r = cc.dispatch(_c2, "photo UsaTec wpr m1")
 check("a szavak sorrendje mindegy", _kert[-1] == ("UsaTec", (1,), "wpr"))
+r = cc.dispatch(_c2, "photo UsaTec wpr")
+check("csak-WPR idosik nelkul -> a strategia idosikjai",
+      _kert[-1] == ("UsaTec", None, "wpr"))
 
 
 def _nincs(s, t, only=None):
@@ -382,6 +388,45 @@ check("jelzes-kep alairasa: a szoveg + a WPR ertekei",
 # pillanatkep-rajz: belepo NELKUL
 png = sc.render_png("X", "", None, None, None, b, SPEC, digits=2, tfs=(15,))
 check("pillanatkep (belepo nelkul, csak M15) elkeszul", png[:4] == PNG)
+
+# ══ 8. A tobbi strategia kepe ══════════════════════════════════════════════
+print("== 8. mas strategiak ==")
+from strategy.settings import default_params as _dp      # noqa: E402
+_cfg0 = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
+_m1 = _bars(60 * 24 * 12, "1min", 30000.0)
+
+
+def _fetch(tf, n):
+    from core.indicator_engine import resample_ohlc
+    d = _m1 if tf == 1 else resample_ohlc(_m1[["open", "high", "low", "close"]], tf)
+    return d.iloc[-n:]
+
+
+_vart = {"trend_pullback": ([60, 5], {"keltner"}, {"stoch"}),
+         "bollinger_squeeze_breakout": (None, {"bb", "keltner", "ema"}, set()),
+         "pending_straddle": (None, set(), {"wpr"}),
+         "csilla": (None, set(), set())}
+for _n, (_tfs, _ov, _pn) in _vart.items():
+    _st = get_strategy_by_name(_n)
+    _sp = _st.chart_spec(_dp(_st, _cfg0) or {})
+    check(f"{_n}: van sajat kep-spec (idosikok)", bool(_sp.get("tfs")), _sp)
+    if _tfs:
+        check(f"{_n}: a sajat idosikjai", _sp["tfs"] == _tfs, _sp["tfs"])
+    check(f"{_n}: a vart overlay-k",
+          {o["kind"] for o in _sp.get("overlays") or ()} == _ov)
+    check(f"{_n}: a vart panelek",
+          {q["kind"] for q in _sp.get("panels") or ()} == _pn)
+    _bb = sc.fetch_bars("X", _sp, _fetch)
+    _e = float(_m1["close"].iloc[-1])
+    check(f"{_n}: a kep elkeszul a sajat idosikjain",
+          set(_bb) == set(sc.spec_tfs(_sp)) and sc.render_png(
+              "X", "BUY", _e, _e - 5, _e + 10, _bb, _sp)[:4] == PNG, sorted(_bb))
+_tp = get_strategy_by_name("trend_pullback").chart_spec({})
+check("Stoch-ertek az alairasban (trend_pullback)",
+      [n for n, _ in sc.panel_values(sc.fetch_bars("X", _tp, _fetch), _tp)]
+      == ["Stoch M5"])
+check("tf_label: M1 / M15 / H1 / H4",
+      [sc.tf_label(t) for t in (1, 15, 60, 240)] == ["M1", "M15", "H1", "H4"])
 
 print(f"\n{sum(_results)}/{len(_results)} teszt PASS")
 if _fail:

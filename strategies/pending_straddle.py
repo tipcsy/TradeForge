@@ -729,6 +729,22 @@ class PendingStraddleStrategy(Strategy):
 
     # ── Méretezés (SL/TP TÁVOLSÁG — a lot NEM a stratégiáé) ────────────────
 
+    def chart_spec(self, params: dict) -> dict:
+        """A jelzés-képre: a JEL-idősík WPR-je a trigger-szintekkel (a WPR itt
+        IDŐZÍT, nem irányt ad), fölötte a nagyobb idősík környezetnek."""
+        p = params or {}
+        tf = int(_tf(p))
+        felso = 15 if tf < 15 else 60
+        return {
+            "tfs": [felso, tf],
+            "panels": [{"kind": "wpr", "tf": tf,
+                        "period": int(p.get("wpr_period", 14) or 14),
+                        "levels": [p.get("wpr_sell_extreme", -20),
+                                   p.get("wpr_sell_trigger", -50),
+                                   p.get("wpr_buy_trigger", -50),
+                                   p.get("wpr_buy_extreme", -80)]}],
+        }
+
     def sl_tp_points(self, hi_row, params, point_size):
         """`(sl_points, tp_points)` PONTBAN, vagy `None`.
 

@@ -1204,8 +1204,9 @@ def cmd_quit(ctx: Context, args: list, confirmed: bool = False) -> Result:
     return Result([_t("console.quit")], quit=True)
 
 
-_PHOTO_TF = {"m15": (15,), "15": (15,), "m1": (1,), "1": (1,),
-             "mind": (15, 1), "all": (15, 1), "both": (15, 1)}
+_PHOTO_TF = {"m1": (1,), "m5": (5,), "m15": (15,), "m30": (30,),
+             "h1": (60,), "h4": (240,), "1": (1,), "5": (5,), "15": (15,),
+             "30": (30,), "60": (60,)}
 # Csak EGY oszcillátor-fajta a képen (ár nélkül): `/photo UsaTec M15 wpr`.
 _PHOTO_ONLY = ("wpr",)
 
@@ -1230,7 +1231,7 @@ def cmd_photo(ctx: Context, args: list, confirmed: bool = False) -> Result:
         else:
             return Result([_t("console.photo.unknown", given=args[0],
                               candidates=", ".join(jeloltek) or "—")], ok=False)
-    tfs, only = (15, 1), None
+    tfs, only = None, None           # None = a stratégia saját idősíkjai
     for szo in args[1:]:
         w = str(szo).lower()
         if w in _PHOTO_TF:
@@ -1246,6 +1247,7 @@ def cmd_photo(ctx: Context, args: list, confirmed: bool = False) -> Result:
         # (teszt-stub, más hívó) is működjön.
         png, sn = _ki[0], _ki[1]
         _vals = _ki[2] if len(_ki) > 2 else []
+        tfs = (_ki[3] if len(_ki) > 3 else None) or tfs or (15, 1)
     except ValueError as ex:
         if only:
             return Result([_t("console.photo.no_panel", symbol=sym,
@@ -1258,7 +1260,8 @@ def cmd_photo(ctx: Context, args: list, confirmed: bool = False) -> Result:
                           error=_t("console.photo.no_data"))], ok=False)
     sorok = ([megjegyzes] if megjegyzes else []) + [
         _t("console.photo.caption", symbol=sym, strategy=sn or "—",
-           tf=" + ".join(f"M{t}" for t in tfs) + (f" · {only.upper()}"
+           tf=" + ".join((f"H{t // 60}" if t >= 60 and t % 60 == 0 else f"M{t}")
+                         for t in tfs) + (f" · {only.upper()}"
                                                    if only else ""))
         + ("".join(f" · {n}: {v:.0f}" for n, v in _vals))]
     return Result(sorok, photo=png)

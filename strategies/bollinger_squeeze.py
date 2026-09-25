@@ -560,6 +560,26 @@ class BollingerSqueezeStrategy(Strategy):
         sig, state.pending = state.pending, "NONE"
         return sig
 
+    def chart_spec(self, params: dict) -> dict:
+        """A jelzés-képre: a JEL-idősík (alap H1) a Bollinger-szalaggal és a
+        Keltner-csatornával — a squeeze az, amikor a BB a Keltneren BELÜL van —
+        plusz a lassú EMA (trendszűrő); alatta az M1 a belépőhöz. A képletek a
+        stratégiáéi (BB szórás `ddof=0`, Keltner ATR EMA-val)."""
+        p = params or {}
+        tf = int(signal_tf_min())
+        return {
+            "tfs": [tf, 1] if tf != 1 else [15, 1],
+            "overlays": [
+                {"kind": "bb", "tf": tf, "period": int(p.get("bb_period", 20)),
+                 "std": float(p.get("bb_std", 2.0))},
+                {"kind": "keltner", "tf": tf,
+                 "period": int(p.get("kc_ema_period", 20)),
+                 "atr_period": int(p.get("kc_atr_period", 10)),
+                 "mult": float(p.get("kc_atr_mult", 1.5)), "atr": "ema"},
+                {"kind": "ema", "tf": tf, "period": int(p.get("ema_slow", 200))},
+            ],
+        }
+
     def sl_tp_points(self, hi_row, params, point_size):
         """SL/TP TÁV PONTBAN — tiszta méretezés, szűrő NÉLKÜL."""
         atr = hi_row.get("atr")

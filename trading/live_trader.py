@@ -141,7 +141,7 @@ def params_source(symbol: str, strategy_name: str) -> str:
     return "tuned" if params_file(symbol, strategy_name).exists() else "default"
 
 
-def pair_chart_png(symbol: str, cfg: dict, tfs=(15, 1), only=None) -> tuple:
+def pair_chart_png(symbol: str, cfg: dict, tfs=None, only=None) -> tuple:
     """`(png, stratégia_név, [(név, érték), …])` — a pár PILLANATKÉPE a
     `/photo` parancshoz, és a képen látszó oszcillátorok utolsó értéke
     (az aláírásba: „WPR M15: -44 · WPR M1: -80").
@@ -164,17 +164,19 @@ def pair_chart_png(symbol: str, cfg: dict, tfs=(15, 1), only=None) -> tuple:
             spec = st.chart_spec(p) or {}
         except Exception:
             log.debug("/photo: a stratégia indikátorai kimaradnak", exc_info=True)
+    tfs = tuple(tfs) if tfs else signal_chart.spec_tfs(spec)
     bars = signal_chart.fetch_bars(
-        symbol, spec, lambda tf, n: mt5_connector.tf_bars(symbol, tf, n))
+        symbol, spec, lambda tf, n: mt5_connector.tf_bars(symbol, tf, n), tfs)
     _ps = float(((cfg.get("pairs") or {}).get(symbol) or {}).get("point_size") or 0)
     digits = min(8, max(0, int(round(-math.log10(_ps))))) if _ps > 0 else 5
     _ido = datetime.now().strftime("%H:%M")
     png = signal_chart.render_png(
         symbol, "", None, None, None, bars, spec, digits=digits, tfs=tfs,
         only=only, title=f"{symbol}{' · ' + sn if sn else ''} · {_ido}")
+    _cimkek = {signal_chart.tf_label(t) for t in tfs}
     _vals = [(n, v) for n, v in signal_chart.panel_values(bars, spec)
-             if int(n.rsplit("M", 1)[-1]) in tuple(tfs)]
-    return png, sn, _vals
+             if n.rsplit(" ", 1)[-1] in _cimkek]
+    return png, sn, _vals, tfs
 
 
 def strategy_params(symbol: str, strategy_name: str, cfg: dict,

@@ -427,6 +427,13 @@ class CsillaStrategy(Strategy):
         self._pending[str(params.get("symbol", "") or state.symbol)] = sl
         return "BUY" if s_ > 0 else "SELL"
 
+    def chart_spec(self, params: dict) -> dict:
+        """A jelzés-képre: a stratégia SAJÁT idősík-párja (pl. H1 + M15). A
+        swing-szerkezetnek nincs szabványos indikátora — a gyertyák és a
+        belépő szintjei mutatják a törést."""
+        hi, lo = _tf_min()
+        return {"tfs": [int(hi), int(lo)]}
+
     def sl_tp_points(self, hi_row, params, point_size):
         """A stop a LEGUTÓBBI belépő korrekció-tetejéből (+ spread), pontban.
         TP = SL × `tp_rr_ratio` — alapból messze (a mért változatban nincs célár,

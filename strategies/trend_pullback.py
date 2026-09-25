@@ -324,6 +324,23 @@ class TrendPullbackStrategy(Strategy):
             return "NONE"
         return "BUY" if (most and not elozo) else "NONE"
 
+    def chart_spec(self, params: dict) -> dict:
+        """A jelzés-képre: H1 a Keltner-csatornával (a trend-feltétel) és M5 a
+        Stochastic-kal (a visszahúzódás) — a stratégia SAJÁT képleteivel (a
+        Keltner ATR-je itt egyszerű mozgóátlag, lásd `_atr`)."""
+        p = params or {}
+        kel = int(p.get("keltner_period", 14) or 14)
+        return {
+            "tfs": [TF_TREND, TF_BELEP],
+            "overlays": [{"kind": "keltner", "tf": TF_TREND, "period": kel,
+                          "atr_period": kel, "atr": "sma",
+                          "mult": float(p.get("keltner_mult", 2.0) or 2.0)}],
+            "panels": [{"kind": "stoch", "tf": TF_BELEP,
+                        "period": int(p.get("stoch_period", 14) or 14),
+                        "d": int(p.get("stoch_d", 3) or 3),
+                        "levels": [80, 20]}],
+        }
+
     def sl_tp_points(self, hi_row, params, point_size):
         """SL/TP PONTBAN, az M15 ATR-ből. None → nincs érvényes ATR."""
         a = hi_row.get("atr", 0)
