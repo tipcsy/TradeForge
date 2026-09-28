@@ -305,6 +305,11 @@ def cmd_console():
         mt5_connector.disconnect()
         return 1
 
+    # ⚠ 0029 (4b/3, S1): a KÜLÖN processzben futó motor lássa a felületen
+    # átállított configot — a figyelő előkészít, a motor a kör elején alkalmaz.
+    from core import config_watch
+    config_watch.start(CFG_PATH)
+
     slot_mgr = SlotManager(cfg["trading"]["max_open_slots"])
     szal = threading.Thread(target=run, args=(cfg, slot_mgr),
                             daemon=True, name="LiveTrader")

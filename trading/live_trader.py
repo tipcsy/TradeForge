@@ -4222,6 +4222,14 @@ def run(cfg: dict, slot_mgr: SlotManager):
             # halad-e. A kör végére tenni hiba volna: egy félbeszakadt körnél
             # sosem frissülne, és a motor holtnak látszana, miközben dolgozik.
             last_cycle_ts = time.time()
+            # ⚠ 0029 (4b/3, S1): KÜLÖN processzben futó motornál a felületen
+            # átállított config itt, a kör ELEJÉN, biztonságos ponton áll át
+            # (core/config_watch). A felület processzében futó motornál üres.
+            try:
+                from core import config_watch as _cw
+                _cw.apply_pending(cfg)
+            except Exception as _e:
+                log.warning("config-újratöltés kihagyva: %s", _e)
             # A karmester-telemetria kiírása, ha eljött az ideje (időzített,
             # atomikus — a körre nem mérhető költség).
             # ⚠ A KAPCSOLÓ KÖRÖNKÉNT. A terv ígérete: a kill-switch fájl a
