@@ -30,6 +30,7 @@ TISZTA modul: se MT5, se fájl — a hívó adja a configot.
 """
 from __future__ import annotations
 
+import copy
 import re
 from dataclasses import dataclass, field
 
@@ -111,9 +112,30 @@ def profiles(cfg: dict | None) -> list[BrokerProfile]:
     return [_profil(cfg.get("broker") or {}, cfg.get("mt5") or {})]
 
 
+_override: str | None = None
+
+
+def set_override(broker_id: str | None) -> None:
+    """A `--broker <id>` futásidejű választása (0029, 4. lépés).
+
+    ⚠ NEM a configba: ha a motor egy mentésnél kiírná az `active_broker`-t, a
+    következő indításkor a FELÜLET motorja is erre a brókerre állna át."""
+    global _override
+    _override = broker_id or None
+
+
 def active(cfg: dict | None) -> BrokerProfile:
-    """Az aktív profil: `active_broker` azonosító szerint, különben az első."""
+    """Az aktív profil: a `--broker` felülírás, az `active_broker`, különben az
+    első. Ismeretlen `--broker` azonosítóra ValueError — csendben NEM esünk
+    vissza az otthoni brókerre (egy második motor azzal az otthoni számlán
+    kereskedne)."""
     ps = profiles(cfg)
+    if _override:
+        for p in ps:
+            if p.id == _override:
+                return p
+        raise ValueError(f"ismeretlen bróker: {_override!r} "
+                         f"(a profilok: {', '.join(p.id for p in ps)})")
     want = (cfg or {}).get("active_broker")
     for p in ps:
         if want and p.id == want:
@@ -173,12 +195,22 @@ def validate(cfg: dict | None) -> list[str]:
 BROKER_PAIR_KEYS = ("point_size", "pv1_point", "min_lot", "lot_step", "max_lot",
                     "commission_per_lot", "swap_long_per_lot", "swap_short_per_lot",
                     "swap_3x_weekday", "backtest_spread_points")
+# ⚠ A KERESKEDÉSI SZÁNDÉK IS BRÓKERENKÉNT (4. lépés). A `run_state` (Play/Stop)
+# és a vele szinkronban tartott `enabled` a pár alatt él. Közösen egy második
+# bróker motorja ugyanazokat a párokat indítaná, és a Play/Stop-ja az OTTHONI
+# szándékot írná át. Nem-otthoni brókernél ezért a saját blokkjából jönnek, és
+# ha ott nincsenek: LEÁLLÍTVA — egy új bróker motorja magától semmit nem indít.
+BROKER_INTENT_DEFAULTS = {"run_state": {}, "enabled": False}
 OVERLAY_KEY = "_broker_overlay"
 
 
 def overlay_pairs(cfg: dict, profile: BrokerProfile) -> dict:
-    """A nem-otthoni bróker instrumentum-értékei a pár alapkulcsaira (helyben).
-    Otthoni brókernél NEM csinál semmit. Visszaad: a cfg."""
+    """A nem-otthoni bróker értékei (instrumentum + szándék) a pár alapkulcsaira
+    (helyben). Otthoni brókernél NEM csinál semmit. Visszaad: a cfg.
+
+    A betöltött értékről PILLANATKÉP készül: a mentés ehhez hasonlít, így a
+    helyben módosított (pl. `run_state[...] = "live"`) érték is a bróker
+    blokkjába kerül."""
     if profile is None or profile.home or not isinstance(cfg, dict):
         return cfg
     applied, orig, hianyzott = {}, {}, {}
@@ -186,17 +218,17 @@ def overlay_pairs(cfg: dict, profile: BrokerProfile) -> dict:
         if not isinstance(pc, dict):
             continue
         blokk = (pc.get("brokers") or {}).get(profile.id)
-        if not isinstance(blokk, dict):
-            continue
-        for k in BROKER_PAIR_KEYS:
-            if k not in blokk:
-                continue
+        blokk = blokk if isinstance(blokk, dict) else {}
+        ertekek = {k: blokk[k] for k in BROKER_PAIR_KEYS if k in blokk}
+        for k, alap in BROKER_INTENT_DEFAULTS.items():
+            ertekek[k] = blokk.get(k, alap)
+        for k, v in ertekek.items():
             if k in pc:
                 orig.setdefault(sym, {})[k] = pc[k]
             else:
                 hianyzott.setdefault(sym, []).append(k)
-            pc[k] = blokk[k]
-            applied.setdefault(sym, {})[k] = blokk[k]
+            pc[k] = copy.deepcopy(v)
+            applied.setdefault(sym, {})[k] = copy.deepcopy(v)
     if applied:
         cfg[OVERLAY_KEY] = {"id": profile.id, "applied": applied, "orig": orig,
                             "missing": hianyzott}
@@ -217,10 +249,9 @@ def restore_for_save(data: dict) -> dict:
         pc = pairs.get(sym)
         if not isinstance(pc, dict):
             continue
-        blokk = pc.setdefault("brokers", {}).setdefault(pid, {})
         for k, betoltott in kulcsok.items():
-            if k in pc and pc[k] != betoltott:
-                blokk[k] = pc[k]                    # futás közben módosult
+            if k in pc and pc[k] != betoltott:          # futás közben módosult
+                pc.setdefault("brokers", {}).setdefault(pid, {})[k] = pc[k]
             if k in (ov.get("orig") or {}).get(sym, {}):
                 pc[k] = ov["orig"][sym][k]
             elif k in (ov.get("missing") or {}).get(sym, []):

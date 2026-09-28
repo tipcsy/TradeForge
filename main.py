@@ -52,13 +52,29 @@ CFG_PATH = ROOT / "config.json"
 def load_cfg() -> dict:
     # A váz config.json + az aktív stratégia saját beállításainak beolvasztása.
     from strategy.settings import load_config
+    from core import broker_profile
+    # `--broker <id>`: EGY másik bróker motorja (0029, 4. lépés). Futásidejű, a
+    # configba NEM kerül. A betöltés ELŐTT kell: a `load_config` már az aktív
+    # bróker instrumentum-értékeit és szándékát rakja a párokra.
+    if "--broker" in sys.argv:
+        _i = sys.argv.index("--broker")
+        broker_profile.set_override(sys.argv[_i + 1] if _i + 1 < len(sys.argv) else "")
     cfg = load_config(CFG_PATH)
     # ⚠ 0029: az AKTÍV bróker-profil már INDULÁSKOR (nem csak a `connect`-nél) —
     # a kapcsolódás előtt futó backteszt/optimalizálás is az ő adatát olvassa
     # (core/broker_paths). A régi confignál ez az otthoni profil: semmi nem változik.
     try:
-        from core import broker_adapter, broker_profile
-        broker_adapter.configure(broker_profile.active(cfg))
+        from core import broker_adapter
+        try:
+            _profil = broker_profile.active(cfg)
+        except ValueError as _e:
+            # Ismeretlen `--broker`: KILÉPÜNK — egy csendes visszaesés az otthoni
+            # brókerre a második motort az otthoni számlán indítaná.
+            if "--broker" in sys.argv:
+                print(_e)
+                sys.exit(2)
+            raise
+        broker_adapter.configure(_profil)
     except Exception as ex:
         # Hibás profil (pl. elgépelt zóna): a config-ellenőrzés kiírja, a
         # `connect` pedig ugyanitt elbukik — kereskedés nem indul rossz órával.
@@ -222,6 +238,11 @@ def cmd_dashboard():
     win.run()
 
 
+def broker_profile_active(cfg: dict):
+    from core import broker_profile
+    return broker_profile.active(cfg)
+
+
 def cmd_console():
     """FEJ NÉLKÜLI élő kereskedés + egyszerű parancssor.
 
@@ -295,12 +316,21 @@ def cmd_console():
         print(_t("console.quit"))
         lt.request_stop()
         szal.join(timeout=15)
+        _kozzetevo.stop()                       # a végső kép: „rendben leállt"
         print(_t("console.stopped"))
         live_lock.release(_szamla)
         mt5_connector.disconnect()
 
     ctx = console_cmd.live_context(cfg, CFG_PATH)
     _interaktiv = bool(sys.stdin) and sys.stdin.isatty()
+
+    # ⚠ 0029 (4. lépés): a motor ÁLLAPOTKÉPE a saját számla-mappájába — a
+    # felület (egy másik processz) ebből mutatja ezt a brókert. Csak ír, a
+    # kereskedést egy írási hiba sem állítja meg.
+    from core import broker_adapter, engine_status
+    _kozzetevo = engine_status.Publisher(
+        ctx, broker_adapter.current() or broker_profile_active(cfg),
+        offset_fn=mt5_connector._load_offset).start()
 
     # ── TÁBLÁZATOS NÉZET (--tui) ──────────────────────────────────────────
     # ⚠ Ugyanaz a `ctx`, ugyanazok a parancsok — csak MÁS megjelenítő. A `rich`

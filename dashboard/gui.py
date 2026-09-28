@@ -2890,6 +2890,22 @@ class DashboardWindow:
             on_changed=self._apply_filter_sort,
             confirm=self._confirm)
 
+        # ── BRÓKEREK fül (0029, 4. lépés) — a többi bróker motorja, CSAK OLVASÁS.
+        # ⚠ Egy brókernél nincs: a felhasználó kérése szerint egy brókernél a
+        # bróker-jelölés sem látszik.
+        from core import broker_profile as _bp
+        try:
+            _masok = [p for p in _bp.profiles(cfg) if not p.home]
+        except ValueError:
+            _masok = []
+        if _masok:
+            brk_frame = tk.Frame(self._notebook, bg=BG)
+            self._notebook.add(brk_frame, text=_t("gui.brokerek"))
+            from dashboard.brokers_tab import BrokersTab
+            self._brokers_tab = BrokersTab(
+                brk_frame, profiles_provider=lambda: [
+                    p for p in _bp.profiles(self.cfg) if not p.home])
+
         bt_frame = tk.Frame(self._notebook, bg=BG_BT)
         self._notebook.add(bt_frame, text=_t("gui.portfolio_backtest"))
         self._bt_tab = PortfolioBacktestTab(bt_frame, cfg, mono_font, small_font, header_font)

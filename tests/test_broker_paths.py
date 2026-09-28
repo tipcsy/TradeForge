@@ -101,7 +101,8 @@ cfg = dict(copy.deepcopy(CFG), pairs={
     "GOLD": {"point_size": 0.01, "pv1_point": 0.88, "min_lot": 0.01,
              "brokers": {"roboforex": {"point_size": 0.001, "pv1_point": 0.1,
                                        "commission_per_lot": 7.0}}},
-    "EURUSD": {"point_size": 1e-05}})
+    "EURUSD": {"point_size": 1e-05, "enabled": True,
+               "run_state": {"wpr_sma": "live"}}})
 alap = copy.deepcopy(cfg)
 
 P.overlay_pairs(cfg, HOME)
@@ -112,7 +113,10 @@ g = cfg["pairs"]["GOLD"]
 check("roboforex: a GOLD a broker ertekeivel", (g["point_size"], g["pv1_point"],
       g["commission_per_lot"]) == (0.001, 0.1, 7.0), str(g))
 check("a nem erintett kulcs (min_lot) marad", g["min_lot"] == 0.01)
-check("broker-blokk nelkuli par erintetlen", cfg["pairs"]["EURUSD"] == {"point_size": 1e-05})
+e = cfg["pairs"]["EURUSD"]
+check("broker-blokk nelkuli par: az instrumentum-ertek marad", e["point_size"] == 1e-05)
+check("SZANDEK: a nem-otthoni broker NEM orokli az otthoni Play-t (leallitva)",
+      e["enabled"] is False and e["run_state"] == {}, str(e))
 
 ki = P.restore_for_save(copy.deepcopy(cfg))
 check("mentes: az OTTHONI ertekek vissza", (ki["pairs"]["GOLD"]["point_size"],
@@ -130,6 +134,34 @@ ki = P.restore_for_save(copy.deepcopy(cfg))
 check("futas kozbeni modositas a BROKER blokkjaba kerul",
       ki["pairs"]["GOLD"]["brokers"]["roboforex"]["pv1_point"] == 0.12
       and ki["pairs"]["GOLD"]["pv1_point"] == 0.88)
+
+print("\n== A kereskedesi SZANDEK brokerenkent ==")
+from core import run_state as RS                                         # noqa: E402
+RS.set_state(cfg, "EURUSD", "wpr_sma", RS.LIVE)        # Play a roboforex motoron
+ki = P.restore_for_save(copy.deepcopy(cfg))
+e = ki["pairs"]["EURUSD"]
+check("Play a roboforexen -> a SAJAT blokkjaba",
+      e["brokers"]["roboforex"]["run_state"] == {"wpr_sma": "live"}, str(e))
+check("... es az OTTHONI szandek erintetlen", e["run_state"] == {"wpr_sma": "live"}
+      and e["enabled"] is True)
+cfg2 = copy.deepcopy(ki)
+P.overlay_pairs(cfg2, ROBO)
+check("ujratoltes: a roboforex a SAJAT szandekaval indul",
+      cfg2["pairs"]["EURUSD"]["run_state"] == {"wpr_sma": "live"})
+check("... es ami ott nincs (GOLD), az leallitva",
+      cfg2["pairs"]["GOLD"]["run_state"] == {} and cfg2["pairs"]["GOLD"]["enabled"] is False)
+
+print("\n== A --broker valasztas (futasideju, NEM a configba) ==")
+P.set_override("roboforex")
+check("--broker roboforex -> az aktiv", P.active(CFG).id == "roboforex")
+P.set_override("nincsilyen")
+try:
+    P.active(CFG)
+    check("ismeretlen --broker -> ValueError (NEM csendes otthoni visszaeses)", False)
+except ValueError:
+    check("ismeretlen --broker -> ValueError (NEM csendes otthoni visszaeses)", True)
+P.set_override(None)
+check("felulirás nelkul az elso", P.active(CFG).id == "activtrades")
 
 from strategy import settings                                            # noqa: E402
 hiba = settings.write_config_file(cfg, tmp)
