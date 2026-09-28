@@ -3637,7 +3637,7 @@ class DashboardWindow:
         # MT5 szimbólum-lekérés HÁTTÉRSZÁLON; a UI-t after(0)-val frissítjük.
         def _load_syms():
             try:
-                import MetaTrader5 as mt5
+                from core.broker_adapter import mt5
                 syms = mt5.symbols_get()
                 pairs = sorted(((s.name, getattr(s, "description", "")) for s in syms),
                                key=lambda x: x[0]) if syms else []
@@ -3689,7 +3689,7 @@ class DashboardWindow:
             min_lot, lot_step, max_lot = 0.01, 0.01, 0.0
             description = ""
             try:
-                import MetaTrader5 as _mt5
+                from core.broker_adapter import mt5 as _mt5
                 from core.mt5_connector import MT5_LOCK
                 with MT5_LOCK:
                     info = _mt5.symbol_info(symbol)
@@ -5482,7 +5482,7 @@ class DashboardWindow:
         """(bid, ask) a mostani árból — a megerősítő ablak ebből mutatja, mennyit
         mozdult az ár a jelzés óta. None, ha nincs kapcsolat."""
         try:
-            import MetaTrader5 as _mt5
+            from core.broker_adapter import mt5 as _mt5
             from core.mt5_connector import MT5_LOCK
             with MT5_LOCK:
                 t = _mt5.symbol_info_tick(symbol)
@@ -6073,7 +6073,7 @@ class DashboardWindow:
         # az MT5-ből és cache-eljük a ds-be. Enélkül a trail-távolság mező üres marad.
         if not point:
             try:
-                import MetaTrader5 as _mt5
+                from core.broker_adapter import mt5 as _mt5
                 from core.mt5_connector import MT5_LOCK
                 with MT5_LOCK:
                     _mt5.symbol_select(symbol, True)
@@ -6418,7 +6418,7 @@ class DashboardWindow:
         Bars/indikátor NÉLKÜL → minden párra futtatható gyakran. A symbol_select
         biztosítja, hogy a (akár letiltott) szimbólum is streameljen MT5-ben."""
         try:
-            import MetaTrader5 as _mt5
+            from core.broker_adapter import mt5 as _mt5
             from core.mt5_connector import MT5_LOCK
         except Exception:
             return
@@ -6481,7 +6481,7 @@ class DashboardWindow:
             return
         ds._extras_ts = _t.time()
         try:
-            import MetaTrader5 as _mt5
+            from core.broker_adapter import mt5 as _mt5
             import pandas as _pd
             from core.mt5_connector import MT5_LOCK
             from core.indicator_engine import atr as _atr
@@ -6646,7 +6646,7 @@ class DashboardWindow:
         """Egy pár piaci adatainak frissítése MT5-ből: ár, spread, változás%,
         és a stratégia megjelenítési cellái."""
         try:
-            import MetaTrader5 as _mt5
+            from core.broker_adapter import mt5 as _mt5
             from core.mt5_connector import MT5_LOCK
         except Exception:
             return

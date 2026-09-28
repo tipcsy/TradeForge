@@ -384,7 +384,7 @@ check_("az eles configon lefut", isinstance(cc.check(real), list))
 _ismert = {"build_target_idle", "daily_limit_pct_dead", "market_gate_no_classifier",
            "missing_costs", "optimizer_skip", "signal_mode_invisible",
            "stale_strategy_key", "untuned_pair", "independent_multi_strategy",
-           "tp_vs_preset", "empty_strategies_fallback"}
+           "tp_vs_preset", "empty_strategies_fallback", "broker_profiles"}
 import re as _re
 _modul_kodok = set(_re.findall(
     r'_finding\(\s*\w+,\s*"(\w+)"',

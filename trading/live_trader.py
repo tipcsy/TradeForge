@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-import MetaTrader5 as mt5
+from core.broker_adapter import mt5
 import pandas as pd
 import numpy as np
 

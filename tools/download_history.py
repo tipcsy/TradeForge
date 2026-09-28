@@ -17,8 +17,10 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-import MetaTrader5 as mt5
 import pandas as pd
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from core.broker_adapter import mt5          # noqa: E402  (szimbólum-alias + bróker-idő)
 
 # Importáljuk a globális MT5 lockot — ha elérhető (GUI-ból hívva); egyébként dummy
 try:

@@ -53,7 +53,7 @@ import pyarrow.parquet as pq
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-import MetaTrader5 as mt5                     # noqa: E402
+from core.broker_adapter import mt5          # noqa: E402
 from core import mt5_connector                # noqa: E402
 from core.i18n import t as _t
 

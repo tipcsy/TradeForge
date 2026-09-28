@@ -24,7 +24,7 @@ holtponthoz vezetne). Ugyanaz a konvenció, mint a `_breakeven_plan`-nél.
 
 from __future__ import annotations
 
-import MetaTrader5 as mt5
+from core.broker_adapter import mt5
 
 # A `symbol_info.filling_mode` BITMASZK értékei. A MetaTrader5 Python csomag NEM
 # exportálja a SYMBOL_FILLING_* konstansokat (csak az ORDER_FILLING_*-ot), ezért itt

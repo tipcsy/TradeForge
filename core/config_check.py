@@ -518,7 +518,18 @@ def _check_build_target_idle(cfg: dict, out: list) -> None:
                    pct=_pct), symbol=sym))
 
 
+def _check_broker_profiles(cfg: dict, out: list) -> None:
+    """A bróker-profilok listája (0029): legfeljebb 5, egyedi azonosító/címke/
+    számla, érvényes szerver-zóna, létező aktív bróker. Egy elgépelt zóna NÉMÁN
+    elcsúsztatná az összes órát — ezért itt, induláskor is kiírjuk."""
+    from core import broker_profile
+    for hiba in broker_profile.validate(cfg):
+        out.append(_finding(WARN, "broker_profiles",
+                            _t("cfgchk.broker_profiles", hiba=hiba)))
+
+
 _CHECKS = (
+    _check_broker_profiles,
     _check_gate_preconditions,
     _check_stale_strategy_keys,
     _check_costs,

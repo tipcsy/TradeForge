@@ -1,4 +1,4 @@
-import MetaTrader5 as mt5
+from core.broker_adapter import mt5
 import logging
 import os
 import threading
@@ -94,11 +94,19 @@ def connect(cfg: dict) -> bool:
     a config fiókjával indítja), (2) a végén ELLENŐRIZZÜK, hogy tényleg a várt
     login@server-re kapcsolódtunk — ha nem, HIBÁVAL leállunk (nem dolgozunk
     csendben rossz fiókon)."""
-    broker  = cfg["broker"]
-    mt5_cfg = cfg.get("mt5", {})
+    # ⚠ 0029 (v3.110.0): az AKTÍV BRÓKER-PROFILBÓL. `brokers` lista nélkül a
+    # profil a régi `broker` + `mt5` blokkból épül, UGYANAZOKKAL az értékekkel.
+    # Az adapter (core/broker_adapter) innentől ennek a brókernek a szimbólum-
+    # neveire és szerver-órájára fordít — identitás-profilnál semmit nem csinál.
+    from core import broker_adapter, broker_profile
+    profil  = broker_profile.active(cfg)
+    broker  = {"login": profil.login, "server": profil.server,
+               "password": profil.password}
+    mt5_cfg = profil.mt5
     kwargs  = _init_kwargs(mt5_cfg)
     want_login  = int(broker["login"])
     want_server = broker["server"]
+    broker_adapter.configure(profil)
 
     with MT5_LOCK:
         # Robusztus út: path + portable + login/password/server EGYSZERRE →

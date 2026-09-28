@@ -44,7 +44,7 @@ def check(cfg: dict) -> list:
     Üres lista = minden friss (vagy nem mérhető). MT5-kapcsolat nélkül üres — a
     hívónak nem kell külön kezelnie."""
     try:
-        import MetaTrader5 as mt5
+        from core.broker_adapter import mt5
         from core import mt5_connector as mc
         from core import order_exec
         from tools.refresh_costs import swap_from_symbol

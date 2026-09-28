@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-import MetaTrader5 as mt5
+from core.broker_adapter import mt5
 
 from core.mt5_connector import MT5_LOCK
 from strategy.visual import PREFIX

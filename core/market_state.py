@@ -90,7 +90,7 @@ def info_of(symbol: str, max_age_sec: int = MAX_AGE_SEC) -> dict:
     if now is None:
         return out
     try:
-        import MetaTrader5 as mt5
+        from core.broker_adapter import mt5
         from core.mt5_connector import MT5_LOCK
         with MT5_LOCK:
             t = mt5.symbol_info_tick(symbol)

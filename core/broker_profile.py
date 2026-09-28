@@ -1,0 +1,150 @@
+"""BRÓKER-PROFILOK — melyik bróker, melyik számla, milyen óra, milyen szimbólumnevek.
+
+⚠ 0029 „Több bróker egyszerre", 2. lépés (2026-09-28). A program eddig egyetlen
+brókert ismert (a config `broker` + `mt5` blokkja). A profil ezt általánosítja:
+
+    "brokers": [
+      {"id": "activtrades", "tag": "At", "name": "ActivTrades",
+       "server": "...", "login": 123, "password": "...", "is_demo": true,
+       "magic": 20260627, "mt5": {"path": "...", "portable": true},
+       "server_zone": "Europe/Berlin",
+       "symbols": {}},                                  # kanonikus -> bróker
+      {"id": "roboforex", "tag": "Rob", ..., "server_zone": "America/New_York+7",
+       "symbols": {"GOLD": "XAUUSD"}}
+    ],
+    "active_broker": "activtrades"
+
+⚠ VISSZAFELÉ KOMPATIBILIS: ha nincs `brokers` lista, a mai `broker` + `mt5`
+blokkból EGY profil épül — ugyanazokkal az értékekkel. A mai config tehát
+változatlanul működik, és semmit nem kell átírni.
+
+⚠ LEGFELJEBB 5 BRÓKER (Tibi döntése, 2026-09-28): „a 2-3-4 még reális, 5
+már sok, annál több ne lehessen". A `validate` ezt hibának jelzi.
+
+⚠ A SZIMBÓLUM-ALIAS. A programon belül MINDEN a kanonikus névvel megy (a
+`pairs` kulcsa: `GOLD`); csak az MT5 felé forduló réteg (`core/broker_adapter`)
+fordít a bróker saját nevére (`XAUUSD`). Így a hangolt paraméterek, kapuk,
+naplók nem vesznek el bróker-váltáskor.
+
+TISZTA modul: se MT5, se fájl — a hívó adja a configot.
+"""
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+
+from core import broker_time as BT
+
+MAX_BROKERS = 5
+
+
+@dataclass(frozen=True)
+class BrokerProfile:
+    id: str
+    tag: str
+    name: str = ""
+    server: str = ""
+    login: int = 0
+    password: str = field(default="", repr=False)
+    is_demo: bool = False
+    magic: int = 0
+    mt5: dict = field(default_factory=dict, compare=False, hash=False)
+    server_zone: BT.ServerZone = BT.CANONICAL
+    symbols: dict = field(default_factory=dict, compare=False, hash=False)
+
+    # ── szimbólum-fordítás ────────────────────────────────────────────────
+    def to_broker(self, sym):
+        """Kanonikus név → a bróker neve (nincs alias → ugyanaz)."""
+        return self.symbols.get(sym, sym) if isinstance(sym, str) else sym
+
+    def to_canonical(self, sym):
+        """A bróker neve → kanonikus név (nincs alias → ugyanaz)."""
+        if not isinstance(sym, str) or not self.symbols:
+            return sym
+        return self._vissza().get(sym, sym)
+
+    def _vissza(self) -> dict:
+        return {v: k for k, v in self.symbols.items()}
+
+    @property
+    def is_identity(self) -> bool:
+        """Semmit nem kell fordítani: kanonikus óra ÉS nincs alias.
+        (A mai ActivTrades-config ilyen → az adapter mindent érintetlenül ad át.)"""
+        return self.server_zone.is_canonical and not self.symbols
+
+
+def _alap_tag(nev: str, azon: str) -> str:
+    s = re.sub(r"[^A-Za-z0-9]", "", nev or azon) or "Br"
+    return s[:3]
+
+
+def _profil(d: dict, mt5_cfg: dict | None = None) -> BrokerProfile:
+    nev = str(d.get("name", "") or "")
+    azon = str(d.get("id") or re.sub(r"[^a-z0-9]", "", nev.lower()) or "broker")
+    return BrokerProfile(
+        id=azon,
+        tag=str(d.get("tag") or _alap_tag(nev, azon)),
+        name=nev or azon,
+        server=str(d.get("server", "") or ""),
+        login=int(d.get("login", 0) or 0),
+        password=str(d.get("password", "") or ""),
+        is_demo=bool(d.get("is_demo", False)),
+        magic=int(d.get("magic", 0) or 0),
+        mt5=dict(d.get("mt5") if isinstance(d.get("mt5"), dict) else (mt5_cfg or {})),
+        server_zone=BT.parse(d.get("server_zone")),
+        symbols={str(k): str(v) for k, v in (d.get("symbols") or {}).items()
+                 if str(k) != str(v)},
+    )
+
+
+def profiles(cfg: dict | None) -> list[BrokerProfile]:
+    """Az összes profil. `brokers` lista nélkül a régi `broker` + `mt5` blokk."""
+    cfg = cfg or {}
+    lista = cfg.get("brokers")
+    if isinstance(lista, list) and lista:
+        return [_profil(d) for d in lista if isinstance(d, dict)]
+    return [_profil(cfg.get("broker") or {}, cfg.get("mt5") or {})]
+
+
+def active(cfg: dict | None) -> BrokerProfile:
+    """Az aktív profil: `active_broker` azonosító szerint, különben az első."""
+    ps = profiles(cfg)
+    want = (cfg or {}).get("active_broker")
+    for p in ps:
+        if want and p.id == want:
+            return p
+    return ps[0]
+
+
+def validate(cfg: dict | None) -> list[str]:
+    """A profil-lista hibái (üres = rendben). A zóna-hibát is itt fogjuk meg:
+    egy elgépelt zóna NÉMÁN elcsúsztatná az összes órát."""
+    hibak = []
+    lista = (cfg or {}).get("brokers")
+    nyers = lista if isinstance(lista, list) and lista else None
+    if nyers is not None and len(nyers) > MAX_BROKERS:
+        hibak.append(f"legfeljebb {MAX_BROKERS} bróker lehet, a configban {len(nyers)} van")
+    ps = []
+    for d in (nyers or [None]):
+        try:
+            ps.append(_profil(d) if d is not None else profiles(cfg)[0])
+        except ValueError as e:
+            hibak.append(str(e))
+    for mezo in ("id", "tag"):
+        ertekek = [getattr(p, mezo) for p in ps]
+        dup = sorted({v for v in ertekek if ertekek.count(v) > 1})
+        if dup:
+            hibak.append(f"ismétlődő bróker-{mezo}: {', '.join(dup)}")
+    szamlak = [(p.server, p.login) for p in ps if p.login]
+    if len(szamlak) != len(set(szamlak)):
+        hibak.append("ugyanaz a számla (szerver + login) kétszer szerepel")
+    for p in ps:
+        celok = list(p.symbols.values())
+        dup = sorted({v for v in celok if celok.count(v) > 1})
+        if dup:
+            hibak.append(f"{p.id}: több kanonikus név ugyanarra a bróker-szimbólumra: "
+                         f"{', '.join(dup)}")
+    want = (cfg or {}).get("active_broker")
+    if want and want not in [p.id for p in ps]:
+        hibak.append(f"az active_broker ('{want}') nincs a profilok között")
+    return hibak

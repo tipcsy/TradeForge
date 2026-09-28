@@ -134,7 +134,7 @@ def main() -> int:
         print("Nem sikerult csatlakozni az MT5-hoz.")
         return 1
 
-    import MetaTrader5 as mt5
+    from core.broker_adapter import mt5
 
     raw = json.loads(CFG_PATH.read_text(encoding="utf-8"),
                      object_pairs_hook=OrderedDict)

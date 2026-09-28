@@ -109,6 +109,7 @@
   "bulk.viz": "Visualisation shown",
   "cfgchk.build_target_idle": "{symbol}: a package target is set ({target_r} R) but position building is OFF, so the target never reaches the legs. Turn building on, or set the target to 0.",
   "cfgchk.build_trail_without_target": "{symbol}: a trailing package stop is set ({pct}) but there is no target, so it has nothing to measure progress against and does nothing. Set a target, or zero the trailing.",
+  "cfgchk.broker_profiles": "Broker profile error: {hiba}",
   "cfgchk.daily_limit_pct_dead": "The daily limit is the fixed {usd}$ (daily_loss_limit_usd); daily_loss_limit_pct={pct} is DEAD alongside it — it would only apply if usd were 0/missing.",
   "cfgchk.empty_strategies_fallback": "{sym}: the `strategies` list is EMPTY but the pair is enabled → the DEFAULT strategy silently runs on it ({default}). An empty list is NOT an off switch! If the pair really should not run: `enabled: false`. If it should run something else: put it in the `strategies` list.",
   "cfgchk.incompatible_strategy": "Strategy {name} is present in the folder but did NOT load: {reason}. While this lasts it appears in no list and cannot trade.",

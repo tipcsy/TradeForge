@@ -109,6 +109,7 @@
   "bulk.viz": "Vizualizáció látszik",
   "cfgchk.build_target_idle": "{symbol}: a csomag-célár be van állítva ({target_r} R), de az építés KI van kapcsolva → a cél sosem kerül a lábakra. Kapcsold be az építést, vagy állítsd a célt 0-ra.",
   "cfgchk.build_trail_without_target": "{symbol}: kúszó csomag-stop be van állítva ({pct}), de NINCS célár → a kúszásnak nincs mihez mérnie a haladást, tehát nem hat. Állíts be célárat, vagy nullázd a kúszást.",
+  "cfgchk.broker_profiles": "Bróker-profil hiba: {hiba}",
   "cfgchk.daily_limit_pct_dead": "A napi limit a rögzített {usd}$ (daily_loss_limit_usd); a daily_loss_limit_pct={pct} MELLETTE HOLT — csak akkor lépne életbe, ha az usd 0/hiányzó lenne.",
   "cfgchk.empty_strategies_fallback": "{sym}: a `strategies` lista ÜRES, de a pár engedélyezett → némán az ALAPÉRTELMEZETT stratégia fut rajta ({default}). Az üres lista NEM kikapcsolás! Ha a pár tényleg ne fusson: `enabled: false`. Ha fusson, de mást: írd bele a `strategies` listába.",
   "cfgchk.incompatible_strategy": "A(z) {name} stratégia a mappában van, de NEM töltődött be: {reason}. Amíg ez így marad, sem a listákban nem jelenik meg, sem kereskedni nem tud.",

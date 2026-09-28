@@ -137,6 +137,41 @@ def index_to_canonical(idx: pd.DatetimeIndex, sz: ServerZone) -> pd.DatetimeInde
     return kan.tz_localize(idx.tz) if idx.tz is not None else kan
 
 
+def _epoch_ki(idx: pd.DatetimeIndex, unit: str) -> np.ndarray:
+    """⚠ A `core.epoch`-on át: a nyers int64-nézet az index SAJÁT felbontását adja (s/ms/
+    us/ns) — egy fix `// 10**9` nem-ns indexen csendben rossz számot adna."""
+    from core import epoch
+    return epoch.sec(idx) if unit == "s" else epoch.ns(idx) // 10 ** 6
+
+
+def epoch_to_canonical(sec, sz: ServerZone, unit: str = "s"):
+    """MT5-időbélyeg (a szerver fal-órája epoch-ként: `time`, `time_msc`) →
+    ugyanez kanonikus fal-órában. Skalár vagy numpy tömb; `unit` "s" vagy "ms".
+    Kanonikus zónánál a bemenet VÁLTOZATLANUL."""
+    if sz.is_canonical:
+        return sec
+    skalar = np.isscalar(sec)
+    a = np.atleast_1d(np.asarray(sec, dtype=np.int64))
+    idx = pd.to_datetime(a, unit=unit)
+    kan = index_to_canonical(pd.DatetimeIndex(idx), sz)
+    out = _epoch_ki(kan, unit)
+    return int(out[0]) if skalar else out
+
+
+def canonical_to_server_epoch(sec, sz: ServerZone, unit: str = "s"):
+    """Az `epoch_to_canonical` fordítottja — MT5-lekérdezés határaihoz
+    (`copy_rates_range`, `history_deals_get` stb.)."""
+    if sz.is_canonical:
+        return sec
+    skalar = np.isscalar(sec)
+    a = np.atleast_1d(np.asarray(sec, dtype=np.int64))
+    idx = pd.DatetimeIndex(pd.to_datetime(a, unit=unit))
+    utc = index_to_utc(idx, CANONICAL)
+    fal = utc.tz_convert(sz.zone).tz_localize(None) + pd.Timedelta(hours=sz.shift_h)
+    out = _epoch_ki(fal, unit)
+    return int(out[0]) if skalar else out
+
+
 def frame_to_canonical(df: pd.DataFrame, sz: ServerZone) -> pd.DataFrame:
     """Gyertya-tábla indexének átváltása (kanonikusnál a bemenet, másolás nélkül)."""
     if sz.is_canonical:
