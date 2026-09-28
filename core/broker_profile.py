@@ -55,6 +55,9 @@ class BrokerProfile:
     # Az OTTHONI bróker (a lista első eleme; régi config: az egyetlen) adatai a
     # régi helyükön maradnak — lásd core/broker_paths.py.
     home: bool = True
+    # A felügyelő újraindítja-e a leállt motort (core/engine_supervisor).
+    # Alapból NEM: egy kereskedő motor magától ne induljon, csak ha kérted.
+    autostart: bool = False
 
     # ── szimbólum-fordítás ────────────────────────────────────────────────
     def to_broker(self, sym):
@@ -99,6 +102,7 @@ def _profil(d: dict, mt5_cfg: dict | None = None, home: bool = True) -> BrokerPr
         symbols={str(k): str(v) for k, v in (d.get("symbols") or {}).items()
                  if str(k) != str(v)},
         home=home,
+        autostart=bool(d.get("autostart", False)),
     )
 
 

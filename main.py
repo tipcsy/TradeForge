@@ -39,6 +39,7 @@ készült, és szabadon terjesztheted a GNU GPL v3 feltételei szerint (lásd LI
 """
 
 import json
+import os
 import sys
 
 from core.i18n import t as _t
@@ -309,13 +310,22 @@ def cmd_console():
                             daemon=True, name="LiveTrader")
     szal.start()
 
+    _kilepve = [False]
+
     def _kilep():
         """A leállítás EGY helyen: a motor körhatáron áll meg, aztán elengedjük
         a zárat és a kapcsolatot. ⚠ A zár elengedése nem elhagyható — enélkül a
         következő indulás egy elárvult zárat találna."""
+        if _kilepve[0]:                         # csak EGYSZER (távoli + helyi)
+            return
+        _kilepve[0] = True
         print(_t("console.quit"))
         lt.request_stop()
         szal.join(timeout=15)
+        try:
+            _csatorna.stop()
+        except NameError:
+            pass
         _kozzetevo.stop()                       # a végső kép: „rendben leállt"
         print(_t("console.stopped"))
         live_lock.release(_szamla)
@@ -331,6 +341,20 @@ def cmd_console():
     _kozzetevo = engine_status.Publisher(
         ctx, broker_adapter.current() or broker_profile_active(cfg),
         offset_fn=mt5_connector._load_offset).start()
+
+    # ⚠ 0029 (4b): a VEZÉRLŐ CSATORNA — a felület Play/Stop/zárás/leállítás
+    # parancsai a közös parancs-rétegen át. Távoli „quit": ugyanaz a rendes
+    # kilépés, mint a konzolról (végső „leállt" kép, zár, kapcsolat), majd a
+    # processz vége — a főszál ilyenkor egy `input()`-on állhat.
+    from core import engine_channel
+
+    def _tavoli_kilep():
+        _kilep()
+        os._exit(0)
+
+    _csatorna = engine_channel.Processor(
+        ctx, broker_adapter.current() or broker_profile_active(cfg),
+        on_quit=_tavoli_kilep).start()
 
     # ── TÁBLÁZATOS NÉZET (--tui) ──────────────────────────────────────────
     # ⚠ Ugyanaz a `ctx`, ugyanazok a parancsok — csak MÁS megjelenítő. A `rich`

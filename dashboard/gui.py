@@ -2904,7 +2904,8 @@ class DashboardWindow:
             from dashboard.brokers_tab import BrokersTab
             self._brokers_tab = BrokersTab(
                 brk_frame, profiles_provider=lambda: [
-                    p for p in _bp.profiles(self.cfg) if not p.home])
+                    p for p in _bp.profiles(self.cfg) if not p.home],
+                confirm=lambda szoveg: self._confirm(szoveg))
 
         bt_frame = tk.Frame(self._notebook, bg=BG_BT)
         self._notebook.add(bt_frame, text=_t("gui.portfolio_backtest"))

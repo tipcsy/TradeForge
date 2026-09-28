@@ -1,26 +1,33 @@
-"""BRÓKEREK fül — a többi bróker motorja, CSAK OLVASÁS.
+"""BRÓKEREK fül — a többi bróker motorja: állapot ÉS vezérlés.
 
-⚠ 0029 „Több bróker egyszerre", 4. lépés (2026-09-28). Minden további bróker
-külön processzben fut (`python main.py console --broker <id>`), és a saját
-állapotképét írja (`core/engine_status`). Ez a fül azokat olvassa és mutatja:
-életjel (fut / áll / hibás / nincs adat), a bróker SZERVER-órája, egyenleg,
-napi P&L, nyitott pozíciók.
+⚠ 0029 „Több bróker egyszerre". Minden további bróker külön processzben fut
+(`python main.py console --broker <id>`).
+  • 4a (v3.112.0): a fül OLVASTA a motor állapotképét (`core/engine_status`):
+    életjel (fut / áll / hibás / nincs adat), SZERVER-óra, egyenleg, napi P&L,
+    nyitott pozíciók.
+  • 4b (v3.113.0): VEZÉRLÉS a `core/engine_channel` postaládáján át — pár/
+    stratégia Play/Stop, pozíció-zárás, a motor leállítása.
 
-⚠ CSAK OLVASÁS, SZÁNDÉKOSAN (Tibi döntése): nincs Play/Stop, nincs zárás —
-a vezérlő csatorna a következő kör. A fül ezt ki is írja, hogy senki ne
-keressen rajta gombot.
+⚠ A SZABÁLYOK A KÖZÖS PARANCS-RÉTEGBEN. A gomb egy parancssort küld
+(`play GOLD wpr_sma`, `close 12345`, `quit`) — ugyanazt, amit a konzolba írnál.
+Ha a parancs rákérdez (zárás, kivezetés), a kérdést a MOTOR adja vissza, a fül
+megmutatja, és csak igen esetén küldi újra megerősítve. A fül maga semmit nem
+dönt el — így nem is csúszhat el a konzoltól/Telegramtól.
 
-⚠ A fül csak akkor jön létre, ha egynél több bróker-profil van (egy brókernél
-nincs mit mutatnia — a felhasználó kérése szerint egy brókernél a bróker-
-jelölés sem látszik).
+⚠ A PARANCS HÁTTÉRSZÁLON MEGY: egy nem válaszoló motor nem fagyaszthatja be a
+felületet. A válasz (vagy a „nem válaszolt") az állapotsorba kerül.
 
-A fül NEM ismer MT5-öt: a profilokat és a képeket a hívó / a modul adja.
+⚠ A fül csak akkor jön létre, ha egynél több bróker-profil van.
+A fül NEM ismer MT5-öt: a profilokat, a képeket és a csatornát a modulok adják.
 """
 from __future__ import annotations
 
+import queue
+import threading
 import time
 import tkinter as tk
 
+from core import engine_channel as CH
 from core import engine_status as ES
 from core.i18n import t as _t
 from dashboard import theme as _theme
@@ -29,6 +36,7 @@ from dashboard.theme import (BG, BG_HEADER, BG_ROW_EVEN, BG_ROW_ODD, FG_GRAY,
                              FG_GREEN, FG_RED, FG_WHITE, FG_YELLOW)
 
 FRISSITES_MS = 2000
+FELUGYELO_MS = 30000                 # az autostart-figyelés köre
 
 _ALLAPOT_SZIN = {ES.FUT: FG_GREEN, ES.ALL: FG_GRAY, ES.HIBAS: FG_RED,
                  ES.NINCS: FG_YELLOW}
@@ -43,7 +51,8 @@ def _penz(v, cur=""):
 
 def rows(profiles, now=None, reader=ES.read) -> list:
     """A fül adat-sorai (a teszt ezt nézi, a felület ezt rajzolja).
-    `[{tag, name, account, health, clock, balance, daily, n_pos, age, positions}]`"""
+    `[{profile, tag, name, account, health, clock, balance, daily, n_pos, age,
+       positions, pairs}]`"""
     now = time.time() if now is None else now
     out = []
     for p in profiles:
@@ -53,7 +62,7 @@ def rows(profiles, now=None, reader=ES.read) -> list:
         clock = ES.server_clock(snap, now)
         poz = (snap or {}).get("positions") or []
         out.append({
-            "tag": p.tag, "name": p.name,
+            "profile": p, "tag": p.tag, "name": p.name,
             "account": f"#{p.login} {p.server}".strip(),
             "health": ES.health(snap, now),
             "clock": clock.strftime("%H:%M") if clock else "—",
@@ -64,23 +73,47 @@ def rows(profiles, now=None, reader=ES.read) -> list:
             "age": (_t("age.sec", n=f"{max(0.0, now - float(snap['ts'])):.0f}")
                     if snap and snap.get("ts") else "—"),
             "positions": [dict(x, tag=p.tag) for x in poz],
+            "pairs": [dict(x, tag=p.tag) for x in ((snap or {}).get("pairs") or [])],
         })
     return out
 
 
-class BrokersTab:
-    """`profiles_provider() -> [BrokerProfile]` — a MÁSIK (nem-otthoni) brókerek."""
+def toggle_line(symbol: str, strategy: str, running: bool) -> str:
+    """A Play/Stop gomb parancssora — ugyanaz, amit a konzolba írnál."""
+    return f"{'stop' if running else 'play'} {symbol} {strategy}"
 
-    def __init__(self, parent, profiles_provider):
+
+class BrokersTab:
+    """`profiles_provider() -> [BrokerProfile]` — a MÁSIK (nem-otthoni) brókerek.
+    `confirm(szöveg) -> bool` — a felület IGEN/NEM kérdése (tesztben cserélhető).
+    `request(profil, sor, megerősítve) -> dict|None` — a csatorna (tesztben
+    cserélhető; alapból `core.engine_channel.request`)."""
+
+    def __init__(self, parent, profiles_provider, confirm=None, request=None,
+                 starter=None, supervisor=None):
         self.parent = parent
         self._profiles = profiles_provider
+        self._confirm = confirm or (lambda szoveg: False)
+        self._request = request or CH.request
+        from core import engine_supervisor as SV
+        self._starter = starter or SV.start
+        self._running = SV.running
+        self._supervisor = supervisor or SV.Supervisor()
         # Az utolsó JÓ kép brókerenként: egy átmeneti olvasási hiba (a motor épp
         # cseréli a fájlt) ne villantsa „nincs adat"-ra a sort. Nem hazudik: az
         # életjel KORA tovább nő, és egy tartós hiba így is „hibás"-ra vált.
         self._utolso: dict = {}
+        # ⚠ A HÁTTÉRSZÁL NEM NYÚLHAT A TK-HOZ. Az első változat `after()`-t hívott
+        # a szálból — a Tk nem szálbiztos, a hívás elbukott, és a válasz (vele a
+        # megerősítő kérdés) CSENDBEN elveszett (a teszt fogta meg). A szál egy
+        # sorba tesz, a FŐSZÁL 100 ms-enként kiveszi.
+        self._valaszok: queue.Queue = queue.Queue()
         self._build_ui()
         self._frissit()
+        self._valasz_pumpa()
+        self.parent.after(FELUGYELO_MS, self._felugyel)
 
+    # ── felépítés ─────────────────────────────────────────────────────────
     def _build_ui(self):
         f = _theme.fonts()
         self._mono, self._small, self._header = f["mono"], f["small"], f["header"]
@@ -89,26 +122,36 @@ class BrokersTab:
         top.pack(fill="x", padx=10, pady=(8, 2))
         tk.Label(top, text=_t("brokers.title"), bg=BG, fg=FG_WHITE,
                  font=self._header).pack(side="left")
-        tk.Label(p, text=_t("brokers.readonly"), bg=BG, fg=FG_YELLOW,
+        self._lbl_statusz = tk.Label(top, text="", bg=BG, fg=FG_GRAY,
+                                     font=self._small, anchor="e")
+        self._lbl_statusz.pack(side="right", padx=8)
+        tk.Label(p, text=_t("brokers.howto"), bg=BG, fg=FG_GRAY,
                  font=self._small, anchor="w", justify="left").pack(
                      fill="x", padx=10, pady=(0, 6))
 
         self._fo_oszlop = [(_t("brokers.col.tag"), 5), (_t("brokers.col.broker"), 14),
-                           (_t("brokers.col.account"), 26), (_t("brokers.col.state"), 12),
-                           (_t("brokers.col.clock"), 9), (_t("brokers.col.balance"), 16),
-                           (_t("brokers.col.daily"), 14), (_t("brokers.col.npos"), 6),
+                           (_t("brokers.col.account"), 24), (_t("brokers.col.state"), 12),
+                           (_t("brokers.col.clock"), 9), (_t("brokers.col.balance"), 15),
+                           (_t("brokers.col.daily"), 13), (_t("brokers.col.npos"), 5),
                            (_t("brokers.col.age"), 9)]
-        self._fo = self._tabla(p, self._fo_oszlop, expand=False)
+        self._fo = self._tabla(p, self._fo_oszlop, expand=False, gomb=True)
+
+        tk.Label(p, text=_t("brokers.pairs"), bg=BG, fg=FG_WHITE,
+                 font=self._header, anchor="w").pack(fill="x", padx=10, pady=(10, 2))
+        self._par_oszlop = [(_t("brokers.col.tag"), 5), (_t("brokers.col.symbol"), 12),
+                            (_t("brokers.col.pairstate"), 12)]
+        self._par = self._tabla(p, self._par_oszlop, expand=False, gomb=True)
 
         tk.Label(p, text=_t("brokers.positions"), bg=BG, fg=FG_WHITE,
                  font=self._header, anchor="w").pack(fill="x", padx=10, pady=(10, 2))
-        self._poz_oszlop = [(_t("brokers.col.tag"), 5), (_t("brokers.col.symbol"), 12),
+        self._poz_oszlop = [(_t("brokers.col.tag"), 5), ("Ticket", 11),
+                            (_t("brokers.col.symbol"), 12),
                             (_t("brokers.col.dir"), 6), ("Lot", 7),
                             (_t("brokers.col.open"), 12), ("SL", 12), ("TP", 12),
                             (_t("brokers.col.pnl"), 12)]
-        self._poz = self._tabla(p, self._poz_oszlop, expand=True)
+        self._poz = self._tabla(p, self._poz_oszlop, expand=True, gomb=True)
 
-    def _tabla(self, p, oszlopok, expand):
+    def _tabla(self, p, oszlopok, expand, gomb=False):
         fej = tk.Frame(p, bg=BG_HEADER)
         fej.pack(fill="x", padx=10)
         for cim, w in oszlopok:
@@ -129,7 +172,65 @@ class BrokersTab:
         for szoveg, w, szin in cellak:
             tk.Label(r, text=szoveg, width=w, anchor="w", bg=bg, fg=szin,
                      font=self._mono).pack(side="left", padx=2)
+        return r, bg
 
+    def _gomb(self, sor, bg, szoveg, parancs, szin=FG_WHITE, aktiv=True):
+        b = tk.Button(sor, text=szoveg, bg=BG_HEADER, fg=szin, relief="flat",
+                      font=self._small, padx=6, command=parancs,
+                      state=("normal" if aktiv else "disabled"))
+        b.pack(side="left", padx=3)
+        return b
+
+    # ── parancs (háttérszálon) ────────────────────────────────────────────
+    def _statusz(self, szoveg, szin=FG_GRAY):
+        try:
+            self._lbl_statusz.config(text=szoveg, fg=szin)
+        except tk.TclError:
+            pass
+
+    def send(self, profile, line):
+        """Egy parancs a bróker motorjának, a kétlépcsős megerősítéssel.
+        A hívás azonnal visszatér; az eredmény az állapotsorba kerül."""
+        self._statusz(_t("brokers.cmd.sending", tag=profile.tag, line=line))
+
+        def _vissza(r, megerositve):
+            if r is None:
+                self._statusz(_t("brokers.cmd.no_answer", tag=profile.tag), FG_RED)
+                return
+            if r.get("confirm") and not megerositve:
+                if self._confirm(r["confirm"]):
+                    _hatter(True)
+                else:
+                    self._statusz(_t("brokers.cmd.cancelled"), FG_GRAY)
+                return
+            szoveg = " ".join(str(x) for x in (r.get("lines") or [])) or "OK"
+            self._statusz(f"{profile.tag}: {szoveg}", FG_GREEN if r.get("ok") else FG_RED)
+
+        def _hatter(megerositve):
+            def _fut():
+                r = self._request(profile, line, megerositve)
+                self._valaszok.put(lambda: _vissza(r, megerositve))
+            threading.Thread(target=_fut, daemon=True, name="BrokerCmd").start()
+
+        _hatter(False)
+
+    def _valasz_pumpa(self):
+        """A háttérszálak válaszai a FŐSZÁLON (lásd a `_valaszok` megjegyzését)."""
+        while True:
+            try:
+                teendo = self._valaszok.get_nowait()
+            except queue.Empty:
+                break
+            try:
+                teendo()
+            except tk.TclError:
+                pass
+        try:
+            self.parent.after(100, self._valasz_pumpa)
+        except tk.TclError:
+            pass                                  # az ablak bezárult
+
+    # ── frissítés ─────────────────────────────────────────────────────────
     def _frissit(self):
         def _olvas(p):
             snap = ES.read(p)
@@ -141,32 +242,88 @@ class BrokersTab:
             adat = rows(self._profiles(), reader=_olvas)
         except Exception:
             adat = []
-        for w in list(self._fo.winfo_children()) + list(self._poz.winfo_children()):
+        for w in (list(self._fo.winfo_children()) + list(self._par.winfo_children())
+                  + list(self._poz.winfo_children())):
             w.destroy()
+        k_par = k_poz = 0
         for i, r in enumerate(adat):
+            prof = r["profile"]
+            fut = r["health"] == ES.FUT
             ertek = (r["tag"], r["name"], r["account"],
                      _t(f"brokers.state.{r['health']}"), r["clock"], r["balance"],
                      r["daily"], str(r["n_pos"]), r["age"])
             szinek = [FG_WHITE] * len(ertek)
             szinek[3] = _ALLAPOT_SZIN.get(r["health"], FG_GRAY)
-            self._sor(self._fo, i, [(v, w, c) for v, (_, w), c
-                                    in zip(ertek, self._fo_oszlop, szinek)])
-        k = 0
-        for r in adat:
+            sor, bg = self._sor(self._fo, i, [(v, w, c) for v, (_, w), c
+                                             in zip(ertek, self._fo_oszlop, szinek)])
+            if r["health"] in (ES.FUT, ES.HIBAS):
+                self._gomb(sor, bg, _t("brokers.btn.quit"),
+                           lambda p=prof: self._leallit(p), FG_RED, aktiv=fut)
+            else:
+                self._gomb(sor, bg, _t("brokers.btn.start"),
+                           lambda p=prof: self._indit(p), FG_GREEN)
+
+            for par in r["pairs"]:
+                sor, bg = self._sor(self._par, k_par, [
+                    (par["tag"], 5, FG_WHITE), (str(par.get("symbol", "")), 12, FG_WHITE),
+                    (str(par.get("state", "")), 12, FG_GRAY)])
+                for nev, elo in (par.get("strategies") or []):
+                    self._gomb(sor, bg, f"{nev} {'■' if elo else '▶'}",
+                               lambda p=prof, s=par["symbol"], n=nev, e=elo:
+                               self.send(p, toggle_line(s, n, e)),
+                               FG_GREEN if elo else FG_GRAY, aktiv=fut)
+                k_par += 1
+
             for x in r["positions"]:
                 pnl = x.get("profit")
-                ertek = (x["tag"], str(x.get("symbol", "")), str(x.get("type", "")),
-                         f"{x.get('volume', '')}", f"{x.get('price_open', '')}",
-                         f"{x.get('sl', '')}", f"{x.get('tp', '')}", _penz(pnl))
+                ertek = (x["tag"], str(x.get("ticket", "")), str(x.get("symbol", "")),
+                         str(x.get("type", "")), f"{x.get('volume', '')}",
+                         f"{x.get('price_open', '')}", f"{x.get('sl', '')}",
+                         f"{x.get('tp', '')}", _penz(pnl))
                 szinek = [FG_WHITE] * len(ertek)
                 try:
-                    szinek[7] = FG_GREEN if float(pnl) >= 0 else FG_RED
+                    szinek[8] = FG_GREEN if float(pnl) >= 0 else FG_RED
                 except (TypeError, ValueError):
                     pass
-                self._sor(self._poz, k, [(v, w, c) for v, (_, w), c
-                                         in zip(ertek, self._poz_oszlop, szinek)])
-                k += 1
+                sor, bg = self._sor(self._poz, k_poz, [(v, w, c) for v, (_, w), c
+                                                       in zip(ertek, self._poz_oszlop, szinek)])
+                self._gomb(sor, bg, _t("brokers.btn.close"),
+                           lambda p=prof, t=x.get("ticket"): self.send(p, f"close {t}"),
+                           FG_RED, aktiv=fut)
+                k_poz += 1
         try:
             self.parent.after(FRISSITES_MS, self._frissit)
         except tk.TclError:
             pass                                  # az ablak bezárult
+
+    def _indit(self, profile):
+        """A motor indítása leválasztott processzként (core/engine_supervisor).
+        A dupla indítást a számla futás-zára akadályozza meg."""
+        try:
+            ok, kulcs = self._starter(profile)
+        except Exception as ex:
+            self._statusz(_t("brokers.start.failed", tag=profile.tag, error=ex), FG_RED)
+            return
+        self._statusz(_t(f"brokers.start.{kulcs}", tag=profile.tag),
+                      FG_GREEN if ok else FG_YELLOW)
+
+    def _felugyel(self):
+        """Az `autostart` profilok figyelése (a felügyelő szabályaival)."""
+        try:
+            for azon, esemeny in self._supervisor.tick(
+                    self._profiles(), autostart_of=lambda p: p.autostart):
+                self._statusz(_t(f"brokers.sv.{esemeny}", id=azon),
+                              FG_YELLOW if esemeny == "restarted" else FG_RED)
+        except Exception:
+            pass
+        try:
+            self.parent.after(FELUGYELO_MS, self._felugyel)
+        except tk.TclError:
+            pass
+
+    def _leallit(self, profile):
+        """A motor leállítása — a felület MAGA kérdez rá (a `quit` parancs a
+        konzolon sem kérdez, de a felületen egy félrekattintás ne állítson le
+        egy kereskedő motort)."""
+        if self._confirm(_t("brokers.confirm_quit", name=profile.name)):
+            self.send(profile, "quit")
