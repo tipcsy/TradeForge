@@ -37,9 +37,16 @@ except Exception:                                   # pragma: no cover
 
 DIR = Path(_BASE) / "data" / "conductor"
 
+def _dir():
+    """A `DIR` az AKTÍV bróker számla-mappájában (0029, core/broker_paths).
+    Az otthoni brókernél (és a tesztek ideiglenes útvonalainál) VÁLTOZATLAN."""
+    from core import broker_paths
+    return broker_paths.account(DIR)
+
+
 
 def telemetry_dir() -> Path:
-    return DIR / "telemetry"
+    return _dir() / "telemetry"
 
 
 def telemetry_file(day: str) -> Path:
@@ -49,11 +56,11 @@ def telemetry_file(day: str) -> Path:
 
 
 def journal_file() -> Path:
-    return DIR / "decisions.jsonl"
+    return _dir() / "decisions.jsonl"
 
 
 def state_file() -> Path:
-    return DIR / "state.json"
+    return _dir() / "state.json"
 
 
 def trades_csv() -> Path:
@@ -68,13 +75,14 @@ def trades_csv() -> Path:
     Telegram-értesítések és ebből számol a napi összesítő is. Egy külön
     karmester-nyilvántartás a lezárt kötésekről előbb-utóbb MÁS számot adna
     ugyanarra a napra — ez a projekt visszatérő hibaosztálya."""
-    return Path(_BASE) / "trades.csv"
+    from core import broker_paths              # 0029: számlánként
+    return broker_paths.account(Path(_BASE) / "trades.csv")
 
 
 def off_switch() -> Path:
     """A KILL SWITCH fájlja. Ha létezik, a karmester L-1 (kikapcsolt) — és ezt
     a szál minden ciklus ELEJÉN, a mérés előtt megnézi."""
-    return DIR / "off"
+    return _dir() / "off"
 
 
 def ensure(sub: "Path | None" = None) -> bool:
@@ -84,8 +92,8 @@ def ensure(sub: "Path | None" = None) -> bool:
     a kereskedés. De nem is néma — a hívó a `False`-ból tudja, hogy nincs hova
     írni, és egyszer naplóz."""
     try:
-        (sub or DIR).mkdir(parents=True, exist_ok=True)
+        (sub or _dir()).mkdir(parents=True, exist_ok=True)
         return True
     except Exception as ex:
-        log.warning("conductor: a mappa nem hozható létre (%s): %s", sub or DIR, ex)
+        log.warning("conductor: a mappa nem hozható létre (%s): %s", sub or _dir(), ex)
         return False

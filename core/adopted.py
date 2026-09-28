@@ -27,6 +27,13 @@ from pathlib import Path
 
 PATH = Path(__file__).resolve().parents[1] / "data" / "adopted_positions.json"
 
+def _path():
+    """A `PATH` az AKTÍV bróker számla-mappájában (0029, core/broker_paths).
+    Az otthoni brókernél (és a tesztek ideiglenes útvonalainál) VÁLTOZATLAN."""
+    from core import broker_paths
+    return broker_paths.account(PATH)
+
+
 log = logging.getLogger(__name__)
 
 _lock = threading.Lock()
@@ -53,8 +60,8 @@ def load() -> dict:
     global _loaded
     with _lock:
         try:
-            if PATH.exists():
-                with open(PATH, encoding="utf-8") as f:
+            if _path().exists():
+                with open(_path(), encoding="utf-8") as f:
                     data = json.load(f)
                 if isinstance(data, dict):
                     _state.clear()
@@ -71,7 +78,7 @@ def load() -> dict:
             # „még nincs bejegyzés" állapottól.
             log.warning("%s: a nyilvántartás nem olvasható (%s) — ÜRESEN indul. "
                         "A korábbi bejegyzések nem érvényesülnek.",
-                        PATH.name, ex)
+                        _path().name, ex)
         _loaded = True
         return dict(_state)
 
@@ -83,18 +90,18 @@ def _ensure_loaded():
 
 def _save_locked():
     try:
-        PATH.parent.mkdir(parents=True, exist_ok=True)
-        tmp = PATH.with_suffix(".tmp")
+        _path().parent.mkdir(parents=True, exist_ok=True)
+        tmp = _path().with_suffix(".tmp")
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(_state, f, indent=2, ensure_ascii=False)
-        tmp.replace(PATH)
+        tmp.replace(_path())
     except Exception as ex:
         # ⚠ EZ A LEGROSSZABB NÉMA HIBA a modulban: a bejegyzés a MEMÓRIÁBAN
         # megvan, tehát minden működni látszik — a lemezen viszont nincs, és ez
         # csak a KÖVETKEZŐ INDÍTÁSKOR derülne ki, amikor a pozíció már gazdátlan.
         log.error("%s: a nyilvántartás MENTÉSE nem sikerült (%s). A bejegyzés "
                   "csak a memóriában él — újraindítás után elveszik.",
-                  PATH.name, ex)
+                  _path().name, ex)
 
 
 def adopt(ticket: int, strategy: str, symbol: str):
@@ -195,6 +202,6 @@ def prune(open_tickets=None, keep_days: int = 3):
                     except Exception as ex:
                         # Hibás időbélyeg → a bejegyzést MEGTARTJUK (a törlés
                         # visszafordíthatatlan), de nem hallgatunk róla.
-                        log.debug("%s: hibás closed_at (%s): %s", PATH.name, k, ex)
+                        log.debug("%s: hibás closed_at (%s): %s", _path().name, k, ex)
         if changed:
             _save_locked()

@@ -1023,7 +1023,8 @@ _off_far = {"ertek": None, "db": 0}
 
 def _offset_file():
     from version import BASE_DIR
-    return BASE_DIR / "data" / "server_offset.json"
+    from core import broker_paths              # 0029: brókerenként más a szerver órája
+    return broker_paths.feed(BASE_DIR / "data" / "server_offset.json")
 
 
 def _quantize_offset(raw: float):

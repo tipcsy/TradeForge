@@ -2867,9 +2867,9 @@ class DashboardWindow:
         sig_frame = tk.Frame(self._notebook, bg=BG)
         self._notebook.add(sig_frame, text=_t("gui.jelzesek"))
         from dashboard.signals_tab import SignalsTab
-        from trading.live_trader import TRADES_CSV as _TCSV
+        from trading.live_trader import trades_csv as _tcsv
         self._signals_tab = SignalsTab(
-            sig_frame, _TCSV,
+            sig_frame, _tcsv(),
             on_trade=self._signal_manual_trade,
             price_of=self._signal_price_of,
             digits_of=self._signal_digits_of,

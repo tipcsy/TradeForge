@@ -116,6 +116,13 @@ def _point_size(info) -> float:
     return float(getattr(info, "point", 0.0) or 0.0)
 
 
+def _cel(pc: dict) -> dict:
+    """0029: nem-otthoni brókernél a `pairs.<sym>.brokers.<id>` blokkba írunk,
+    különben az otthoni bróker értékeit írnánk felül."""
+    from core import broker_adapter, broker_profile
+    return broker_profile.write_target(pc, broker_adapter.current())
+
+
 def main() -> int:
     write = "--write" in sys.argv
     days = SPREAD_DAYS
@@ -182,13 +189,13 @@ def main() -> int:
             spread_rows.append((symbol, sp_old, sp_new, sp_src))
 
             if write:
-                pc["pv1_point"] = round(pv1_new, 4)
+                _cel(pc)["pv1_point"] = round(pv1_new, 4)
                 if vb:
                     vmin, vmax, vstep = vb
-                    pc["min_lot"]  = vmin
-                    pc["lot_step"] = vstep
+                    _cel(pc)["min_lot"]  = vmin
+                    _cel(pc)["lot_step"] = vstep
                     if vmax != float("inf"):
-                        pc["max_lot"] = vmax
+                        _cel(pc)["max_lot"] = vmax
                 if sp_new is not None:
                     pc["backtest_spread_points"] = round(sp_new, 2)
     finally:

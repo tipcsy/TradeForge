@@ -223,7 +223,8 @@ def recalibrate_vol_ref(cfg: dict, symbol: str) -> tuple:
     from pathlib import Path
     from core.execution_params import load_execution_params
     from gates import vol_baseline as _vb
-    f = Path(__file__).resolve().parents[1] / "data" / "m15" / f"{symbol}.parquet"
+    from core import broker_paths
+    f = broker_paths.feed(Path(__file__).resolve().parents[1] / "data" / "m15" / f"{symbol}.parquet")
     if not f.exists():
         raise FileNotFoundError(f.name)
     df = pd.read_parquet(f)

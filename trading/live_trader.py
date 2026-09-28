@@ -85,6 +85,13 @@ from core import pnl_split
 MT5_LOCK = mt5_connector.MT5_LOCK
 TRADES_CSV   = ROOT / "trades.csv"
 
+def trades_csv():
+    """A `TRADES_CSV` az AKTÍV bróker számla-mappájában (0029, core/broker_paths).
+    Az otthoni brókernél (és a tesztek ideiglenes útvonalainál) VÁLTOZATLAN."""
+    from core import broker_paths
+    return broker_paths.account(TRADES_CSV)
+
+
 
 def load_pair_params(symbol: str, strategy_name: str | None = None) -> Optional[dict]:
     """Per-pár params betöltése: data/optimized_params/<strategy>/<SYMBOL>.json.
@@ -729,22 +736,22 @@ def log_trade(row: dict):
     except Exception:
         log.debug("értesítés: a kereskedési esemény kimaradt", exc_info=True)
     df = pd.DataFrame([row]).reindex(columns=TRADES_COLUMNS)
-    if not TRADES_CSV.exists():
-        df.to_csv(TRADES_CSV, index=False)
+    if not trades_csv().exists():
+        df.to_csv(trades_csv(), index=False)
         return
     try:
-        existing_cols = pd.read_csv(TRADES_CSV, nrows=0).columns.tolist()
+        existing_cols = pd.read_csv(trades_csv(), nrows=0).columns.tolist()
     except Exception:
         existing_cols = []
     if existing_cols == TRADES_COLUMNS:
-        df.to_csv(TRADES_CSV, mode="a", header=False, index=False)
+        df.to_csv(trades_csv(), mode="a", header=False, index=False)
     else:
         # Régi/eltérő fejléc → egyszeri migráció a kanonikus sémára
         try:
-            old = pd.read_csv(TRADES_CSV).reindex(columns=TRADES_COLUMNS)
-            pd.concat([old, df], ignore_index=True).to_csv(TRADES_CSV, index=False)
+            old = pd.read_csv(trades_csv()).reindex(columns=TRADES_COLUMNS)
+            pd.concat([old, df], ignore_index=True).to_csv(trades_csv(), index=False)
         except Exception:
-            df.to_csv(TRADES_CSV, mode="a", header=False, index=False)
+            df.to_csv(trades_csv(), mode="a", header=False, index=False)
 
 
 def today_trade_rows() -> list:
@@ -754,10 +761,10 @@ def today_trade_rows() -> list:
     napi összesítő és az egyedi üzenetek nem tudnak eltérő képet adni ugyanarról
     a napról. A dátum a HELYI nap — a felhasználó ebben gondolkodik, amikor azt
     kérdezi, „mi volt ma"."""
-    if not TRADES_CSV.exists():
+    if not trades_csv().exists():
         return []
     try:
-        df = pd.read_csv(TRADES_CSV)
+        df = pd.read_csv(trades_csv())
         if "time" not in df.columns or df.empty:
             return []
         _t_ser = pd.to_datetime(df["time"], errors="coerce", utc=True)
@@ -768,7 +775,7 @@ def today_trade_rows() -> list:
         # ⚠ NEM néma: a napi összesítő enélkül üresen jönne, és az
         # megkülönböztethetetlen volna a „ma nem történt semmi"-től.
         _warn_once("today_rows", "a mai kereskedési sorok nem olvashatók (%s) — "
-                   "a napi összesítő üresnek fog látszani", TRADES_CSV.name)
+                   "a napi összesítő üresnek fog látszani", trades_csv().name)
         return []
 
 
@@ -820,6 +827,13 @@ class LivePairState:
 # trailing), ezért mi naplózzuk — így a viz lépcsős SL-vonalat tud rajzolni (eredeti
 # piros, elmozdított sárga). Soronként: position_id;szerver_epoch;sl.
 SL_MOVES_DIR = ROOT / "data" / "sl_moves"
+
+def _sl_moves_dir():
+    """A `SL_MOVES_DIR` az AKTÍV bróker számla-mappájában (0029, core/broker_paths).
+    Az otthoni brókernél (és a tesztek ideiglenes útvonalainál) VÁLTOZATLAN."""
+    from core import broker_paths
+    return broker_paths.account(SL_MOVES_DIR)
+
 
 
 # ⚠ EGYSZER SZÓLJ, ne minden körben. A motor ciklusa páronként 30 mp-enként fut:
@@ -921,8 +935,8 @@ def sl_journal_append(symbol: str, ticket: int, t_server: int, sl: float,
     except Exception:
         log.debug("értesítés: az SL-mozgás kimaradt", exc_info=True)
     try:
-        SL_MOVES_DIR.mkdir(parents=True, exist_ok=True)
-        with open(SL_MOVES_DIR / f"{symbol}.csv", "a", encoding="ascii") as fh:
+        _sl_moves_dir().mkdir(parents=True, exist_ok=True)
+        with open(_sl_moves_dir() / f"{symbol}.csv", "a", encoding="ascii") as fh:
             fh.write(f"{int(ticket)};{int(t_server)};{repr(float(sl))}\n")
     except Exception as ex:
         # ⚠ AUDIT-NYOM. Ebből rekonstruálható utólag, MIKOR és HOVA mozgatta a
@@ -935,7 +949,7 @@ def sl_journal_append(symbol: str, ticket: int, t_server: int, sl: float,
 
 def sl_journal_read(symbol: str) -> dict:
     """position_id → [(szerver_epoch, sl), …] idő szerint rendezve. {} ha nincs."""
-    path = SL_MOVES_DIR / f"{symbol}.csv"
+    path = _sl_moves_dir() / f"{symbol}.csv"
     out: dict = {}
     if not path.exists():
         return out

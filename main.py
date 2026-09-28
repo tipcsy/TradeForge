@@ -53,6 +53,17 @@ def load_cfg() -> dict:
     # A váz config.json + az aktív stratégia saját beállításainak beolvasztása.
     from strategy.settings import load_config
     cfg = load_config(CFG_PATH)
+    # ⚠ 0029: az AKTÍV bróker-profil már INDULÁSKOR (nem csak a `connect`-nél) —
+    # a kapcsolódás előtt futó backteszt/optimalizálás is az ő adatát olvassa
+    # (core/broker_paths). A régi confignál ez az otthoni profil: semmi nem változik.
+    try:
+        from core import broker_adapter, broker_profile
+        broker_adapter.configure(broker_profile.active(cfg))
+    except Exception as ex:
+        # Hibás profil (pl. elgépelt zóna): a config-ellenőrzés kiírja, a
+        # `connect` pedig ugyanitt elbukik — kereskedés nem indul rossz órával.
+        import logging
+        logging.getLogger(__name__).error("A bróker-profil hibás: %s", ex)
     # KOHERENCIA-ellenőrzés: az önmagában érvényes, de önellentmondó beállítások
     # kiírása (pl. bekapcsolt kapu, aminek nincs mit mérnie). MINDEN parancs ezen
     # a függvényen jön be, tehát a live, a backteszt és az optimalizálás ugyanazt

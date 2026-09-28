@@ -110,7 +110,21 @@ from strategies import csilla_rules as sw         # noqa: E402
 # (`csilla_signals.csv`) megmarad.
 START = pd.Timestamp("2026-09-23 00:00", tz="UTC")     # a forward kezdete (szerver-idő)
 JOURNAL = ROOT / "data" / "forward" / "csilla_chain_signals.csv"
+
+def _journal():
+    """A `JOURNAL` az AKTÍV bróker feed-mappájában (0029, core/broker_paths).
+    Az otthoni brókernél (és a tesztek ideiglenes útvonalainál) VÁLTOZATLAN."""
+    from core import broker_paths
+    return broker_paths.feed(JOURNAL)
+
 STATUS_JSON = ROOT / "data" / "forward" / "csilla_status.json"   # a felületnek
+
+def _status_json():
+    """A `STATUS_JSON` az AKTÍV bróker feed-mappájában (0029, core/broker_paths).
+    Az otthoni brókernél (és a tesztek ideiglenes útvonalainál) VÁLTOZATLAN."""
+    from core import broker_paths
+    return broker_paths.feed(STATUS_JSON)
+
 # ⚠ AZ ÚJ TESZTBEN NINCS SÁV (2026-09-23, az első napon rögzítve). A korábbi
 # Csilla-sáv (Ger40 8–11, UsaTec/GOLD 15–18) a D1/W1-es szabály méréséből jött:
 # ott az volt az EGYETLEN cella, ami pozitív előjelet adott. Az új láncra ennek
@@ -128,8 +142,8 @@ KILL_N, KILL_R = 60, -0.10
 
 
 def _load_journal() -> pd.DataFrame:
-    if JOURNAL.exists():
-        j = pd.read_csv(JOURNAL, sep=";", parse_dates=["t"])
+    if _journal().exists():
+        j = pd.read_csv(_journal(), sep=";", parse_dates=["t"])
         j["t"] = pd.to_datetime(j["t"], utc=True)
         return j
     return pd.DataFrame(columns=["sym", "t", "dir", "entry", "sl_pts", "atr15", "kind",
@@ -137,8 +151,8 @@ def _load_journal() -> pd.DataFrame:
 
 
 def _save_journal(j: pd.DataFrame):
-    JOURNAL.parent.mkdir(parents=True, exist_ok=True)
-    j.sort_values(["sym", "t"]).to_csv(JOURNAL, sep=";", index=False)
+    _journal().parent.mkdir(parents=True, exist_ok=True)
+    j.sort_values(["sym", "t"]).to_csv(_journal(), sep=";", index=False)
 
 
 def _entries(sym: str):
@@ -204,7 +218,7 @@ def update(with_mt5: bool = True):
     if uj:
         j = pd.concat([j, pd.DataFrame(uj)], ignore_index=True)
     _save_journal(j)
-    print(f"   +{len(uj)} új jelzés → {JOURNAL.name} (összesen {len(j)}, "
+    print(f"   +{len(uj)} új jelzés → {_journal().name} (összesen {len(j)}, "
           f"elsődleges {int(j.primary.sum()) if len(j) else 0})")
 
 
@@ -296,11 +310,11 @@ def summary(j: pd.DataFrame | None = None) -> dict:
 def write_status(j: pd.DataFrame | None = None) -> dict:
     d = summary(j)
     try:
-        STATUS_JSON.parent.mkdir(parents=True, exist_ok=True)
-        STATUS_JSON.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+        _status_json().parent.mkdir(parents=True, exist_ok=True)
+        _status_json().write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
     except Exception as ex:
         # ⚠ NEM NÉMA: a felület ebből olvas; ha nem íródik, a riport mondja meg.
-        print(f"   ! az állapot-fájl nem íródott ({STATUS_JSON.name}): {ex!r}")
+        print(f"   ! az állapot-fájl nem íródott ({_status_json().name}): {ex!r}")
     return d
 
 
@@ -341,7 +355,7 @@ def status_lines() -> list:
     fájl, azt mondja (a „nincs adat" nem ugyanaz, mint a „0 kötés")."""
     from core.i18n import t as _tr
     try:
-        d = json.loads(STATUS_JSON.read_text(encoding="utf-8"))
+        d = json.loads(_status_json().read_text(encoding="utf-8"))
     except Exception:
         return [_tr("forward.no_status")]
     p = d.get("primary") or {}

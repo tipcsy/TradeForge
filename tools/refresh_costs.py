@@ -174,6 +174,13 @@ def _mid_price(mt5, info) -> float:
     return float(getattr(info, "bid", 0.0) or 0.0)
 
 
+def _cel(pc: dict) -> dict:
+    """0029: nem-otthoni brókernél a `pairs.<sym>.brokers.<id>` blokkba írunk,
+    különben az otthoni bróker értékeit írnánk felül."""
+    from core import broker_adapter, broker_profile
+    return broker_profile.write_target(pc, broker_adapter.current())
+
+
 def main() -> int:
     write = "--write" in sys.argv
     days = 365
@@ -235,12 +242,12 @@ def main() -> int:
                          f"{src_c} / {src_s}"))
 
             if write:
-                pc["commission_per_lot"] = round(float(comm), 4)
-                pc["swap_long_per_lot"] = round(float(sw_l), 4)
-                pc["swap_short_per_lot"] = round(float(sw_s), 4)
+                _cel(pc)["commission_per_lot"] = round(float(comm), 4)
+                _cel(pc)["swap_long_per_lot"] = round(float(sw_l), 4)
+                _cel(pc)["swap_short_per_lot"] = round(float(sw_s), 4)
                 if w3 is not None:
                     # MT5 ENUM_DAY_OF_WEEK → Python weekday() (lásd a fenti helper)
-                    pc["swap_3x_weekday"] = mt5_day_to_weekday(w3)
+                    _cel(pc)["swap_3x_weekday"] = mt5_day_to_weekday(w3)
     finally:
         mc.disconnect()
 

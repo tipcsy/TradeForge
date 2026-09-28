@@ -43,6 +43,13 @@ log = logging.getLogger(__name__)
 
 DIR = Path(__file__).resolve().parents[1] / "data" / "signal_journal"
 
+def _dir():
+    """A `DIR` az AKTÍV bróker feed-mappájában (0029, core/broker_paths).
+    Az otthoni brókernél (és a tesztek ideiglenes útvonalainál) VÁLTOZATLAN."""
+    from core import broker_paths
+    return broker_paths.feed(DIR)
+
+
 # Megtartás. A napló KIJELZÉST szolgál, nem auditot: a chart úgysem tud
 # korlátlan objektumot kezelni, és a régi jelölő értéke gyorsan nullához tart.
 # `0` = ne takaríts (mint az örökbefogadás-nyilvántartásnál).
@@ -71,7 +78,7 @@ def path_of(symbol: str, strategy: str) -> Path:
     értelmes."""
     safe = "".join(c if (c.isalnum() or c in "._-") else "_"
                    for c in f"{symbol}__{strategy}")
-    return DIR / f"{safe}.jsonl"
+    return _dir() / f"{safe}.jsonl"
 
 
 def fingerprint(params: dict) -> str:
@@ -188,7 +195,7 @@ def append(symbol: str, strategy: str, records: list, fp: str = "") -> int:
         if not fresh:
             return 0
         try:
-            DIR.mkdir(parents=True, exist_ok=True)
+            _dir().mkdir(parents=True, exist_ok=True)
             with open(p, "a", encoding="utf-8") as f:
                 for n in fresh:
                     f.write(json.dumps({k: n[k] for k in _FIELDS if k in n},

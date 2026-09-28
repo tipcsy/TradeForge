@@ -53,7 +53,21 @@ logging.basicConfig(level=logging.INFO,
 log = logging.getLogger(__name__)
 
 TICK_DIR = ROOT / "data" / "ticks"
+
+def _tick_dir():
+    """A `TICK_DIR` az AKTÍV bróker feed-mappájában (0029, core/broker_paths).
+    Az otthoni brókernél (és a tesztek ideiglenes útvonalainál) VÁLTOZATLAN."""
+    from core import broker_paths
+    return broker_paths.feed(TICK_DIR)
+
 MANIFEST_DIR = ROOT / "data" / "bars_manifest"
+
+def _manifest_dir():
+    """A `MANIFEST_DIR` az AKTÍV bróker feed-mappájában (0029, core/broker_paths).
+    Az otthoni brókernél (és a tesztek ideiglenes útvonalainál) VÁLTOZATLAN."""
+    from core import broker_paths
+    return broker_paths.feed(MANIFEST_DIR)
+
 BUILDER_VERSION = 1
 BATCH_ROWS = 2_000_000              # ~48 MB tick egy batchben
 
@@ -67,7 +81,7 @@ COLS = ["open", "high", "low", "close", "volume", "avg_spread", "close_spread"]
 
 
 def month_files(sym: str) -> list[Path]:
-    d = TICK_DIR / sym
+    d = _tick_dir() / sym
     if not d.is_dir():
         return []
     out = sorted(d.glob("[0-9][0-9][0-9][0-9]-[0-9][0-9].parquet"))
@@ -156,8 +170,8 @@ def compare(new: pd.DataFrame, old_path: Path) -> dict:
 
 
 def write_manifest(sym: str, tf: str, first, last, rows: int) -> None:
-    MANIFEST_DIR.mkdir(parents=True, exist_ok=True)
-    p = MANIFEST_DIR / f"{sym}_{tf}.json"
+    _manifest_dir().mkdir(parents=True, exist_ok=True)
+    p = _manifest_dir() / f"{sym}_{tf}.json"
     payload = {
         "symbol": sym, "tf": tf,
         "source_from": str(first), "source_to": str(last), "rows": rows,
@@ -177,7 +191,7 @@ def status(syms) -> pd.DataFrame:
         size = sum(f.stat().st_size for f in files)
         man = {}
         for tf in ("M1", "M15"):
-            p = MANIFEST_DIR / f"{sym}_{tf}.json"
+            p = _manifest_dir() / f"{sym}_{tf}.json"
             if p.exists():
                 try:
                     man[tf] = json.load(io.open(p, encoding="utf-8"))["built_at"][:16]
@@ -205,8 +219,8 @@ def main() -> int:
     cfg = json.load(io.open(ROOT / "config.json", encoding="utf-8"))
     pairs = {k: v for k, v in cfg["pairs"].items() if k != "_comment"}
     syms = ([s.strip() for s in args.symbols.split(",") if s.strip()] or
-            sorted(p.name for p in TICK_DIR.iterdir() if p.is_dir())
-            if TICK_DIR.is_dir() else [])
+            sorted(p.name for p in _tick_dir().iterdir() if p.is_dir())
+            if _tick_dir().is_dir() else [])
     if args.status:
         print(status(syms).to_string(index=False))
         return 0

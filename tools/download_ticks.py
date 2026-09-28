@@ -63,6 +63,13 @@ logging.basicConfig(level=logging.INFO,
 log = logging.getLogger(__name__)
 
 TICK_DIR = ROOT / "data" / "ticks"
+
+def _tick_dir():
+    """A `TICK_DIR` az AKTÍV bróker feed-mappájában (0029, core/broker_paths).
+    Az otthoni brókernél (és a tesztek ideiglenes útvonalainál) VÁLTOZATLAN."""
+    from core import broker_paths
+    return broker_paths.feed(TICK_DIR)
+
 DAY_RETRIES = 3            # egy napra ennyiszer próbálkozunk
 RETRY_SLEEP = 3.0          # mp az újrapróbálkozások közt
 POLITE_SLEEP = 0.05        # mp két nap közt (ne fojtsuk meg a terminált)
@@ -90,7 +97,7 @@ def _on_sigint(signum, frame):
 # ---------------------------------------------------------------------------
 
 def day_dir(sym: str) -> Path:
-    return TICK_DIR / sym / "_napok"
+    return _tick_dir() / sym / "_napok"
 
 
 def day_file(sym: str, d: datetime) -> Path:
@@ -98,7 +105,7 @@ def day_file(sym: str, d: datetime) -> Path:
 
 
 def month_file(sym: str, year: int, month: int) -> Path:
-    return TICK_DIR / sym / f"{year:04d}-{month:02d}.parquet"
+    return _tick_dir() / sym / f"{year:04d}-{month:02d}.parquet"
 
 
 def _write_atomic(df: pd.DataFrame, path: Path) -> None:
@@ -195,7 +202,7 @@ def download_symbol(sym: str, start: datetime, end: datetime, cfg: dict) -> dict
     # `consolidate` utána árván hagyná őket, mert a havi fájl már megvan).
     # Ezért a havi fájl is „megvan" jelnek számít.
     kesz_honapok = {tuple(int(x) for x in f.stem.split("-"))
-                    for f in (TICK_DIR / sym).glob(
+                    for f in (_tick_dir() / sym).glob(
                         "[0-9][0-9][0-9][0-9]-[0-9][0-9].parquet")}
     stat = {"uj": 0, "meglevo": 0, "ures": 0, "hiba": 0, "tick": 0}
     d = start
@@ -294,7 +301,7 @@ def consolidate(sym: str, keep_days: bool = False) -> int:
 def status(syms) -> pd.DataFrame:
     rows = []
     for sym in syms:
-        months = sorted((TICK_DIR / sym).glob("[0-9][0-9][0-9][0-9]-[0-9][0-9].parquet"))
+        months = sorted((_tick_dir() / sym).glob("[0-9][0-9][0-9][0-9]-[0-9][0-9].parquet"))
         days = sorted(day_dir(sym).glob("*.parquet"))
         size = sum(f.stat().st_size for f in months) + \
             sum(f.stat().st_size for f in days)

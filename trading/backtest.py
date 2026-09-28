@@ -226,8 +226,10 @@ class BacktestResult:
 # ---------------------------------------------------------------------------
 
 def load_data(symbol: str) -> tuple[Optional[pd.DataFrame], Optional[pd.DataFrame]]:
-    m15_path = ROOT / "data" / "m15" / f"{symbol}.parquet"
-    m1_path  = ROOT / "data" / "m1"  / f"{symbol}.parquet"
+    # ⚠ 0029: az AKTÍV bróker gyertyái (az otthoninál a régi data/m1, data/m15)
+    from core import broker_paths
+    m15_path = broker_paths.feed(ROOT / "data" / "m15" / f"{symbol}.parquet")
+    m1_path  = broker_paths.feed(ROOT / "data" / "m1"  / f"{symbol}.parquet")
 
     if not m15_path.exists() or not m1_path.exists():
         log.warning("%s — hiányzó adat fájl, kihagyva.", symbol)

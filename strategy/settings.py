@@ -281,6 +281,12 @@ def write_config_file(data: dict, path: Path | str) -> str:
     mintha megtörtént volna — és csak újraindításkor derülne ki, hogy nem. Ezért ad
     ez a függvény ÜZENETET, nem bool-t."""
     p = Path(path)
+    # ⚠ 0029: egy nem-otthoni bróker betöltéskor felülírt instrumentum-értékei
+    # (point_size, pv1, költség…) NEM kerülhetnek az otthoni helyre — lásd
+    # core/broker_profile.restore_for_save. Másolaton, a hívó dictje érintetlen.
+    if isinstance(data, dict) and "_broker_overlay" in data:
+        from core import broker_profile
+        data = broker_profile.restore_for_save(copy.deepcopy(data))
     try:
         text = json.dumps(data, indent=2, ensure_ascii=False)
     except Exception as e:
@@ -513,4 +519,12 @@ def load_config(cfg_path: Path | str) -> dict:
                         "vond össze őket.", Path(cfg_path).name, ", ".join(dups))
     except Exception:
         pass
-    return apply_strategy_config(cfg)
+    cfg = apply_strategy_config(cfg)
+    # ⚠ 0029: a nem-otthoni aktív bróker instrumentum-értékei (a mentés
+    # visszaállítja őket — lásd write_config_file). Otthoni brókernél semmi.
+    try:
+        from core import broker_profile
+        broker_profile.overlay_pairs(cfg, broker_profile.active(cfg))
+    except ValueError as ex:
+        log.error("bróker-profil hiba, az instrumentum-értékek az alapok: %s", ex)
+    return cfg

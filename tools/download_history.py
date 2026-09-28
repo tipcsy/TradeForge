@@ -221,7 +221,8 @@ def _fill_gap(out_file: Path, symbol: str, tf_str: str, end: datetime) -> bool:
 # ---------------------------------------------------------------------------
 
 def download_pair(symbol: str, tf_str: str, start: datetime, overwrite: bool, end: datetime) -> bool:
-    out_dir = ROOT / "data" / tf_str.lower()
+    from core import broker_paths                 # 0029: az aktív bróker mappája
+    out_dir = broker_paths.feed(ROOT / "data" / tf_str.lower())
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / f"{symbol}.parquet"
 
@@ -367,7 +368,8 @@ def _ensure_history(symbol, cfg, tf_labels, status) -> tuple[bool, str]:
                 pass
 
     def _pq(tf):
-        return ROOT / "data" / tf.lower() / f"{symbol}.parquet"
+        from core import broker_paths
+        return broker_paths.feed(ROOT / "data" / tf.lower() / f"{symbol}.parquet")
 
     end_dt  = datetime.now(timezone.utc)
     missing = [tf for tf in tf_labels if not _pq(tf).exists()]

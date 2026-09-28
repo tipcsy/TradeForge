@@ -36,6 +36,13 @@ log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[1]
 PATH = ROOT / "data" / "signal_delivery.csv"
 
+def _path():
+    """A `PATH` az AKTÍV bróker számla-mappájában (0029, core/broker_paths).
+    Az otthoni brókernél (és a tesztek ideiglenes útvonalainál) VÁLTOZATLAN."""
+    from core import broker_paths
+    return broker_paths.account(PATH)
+
+
 SENT, QUIET, MUTED, OFF, DROPPED = "sent", "quiet", "muted", "off", "dropped"
 STATUSES = (SENT, QUIET, MUTED, OFF, DROPPED)
 _FEJ = ["time", "symbol", "strategy", "status"]
@@ -51,9 +58,9 @@ def record(time_iso, symbol, strategy, status: str) -> None:
     if status not in STATUSES:
         return
     try:
-        PATH.parent.mkdir(parents=True, exist_ok=True)
-        uj = not PATH.exists()
-        with open(PATH, "a", newline="", encoding="utf-8") as f:
+        _path().parent.mkdir(parents=True, exist_ok=True)
+        uj = not _path().exists()
+        with open(_path(), "a", newline="", encoding="utf-8") as f:
             w = csv.writer(f)
             if uj:
                 w.writerow(_FEJ)
@@ -66,10 +73,10 @@ def record(time_iso, symbol, strategy, status: str) -> None:
 def load() -> dict:
     """`{(idő, pár, stratégia): állapot}` — a fül ebből olvas. Hiba → üres."""
     out = {}
-    if not PATH.exists():
+    if not _path().exists():
         return out
     try:
-        with open(PATH, newline="", encoding="utf-8") as f:
+        with open(_path(), newline="", encoding="utf-8") as f:
             for r in csv.DictReader(f):
                 out[key(r.get("time"), r.get("symbol"), r.get("strategy"))] = \
                     r.get("status") or ""

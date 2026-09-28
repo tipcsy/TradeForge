@@ -51,6 +51,9 @@ class BrokerProfile:
     mt5: dict = field(default_factory=dict, compare=False, hash=False)
     server_zone: BT.ServerZone = BT.CANONICAL
     symbols: dict = field(default_factory=dict, compare=False, hash=False)
+    # Az OTTHONI bróker (a lista első eleme; régi config: az egyetlen) adatai a
+    # régi helyükön maradnak — lásd core/broker_paths.py.
+    home: bool = True
 
     # ── szimbólum-fordítás ────────────────────────────────────────────────
     def to_broker(self, sym):
@@ -78,7 +81,7 @@ def _alap_tag(nev: str, azon: str) -> str:
     return s[:3]
 
 
-def _profil(d: dict, mt5_cfg: dict | None = None) -> BrokerProfile:
+def _profil(d: dict, mt5_cfg: dict | None = None, home: bool = True) -> BrokerProfile:
     nev = str(d.get("name", "") or "")
     azon = str(d.get("id") or re.sub(r"[^a-z0-9]", "", nev.lower()) or "broker")
     return BrokerProfile(
@@ -94,6 +97,7 @@ def _profil(d: dict, mt5_cfg: dict | None = None) -> BrokerProfile:
         server_zone=BT.parse(d.get("server_zone")),
         symbols={str(k): str(v) for k, v in (d.get("symbols") or {}).items()
                  if str(k) != str(v)},
+        home=home,
     )
 
 
@@ -102,7 +106,8 @@ def profiles(cfg: dict | None) -> list[BrokerProfile]:
     cfg = cfg or {}
     lista = cfg.get("brokers")
     if isinstance(lista, list) and lista:
-        return [_profil(d) for d in lista if isinstance(d, dict)]
+        dl = [d for d in lista if isinstance(d, dict)]
+        return [_profil(d, home=(i == 0)) for i, d in enumerate(dl)]
     return [_profil(cfg.get("broker") or {}, cfg.get("mt5") or {})]
 
 
@@ -148,3 +153,84 @@ def validate(cfg: dict | None) -> list[str]:
     if want and want not in [p.id for p in ps]:
         hibak.append(f"az active_broker ('{want}') nincs a profilok között")
     return hibak
+
+
+# ── BRÓKER-FÜGGŐ INSTRUMENTUM-ÉRTÉKEK (0029, 3. lépés) ──────────────────────
+# Ugyanaz az instrumentum két brókernél más kontraktus: más pont-méret, pip-
+# érték, lot-korlát, jutalék, swap, spread. Ezek a `pairs.<sym>.brokers.<id>`
+# blokkba kerülnek; az ALAP (a `pairs.<sym>` saját kulcsai) az OTTHONI brókeré.
+#
+# ⚠ A MENTÉS A VESZÉLY. Betöltéskor (nem-otthoni brókernél) a bróker értékei
+# a pár alapkulcsaira kerülnek — így a motor, a backteszt és a méretezés
+# változtatás nélkül a jó számokkal dolgozik. Ha viszont egy mentés ezt a
+# futásidejű dictet írná ki, a MÁSIK bróker számai az otthoni helyére kerülnének
+# (a config.json-t tesztek már kétszer letarolták — ez ugyanaz a hibaosztály).
+# Ezért a felülírás EMLÉKSZIK az eredetire (`_broker_overlay`), és az egyetlen
+# config-író (`strategy.settings.write_config_file`) kiírás előtt VISSZAÁLLÍTJA;
+# ha a felhasználó futás közben módosított egy ilyen értéket, az a bróker SAJÁT
+# blokkjába kerül.
+
+BROKER_PAIR_KEYS = ("point_size", "pv1_point", "min_lot", "lot_step", "max_lot",
+                    "commission_per_lot", "swap_long_per_lot", "swap_short_per_lot",
+                    "swap_3x_weekday", "backtest_spread_points")
+OVERLAY_KEY = "_broker_overlay"
+
+
+def overlay_pairs(cfg: dict, profile: BrokerProfile) -> dict:
+    """A nem-otthoni bróker instrumentum-értékei a pár alapkulcsaira (helyben).
+    Otthoni brókernél NEM csinál semmit. Visszaad: a cfg."""
+    if profile is None or profile.home or not isinstance(cfg, dict):
+        return cfg
+    applied, orig, hianyzott = {}, {}, {}
+    for sym, pc in (cfg.get("pairs") or {}).items():
+        if not isinstance(pc, dict):
+            continue
+        blokk = (pc.get("brokers") or {}).get(profile.id)
+        if not isinstance(blokk, dict):
+            continue
+        for k in BROKER_PAIR_KEYS:
+            if k not in blokk:
+                continue
+            if k in pc:
+                orig.setdefault(sym, {})[k] = pc[k]
+            else:
+                hianyzott.setdefault(sym, []).append(k)
+            pc[k] = blokk[k]
+            applied.setdefault(sym, {})[k] = blokk[k]
+    if applied:
+        cfg[OVERLAY_KEY] = {"id": profile.id, "applied": applied, "orig": orig,
+                            "missing": hianyzott}
+    return cfg
+
+
+def restore_for_save(data: dict) -> dict:
+    """Kiírás előtt (helyben): az otthoni értékek vissza, a futás közbeni
+    módosítás a bróker SAJÁT blokkjába. A rejtett kulcs eltűnik."""
+    if not isinstance(data, dict):
+        return data
+    ov = data.pop(OVERLAY_KEY, None)
+    if not isinstance(ov, dict):
+        return data
+    pid = ov.get("id")
+    pairs = data.get("pairs") or {}
+    for sym, kulcsok in (ov.get("applied") or {}).items():
+        pc = pairs.get(sym)
+        if not isinstance(pc, dict):
+            continue
+        blokk = pc.setdefault("brokers", {}).setdefault(pid, {})
+        for k, betoltott in kulcsok.items():
+            if k in pc and pc[k] != betoltott:
+                blokk[k] = pc[k]                    # futás közben módosult
+            if k in (ov.get("orig") or {}).get(sym, {}):
+                pc[k] = ov["orig"][sym][k]
+            elif k in (ov.get("missing") or {}).get(sym, []):
+                pc.pop(k, None)
+    return data
+
+
+def write_target(pair_cfg: dict, profile: BrokerProfile) -> dict:
+    """Hova írjon egy bróker-függő értéket egy eszköz (pl. refresh_costs):
+    otthoni brókernél a pár maga, különben a `brokers.<id>` blokkja."""
+    if profile is None or profile.home:
+        return pair_cfg
+    return pair_cfg.setdefault("brokers", {}).setdefault(profile.id, {})
