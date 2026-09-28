@@ -3561,6 +3561,109 @@ def package_trail(symbol: str, strategy_name: "str | None", pair_cfg: dict,
         return False
 
 
+# ── KÉZI POZÍCIÓ-MŰVELETEK — EGY implementáció, két hívó (0029, 4b/3 S3b) ─────
+# ⚠ Eddig a FELÜLET futtatta a saját példányát (Pozíciók fül: BE, trailing,
+# örökbefogadás). Külön processzben futó motornál ugyanezt a MOTORNAK kell
+# végrehajtania (a `position_state` az ő memóriája; az `adopted`-et ő is írja).
+# Két példány egy ilyen logikából a projektben már elcsúszott (a duplikált
+# trailing egyik fele NameError-t dobott, némán) — ezért itt él egyszer, és a
+# felület helyi útja is ezt hívja.
+
+_POZ_JELZOK = ("trailing_enabled", "trail_points")
+
+
+def manual_breakeven(ticket: int, orig_sl: float) -> bool:
+    """Költség-tudatos kézi breakeven (spread + jutalék + swap fedezve).
+    False, ha az ár még nem fedezi a költséget — akkor az SL változatlan."""
+    from core import pstate as _pst
+    if mt5_connector.move_to_breakeven(ticket):
+        # A BE ELŐTTI stop a nyitáskori kockázat — de csak akkor írjuk be, ha a
+        # motor még nem ismeri (az `ensure` dönt róla).
+        st = _pst.ensure(position_state, int(ticket), original_sl=orig_sl)
+        st["be_done"] = True
+        log.info("✦ #%d — kézi költség-tudatos breakeven beállítva", int(ticket))
+        return True
+    log.info("#%d — BE még nem lehetséges (az ár nem fedezi a spread+jutalék+"
+             "swap költséget) → SL változatlan", int(ticket))
+    return False
+
+
+def set_position_flag(ticket: int, key: str, value):
+    """Egy pozíció kézi jelzőjének beállítása (engedélyezett kulcsok: `_POZ_JELZOK`).
+    ⚠ A rekord alakja a `core.pstate`-é — a hívó MÓDOSÍT, nem talál ki."""
+    if key not in _POZ_JELZOK:
+        raise ValueError(f"nem állítható pozíció-jelző: {key}")
+    from core import pstate as _pst
+    st = _pst.ensure(position_state, int(ticket))
+    st[key] = value
+    return value
+
+
+def toggle_position_flag(ticket: int, key: str) -> bool:
+    """Ki/be kapcsolás (a trailing alapból BE)."""
+    from core import pstate as _pst
+    st = _pst.ensure(position_state, int(ticket))
+    return set_position_flag(ticket, key, not st.get(key, True))
+
+
+def adopt_position(ticket: int, strategy_name: str, symbol: str, pos: dict | None,
+                   pair_cfg: dict | None) -> bool:
+    """Kézi pozíció hozzárendelése egy stratégiához + a BELÉPÉSKORI kockázat
+    (1 R) rögzítése — a motor innentől húzza a stopot, a mostani SL-táv hamar
+    elveszne. SL nélküli pozíciónál nincs kockázat-bejegyzés (az R „—" marad)."""
+    from core import adopted as _adopted, position_meta as _pmeta
+    _adopted.adopt(int(ticket), strategy_name, symbol)
+    if pos is not None:
+        pc = pair_cfg or {}
+        _pmeta.record(
+            int(ticket), symbol, strategy_name,
+            _pmeta.risk_from_prices(
+                pos.get("volume", 0.0), pos.get("price_open", 0.0),
+                pos.get("sl", 0.0), pc.get("point_size", 0.0),
+                pc.get("pv1_point", 0.0)),
+            lot=pos.get("volume", 0.0), entry_price=pos.get("price_open", 0.0))
+    return True
+
+
+def remote_ops(cfg: dict) -> dict:
+    """A csatornán TÁVOLRÓL hívható strukturált műveletek (0029, 4b/3 S3b).
+
+    ⚠ CSAK ami itt van, az fut — a motor nem hajt végre tetszőleges függvényt.
+    ⚠ A csatorna a `False`/`None` eredményt SIKERTELENNEK veszi: a csak
+    mellékhatással járó műveletek ezért kifejezetten True-t adnak, a kapcsolók
+    az új értéket dictben (egy kikapcsolt trailing nem „hiba")."""
+    def _open(symbol, direction, lot, sl, tp, magic, comment="ErikBot-kezi",
+              strategy_name=""):
+        return open_position(symbol, direction, float(lot), float(sl), float(tp),
+                             int(magic), comment=comment, strategy_name=strategy_name)
+
+    def _adopt(ticket, strategy, symbol):
+        pos = next((p for p in (mt5_connector.open_positions_detailed() or [])
+                    if int(p.get("ticket") or 0) == int(ticket)), None)
+        return adopt_position(ticket, strategy, symbol, pos,
+                              (cfg.get("pairs") or {}).get(symbol))
+
+    def _release(ticket):
+        from core import adopted as _adopted
+        _adopted.release(int(ticket))
+        return True
+
+    def _viz_clear(symbol):
+        request_viz_clear(symbol)
+        return True
+
+    return {
+        "open": _open,
+        "build": lambda symbol, strategy=None: manual_build(symbol, strategy),
+        "be": lambda ticket, orig_sl: manual_breakeven(ticket, orig_sl),
+        "ptoggle": lambda ticket, key: {"value": toggle_position_flag(ticket, key)},
+        "pset": lambda ticket, key, value: {"value": set_position_flag(ticket, key, value)},
+        "adopt": _adopt,
+        "release": _release,
+        "viz_clear": _viz_clear,
+    }
+
+
 def manual_build(symbol: str, strategy_name: "str | None" = None) -> bool:
     """Kézi ráépítés (a GUI „＋" gombja hívja). A `build_runtime` alapján nyit egy
     piramidális adalék-pozíciót AZONOS irányba, majd a STRATÉGIA SAJÁT lábainak

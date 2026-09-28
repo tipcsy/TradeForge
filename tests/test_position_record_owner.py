@@ -136,12 +136,21 @@ _kod_gui = [ln for ln in _gui.splitlines()
 check("⚠ a felületnek NINCS saját rekord-alakja (_DEFAULT_PSTATE)",
       not [ln for ln in _kod_gui if "_DEFAULT_PSTATE" in ln],
       str([ln.strip()[:40] for ln in _kod_gui if "_DEFAULT_PSTATE" in ln]))
-check("mindhárom motor-teremtő az ensure-t hívja",
-      _lt.count("_pst.ensure(position_state") == 3,
+# ⚠ 2026-09-28 (0029, 4b/3 S3b): a felület három rekord-teremtője (kézi BE,
+# trailing-kapcsoló, trail-távolság) a MOTOR közös függvényeibe költözött
+# (`live_trader.manual_breakeven / toggle_position_flag / set_position_flag`) —
+# külön processzben futó motornál a rekord a motor memóriája, a felület nem is
+# érheti el. A motorban így 3 + 3 = 6 teremtő van, a felületen EGY SEM; és a
+# felület kódja a `position_state`-et egyáltalán nem írja.
+check("a motor mind a hat teremtője az ensure-t hívja (3 motor + 3 kézi művelet)",
+      _lt.count("_pst.ensure(position_state") == 6,
       f"{_lt.count('_pst.ensure(position_state')} db")
-check("és mindhárom felületi is",
-      _gui.count("_pst.ensure(position_state") == 3,
+check("a felület NEM teremt rekordot (a motor közös függvényeit hívja)",
+      _gui.count("_pst.ensure(position_state") == 0,
       f"{_gui.count('_pst.ensure(position_state')} db")
+check("⚠ a felület kódja a position_state-et nem írja",
+      not [ln for ln in _kod_gui if "position_state[" in ln and "=" in ln.split("position_state[", 1)[1]],
+      str([ln.strip()[:60] for ln in _kod_gui if "position_state[" in ln]))
 check("⚠ a felület a KÖZÖS olvasót használja az 1 R-hez",
       "_pst.original_sl(pstate, sl)" in _gui)
 check("⚠ a kézzel írt `.get(\"original_sl\", ...)` alak sehol",

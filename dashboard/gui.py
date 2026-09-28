@@ -3365,7 +3365,8 @@ class DashboardWindow:
         # enélkül a levett vonalak a következő paraméter-váltásig ottmaradnának.
         try:
             from trading import live_trader as _lt
-            _lt.request_viz_clear(symbol)
+            from dashboard import engine_gateway as _gw     # 4b/3 S3b
+            _gw.op("viz_clear", lambda: _lt.request_viz_clear(symbol), symbol=symbol)
         except Exception:
             pass
         threading.Thread(target=lambda: self._refresh_pair_data(symbol),
@@ -5178,6 +5179,8 @@ class DashboardWindow:
         from dashboard import remote_cmd as _rc
         self._remote = profile
         self._remote_pump = _rc.Pump(self.root)
+        from dashboard import engine_gateway as _gw
+        _gw.configure(profile, self._remote_pump, self._set_status)
         self.start_remote_mirror(profile)
         _figyelo = _cw.Watcher(ROOT / "config.json")
 
@@ -5714,8 +5717,14 @@ class DashboardWindow:
             magic = int(row.get("magic"))
         except (TypeError, ValueError):
             magic = 0
-        ticket = _lt.open_position(sym, irany, lot, sl, tp, magic,
-                                   comment="ErikBot-kezi", strategy_name=strat)
+        # ⚠ 4b/3 S3b: távoli módban a MOTOR küldi a megbízást (a csatornán, szinkron
+        # — a Jelzések fül a ticketet várja; legfeljebb 8 mp).
+        from dashboard import engine_gateway as _gw
+        ticket = _gw.op("open", lambda: _lt.open_position(
+                            sym, irany, lot, sl, tp, magic,
+                            comment="ErikBot-kezi", strategy_name=strat),
+                        sync=True, symbol=sym, direction=irany, lot=lot, sl=sl, tp=tp,
+                        magic=magic, comment="ErikBot-kezi", strategy_name=strat)
         if ticket:
             # ⚠ A TICKET UTÁN MÁR SEMMI NEM BUKHAT EL. Itt a megbízás KIMENT, a
             # pozíció NYITVA van. Ha bármi (naplózás, formázás) kivételt dob, a
@@ -5886,20 +5895,15 @@ class DashboardWindow:
                    strategy=strategy_name, warn=warn),
                 _t("gui.pozicio_hozzarendelese")):
             return
-        _adopted.adopt(ticket, strategy_name, symbol)
-        # A BELÉPÉSKORI kockázat (1 R) rögzítése a kézi pozícióra is — a motor
-        # innentől húzza a stopot, tehát a mostani SL-táv hamarosan elveszne.
-        # SL NÉLKÜLI pozíciónál a kockázat nem értelmezhető → nem írunk bejegyzést,
-        # és az R „—" marad (a fenti figyelmeztetés épp erről szól).
-        if pos is not None:
-            _pc = (self.cfg.get("pairs") or {}).get(symbol) or {}
-            _pmeta.record(
-                ticket, symbol, strategy_name,
-                _pmeta.risk_from_prices(
-                    pos.get("volume", 0.0), pos.get("price_open", 0.0),
-                    pos.get("sl", 0.0), _pc.get("point_size", 0.0),
-                    _pc.get("pv1_point", 0.0)),
-                lot=pos.get("volume", 0.0), entry_price=pos.get("price_open", 0.0))
+        # ⚠ 4b/3 S3b: EGY implementáció (`live_trader.adopt_position`: a
+        # hozzárendelés + a belépéskori 1 R rögzítése) — távoli módban a motor
+        # hajtja végre (ő is írja az `adopted`-et, és friss pozíció-adatból dolgozik).
+        from dashboard import engine_gateway as _gw
+        from trading.live_trader import adopt_position
+        _gw.op("adopt", lambda: adopt_position(
+                   ticket, strategy_name, symbol, pos,
+                   (self.cfg.get("pairs") or {}).get(symbol)),
+               ticket=int(ticket), strategy=strategy_name, symbol=symbol)
         # Ha a pár áll, a live loop KIVEZETÉS-be teszi (kezeli a pozíciót, de új
         # belépőt nem nyit) — a szándékot nem írjuk felül.
         self._pos_tab.refresh()
@@ -5909,7 +5913,8 @@ class DashboardWindow:
         if not self._confirm(_t("gui.adopt.release", ticket=ticket),
                              _t("gui.hozzarendeles_visszavonasa")):
             return
-        _adopted.release(ticket)
+        from dashboard import engine_gateway as _gw     # 4b/3 S3b
+        _gw.op("release", lambda: _adopted.release(ticket), ticket=int(ticket))
         self._pos_tab.refresh()
 
     # ── Kiszállás (kockázatcsökkentő preset) a soron ────────────────────
@@ -6051,26 +6056,16 @@ class DashboardWindow:
         if not pos:
             return
         orig_sl = pos["sl"]
-        def _w():
-            import logging as _logging
-            from core import mt5_connector
-            from trading.live_trader import position_state
-            _log = _logging.getLogger(__name__)
-            # Költség-tudatos BE (spread + jutalék + swap fedezve). Ha az ár még
-            # nincs elég messze a nettó ≥ 0-hoz, a hívás False-t ad → NEM BE-zünk.
-            if mt5_connector.move_to_breakeven(ticket):
-                from core import pstate as _pst
-                # A BE ELŐTTI stop a nyitáskori kockázat — de csak akkor írjuk be,
-                # ha a motor még nem ismeri (az `ensure` dönt róla).
-                st = _pst.ensure(position_state, ticket, original_sl=orig_sl)
-                st["be_done"] = True
-                _log.info("✦ #%d — kézi költség-tudatos breakeven beállítva", ticket)
-            else:
-                # A gomb rendes esetben tiltva van ilyenkor; ha mégis idejut (a
-                # háttér-frissítés és a kattintás közti ár-mozgás miatt), csak logol.
-                _log.info("#%d — BE még nem lehetséges (az ár nem fedezi a "
-                          "spread+jutalék+swap költséget) → SL változatlan", ticket)
-        threading.Thread(target=_w, daemon=True, name="ManualBE").start()
+        # ⚠ 4b/3 S3b: EGY implementáció (`live_trader.manual_breakeven`) — helyben
+        # háttérszálon, távoli módban a motor hajtja végre (engine_gateway).
+        from dashboard import engine_gateway as _gw
+
+        def _helyi():
+            def _w():
+                from trading.live_trader import manual_breakeven
+                manual_breakeven(ticket, orig_sl)
+            threading.Thread(target=_w, daemon=True, name="ManualBE").start()
+        _gw.op("be", _helyi, ticket=int(ticket), orig_sl=orig_sl)
 
     def _pos_build(self, ticket: int):
         """A „＋" gomb: kézi ráépítés ENNEK a pozíciónak a CSOMAGJÁRA (a motor
@@ -6086,13 +6081,17 @@ class DashboardWindow:
             return
         symbol = pos["symbol"]
         strat  = self._strategy_of_position(pos)
-        def _w():
-            import logging as _logging
-            from trading.live_trader import manual_build
-            if not manual_build(symbol, strat):
-                _logging.getLogger(__name__).info(
-                    "%s — ráépítés kihagyva (nincs érvényes építés-jel).", symbol)
-        threading.Thread(target=_w, daemon=True, name="ManualBuild").start()
+        from dashboard import engine_gateway as _gw     # 4b/3 S3b
+
+        def _helyi():
+            def _w():
+                import logging as _logging
+                from trading.live_trader import manual_build
+                if not manual_build(symbol, strat):
+                    _logging.getLogger(__name__).info(
+                        "%s — ráépítés kihagyva (nincs érvényes építés-jel).", symbol)
+            threading.Thread(target=_w, daemon=True, name="ManualBuild").start()
+        _gw.op("build", _helyi, symbol=symbol, strategy=strat)
 
     @staticmethod
     def _strategy_of_position(pos: dict) -> "str | None":
@@ -6122,17 +6121,17 @@ class DashboardWindow:
     # MÓDOSÍTSA a rekordot, ne TALÁLJA KI: az alak a `core.pstate`-é.
 
     def _pos_trail(self, ticket: int):
-        from trading.live_trader import position_state
-        from core import pstate as _pst
-        st = _pst.ensure(position_state, ticket)
-        st["trailing_enabled"] = not st.get("trailing_enabled", True)
+        from dashboard import engine_gateway as _gw     # 4b/3 S3b: egy implementáció
+        from trading.live_trader import toggle_position_flag
+        _gw.op("ptoggle", lambda: toggle_position_flag(ticket, "trailing_enabled"),
+               ticket=int(ticket), key="trailing_enabled")
 
     def _pos_trail_dist(self, ticket: int, points: int):
         """Kézi trail-távolság beállítása egy ticketre PONTBAN (Pozíciók fül)."""
-        from trading.live_trader import position_state
-        from core import pstate as _pst
-        st = _pst.ensure(position_state, ticket)
-        st["trail_points"] = points
+        from dashboard import engine_gateway as _gw     # 4b/3 S3b: egy implementáció
+        from trading.live_trader import set_position_flag
+        _gw.op("pset", lambda: set_position_flag(ticket, "trail_points", points),
+               ticket=int(ticket), key="trail_points", value=points)
 
     def _pos_params(self, symbol: str) -> dict:
         """Egy szimbólum optimalizált paraméterei (a Pozíciók fül kiszállás-

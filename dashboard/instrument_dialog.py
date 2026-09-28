@@ -3823,7 +3823,9 @@ class InstrumentParamsDialog:
         # a V-t ki/be kapcsolni). Csak ha fut a live loop.
         try:
             from trading import live_trader as _lt
-            _lt.request_viz_clear(self.symbol)
+            from dashboard import engine_gateway as _gw     # 0029 4b/3 S3b
+            _gw.op("viz_clear", lambda: _lt.request_viz_clear(self.symbol),
+                   symbol=self.symbol)
         except Exception:
             pass
         return True
@@ -3840,7 +3842,9 @@ class InstrumentParamsDialog:
         # új órákkal rajzoljon és a régi jelzések eltűnjenek. Csak ha fut a live loop.
         try:
             from trading import live_trader as _lt
-            _lt.request_viz_clear(self.symbol)
+            from dashboard import engine_gateway as _gw     # 0029 4b/3 S3b
+            _gw.op("viz_clear", lambda: _lt.request_viz_clear(self.symbol),
+                   symbol=self.symbol)
         except Exception:
             pass
         return len(sel)

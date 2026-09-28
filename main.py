@@ -360,7 +360,7 @@ def cmd_console():
 
     _csatorna = engine_channel.Processor(
         ctx, broker_adapter.current() or broker_profile_active(cfg),
-        on_quit=_tavoli_kilep).start()
+        on_quit=_tavoli_kilep, ops=lt.remote_ops(cfg)).start()
 
     # ── TÁBLÁZATOS NÉZET (--tui) ──────────────────────────────────────────
     # ⚠ Ugyanaz a `ctx`, ugyanazok a parancsok — csak MÁS megjelenítő. A `rich`

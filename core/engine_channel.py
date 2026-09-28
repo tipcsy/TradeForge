@@ -61,13 +61,21 @@ def _olvas(p: Path):
 
 # ── FELÜLET OLDAL ───────────────────────────────────────────────────────────
 
-def send(profile, line: str, confirmed: bool = False, *, now=None,
-         inbox: Path | None = None) -> str:
-    """Parancs a bróker motorjának. Visszaad: a parancs azonosítója."""
+def send(profile, line: str = "", confirmed: bool = False, *, now=None,
+         inbox: Path | None = None, op: str | None = None,
+         args: dict | None = None) -> str:
+    """Parancs a bróker motorjának. Visszaad: a parancs azonosítója.
+
+    Két alak: `line` — egy konzol-parancssor (a közös parancs-rétegen fut);
+    `op` + `args` — STRUKTURÁLT művelet (4b/3 S3b), amelynek nincs konzol-
+    parancsa (kézi kötés, BE, trailing, örökbefogadás…); a motor csak a neki
+    megadott művelet-listából (`ops`) hajt végre."""
     azon = uuid.uuid4().hex
-    ES.write({"id": azon, "line": str(line), "confirmed": bool(confirmed),
-              "ts": time.time() if now is None else now},
-             (inbox or _dir(INBOX, profile)) / f"{azon}.json")
+    cmd = {"id": azon, "line": str(line or ""), "confirmed": bool(confirmed),
+           "ts": time.time() if now is None else now}
+    if op:
+        cmd.update(op=str(op), args=dict(args or {}))
+    ES.write(cmd, (inbox or _dir(INBOX, profile)) / f"{azon}.json")
     return azon
 
 
@@ -83,11 +91,11 @@ def result(profile, azon: str, *, outbox: Path | None = None) -> dict | None:
     return r
 
 
-def request(profile, line: str, confirmed: bool = False, timeout: float = 10.0,
-            *, inbox=None, outbox=None) -> dict | None:
+def request(profile, line: str = "", confirmed: bool = False, timeout: float = 10.0,
+            *, inbox=None, outbox=None, op=None, args=None) -> dict | None:
     """Küldés + várakozás a válaszra (HÁTTÉRSZÁLBÓL hívandó — blokkol).
     None: a motor `timeout` alatt nem válaszolt (nem fut / lefagyott)."""
-    azon = send(profile, line, confirmed, inbox=inbox)
+    azon = send(profile, line, confirmed, inbox=inbox, op=op, args=args)
     vege = time.time() + timeout
     while time.time() < vege:
         r = result(profile, azon, outbox=outbox)
@@ -114,7 +122,8 @@ def _parancs_nev(line: str) -> str:
     return C.ALIASES.get(nev, nev)
 
 
-def process_once(ctx, profile, *, now=None, inbox=None, outbox=None) -> list:
+def process_once(ctx, profile, *, now=None, inbox=None, outbox=None,
+                 ops: dict | None = None) -> list:
     """A postaláda EGY feldolgozása. Visszaad: a feldolgozott válaszok listája
     (a teszthez). Egy hibás parancs nem állítja meg a többit."""
     from core import console_cmd as C
@@ -135,9 +144,23 @@ def process_once(ctx, profile, *, now=None, inbox=None, outbox=None) -> list:
         valasz = {"id": cmd["id"], "ts": now, "ok": False, "lines": [],
                   "confirm": "", "quit": False}
         nev = _parancs_nev(cmd.get("line", ""))
+        muvelet = cmd.get("op")
         if now - float(cmd.get("ts") or 0) > MAX_AGE_SEC:
             valasz["lines"] = [_t("channel.stale")]
             valasz["reason"] = "stale"
+        elif muvelet:
+            fn = (ops or {}).get(muvelet)
+            if fn is None:
+                valasz["lines"] = [_t("channel.not_allowed", name=muvelet)]
+                valasz["reason"] = "not_allowed"
+            else:
+                try:
+                    eredmeny = fn(**(cmd.get("args") or {}))
+                    valasz.update(ok=eredmeny is not False and eredmeny is not None,
+                                  result=eredmeny)
+                except Exception as ex:             # a motort nem viheti el
+                    valasz["lines"] = [_t("channel.error", error=ex)]
+                    valasz["reason"] = "error"
         elif nev not in ALLOWED:
             valasz["lines"] = [_t("channel.not_allowed", name=nev)]
             valasz["reason"] = "not_allowed"
@@ -162,10 +185,11 @@ class Processor:
     `on_quit()` a távoli leállításkor hívódik (a motor rendes kilépése)."""
 
     def __init__(self, ctx, profile, on_quit=lambda: None, period=POLL_SEC,
-                 inbox=None, outbox=None):
+                 inbox=None, outbox=None, ops: dict | None = None):
         self.ctx, self.profile, self.on_quit = ctx, profile, on_quit
         self.period = period
         self._dirs = {"inbox": inbox, "outbox": outbox}
+        self.ops = dict(ops or {})
         self._stop = threading.Event()
         self._t = threading.Thread(target=self._fut, daemon=True,
                                    name="EngineChannel")
@@ -173,7 +197,7 @@ class Processor:
     def _fut(self):
         while not self._stop.is_set():
             try:
-                kesz = process_once(self.ctx, self.profile, **self._dirs)
+                kesz = process_once(self.ctx, self.profile, ops=self.ops, **self._dirs)
             except Exception:
                 kesz = []
             if any(v.get("quit") for v in kesz):
