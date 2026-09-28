@@ -52,7 +52,11 @@ from zoneinfo import ZoneInfo
 from core.i18n import LabelMap as _LabelMap, t as _t
 
 # ── A szerver órája (MÉRVE, lásd a modul fejlécét) ──────────────────────────
-SERVER_ZONE = "Europe/Berlin"
+# ⚠ 2026-09-28 óta ez a KANONIKUS óra (`core/broker_time.py`): a gyertyák akkor
+# is ebben vannak, ha a bróker szervere más zónában jár — a határon váltjuk át.
+# Az ActivTrades szervere ezzel azonos (újramérve: tools/detect_server_zone.py,
+# az évi eltérő heteken is — lásd tests/test_server_zone_real.py).
+from core.broker_time import CANONICAL_ZONE as SERVER_ZONE  # noqa: E402
 
 # ── A hat piac: tőzsdei nyitóharang a saját helyi idejükben ─────────────────
 # A nyitás-percre azért a tőzsdei nyitás kell (nem a „FX-szesszió"), mert a
