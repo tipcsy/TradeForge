@@ -22,8 +22,6 @@ A fül NEM ismer MT5-öt: a profilokat, a képeket és a csatornát a modulok ad
 """
 from __future__ import annotations
 
-import queue
-import threading
 import time
 import tkinter as tk
 
@@ -103,14 +101,11 @@ class BrokersTab:
         # cseréli a fájlt) ne villantsa „nincs adat"-ra a sort. Nem hazudik: az
         # életjel KORA tovább nő, és egy tartós hiba így is „hibás"-ra vált.
         self._utolso: dict = {}
-        # ⚠ A HÁTTÉRSZÁL NEM NYÚLHAT A TK-HOZ. Az első változat `after()`-t hívott
-        # a szálból — a Tk nem szálbiztos, a hívás elbukott, és a válasz (vele a
-        # megerősítő kérdés) CSENDBEN elveszett (a teszt fogta meg). A szál egy
-        # sorba tesz, a FŐSZÁL 100 ms-enként kiveszi.
-        self._valaszok: queue.Queue = queue.Queue()
         self._build_ui()
+        # A háttérszálak válaszai a FŐSZÁLON — a közös segéddel (dashboard/remote_cmd).
+        from dashboard import remote_cmd as _rc
+        self._pump = _rc.Pump(self.parent)
         self._frissit()
-        self._valasz_pumpa()
         self.parent.after(FELUGYELO_MS, self._felugyel)
 
     # ── felépítés ─────────────────────────────────────────────────────────
@@ -189,46 +184,24 @@ class BrokersTab:
             pass
 
     def send(self, profile, line):
-        """Egy parancs a bróker motorjának, a kétlépcsős megerősítéssel.
-        A hívás azonnal visszatér; az eredmény az állapotsorba kerül."""
+        """Egy parancs a bróker motorjának, a kétlépcsős megerősítéssel
+        (a KÖZÖS segéden át: dashboard/remote_cmd). Azonnal visszatér; az
+        eredmény az állapotsorba kerül."""
+        from dashboard import remote_cmd as _rc
         self._statusz(_t("brokers.cmd.sending", tag=profile.tag, line=line))
 
-        def _vissza(r, megerositve):
+        def _eredmeny(r, megszakitva):
             if r is None:
                 self._statusz(_t("brokers.cmd.no_answer", tag=profile.tag), FG_RED)
-                return
-            if r.get("confirm") and not megerositve:
-                if self._confirm(r["confirm"]):
-                    _hatter(True)
-                else:
-                    self._statusz(_t("brokers.cmd.cancelled"), FG_GRAY)
-                return
-            szoveg = " ".join(str(x) for x in (r.get("lines") or [])) or "OK"
-            self._statusz(f"{profile.tag}: {szoveg}", FG_GREEN if r.get("ok") else FG_RED)
+            elif megszakitva:
+                self._statusz(_t("brokers.cmd.cancelled"), FG_GRAY)
+            else:
+                szoveg = " ".join(str(x) for x in (r.get("lines") or [])) or "OK"
+                self._statusz(f"{profile.tag}: {szoveg}",
+                              FG_GREEN if r.get("ok") else FG_RED)
 
-        def _hatter(megerositve):
-            def _fut():
-                r = self._request(profile, line, megerositve)
-                self._valaszok.put(lambda: _vissza(r, megerositve))
-            threading.Thread(target=_fut, daemon=True, name="BrokerCmd").start()
-
-        _hatter(False)
-
-    def _valasz_pumpa(self):
-        """A háttérszálak válaszai a FŐSZÁLON (lásd a `_valaszok` megjegyzését)."""
-        while True:
-            try:
-                teendo = self._valaszok.get_nowait()
-            except queue.Empty:
-                break
-            try:
-                teendo()
-            except tk.TclError:
-                pass
-        try:
-            self.parent.after(100, self._valasz_pumpa)
-        except tk.TclError:
-            pass                                  # az ablak bezárult
+        _rc.send(self._pump, profile, line, confirm=self._confirm,
+                 on_result=_eredmeny, request=self._request)
 
     # ── frissítés ─────────────────────────────────────────────────────────
     def _frissit(self):

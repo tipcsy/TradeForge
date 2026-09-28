@@ -2689,6 +2689,9 @@ class DashboardWindow:
         self.dashboard_ref    = dashboard_ref
         self.instrument_state = instrument_state
         self.optimizer_status = optimizer_status
+        # ⚠ TÁVOLI MÓD (0029, 4b/3): ha a motor KÜLÖN processzben fut, ez a
+        # profilja; különben None, és MINDEN a mai (közös memóriás) úton megy.
+        self._remote = None
 
         self._on_play         = on_play_pair
         self._on_stop         = on_stop_pair
@@ -5161,6 +5164,50 @@ class DashboardWindow:
     # indítás, hangolatlan indulás jelzése, kivezetés-figyelmeztetés). A
     # szabályok mostantól EGY helyen vannak, itt csak a környezet készül el.
 
+    def start_remote_mode(self, profile) -> None:
+        """A felület átállítása egy KÜLÖN processzben futó motorra (0029, 4b/3).
+        Az S5 átkapcsoló hívja; addig senki.
+
+          • a fő tábla a motor állapotképéből töltődik (tükör);
+          • a config: a motor is menti (Play/Stop szándék) — a felület a saját
+            configját a FŐSZÁLON frissíti, különben a tábla elavult Play/Stop-
+            állapotot rajzolna (S1 figyelő, S0 háromutas mentés);
+          • az állapot-modulok (rr_state, adopted…) fájlját is figyeli;
+          • a Play/Stop és a zárás a csatornán megy (a motor közös rétegén)."""
+        from core import config_watch as _cw, state_reload as _sr
+        from dashboard import remote_cmd as _rc
+        self._remote = profile
+        self._remote_pump = _rc.Pump(self.root)
+        self.start_remote_mirror(profile)
+        _figyelo = _cw.Watcher(ROOT / "config.json")
+
+        def _allapot():
+            try:
+                if _figyelo.check_once():
+                    _cw.apply_pending(self.cfg)
+                    self._apply_filter_sort()
+                _sr.refresh_all()
+            except Exception as ex:
+                log.debug("távoli mód, config/állapot: %s", ex)
+            try:
+                self.root.after(2000, _allapot)
+            except tk.TclError:
+                pass
+        _allapot()
+
+    def _remote_cmd(self, line: str, confirmed: bool = False) -> None:
+        """Parancs a KÜLÖN processzben futó motornak (a közös segéddel). Az
+        eredmény az állapotsorba kerül."""
+        from dashboard import remote_cmd as _rc
+
+        def _eredmeny(r, megszakitva):
+            if r is None:
+                self._set_status(_t("brokers.cmd.no_answer", tag=self._remote.tag))
+            elif not megszakitva:
+                self._set_status(" ".join(str(x) for x in (r.get("lines") or [])))
+        _rc.send(self._remote_pump, self._remote, line, confirm=self._confirm,
+                 on_result=_eredmeny, confirmed=confirmed)
+
     def start_remote_mirror(self, profile, period_ms: int = 1000) -> None:
         """TÁVOLI MÓD (0029, 4b/3 S2): a fő tábla dictjei a KÜLÖN processzben
         futó motor állapotképéből töltődnek (core/engine_mirror) — a tábla kódja
@@ -5244,6 +5291,10 @@ class DashboardWindow:
 
     def _run_play(self, symbol: str, names: list):
         """Indítás a közös rétegen át + a felület frissítése."""
+        if self._remote is not None:              # 4b/3: a motor külön processzben
+            for n in names:
+                self._remote_cmd(f"play {symbol} {n}")
+            return None
         from core import console_cmd as _cc
         _elotte = self.instrument_state.get(symbol)
         res = _cc.start_strategies(self._cmd_ctx(), symbol, names)
@@ -5262,6 +5313,10 @@ class DashboardWindow:
         `console_cmd` nem hajtja végre azonnal: `Result.confirm`-ot ad vissza. A
         konzol beír egy i/n-t, a Telegram gombot tesz alá — a felület eddig fel
         sem tette a kérdést, némán kivezetésbe állította a párt."""
+        if self._remote is not None:              # 4b/3: a motor rákérdez, ha kell
+            for n in names:
+                self._remote_cmd(f"stop {symbol} {n}")
+            return None
         from core import console_cmd as _cc
         ctx = self._cmd_ctx()
         res = _cc.stop_strategies(ctx, symbol, names)
@@ -5965,6 +6020,9 @@ class DashboardWindow:
         if not self._confirm(_t("gui.close.one", ticket=ticket),
                              _t("gui.pozicio_zarasa")):
             return
+        if self._remote is not None:              # 4b/3: már rákérdeztünk
+            self._remote_cmd(f"close {ticket}", confirmed=True)
+            return
         def _w():
             from core import mt5_connector
             mt5_connector.close_position(ticket)
@@ -5976,6 +6034,9 @@ class DashboardWindow:
             return
         if not self._confirm(_t("gui.close.all", n=len(positions)),
                              _t("gui.osszes_pozicio_zarasa")):
+            return
+        if self._remote is not None:              # 4b/3: már rákérdeztünk
+            self._remote_cmd("close all", confirmed=True)
             return
         tickets = [p["ticket"] for p in positions]
         def _w():

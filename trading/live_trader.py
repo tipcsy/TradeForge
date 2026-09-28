@@ -4230,6 +4230,14 @@ def run(cfg: dict, slot_mgr: SlotManager):
                 _cw.apply_pending(cfg)
             except Exception as _e:
                 log.warning("config-újratöltés kihagyva: %s", _e)
+            # ⚠ 4b/3 S3a: az állapot-modulok (rr_state, adopted, position_meta…)
+            # fájlját egy MÁSIK processz is módosíthatja — ha változott,
+            # újratöltjük (core/state_reload). Egy processzben ártalmatlan.
+            try:
+                from core import state_reload as _sr
+                _sr.refresh_all()
+            except Exception as _e:
+                log.warning("állapot-újratöltés kihagyva: %s", _e)
             # A karmester-telemetria kiírása, ha eljött az ideje (időzített,
             # atomikus — a körre nem mérhető költség).
             # ⚠ A KAPCSOLÓ KÖRÖNKÉNT. A terv ígérete: a kill-switch fájl a
