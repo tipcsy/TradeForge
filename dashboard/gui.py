@@ -2604,7 +2604,7 @@ class ClosedTab:
         eset EGYSZERI pillanatkép: egy lezárt múltbeli időszak nem változik, ezért
         nem kérjük le minden körben."""
         from datetime import timedelta
-        from core.mt5_connector import server_today
+        from dashboard.mt5_view import server_today     # 4b/3 S4
         mode = self._range_var.get()
         self._lbl_range_err.config(text="")
         if mode == "today":
@@ -3658,7 +3658,7 @@ class DashboardWindow:
         # MT5 szimbólum-lekérés HÁTTÉRSZÁLON; a UI-t after(0)-val frissítjük.
         def _load_syms():
             try:
-                from core.broker_adapter import mt5
+                from dashboard import mt5_view as mt5    # 4b/3 S4
                 syms = mt5.symbols_get()
                 pairs = sorted(((s.name, getattr(s, "description", "")) for s in syms),
                                key=lambda x: x[0]) if syms else []
@@ -3710,8 +3710,8 @@ class DashboardWindow:
             min_lot, lot_step, max_lot = 0.01, 0.01, 0.0
             description = ""
             try:
-                from core.broker_adapter import mt5 as _mt5
-                from core.mt5_connector import MT5_LOCK
+                from dashboard import mt5_view as _mt5          # 4b/3 S4
+                MT5_LOCK = _mt5.lock()
                 with MT5_LOCK:
                     info = _mt5.symbol_info(symbol)
                 if info:
@@ -4679,7 +4679,7 @@ class DashboardWindow:
         # beállítani (a Pozíciók-fül menüje csak meglévő pozíciónál nyílik).
         from core import rr_state as _rrs
         from core import risk_reduction as _rrx
-        from core import mt5_connector as _mc
+        from dashboard import mt5_view as _mc           # 4b/3 S4
         _pl = (self.cfg.get("pairs", {}).get(symbol, {}) or {})
         try:
             _netting = _mc.is_netting()
@@ -5261,14 +5261,14 @@ class DashboardWindow:
 
         def _positions():
             try:
-                from core import mt5_connector as _mt5
+                from dashboard import mt5_view as _mt5   # 4b/3 S4
                 return _mt5.open_positions_detailed() or []
             except Exception:
                 return []
 
         def _close(ticket):
             try:
-                from core import mt5_connector as _mt5
+                from dashboard import mt5_view as _mt5   # 4b/3 S4
                 return bool(_mt5.close_position(ticket))
             except Exception:
                 return False
@@ -5578,8 +5578,8 @@ class DashboardWindow:
         """(bid, ask) a mostani árból — a megerősítő ablak ebből mutatja, mennyit
         mozdult az ár a jelzés óta. None, ha nincs kapcsolat."""
         try:
-            from core.broker_adapter import mt5 as _mt5
-            from core.mt5_connector import MT5_LOCK
+            from dashboard import mt5_view as _mt5          # 4b/3 S4
+            MT5_LOCK = _mt5.lock()
             with MT5_LOCK:
                 t = _mt5.symbol_info_tick(symbol)
             return (float(t.bid), float(t.ask)) if t else None
@@ -5666,7 +5666,7 @@ class DashboardWindow:
         pótolja — de kivételt itt dobni nem szabad, mert a hívó azt „sikertelen
         kötésnek" mutatná."""
         try:
-            from core.mt5_connector import open_positions_detailed
+            from dashboard.mt5_view import open_positions_detailed   # 4b/3 S4
             if isinstance(getattr(self, "_mt5_cache", None), dict):
                 self._mt5_cache["positions_detail"] = open_positions_detailed()
         except Exception:
@@ -5749,10 +5749,8 @@ class DashboardWindow:
         helyi dátuma — különben a felirat („MT5 szerver-idő") megint nem
         teljesülne, és a napváltás környékén más trade-ek jönnének, mint amit a
         „ma" nézet mutat."""
-        from core.mt5_connector import (closed_positions_range,
-                                        server_day_bounds_for)
-        frm, to = server_day_bounds_for(date_from, date_to)
-        return closed_positions_range(frm, to)
+        from dashboard import mt5_view as _mv            # 4b/3 S4: helyben a mai út
+        return _mv.closed_positions_range(date_from, date_to)
 
     def _closed_risk(self, c: dict):
         """Egy lezárt kötés belépéskori kockázata (1 R) — a `Lezárt` fül R-oszlopához.
@@ -5947,7 +5945,7 @@ class DashboardWindow:
         # MELYIK preset nem választható és MIÉRT — a KÖZÖS szabályból (ugyanezt
         # hívja az instrumentum-ablak preset-választója is, lásd
         # `risk_reduction.preset_blockers`).
-        from core import mt5_connector as _mc
+        from dashboard import mt5_view as _mc           # 4b/3 S4
         _netting = _mc.is_netting()
         _blocked = _rrx.preset_blockers(cur_lot, min_lot, lot_step, _netting)
         halvable = not _blocked
@@ -6171,8 +6169,8 @@ class DashboardWindow:
         # az MT5-ből és cache-eljük a ds-be. Enélkül a trail-távolság mező üres marad.
         if not point:
             try:
-                from core.broker_adapter import mt5 as _mt5
-                from core.mt5_connector import MT5_LOCK
+                from dashboard import mt5_view as _mt5          # 4b/3 S4
+                MT5_LOCK = _mt5.lock()
                 with MT5_LOCK:
                     _mt5.symbol_select(symbol, True)
                     _info = _mt5.symbol_info(symbol)
@@ -6197,8 +6195,8 @@ class DashboardWindow:
 
         def _work():
             try:
-                from core import mt5_connector
-                mt5_connector.connect(self.cfg)
+                from dashboard import mt5_view as _mv    # 4b/3 S4: távolról a motoré
+                _mv.connect(self.cfg)
             except Exception:
                 pass
         threading.Thread(target=_work, daemon=True, name="MT5Connect").start()
@@ -6516,8 +6514,8 @@ class DashboardWindow:
         Bars/indikátor NÉLKÜL → minden párra futtatható gyakran. A symbol_select
         biztosítja, hogy a (akár letiltott) szimbólum is streameljen MT5-ben."""
         try:
-            from core.broker_adapter import mt5 as _mt5
-            from core.mt5_connector import MT5_LOCK
+            from dashboard import mt5_view as _mt5          # 4b/3 S4
+            MT5_LOCK = _mt5.lock()
         except Exception:
             return
         ds = self.dashboard_ref.get(symbol)
@@ -6579,9 +6577,9 @@ class DashboardWindow:
             return
         ds._extras_ts = _t.time()
         try:
-            from core.broker_adapter import mt5 as _mt5
+            from dashboard import mt5_view as _mt5          # 4b/3 S4
             import pandas as _pd
-            from core.mt5_connector import MT5_LOCK
+            MT5_LOCK = _mt5.lock()
             from core.indicator_engine import atr as _atr
         except Exception:
             return
@@ -6651,7 +6649,7 @@ class DashboardWindow:
         # motor is ugyanezt az órát kapja (`live_trader`), tehát a kijelzés és a
         # döntés nem csúszik szét.
         try:
-            from core import mt5_connector as _mcs
+            from dashboard import mt5_view as _mcs          # 4b/3 S4
             from gates import sessions as _sess
             _sp = _sess.params_of(self.cfg.get("pairs", {}).get(symbol, {}) or {},
                                   self.cfg, symbol)
@@ -6665,7 +6663,7 @@ class DashboardWindow:
         # NATIVE copy_rates (nincs resample-torzítás); sign(close − SMA(n)).
         try:
             from gates import tf_align as _tfa
-            from core import mt5_connector as _mc
+            from dashboard import mt5_view as _mc           # 4b/3 S4
             _tfa_en, _tfa_tfs, _tfa_sma, _ = _tfa.config_for(self.cfg, symbol)
             if _tfa_en:
                 _closes = _mc.tf_closes(symbol, _tfa_tfs, _tfa_sma + 5)
@@ -6744,8 +6742,8 @@ class DashboardWindow:
         """Egy pár piaci adatainak frissítése MT5-ből: ár, spread, változás%,
         és a stratégia megjelenítési cellái."""
         try:
-            from core.broker_adapter import mt5 as _mt5
-            from core.mt5_connector import MT5_LOCK
+            from dashboard import mt5_view as _mt5          # 4b/3 S4
+            MT5_LOCK = _mt5.lock()
         except Exception:
             return
         import pandas as _pd
@@ -6900,7 +6898,7 @@ class DashboardWindow:
         try:
             from gates import momentum as _mom
             from core import gates as _gts
-            from core import mt5_connector as _mc
+            from dashboard import mt5_view as _mc           # 4b/3 S4
             _mcfg = _gts.momentum_config(_pcfg, self.cfg)
             _mcloses = _mc.tf_closes(symbol, _mom.needed_timeframes(_mcfg),
                                      _mom.needed_bars(_mcfg))
@@ -6985,7 +6983,7 @@ class DashboardWindow:
             import time as _t
             while getattr(self, "_bg_poller_running", False):
                 try:
-                    from core.mt5_connector import (
+                    from dashboard.mt5_view import (    # 4b/3 S4
                         connection_info, daily_pnl as _dpnl,
                         open_positions_by_symbol, open_positions_detailed,
                         closed_positions_today, server_offset_sec)

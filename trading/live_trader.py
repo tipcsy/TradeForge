@@ -3652,7 +3652,58 @@ def remote_ops(cfg: dict) -> dict:
         request_viz_clear(symbol)
         return True
 
+    # ── OLVASÓ műveletek (4b/3 S4): a felület MT5-adata a motoron át ─────────
+    # ⚠ Csak NYERS adatot adunk; a kijelzés számítása a felületen marad — a
+    # kijelzés-út egyszer már GIL-fogással lassította a kereskedési kört.
+    def _symbol_info(symbol):
+        with MT5_LOCK:
+            mt5.symbol_select(symbol, True)
+            i = mt5.symbol_info(symbol)
+        if i is None:
+            return None
+        d = i._asdict()
+        return {k: d.get(k) for k in ("name", "description", "point", "digits",
+                                      "spread", "trade_tick_value", "trade_tick_size",
+                                      "volume_min", "volume_step", "volume_max")}
+
+    def _rates(symbol, tf, start, count):
+        with MT5_LOCK:
+            mt5.symbol_select(symbol, True)
+            r = mt5.copy_rates_from_pos(symbol, int(tf), int(start), int(count))
+        if r is None:
+            return None
+        return {"names": list(r.dtype.names), "rows": [list(map(lambda v: v.item()
+                if hasattr(v, "item") else v, x)) for x in r]}
+
+    def _tf_closes(symbol, tfs, count):
+        return {str(k): v for k, v in
+                mt5_connector.tf_closes(symbol, list(tfs), int(count)).items()}
+
+    def _closed_range(date_from, date_to):
+        import datetime as _dt
+        frm, to = mt5_connector.server_day_bounds_for(
+            _dt.date.fromisoformat(date_from), _dt.date.fromisoformat(date_to))
+        from core import engine_status as _es
+        return _es._json_ok(mt5_connector.closed_positions_range(frm, to))
+
+    def _symbols():
+        with MT5_LOCK:
+            syms = mt5.symbols_get()
+        return [[x.name, getattr(x, "description", "")] for x in (syms or [])]
+
+    def _viz_render(symbol):
+        # ⚠ A viz-fájl a BRÓKER SAJÁT termináljának mappájába kerül — ez a
+        # motor dolga (távoli módban a felület nem is látja azt a terminált).
+        from core import engine_status as _es
+        return _es._json_ok(render_symbol_viz(symbol, cfg))
+
     return {
+        "viz_render": _viz_render,
+        "symbols": _symbols,
+        "symbol_info": _symbol_info,
+        "rates": _rates,
+        "tf_closes": _tf_closes,
+        "closed_range": _closed_range,
         "open": _open,
         "build": lambda symbol, strategy=None: manual_build(symbol, strategy),
         "be": lambda ticket, orig_sl: manual_breakeven(ticket, orig_sl),

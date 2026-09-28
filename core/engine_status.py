@@ -63,7 +63,8 @@ def _json_ok(v):
 
 
 def snapshot(ctx, profile, *, server_offset_sec=None, stopped=False,
-             now: float | None = None, optimizer_status=None) -> dict:
+             now: float | None = None, optimizer_status=None,
+             extra: dict | None = None) -> dict:
     """Az állapotkép a konzol KÖZÖS soraiból (`core.console_cmd`) — ugyanazt
     mutatja, amit a konzol és a TUI; külön lekérdezés nem készül."""
     from core import console_cmd as C
@@ -96,6 +97,9 @@ def snapshot(ctx, profile, *, server_offset_sec=None, stopped=False,
         "dashboard": _tukor_dashboard(ctx),
         "instrument_state": dict(getattr(ctx, "instrument_state", {}) or {}),
         "optimizer_status": dict(optimizer_status or {}),
+        # 4b/3 S4: amit a felület eddig SAJÁT MT5-hívással kérdezett (számla-
+        # típus, pozíció-összesítő, mai lezártak) — a hívó adja (`extra`).
+        **(extra or {}),
     })
 
 
@@ -134,9 +138,10 @@ class Publisher:
     különböztetni az összeomlástól."""
 
     def __init__(self, ctx, profile, offset_fn=lambda: None, period=PERIOD_SEC,
-                 optimizer_status=None):
+                 optimizer_status=None, extra_fn=None):
         self.ctx, self.profile, self.offset_fn = ctx, profile, offset_fn
         self.optimizer_status = optimizer_status
+        self.extra_fn = extra_fn
         self.period = period
         self._stop = threading.Event()
         self._t = threading.Thread(target=self._fut, daemon=True,
@@ -146,11 +151,18 @@ class Publisher:
     def _egyszer(self, stopped=False):
         try:
             write(snapshot(self.ctx, self.profile, server_offset_sec=self.offset_fn(),
-                           stopped=stopped, optimizer_status=self.optimizer_status),
+                           stopped=stopped, optimizer_status=self.optimizer_status,
+                           extra=self._extra()),
                   self.p)
         except Exception as ex:                      # a kereskedést sosem állítja meg
             import logging
             logging.getLogger(__name__).warning("motor-állapotkép írási hiba: %s", ex)
+
+    def _extra(self) -> dict:
+        try:
+            return dict(self.extra_fn() or {}) if self.extra_fn else {}
+        except Exception:
+            return {}
 
     def _fut(self):
         while not self._stop.is_set():

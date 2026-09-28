@@ -2509,7 +2509,11 @@ class InstrumentParamsDialog:
             lbl.config(text=_t("idlg.rajzolas"), fg=FG_GRAY)
             lbl.update_idletasks()
             from trading.live_trader import render_symbol_viz
-            r = render_symbol_viz(self.symbol, self.root_cfg)
+            from dashboard import engine_gateway as _gw   # 0029 4b/3 S4: a bróker motorja rajzol
+            r = _gw.op("viz_render", lambda: render_symbol_viz(self.symbol, self.root_cfg),
+                       sync=True, timeout=15.0, symbol=self.symbol)
+            if r is None:
+                raise RuntimeError(_t("brokers.cmd.no_answer", tag="motor"))
         except Exception as ex:
             lbl.config(text=f"Hiba: {ex}", fg=FG_RED)
             return
@@ -3965,7 +3969,9 @@ class InstrumentParamsDialog:
         # sikertelen rajzolás nem akadályozhatja meg a MENTÉST.
         try:
             from trading.live_trader import render_symbol_viz
-            _r = render_symbol_viz(self.symbol, self.root_cfg)
+            from dashboard import engine_gateway as _gw   # 0029 4b/3 S4
+            _r = _gw.op("viz_render", lambda: render_symbol_viz(self.symbol, self.root_cfg),
+                        sync=True, timeout=15.0, symbol=self.symbol) or {}
             if _r.get("errors"):
                 import logging as _lg
                 _lg.getLogger(__name__).info(

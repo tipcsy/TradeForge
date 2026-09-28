@@ -66,8 +66,9 @@ check("False eredmeny = sikertelen", futtat("hamis")["ok"] is False)
 
 print("\n== A motor muvelet-listaja ==")
 from trading import live_trader as LT                                    # noqa: E402
-check("pontosan a nyolc engedelyezett muvelet", set(LT.remote_ops({})) ==
-      {"open", "build", "be", "ptoggle", "pset", "adopt", "release", "viz_clear"},
+check("pontosan a 14 engedelyezett muvelet (9 iro + 5 OLVASO, S4)", set(LT.remote_ops({})) ==
+      {"open", "build", "be", "ptoggle", "pset", "adopt", "release", "viz_clear",
+       "viz_render", "symbols", "symbol_info", "rates", "tf_closes", "closed_range"},
       str(sorted(LT.remote_ops({}))))
 
 print("\n== EGY implementacio: a kozos fuggvenyek ==")

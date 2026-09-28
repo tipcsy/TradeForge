@@ -343,10 +343,27 @@ def cmd_console():
     # felület (egy másik processz) ebből mutatja ezt a brókert. Csak ír, a
     # kereskedést egy írási hiba sem állítja meg.
     from core import broker_adapter, engine_status
+    # 4b/3 S4: amit a felület eddig SAJÁT MT5-hívással kérdezett. A mai lezártak
+    # MT5-előzmény lekérdezés — 10 mp-enként elég (a kereskedési kör zárja miatt).
+    _extra_tar = {"t": 0.0, "closed": []}
+
+    def _extra():
+        import time as _time
+        if _time.time() - _extra_tar["t"] > 10:
+            try:
+                _extra_tar["closed"] = mt5_connector.closed_positions_today()
+            except Exception:
+                pass
+            _extra_tar["t"] = _time.time()
+        return {"margin_mode": mt5_connector._MARGIN_MODE,
+                "margin_mode_name": mt5_connector.margin_mode_name(),
+                "positions_by_symbol": mt5_connector.open_positions_by_symbol(),
+                "closed_today": _extra_tar["closed"]}
+
     _kozzetevo = engine_status.Publisher(
         ctx, broker_adapter.current() or broker_profile_active(cfg),
         offset_fn=mt5_connector._load_offset,
-        optimizer_status=lt.optimizer_status).start()
+        optimizer_status=lt.optimizer_status, extra_fn=_extra).start()
 
     # ⚠ 0029 (4b): a VEZÉRLŐ CSATORNA — a felület Play/Stop/zárás/leállítás
     # parancsai a közös parancs-rétegen át. Távoli „quit": ugyanaz a rendes
