@@ -261,6 +261,53 @@ def main_config_view(cfg: dict) -> dict:
     return view
 
 
+# ── KÉT PROCESSZ, EGY config.json (0029, 4b) ────────────────────────────────
+# ⚠ A LELET (2026-09-28): a bróker-motor (külön processz) a Play-t a saját
+# blokkjába menti; a felület viszont az indításkor betöltött configot tartja a
+# memóriájában, és a KÖVETKEZŐ mentése (bármilyen beállítás) visszaírta a régit —
+# a motor Play-je CSENDBEN eltűnt. Klasszikus elveszett frissítés.
+#
+# A MEGOLDÁS: háromutas összefésülés. Minden processz megjegyzi, milyen volt a
+# fájl, amikor betöltötte (`_ALAP`; mentés után a SAJÁT kiírt változata). Mentéskor
+# újraolvassa a lemezt, és CSAK azt írja felül, amit ő maga változtatott azóta; minden mást a lemezről
+# vesz át (ott lehet a másik processz módosítása). Ugyanazt a kulcsot két
+# processz módosítva: az utolsó mentés nyer (mint eddig mindenhol).
+# Betöltött alap nélkül (pl. a tesztek ideiglenes fájljai) a régi viselkedés.
+_ALAP: dict = {}
+
+
+def _alap_kulcs(path) -> str:
+    try:
+        return str(Path(path).resolve())
+    except Exception:
+        return str(path)
+
+
+def merge3(alap, enyem, lemez):
+    """Háromutas összefésülés (lásd fent). Dict-eken kulcsonként, rekurzívan;
+    minden más értéket egészben kezel (listát is)."""
+    if not (isinstance(alap, dict) and isinstance(enyem, dict) and isinstance(lemez, dict)):
+        return lemez if enyem == alap else enyem
+    ki = {}
+    for k in list(enyem) + [k for k in lemez if k not in enyem]:
+        b, m, d = k in alap, k in enyem, k in lemez
+        if m and b and enyem[k] == alap[k]:          # nem nyúltam hozzá
+            if d:
+                ki[k] = lemez[k]
+        elif m:                                       # én változtattam / vettem fel
+            if d and isinstance(enyem[k], dict) and isinstance(lemez[k], dict):
+                ki[k] = merge3(alap.get(k, {}) if isinstance(alap.get(k), dict) else {},
+                               enyem[k], lemez[k])
+            else:
+                ki[k] = enyem[k]
+        elif b:                                       # én töröltem
+            if d and lemez[k] != alap[k]:
+                ki[k] = lemez[k]                      # közben más módosította: marad
+        elif d:                                       # más vette fel
+            ki[k] = lemez[k]
+    return ki
+
+
 def write_config_file(data: dict, path: Path | str) -> str:
     """Egy MÁR KÉSZ váz-config dict ATOMIKUS kiírása. Visszaad: `""` ha sikerült,
     különben az EMBERI hibaüzenet (a hívó kiteszi az állapotsorba / hibacímkére).
@@ -287,6 +334,20 @@ def write_config_file(data: dict, path: Path | str) -> str:
     if isinstance(data, dict) and "_broker_overlay" in data:
         from core import broker_profile
         data = broker_profile.restore_for_save(copy.deepcopy(data))
+    _k = _alap_kulcs(p)
+    # ⚠ Az ÚJ ALAP a MI változatunk (összefésülés ELŐTT), nem az összefésült: a
+    # memóriánkban NINCS benne a másik processz változása — ha az összefésültet
+    # vennénk alapnak, a következő mentésünk azt a mi „törlésünknek" látná, és
+    # kitörölné (a teszt második mentése pont ezt fogta meg).
+    # ⚠ `deepcopy`, nem JSON-oda-vissza: egy nem szerializálható érték itt NEM
+    # dobhat — a lenti, beszédes hibaüzenetnek kell jelentenie (test_config_save).
+    _enyem = copy.deepcopy(data) if isinstance(data, dict) else None
+    if isinstance(data, dict) and _k in _ALAP and p.exists():
+        try:
+            lemez = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            lemez = _ALAP[_k]
+        data = merge3(_ALAP[_k], data, lemez)
     try:
         text = json.dumps(data, indent=2, ensure_ascii=False)
     except Exception as e:
@@ -297,6 +358,8 @@ def write_config_file(data: dict, path: Path | str) -> str:
         with open(tmp, "w", encoding="utf-8") as f:
             f.write(text)
         tmp.replace(p)
+        if _k in _ALAP and _enyem is not None:
+            _ALAP[_k] = _enyem
         return ""
     except Exception as e:
         log.error("config.json mentési hiba (%s): %s", p, e)
@@ -504,11 +567,17 @@ def duplicate_keys(text: str) -> list[str]:
     return sorted(set(dups))
 
 
-def load_config(cfg_path: Path | str) -> dict:
-    """config.json betöltése + a stratégia-config beolvasztása (központi belépő)."""
+def load_config(cfg_path: Path | str, remember: bool = True) -> dict:
+    """config.json betöltése + a stratégia-config beolvasztása (központi belépő).
+
+    `remember=False`: a háromutas mentés ALAPJÁT nem frissíti — a config-figyelő
+    (`core/config_watch`) így tölt, és az alapot csak akkor állítja át, amikor a
+    motor ténylegesen ALKALMAZZA az új configot (lásd ott)."""
     with open(cfg_path, encoding="utf-8") as f:
         text = f.read()
     cfg = json.loads(text)
+    if remember:
+        _ALAP[_alap_kulcs(cfg_path)] = json.loads(text)  # a háromutas mentéshez
     # Ismételt kulcs: a betöltés némán az UTOLSÓT tartja meg. Szólunk, mert a
     # fájlt olvasva a felhasználó az ELSŐT hiheti érvényesnek. Sosem gátol.
     try:
