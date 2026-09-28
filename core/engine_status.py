@@ -34,7 +34,7 @@ from pathlib import Path
 
 VERSION = 1
 FILE = "engine_status.json"
-PERIOD_SEC = 5.0
+PERIOD_SEC = 2.0                 # 4b/3 S2: a fő tábla is ebből él (volt 5 mp)
 STALE_SEC = 30.0                 # ennél régebbi kép = a motor nem ír → hibás
 
 NINCS, ALL, HIBAS, FUT = "nincs", "all", "hibas", "fut"
@@ -63,7 +63,7 @@ def _json_ok(v):
 
 
 def snapshot(ctx, profile, *, server_offset_sec=None, stopped=False,
-             now: float | None = None) -> dict:
+             now: float | None = None, optimizer_status=None) -> dict:
     """Az állapotkép a konzol KÖZÖS soraiból (`core.console_cmd`) — ugyanazt
     mutatja, amit a konzol és a TUI; külön lekérdezés nem készül."""
     from core import console_cmd as C
@@ -91,6 +91,11 @@ def snapshot(ctx, profile, *, server_offset_sec=None, stopped=False,
         "account": acc,
         "pairs": C.pair_rows(ctx),
         "positions": C.position_rows(ctx),
+        # ⚠ 4b/3 S2: a KIJELZÉS-TÜKÖR — a fő tábla egy másik processzben ebből
+        # tölti a saját dictjeit (core/engine_mirror). A típus-visszaállítás ott.
+        "dashboard": _tukor_dashboard(ctx),
+        "instrument_state": dict(getattr(ctx, "instrument_state", {}) or {}),
+        "optimizer_status": dict(optimizer_status or {}),
     })
 
 
@@ -99,6 +104,14 @@ def snapshot(ctx, profile, *, server_offset_sec=None, stopped=False,
 # a teszt első futásán azonnal előjött). Rövid várakozással újrapróbáljuk; az
 # olvasó is újrapróbál. Enélkül a fül rendszeresen „nincs adat"-ra villanna.
 _PROBA, _VAR = 6, 0.05
+
+
+def _tukor_dashboard(ctx) -> dict:
+    try:
+        from core import engine_mirror
+        return engine_mirror.dump_dashboard(getattr(ctx, "dashboard", {}) or {})
+    except Exception:
+        return {}
 
 
 def write(data: dict, p: Path) -> None:
@@ -120,8 +133,10 @@ class Publisher:
     `stopped: true` képet írja — így a felület a rendes leállást meg tudja
     különböztetni az összeomlástól."""
 
-    def __init__(self, ctx, profile, offset_fn=lambda: None, period=PERIOD_SEC):
+    def __init__(self, ctx, profile, offset_fn=lambda: None, period=PERIOD_SEC,
+                 optimizer_status=None):
         self.ctx, self.profile, self.offset_fn = ctx, profile, offset_fn
+        self.optimizer_status = optimizer_status
         self.period = period
         self._stop = threading.Event()
         self._t = threading.Thread(target=self._fut, daemon=True,
@@ -131,7 +146,8 @@ class Publisher:
     def _egyszer(self, stopped=False):
         try:
             write(snapshot(self.ctx, self.profile, server_offset_sec=self.offset_fn(),
-                           stopped=stopped), self.p)
+                           stopped=stopped, optimizer_status=self.optimizer_status),
+                  self.p)
         except Exception as ex:                      # a kereskedést sosem állítja meg
             import logging
             logging.getLogger(__name__).warning("motor-állapotkép írási hiba: %s", ex)

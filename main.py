@@ -345,7 +345,8 @@ def cmd_console():
     from core import broker_adapter, engine_status
     _kozzetevo = engine_status.Publisher(
         ctx, broker_adapter.current() or broker_profile_active(cfg),
-        offset_fn=mt5_connector._load_offset).start()
+        offset_fn=mt5_connector._load_offset,
+        optimizer_status=lt.optimizer_status).start()
 
     # ⚠ 0029 (4b): a VEZÉRLŐ CSATORNA — a felület Play/Stop/zárás/leállítás
     # parancsai a közös parancs-rétegen át. Távoli „quit": ugyanaz a rendes

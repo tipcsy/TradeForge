@@ -5161,6 +5161,27 @@ class DashboardWindow:
     # indítás, hangolatlan indulás jelzése, kivezetés-figyelmeztetés). A
     # szabályok mostantól EGY helyen vannak, itt csak a környezet készül el.
 
+    def start_remote_mirror(self, profile, period_ms: int = 1000) -> None:
+        """TÁVOLI MÓD (0029, 4b/3 S2): a fő tábla dictjei a KÜLÖN processzben
+        futó motor állapotképéből töltődnek (core/engine_mirror) — a tábla kódja
+        változatlan, ugyanazt a dictet olvassa. Az S5 átkapcsoló indítja; addig
+        senki nem hívja, a mai (közös memóriás) út érintetlen.
+
+        ⚠ A FŐSZÁLON fut (Tk `after`), tehát a tábla rajzolásával nem versenyez."""
+        from core import engine_mirror as _em, engine_status as _es
+
+        def _pumpa():
+            try:
+                _em.apply(_es.read(profile), self.dashboard_ref,
+                          self.instrument_state, self.optimizer_status)
+            except Exception as ex:
+                log.debug("távoli tükör: %s", ex)
+            try:
+                self.root.after(period_ms, _pumpa)
+            except tk.TclError:
+                pass
+        _pumpa()
+
     def _confirm(self, szoveg: str, cim: str = "", parent=None) -> bool:
         """IGEN/NEM kérdés a felhasználónak — EGY helyen az egész felületen.
 
