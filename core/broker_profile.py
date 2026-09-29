@@ -58,6 +58,9 @@ class BrokerProfile:
     # A felügyelő újraindítja-e a leállt motort (core/engine_supervisor).
     # Alapból NEM: egy kereskedő motor magától ne induljon, csak ha kérted.
     autostart: bool = False
+    # 0029/6a: a számla SAJÁT kockázati beállításai (a közös `trading` fölé) —
+    # csak a BROKER_TRADING_KEYS; üres → a közös érvényes.
+    trading: dict = field(default_factory=dict, compare=False, hash=False)
 
     # ── szimbólum-fordítás ────────────────────────────────────────────────
     def to_broker(self, sym):
@@ -103,6 +106,8 @@ def _profil(d: dict, mt5_cfg: dict | None = None, home: bool = True) -> BrokerPr
                  if str(k) != str(v)},
         home=home,
         autostart=bool(d.get("autostart", False)),
+        trading={k: v for k, v in (d.get("trading") or {}).items()
+                 if k in BROKER_TRADING_KEYS},
     )
 
 
@@ -175,6 +180,27 @@ def validate(cfg: dict | None) -> list[str]:
         if dup:
             hibak.append(f"{p.id}: több kanonikus név ugyanarra a bróker-szimbólumra: "
                          f"{', '.join(dup)}")
+    for d in (nyers or []):
+        if not isinstance(d, dict):
+            continue
+        tr = d.get("trading")
+        if tr is None:
+            continue
+        if not isinstance(tr, dict):
+            hibak.append(f"{d.get('id', '?')}: a 'trading' blokk nem objektum")
+            continue
+        ism = sorted(k for k in tr if k not in BROKER_TRADING_KEYS and not k.startswith("_"))
+        if ism:
+            hibak.append(f"{d.get('id', '?')}: a 'trading' blokkban nem számlánként "
+                         f"állítható kulcs: {', '.join(ism)} (csak: "
+                         f"{', '.join(BROKER_TRADING_KEYS)})")
+        for k in BROKER_TRADING_KEYS:
+            if k in tr:
+                try:
+                    if float(tr[k]) < 0:
+                        raise ValueError
+                except (TypeError, ValueError):
+                    hibak.append(f"{d.get('id', '?')}: trading.{k} érvénytelen: {tr[k]!r}")
     want = (cfg or {}).get("active_broker")
     if want and want not in [p.id for p in ps]:
         hibak.append(f"az active_broker ('{want}') nincs a profilok között")
@@ -239,11 +265,83 @@ def overlay_pairs(cfg: dict, profile: BrokerProfile) -> dict:
     return cfg
 
 
+# ── SZÁMLÁNKÉNTI KOCKÁZATI BEÁLLÍTÁSOK (0029, 6a) ──────────────────────────
+# A slot-keret, a kockázat % és a napi limit MINDEN motorban a saját számlájára
+# hat (saját egyenleg, saját P&L, saját slot-nyilvántartás) — de az ÉRTÉKEK
+# eddig közösek voltak. Egy kisebb számlán kevesebb slot / kisebb limit kell.
+# A bróker blokkjába írt `trading` ugyanúgy felülír, mint a pár-értékek, és a
+# mentés ugyanúgy visszaállít: a futás közbeni módosítás (slot ▲▼, limit) a
+# bróker SAJÁT blokkjába kerül, a közös `trading` érintetlen marad.
+BROKER_TRADING_KEYS = ("max_open_slots", "account_risk_pct",
+                       "daily_loss_limit_usd", "daily_loss_limit_pct")
+TRADING_OVERLAY_KEY = "_broker_trading_overlay"
+
+
+def overlay_trading(cfg: dict, profile: BrokerProfile) -> dict:
+    """Az aktív számla saját `trading` értékei a közös fölé (helyben). Üres
+    blokknál (pl. egy brókernél) nem csinál semmit. Visszaad: a cfg."""
+    if profile is None or not profile.trading or not isinstance(cfg, dict):
+        return cfg
+    tr = cfg.setdefault("trading", {})
+    orig, hianyzott = {}, []
+    for k, v in profile.trading.items():
+        if k in tr:
+            orig[k] = tr[k]
+        else:
+            hianyzott.append(k)
+        tr[k] = copy.deepcopy(v)
+    cfg[TRADING_OVERLAY_KEY] = {"id": profile.id,
+                                "applied": copy.deepcopy(profile.trading),
+                                "orig": orig, "missing": hianyzott}
+    return cfg
+
+
+def effective_trading(cfg: dict, profile: BrokerProfile) -> dict:
+    """Egy (akár NEM aktív) számla érvényes `trading` beállítása — a felület a
+    többi bróker limitjéhez használja. A cfg-t nem módosítja."""
+    alap = dict((cfg or {}).get("trading") or {})
+    ov = (cfg or {}).get(TRADING_OVERLAY_KEY)
+    if isinstance(ov, dict):          # az aktív felülírását előbb visszavesszük
+        for k in (ov.get("applied") or {}):
+            if k in (ov.get("orig") or {}):
+                alap[k] = ov["orig"][k]
+            else:
+                alap.pop(k, None)
+    alap.update(getattr(profile, "trading", None) or {})
+    return alap
+
+
+def _restore_trading(data: dict) -> None:
+    ov = data.pop(TRADING_OVERLAY_KEY, None)
+    if not isinstance(ov, dict):
+        return
+    pid = ov.get("id")
+    tr = data.get("trading")
+    if not isinstance(tr, dict):
+        return
+    # a bróker saját blokkja: a `brokers` listában, régi configban a `broker`
+    lista = data.get("brokers")
+    blokk = None
+    if isinstance(lista, list):
+        blokk = next((d for d in lista if isinstance(d, dict)
+                      and str(d.get("id") or "") == str(pid)), None)
+    if blokk is None and isinstance(data.get("broker"), dict):
+        blokk = data["broker"]
+    for k, betoltott in (ov.get("applied") or {}).items():
+        if k in tr and tr[k] != betoltott and blokk is not None:   # futás közben módosult
+            blokk.setdefault("trading", {})[k] = tr[k]
+        if k in (ov.get("orig") or {}):
+            tr[k] = ov["orig"][k]
+        elif k in (ov.get("missing") or []):
+            tr.pop(k, None)
+
+
 def restore_for_save(data: dict) -> dict:
     """Kiírás előtt (helyben): az otthoni értékek vissza, a futás közbeni
     módosítás a bróker SAJÁT blokkjába. A rejtett kulcs eltűnik."""
     if not isinstance(data, dict):
         return data
+    _restore_trading(data)
     ov = data.pop(OVERLAY_KEY, None)
     if not isinstance(ov, dict):
         return data

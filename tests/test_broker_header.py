@@ -113,7 +113,7 @@ check("a többi bróker pozícióin NINCS művelet (külön, csak-megtekintés b
 
 # ── 5d: számlák + pénznemenkénti összesítő; Telegram-előtag ─────────────
 from dashboard.broker_header import accounts_text                     # noqa: E402
-lim = lambda b: 90.0
+lim = {"activtrades": 90.0, "roboforex": 90.0}
 check("egy brókernél nincs számla-sor (a fejléc változatlan)",
       accounts_text([at], {"activtrades": {"balance": 946.64, "currency": "EUR"}}, lim) == "")
 x = accounts_text([at, rob], {

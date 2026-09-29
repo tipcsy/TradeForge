@@ -6451,7 +6451,6 @@ class DashboardWindow:
         from core import broker_profile as _bp, daily_limit as _dl, engine_status as _es
         from dashboard.broker_header import accounts_text
         profs = _bp.profiles(self.cfg)
-        tc = self.cfg.get("trading") or {}
         szamlak = {}
         if profs and self._balance > 0:
             szamlak[profs[0].id] = {"balance": self._balance,
@@ -6462,7 +6461,13 @@ class DashboardWindow:
             szamlak[_id] = {"balance": _a.get("balance"), "currency": _a.get("currency"),
                             "daily_pnl": _a.get("daily_pnl"),
                             "health": _es.health(_k or None)}
-        szoveg = accounts_text(profs, szamlak, lambda b: _dl.value(tc, b))
+        # 0029/6a: minden számla a SAJÁT érvényes `trading` beállításával
+        _tc_of = {p.id: _bp.effective_trading(self.cfg, p) for p in profs}
+        _lim = {}
+        for p in profs:
+            _b = (szamlak.get(p.id) or {}).get("balance")
+            _lim[p.id] = _dl.value(_tc_of[p.id], float(_b)) if _b is not None else 0.0
+        szoveg = accounts_text(profs, szamlak, _lim)
         if szoveg:
             if lbl.cget("text") != szoveg:
                 lbl.config(text=szoveg)

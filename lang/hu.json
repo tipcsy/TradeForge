@@ -152,6 +152,7 @@
   "engine_stop.not_running": "A motor nem fut ({tag}).",
   "engine_stop.no_answer": "A motor nem válaszolt ({tag}) — nézd meg a naplóját (engine_console.log).",
   "cfgchk.broker_profiles": "Bróker-profil hiba: {hiba}",
+  "cfgchk.shared_instrument": "{symbol}/{strategy}: több brókeren is LIVE ({tags}) — a közös korlát (trading.shared_max_per_instrument = {n}) a számlák között együtt legfeljebb {n} pozíciót enged (0 = kikapcsolva).",
   "cfgchk.daily_limit_pct_dead": "A napi limit a rögzített {usd}$ (daily_loss_limit_usd); a daily_loss_limit_pct={pct} MELLETTE HOLT — csak akkor lépne életbe, ha az usd 0/hiányzó lenne.",
   "cfgchk.empty_strategies_fallback": "{sym}: a `strategies` lista ÜRES, de a pár engedélyezett → némán az ALAPÉRTELMEZETT stratégia fut rajta ({default}). Az üres lista NEM kikapcsolás! Ha a pár tényleg ne fusson: `enabled: false`. Ha fusson, de mást: írd bele a `strategies` listába.",
   "cfgchk.incompatible_strategy": "A(z) {name} stratégia a mappában van, de NEM töltődött be: {reason}. Amíg ez így marad, sem a listákban nem jelenik meg, sem kereskedni nem tud.",

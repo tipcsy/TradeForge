@@ -624,6 +624,36 @@ def owns_closed_ticket(ticket: int, deal_magic: int, deal_symbol: str,
 _magic_to_strategy: dict[int, str] = {}
 
 
+def _shared_exposure_ok(trading_cfg: dict, symbol: str, signal: str) -> bool:
+    """0029/6b: a közös kitettségi korlát (core/shared_exposure) — True, ha
+    nyithat. Egy brókernél mindig True, MT5- és fájl-hívás nélkül. A bróker-
+    lista a futó motor configjából (`_run_cfg`)."""
+    from core import broker_profile as _bp
+    try:
+        profs = _bp.profiles(_run_cfg or {})
+    except Exception:
+        return True
+    if len(profs) <= 1:
+        return True
+    from core import broker_adapter as _ba, engine_status as _es
+    from core import shared_exposure as _se
+    limit = _se.limit_of(trading_cfg)
+    if limit <= 0:
+        return True
+    aktiv = getattr(_ba.current(), "id", None) or profs[0].id
+    masok, ismeretlen = _se.other_counts(profs, aktiv, _es.read)
+    if ismeretlen:
+        _warn_once(("shared_exposure_unknown", tuple(ismeretlen)),
+                   "közös korlát: %s motorjáról nincs állapotkép — a pozícióit "
+                   "nem látjuk (a korlát ezekre nem hat)", ", ".join(ismeretlen))
+    sajat = int((mt5_connector.open_positions_by_symbol().get(symbol) or {})
+                .get("count") or 0)
+    ok, ok_szoveg = _se.decide(symbol, sajat, masok, limit, len(profs))
+    if not ok:
+        log.info("⏭ %s %s jel — belépő KIHAGYVA: %s", symbol, signal, ok_szoveg)
+    return ok
+
+
 def strategy_of_ticket(ticket: int, magic=None) -> "str | None":
     """MELYIK stratégiához tartozik ez a pozíció? (A stratégia-hozzárendelés NEM az
     MT5-ben él — a magic utólag nem írható át.)
@@ -3247,6 +3277,12 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
             # feleannyi keretet fogyaszt — nem ugyanannyit.
             _risk_ccy = position_meta.risk_from_points(
                 lot, sl_points, _sizing_cfg.get("pv1_point", 0.0))
+            # ── KÖZÖS KITETTSÉGI KORLÁT a számlák között (0029/6b) ─────────
+            # Egy brókernél nem létezik; több brókernél a többi motor képéből
+            # (lásd core/shared_exposure — a nem futó motor utolsó képe is
+            # számít, mert a pozíciói a számlán nyitva vannak).
+            if not _shared_exposure_ok(trading_cfg, symbol, signal):
+                return
             slot_mgr.set_budget(balance, trading_cfg)
             if not slot_mgr.can_open_risk(_risk_ccy):
                 log.info("⏭ %s %s jel — belépő KIHAGYVA: nem fér a slot-keretbe "

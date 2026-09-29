@@ -528,8 +528,38 @@ def _check_broker_profiles(cfg: dict, out: list) -> None:
                             _t("cfgchk.broker_profiles", hiba=hiba)))
 
 
+def _check_shared_instruments(cfg: dict, out: list) -> None:
+    """0029/6b: ugyanaz az instrumentum + stratégia TÖBB brókeren is LIVE
+    (Tibi döntése: szabad, de figyelmeztetéssel — és a közös kitettségi korlát
+    egyszerre legfeljebb N pozíciót enged, lásd core/shared_exposure)."""
+    from core import broker_profile, shared_exposure
+    try:
+        profs = broker_profile.profiles(cfg)
+    except Exception:
+        return
+    if len(profs) <= 1:
+        return
+    n = shared_exposure.limit_of(cfg.get("trading"))
+    for sym, pc in (cfg.get("pairs") or {}).items():
+        if not isinstance(pc, dict):
+            continue
+        elok: dict = {}
+        for i, p in enumerate(profs):
+            rs = (pc.get("run_state") if i == 0
+                  else ((pc.get("brokers") or {}).get(p.id) or {}).get("run_state"))
+            for strat, allapot in (rs or {}).items():
+                if allapot == "live":
+                    elok.setdefault(strat, []).append(p.tag or p.id)
+        for strat, tags in sorted(elok.items()):
+            if len(tags) > 1:
+                out.append(_finding(WARN, "shared_instrument", _t(
+                    "cfgchk.shared_instrument", symbol=sym, strategy=strat,
+                    tags=", ".join(tags), n=n), symbol=sym))
+
+
 _CHECKS = (
     _check_broker_profiles,
+    _check_shared_instruments,
     _check_gate_preconditions,
     _check_stale_strategy_keys,
     _check_costs,

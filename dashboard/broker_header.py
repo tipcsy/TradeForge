@@ -82,13 +82,13 @@ def merge_closed(profiles, home_closed, snaps: dict) -> list:
     return out
 
 
-def accounts_text(profiles, accounts: dict, limit_of) -> str:
+def accounts_text(profiles, accounts: dict, limits) -> str:
     """A számlák sora a fejlécben — CSAK több brókernél (egynél: "").
 
     `accounts`: {id: {"balance", "currency", "daily_pnl", "health"}} — az
     otthonié a saját kapcsolatból, a többié a motorja állapotképéből.
-    `limit_of(balance) -> float`: a napi veszteséglimit az adott számlára
-    (a `trading` beállításból — százalékos módban számlánként más).
+    `limits`: {id: a napi veszteséglimit} — minden számla a SAJÁT érvényes
+    `trading` beállításából (0029/6a: számlánként felülírható).
 
     Soronként: „Act: 946.64 EUR · napi +0.00 · limit 90"; ha a motor nem fut,
     az állapota is („· áll"). Alul az ÖSSZESÍTŐ PÉNZNEMENKÉNT (Tibi döntése,
@@ -107,7 +107,7 @@ def accounts_text(profiles, accounts: dict, limit_of) -> str:
             continue
         bal, cur = float(a["balance"]), str(a.get("currency") or "")
         napi = float(a.get("daily_pnl") or 0.0)
-        lim = float(limit_of(bal) or 0.0)
+        lim = float((limits or {}).get(p.id) or 0.0)
         sor = _t("gui.acc.row", tag=tag, balance=f"{bal:,.2f}", cur=cur,
                  daily=f"{napi:+.2f}", limit=f"{lim:.0f}")
         if lim > 0 and napi <= -lim:

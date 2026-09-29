@@ -331,7 +331,8 @@ def write_config_file(data: dict, path: Path | str) -> str:
     # ⚠ 0029: egy nem-otthoni bróker betöltéskor felülírt instrumentum-értékei
     # (point_size, pv1, költség…) NEM kerülhetnek az otthoni helyre — lásd
     # core/broker_profile.restore_for_save. Másolaton, a hívó dictje érintetlen.
-    if isinstance(data, dict) and "_broker_overlay" in data:
+    if isinstance(data, dict) and ("_broker_overlay" in data
+                                   or "_broker_trading_overlay" in data):
         from core import broker_profile
         data = broker_profile.restore_for_save(copy.deepcopy(data))
     _k = _alap_kulcs(p)
@@ -594,6 +595,8 @@ def load_config(cfg_path: Path | str, remember: bool = True) -> dict:
     try:
         from core import broker_profile
         broker_profile.overlay_pairs(cfg, broker_profile.active(cfg))
+        # 0029/6a: a számla saját kockázati beállításai (a mentés visszaállítja)
+        broker_profile.overlay_trading(cfg, broker_profile.active(cfg))
     except ValueError as ex:
         log.error("bróker-profil hiba, az instrumentum-értékek az alapok: %s", ex)
     return cfg
