@@ -65,7 +65,9 @@ class HamisMT5:
         return ticks(a)
 
     def copy_rates_range(self, sym, tf, a, b):
-        self.gyertya.append((sym, tf))
+        self.gyertya.append((sym, tf, a, b))
+        if a.weekday() >= 5:                      # hetvege: nincs gyertya
+            return None
         t0 = int(dt.datetime(2026, 9, 22, 8, tzinfo=dt.timezone.utc).timestamp())
         rec = [(t0 + i * 60, 1.1, 1.2, 1.0, 1.1 + i * 1e-5, 5, 2, 0) for i in range(300)]
         return np.array(rec, dtype=[("time", "<i8"), ("open", "<f8"), ("high", "<f8"),
@@ -137,11 +139,19 @@ try:
                                     ("M15", "M1", "H1"))
         check("sikeres", ok, msg)
         check("EGYETLEN tick-keres sincs", not hamis.kerdes, f"{len(hamis.kerdes)} keres")
-        check("az M15 es az M1 nativ gyertyabol",
-              {tf for _, tf in hamis.gyertya} == {DH.TF_MAP["M15"], DH.TF_MAP["M1"]},
-              str(hamis.gyertya))
+        # ⚠ MERVE (CADJPY): napi darabokban a terminal KOZBEN is kiszolgal
+        # (a szonda max. 0,29 mp-et vart) -> csak az M1 jon a terminalbol
+        check("CSAK az M1 jon a terminalbol (az M15 es a H1 abbol epul)",
+              {tf for _, tf, _, _ in hamis.gyertya} == {DH.TF_MAP["M1"]},
+              str({tf for _, tf, _, _ in hamis.gyertya}))
+        check("minden keres legfeljebb EGY nap (a terminal kozben kiszolgal)",
+              all((b - a) <= dt.timedelta(days=1) for _, _, a, b in hamis.gyertya))
+        check("a hetvegi ures napok NEM allitjak le (a teljes idoszak lejott)",
+              min(a for _, _, a, _ in hamis.gyertya).date() <= dt.date(2026, 9, 21))
+        check("az M15 is letrejott (az M1-bol)",
+              (TMP / "data" / "m15" / "AUDJPY.parquet").exists())
         check("a H1 a helyi M1-bol (a terminalt NEM kerdeztuk)",
-              DH.TF_MAP["H1"] not in {tf for _, tf in hamis.gyertya}
+              DH.TF_MAP["H1"] not in {tf for _, tf, _, _ in hamis.gyertya}
               and (TMP / "data" / "h1" / "AUDJPY.parquet").exists())
         h1 = pd.read_parquet(TMP / "data" / "h1" / "AUDJPY.parquet")
         m1 = pd.read_parquet(TMP / "data" / "m1" / "AUDJPY.parquet")

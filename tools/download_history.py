@@ -257,8 +257,18 @@ def _fill_gap(out_file: Path, symbol: str, tf_str: str, end: datetime) -> bool:
 # Egy pár letöltése
 # ---------------------------------------------------------------------------
 
+_NATIV_SZUNET = 0.05
+
+
 def _native_bars(symbol: str, tf_str: str, start: datetime, end: datetime) -> pd.DataFrame:
-    """Natív gyertyák HAVI darabokban, a jelentől VISSZAFELÉ.
+    """Natív gyertyák NAPI darabokban, a jelentől VISSZAFELÉ, rövid szünetekkel.
+
+    ⚠ MÉRVE (2026-09-29, CADJPY, a terminál gyorsítótárában NEM volt): 2 év M1
+    napi darabokban ~30 mp alatt jött le a szerverről, és közben egy második
+    kliens 0,25 mp-enkénti ár-lekérdezése SOSEM várt 0,29 mp-nél többet — a
+    terminál végig kiszolgálta a motort és a felületet. (A TICK-előzmény nem
+    ilyen: az AUDJPY napi darabokban is 10 percre megállította — ezért az
+    alapból KI.)
 
     ⚠ A terminál csak a „Max. gyertya a charton" (terminal_info().maxbars,
     alapból 100 000) legutóbbi gyertyáját adja: 2 év M1 (~740 ezer) EGY
@@ -269,16 +279,28 @@ def _native_bars(symbol: str, tf_str: str, start: datetime, end: datetime) -> pd
     tf_mt5 = TF_MAP[tf_str]
     darabok = []
     veg = end
+    ures = 0                           # egymás utáni üres napok (hétvége, ünnep)
+    ho, t0 = veg.strftime("%Y-%m"), time.time()
     while veg > start:
-        eleje = max(start, (veg - timedelta(days=1)).replace(
-            day=1, hour=0, minute=0, second=0, microsecond=0))
+        # az aktuális nap eleje (az első kérés csak a mai részt kéri)
+        eleje = max(start, (veg - timedelta(microseconds=1)).replace(
+            hour=0, minute=0, second=0, microsecond=0))
         with _MT5_LOCK:
             raw = mt5.copy_rates_range(symbol, tf_mt5, eleje.replace(tzinfo=None),
                                        veg.replace(tzinfo=None))
-        if raw is None or len(raw) < 10:
-            break                      # innen visszafelé a terminál nem ad adatot
-        darabok.append(pd.DataFrame(raw))
+        if raw is None or len(raw) == 0:
+            ures += 1
+            if ures >= 10:             # innen visszafelé a terminál nem ad adatot
+                break
+        else:
+            ures = 0
+            darabok.append(pd.DataFrame(raw))
+        if eleje.strftime("%Y-%m") != ho:
+            # EGY sor / hónap (a szülő soronként olvassa)
+            print(f"      {ho} ... {tf_str}  ({time.time() - t0:.1f}s)", flush=True)
+            ho, t0 = eleje.strftime("%Y-%m"), time.time()
         veg = eleje
+        time.sleep(_NATIV_SZUNET)
     if not darabok:
         return pd.DataFrame()
     df = pd.concat(darabok[::-1])
@@ -411,7 +433,7 @@ def _history_lock(symbol: str):
 
 
 def _derive_from_m1(m1_file: Path, out_file: Path, symbol: str, tf_str: str) -> bool:
-    """`tf_str` (H1, H4, ...) a helyi M1 fájlból — terminál-hívás NÉLKÜL.
+    """`tf_str` (M15, H1, H4, ...) a helyi M1 fájlból — terminál-hívás NÉLKÜL.
     Mindig teljes újraépítés (tört másodperc), így nincs külön gap-fill út."""
     m1 = pd.read_parquet(m1_file)
     if m1.empty:
@@ -422,7 +444,8 @@ def _derive_from_m1(m1_file: Path, out_file: Path, symbol: str, tf_str: str) -> 
                      ("spread", "mean")):
         if col in m1.columns:
             agg[col] = how
-    bars = (m1[list(agg)].resample(DERIVED[tf_str], label="left", closed="left")
+    bars = (m1[list(agg)].resample(RESAMPLE.get(tf_str) or DERIVED[tf_str],
+                                   label="left", closed="left")
             .agg(agg).dropna(subset=["open"]))
     out_file.parent.mkdir(parents=True, exist_ok=True)
     bars.to_parquet(out_file)
@@ -507,11 +530,14 @@ def _ensure_history(symbol, cfg, tf_labels, status, ticks=False) -> tuple[bool, 
             log.warning("%s — tick-letöltés hiba: %s", symbol, ex)
 
     # az M1 (ha kell) a származtatott idősíkok ELŐTT — azok ebből épülnek
-    sorrend = sorted(tf_labels, key=lambda t: t in DERIVED)
+    sorrend = sorted(tf_labels, key=lambda t: t != "M1")
     for tf in sorrend:
         pq = _pq(tf)
         try:
-            if tf in DERIVED and _pq("M1").exists():
+            # ÚJ M15 is az M1-ből (egy letöltés, ugyanabból az adatból); a
+            # meglévő (tickből épült) M15 marad, és a szokott módon pótlódik
+            uj_m15 = tf == "M15" and not pq.exists() and not ticks
+            if (tf in DERIVED or uj_m15) and _pq("M1").exists():
                 _say(f"{tf} az M1-ből...")
                 _derive_from_m1(_pq("M1"), pq, symbol, tf)
             elif pq.exists():
