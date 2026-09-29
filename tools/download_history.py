@@ -359,6 +359,11 @@ def download_pair(symbol: str, tf_str: str, start: datetime, overwrite: bool, en
     log.info("%s %s — %d gyertya mentve -> %s  [%s -> %s]",
              symbol, tf_str, len(ohlcv), out_file.name,
              str(ohlcv.index[0])[:10], str(ohlcv.index[-1])[:10])
+    # ⚠ AUDUSD (2026-09-29): a terminál a szinkron ELEJÉN a legfrissebb napokra
+    # üreset adott → a fájl 4 nappal a jelen előtt ért véget. Most, hogy a
+    # szinkron lement, a hiányzó végét azonnal pótoljuk.
+    if end - ohlcv.index[-1].to_pydatetime() > timedelta(days=1):
+        _fill_gap(out_file, symbol, tf_str, end)
     return True
 
 

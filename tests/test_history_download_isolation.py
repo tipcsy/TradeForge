@@ -144,8 +144,14 @@ try:
         check("CSAK az M1 jon a terminalbol (az M15 es a H1 abbol epul)",
               {tf for _, tf, _, _ in hamis.gyertya} == {DH.TF_MAP["M1"]},
               str({tf for _, tf, _, _ in hamis.gyertya}))
-        check("minden keres legfeljebb EGY nap (a terminal kozben kiszolgal)",
-              all((b - a) <= dt.timedelta(days=1) for _, _, a, b in hamis.gyertya))
+        check("a tomeges letoltes minden kerese legfeljebb EGY nap",
+              all((b - a) <= dt.timedelta(days=1) for _, _, a, b in hamis.gyertya[:-1]))
+        # ⚠ AUDUSD (2026-09-29): a szinkron elejen a legfrissebb napok uresek
+        # voltak -> a fajl 4 nappal a jelen elott ert veget. A zaro potlas ezt hozza.
+        check("a lemaradt friss veget a letolto AZONNAL potolja",
+              hamis.gyertya[-1][2].date() == dt.date(2026, 9, 22)
+              and hamis.gyertya[-1][3] - hamis.gyertya[-1][2] > dt.timedelta(days=1),
+              str(hamis.gyertya[-1][2:]))
         check("a hetvegi ures napok NEM allitjak le (a teljes idoszak lejott)",
               min(a for _, _, a, _ in hamis.gyertya).date() <= dt.date(2026, 9, 21))
         check("az M15 is letrejott (az M1-bol)",
