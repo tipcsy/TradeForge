@@ -397,7 +397,11 @@ def cmd_console():
         mt5_connector.disconnect()
 
     ctx = console_cmd.live_context(cfg, CFG_PATH)
-    _interaktiv = bool(sys.stdin) and sys.stdin.isatty()
+    # ⚠ `--headless` (a felügyelő így indít): NINCS kezelő. Az `isatty()` erre
+    # nem elég — Windowson a NUL bemenetre is True-t ad, és a motor az első
+    # `input()` fájlvégénél leállt (demó-próba, 2026-09-29).
+    _interaktiv = (bool(sys.stdin) and sys.stdin.isatty()
+                   and "--headless" not in sys.argv)
 
     # ⚠ 0029 (4. lépés): a motor ÁLLAPOTKÉPE a saját számla-mappájába — a
     # felület (egy másik processz) ebből mutatja ezt a brókert. Csak ír, a

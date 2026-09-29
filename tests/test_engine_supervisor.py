@@ -58,9 +58,14 @@ SV.running = lambda p: False
 ok, kulcs = SV.start(ROBO, popen=hamis_popen)
 check("indul", ok and kulcs == "started")
 check("a parancs: main.py console --broker roboforex",
-      hivas["args"][2:] == ["console", "--broker", "roboforex"]
+      hivas["args"][2:] == ["console", "--broker", "roboforex", "--headless"]
       and hivas["args"][1].endswith("main.py"), str(hivas["args"]))
 check("nincs bemenet (nem var input()-ra)", hivas["stdin"] is not None)
+# ⚠ A DEMO-PROBA LELETE (2026-09-29): Windowson a NUL bemenetre az isatty() True,
+# a motor promptot irt, az input() fajlveget kapott, es a motor leallt. A
+# `--headless` kapcsolo nelkul ez visszajonne.
+check("--headless kapcsoloval indul (a Windows isatty-csapda ellen)",
+      "--headless" in hivas["args"])
 if sys.platform == "win32":
     check("LEVALASZTVA (a felulet bezarasa nem allitja le)", hivas["creationflags"] & 0x8)
 check("a kimenet a broker naplojaba", (TMP / "roboforex.log").exists())

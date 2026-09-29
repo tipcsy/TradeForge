@@ -50,7 +50,13 @@ def log_path(profile) -> Path:
 
 
 def command(profile) -> list:
-    return [sys.executable, str(ROOT / "main.py"), "console", "--broker", profile.id]
+    # ⚠ `--headless`: a motor bemenet nélkül fut (stdin = NUL). A konzol eddig
+    # `sys.stdin.isatty()`-ből döntötte el, van-e kezelő — de WINDOWSON a NUL
+    # eszközre ez True-t ad: a motor kiírta a promptot, az `input()` azonnal
+    # fájlvéget kapott, és a motor RENDBEN LEÁLLT, egy mp-cel az indulás után
+    # (az első demó-próba, 2026-09-29). A kapcsoló ezt egyértelművé teszi.
+    return [sys.executable, str(ROOT / "main.py"), "console", "--broker", profile.id,
+            "--headless"]
 
 
 def start(profile, popen=subprocess.Popen) -> tuple[bool, str]:
