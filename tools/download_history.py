@@ -55,6 +55,18 @@ RESAMPLE = {
     "M15": "15min",
 }
 
+# ⚠ A HELYI M1-BŐL ÉPÍTETT IDŐSÍKOK (2026-09-29): a H1-et (és a többi M1-nél
+# nagyobbat) NEM kérjük a terminálból — minden terminál-hívás a motor és a
+# felület hívásaival osztozik (egy GerMid50 H1 lekérés 5,6 mp-re megakasztotta
+# a felületet). Az M1 fájl úgyis megvan; ugyanabból az adatból épül, mint az
+# M15, és egy teljes újraépítés tört másodperc.
+DERIVED = {
+    "M5":  "5min",
+    "M30": "30min",
+    "H1":  "1h",
+    "H4":  "4h",
+}
+
 
 # ---------------------------------------------------------------------------
 # Segédfüggvények (tick -> bar konverzió)
@@ -245,7 +257,8 @@ def _fill_gap(out_file: Path, symbol: str, tf_str: str, end: datetime) -> bool:
 # Egy pár letöltése
 # ---------------------------------------------------------------------------
 
-def download_pair(symbol: str, tf_str: str, start: datetime, overwrite: bool, end: datetime) -> bool:
+def download_pair(symbol: str, tf_str: str, start: datetime, overwrite: bool, end: datetime,
+                  ticks: bool = True) -> bool:
     from core import broker_paths                 # 0029: az aktív bróker mappája
     out_dir = broker_paths.feed(ROOT / "data" / tf_str.lower())
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -261,7 +274,9 @@ def download_pair(symbol: str, tf_str: str, start: datetime, overwrite: bool, en
 
     # Teljes letöltés tick -> resample módszerrel — CSAK tick-építésű idősíkra;
     # a többi (H1) közvetlenül natív gyertyából.
-    if tf_str in RESAMPLE:
+    # `ticks=False`: az ensure_history új instrumentuma — lásd ott (a terminál
+    # tick-szinkronja a motort is megállítja)
+    if tf_str in RESAMPLE and ticks:
         log.info("%s %s — tick letöltés (%s -> %s)...", symbol, tf_str,
                  start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))
         ohlcv = _download_via_ticks(symbol, tf_str, start, end)
@@ -269,8 +284,8 @@ def download_pair(symbol: str, tf_str: str, start: datetime, overwrite: bool, en
         ohlcv = pd.DataFrame()
 
     if ohlcv.empty:
-        # Fallback: natív bar letöltés (ha tick adat nem elérhető, pl. crypto CFD-k)
-        log.info("%s %s — tick adat nem elérhető, próba natív barral...", symbol, tf_str)
+        # natív gyertya (tick nélkül kérve, vagy nincs tick adat, pl. kripto CFD)
+        log.info("%s %s — natív gyertya letöltés...", symbol, tf_str)
         tf_mt5 = TF_MAP[tf_str]
         with _MT5_LOCK:
             raw = mt5.copy_rates_range(
@@ -370,8 +385,29 @@ def _history_lock(symbol: str):
                 fh.close()
 
 
+def _derive_from_m1(m1_file: Path, out_file: Path, symbol: str, tf_str: str) -> bool:
+    """`tf_str` (H1, H4, ...) a helyi M1 fájlból — terminál-hívás NÉLKÜL.
+    Mindig teljes újraépítés (tört másodperc), így nincs külön gap-fill út."""
+    m1 = pd.read_parquet(m1_file)
+    if m1.empty:
+        return False
+    agg = {"open": "first", "high": "max", "low": "min", "close": "last"}
+    for col, how in (("volume", "sum"), ("tick_volume", "sum"),
+                     ("avg_spread", "mean"), ("close_spread", "last"),
+                     ("spread", "mean")):
+        if col in m1.columns:
+            agg[col] = how
+    bars = (m1[list(agg)].resample(DERIVED[tf_str], label="left", closed="left")
+            .agg(agg).dropna(subset=["open"]))
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+    bars.to_parquet(out_file)
+    log.info("%s %s — %d gyertya az M1-ből -> %s", symbol, tf_str, len(bars),
+             out_file.name)
+    return True
+
+
 def ensure_history(symbol: str, cfg: dict, tf_labels=("M15", "M1"),
-                   status=None) -> tuple[bool, str]:
+                   status=None, ticks: bool = False) -> tuple[bool, str]:
     """Gondoskodik róla, hogy `symbol`-nak legyen letöltött előzmény-adata.
 
     Meglévő parquet → gap feltöltés; hiányzó → TELJES letöltés a config
@@ -385,10 +421,10 @@ def ensure_history(symbol: str, cfg: dict, tf_labels=("M15", "M1"),
     Visszaad: (van-e MOST már adat minden kért TF-hez, rövid üzenet).
     """
     with _history_lock(symbol):
-        return _ensure_history(symbol, cfg, tf_labels, status)
+        return _ensure_history(symbol, cfg, tf_labels, status, ticks)
 
 
-def _ensure_history(symbol, cfg, tf_labels, status) -> tuple[bool, str]:
+def _ensure_history(symbol, cfg, tf_labels, status, ticks=False) -> tuple[bool, str]:
     def _say(msg):
         if status is not None:
             try:
@@ -417,9 +453,15 @@ def _ensure_history(symbol, cfg, tf_labels, status) -> tuple[bool, str]:
         "%Y-%m-%d",
     ).replace(tzinfo=timezone.utc)
 
-    # A hiányzó, tickből építhető idősíkok EGY letöltésből (lásd fent) — a
-    # többi (pl. H1) a régi, idősíkonkénti úton.
-    uj_tick = [tf for tf in tf_labels if not _pq(tf).exists() and tf in RESAMPLE]
+    # ⚠ ÚJ INSTRUMENTUM: NATÍV GYERTYA, NEM TICK (demó-próba, 2026-09-29).
+    # A terminál egyszerre EGY kérést szolgál ki: egy még nem látott szimbólum
+    # tick-előzményét előbb a szerverről szinkronizálja (Ger40: 110 mp az első
+    # hónap), és addig a motor ÉS a felület MT5-hívásai is állnak — a külön
+    # processz ezen nem segít (AUDJPY felvétele: a motor 3+ percig állt). A
+    # natív gyertya másodpercek; a pontos (tickből számolt) spread-oszlopot
+    # kifejezett kérésre (`ticks=True`, CLI `--ticks`) lehet pótolni.
+    uj_tick = ([tf for tf in tf_labels if not _pq(tf).exists() and tf in RESAMPLE]
+               if ticks else [])
     if uj_tick:
         _say(f"Letöltés {', '.join(uj_tick)}...")
         try:
@@ -439,19 +481,23 @@ def _ensure_history(symbol, cfg, tf_labels, status) -> tuple[bool, str]:
         except Exception as ex:
             log.warning("%s — tick-letöltés hiba: %s", symbol, ex)
 
-    for tf in tf_labels:
+    # az M1 (ha kell) a származtatott idősíkok ELŐTT — azok ebből épülnek
+    sorrend = sorted(tf_labels, key=lambda t: t in DERIVED)
+    for tf in sorrend:
         pq = _pq(tf)
         try:
-            if pq.exists():
+            if tf in DERIVED and _pq("M1").exists():
+                _say(f"{tf} az M1-ből...")
+                _derive_from_m1(_pq("M1"), pq, symbol, tf)
+            elif pq.exists():
                 if tf in uj_tick:
                     continue                      # most töltöttük le teljesen
                 _say(f"Gap-fill {tf}...")
                 _fill_gap(pq, symbol, tf, end_dt)
             else:
-                # tick nélküli szimbólum (kripto CFD) vagy nem tick-építésű
-                # idősík: a régi út (natív gyertya tartalékkal)
                 _say(f"Letöltés {tf}...")
-                download_pair(symbol, tf, hs, overwrite=False, end=end_dt)
+                download_pair(symbol, tf, hs, overwrite=False, end=end_dt,
+                              ticks=ticks)
         except Exception as ex:
             log.warning("%s %s — előzmény-letöltés hiba: %s", symbol, tf, ex)
 
@@ -529,6 +575,10 @@ def main():
     parser.add_argument(
         "--broker", default=None,
         help="0029: a bróker-profil azonosítója (több brókernél a jó terminál)")
+    parser.add_argument(
+        "--ticks", action="store_true",
+        help="új szimbólumnál a teljes TICK-előzmény (pontos spread) — lassú, és "
+             "a terminál szinkronja alatt a futó motort is megállítja")
     args = parser.parse_args()
 
     from strategy.settings import load_config
@@ -548,7 +598,8 @@ def main():
         def _st(msg):
             print(f"[státusz] {msg}", flush=True)
 
-        ok, msg = ensure_history(args.symbol, cfg, tf_labels, status=_st)
+        ok, msg = ensure_history(args.symbol, cfg, tf_labels, status=_st,
+                                 ticks=args.ticks)
         print(msg, flush=True)
         try:
             mt5_connector.disconnect()

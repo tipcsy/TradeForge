@@ -56,12 +56,21 @@ class HamisMT5:
 
     def __init__(self):
         self.kerdes = []
+        self.gyertya = []
 
     def copy_ticks_range(self, sym, a, b, flags):
         self.kerdes.append((a, b))
         if a.weekday() >= 5:                      # hetvege: nincs adat
             return np.array([], dtype=ticks(a).dtype)
         return ticks(a)
+
+    def copy_rates_range(self, sym, tf, a, b):
+        self.gyertya.append((sym, tf))
+        t0 = int(dt.datetime(2026, 9, 22, 8, tzinfo=dt.timezone.utc).timestamp())
+        rec = [(t0 + i * 60, 1.1, 1.2, 1.0, 1.1 + i * 1e-5, 5, 2, 0) for i in range(300)]
+        return np.array(rec, dtype=[("time", "<i8"), ("open", "<f8"), ("high", "<f8"),
+                                    ("low", "<f8"), ("close", "<f8"), ("tick_volume", "<u8"),
+                                    ("spread", "<i4"), ("real_volume", "<u8")])
 
     def symbol_select(self, s, e=True):
         return True
@@ -109,7 +118,7 @@ try:
     hamis.kerdes.clear()
     try:
         ok, msg = DH.ensure_history("NZDJPY", {"data": {"history_start_date": "2026-09-21"}},
-                                    ("M15", "M1"))
+                                    ("M15", "M1"), ticks=True)
         check("sikeres", ok, msg)
         check("mindket fajl letrejott (IDEIGLENES mappaban)",
               (TMP / "data" / "m15" / "NZDJPY.parquet").exists()
@@ -117,6 +126,30 @@ try:
         napok = (dt.datetime.now(dt.timezone.utc).date() - dt.date(2026, 9, 21)).days + 1
         check("a tickek EGYSZER jottek le (nem idosikonkent ujra)",
               len(hamis.kerdes) <= napok + 1, f"{len(hamis.kerdes)} keres, {napok} nap")
+
+        # ⚠ AUDJPY (demo-proba, 2026-09-29): a terminal EGY kerest szolgal ki; egy
+        # uj szimbolum tick-szinkronja alatt a motor 3+ percig allt. Alapbol
+        # tehat NATIV gyertya — tick-keres NELKUL.
+        print("\n== Uj szimbolum alapbol: nativ gyertya, tick NELKUL ==")
+        hamis.kerdes.clear()
+        hamis.gyertya.clear()
+        ok, msg = DH.ensure_history("AUDJPY", {"data": {"history_start_date": "2026-09-21"}},
+                                    ("M15", "M1", "H1"))
+        check("sikeres", ok, msg)
+        check("EGYETLEN tick-keres sincs", not hamis.kerdes, f"{len(hamis.kerdes)} keres")
+        check("az M15 es az M1 nativ gyertyabol",
+              {tf for _, tf in hamis.gyertya} == {DH.TF_MAP["M15"], DH.TF_MAP["M1"]},
+              str(hamis.gyertya))
+        check("a H1 a helyi M1-bol (a terminalt NEM kerdeztuk)",
+              DH.TF_MAP["H1"] not in {tf for _, tf in hamis.gyertya}
+              and (TMP / "data" / "h1" / "AUDJPY.parquet").exists())
+        h1 = pd.read_parquet(TMP / "data" / "h1" / "AUDJPY.parquet")
+        m1 = pd.read_parquet(TMP / "data" / "m1" / "AUDJPY.parquet")
+        check("a H1 = az M1 orankenti osszevonasa (5 ora, 300 perc)",
+              len(h1) == 5 and h1["close"].iloc[0] == m1["close"].iloc[59]
+              and h1["open"].iloc[1] == m1["open"].iloc[60], str(len(h1)))
+        check("...es a gyertya a nyitasi idejere cimkezve",
+              h1.index[0] == m1.index[0] and (h1.index[1] - h1.index[0]) == pd.Timedelta("1h"))
     finally:
         DH.ROOT, DH.mt5_connector.connect = _regi_root, _regi_conn
 finally:
