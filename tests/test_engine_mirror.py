@@ -75,19 +75,40 @@ check("tuple vissza (strategia-cella)", isinstance(g.strategy_cells["wpr_sma"]["
 check("instrument_state tukrozve", gui_inst == {"GOLD": "LIVE", "EURUSD": "STOPPED"})
 check("optimizer_status tukrozve", gui_opt == {"GOLD": "Opt 40%"})
 
-print("\n== Helyben frissit ==")
+print("\n== Helyben: CSAK a motor mezoit irja (demo-proba lelete, 2026-09-29) ==")
+# ⚠ Kozos processzben a FELULET szamolta az arat, a spreadet, a napi valtozast,
+# a leallitott parok elonezetet. Az elso tukor MINDEN mezot felulirt — a felulet
+# mezoi masodpercenkent visszanullazodtak, az arak uresek lettek.
+import time as _time                                                     # noqa: E402
 regi_obj = gui_dash["GOLD"]
-GOLD.bid = 2401.0
+regi_obj.bid = 9999.0                                     # a felulet sajat ara
+regi_obj.change_pct = 1.23                                # ... es szamolt mezoje
+regi_obj.strategy_cells = {"csilla": {"m15": ("elonezet", "muted")}}
+GOLD.position_pnl = 55.5                                  # motor-mezo valtozik
+GOLD.cells_ts = _time.time()                              # a motor cellai FRISSEK
+GOLD.strategy_cells = {"wpr_sma": {"m15": ("uj", "green")}}
 del ENGINE_DASH["EURUSD"]
 snap2 = json.loads(json.dumps(ES.snapshot(ctx, ROBO)))
 M.apply(snap2, gui_dash, gui_inst, gui_opt)
-check("ugyanaz az objektum, friss ertekkel", gui_dash["GOLD"] is regi_obj and regi_obj.bid == 2401.0)
+check("ugyanaz az objektum", gui_dash["GOLD"] is regi_obj)
+check("MOTOR-mezo frissult (pozicio-P&L)", regi_obj.position_pnl == 55.5)
+check("FELULET-mezo MEGMARADT (ar, napi valtozas)",
+      regi_obj.bid == 9999.0 and regi_obj.change_pct == 1.23)
+check("friss motor-cella atkerult (elo par)",
+      regi_obj.strategy_cells.get("wpr_sma", {}).get("m15") == ("uj", "green"))
+check("a felulet elonezeti cellaja (mas strategia) megmaradt",
+      regi_obj.strategy_cells.get("csilla", {}).get("m15") == ("elonezet", "muted"))
 check("a kikerult par torolve", "EURUSD" not in gui_dash)
+GOLD.cells_ts = _time.time() - 999                        # ELAVULT motor-cella
+GOLD.strategy_cells = {"wpr_sma": {"m15": ("regi", "red")}}
+M.apply(json.loads(json.dumps(ES.snapshot(ctx, ROBO))), gui_dash)
+check("ELAVULT motor-cella NEM irja felul",
+      regi_obj.strategy_cells["wpr_sma"]["m15"] == ("uj", "green"))
 
 print("\n== Verzio-elteres ==")
 snap3 = json.loads(json.dumps(snap2))
 snap3["dashboard"]["GOLD"]["uj_mezo_a_jovobol"] = 42
-check("ismeretlen mezo nem szall el", M.apply(snap3, gui_dash) and gui_dash["GOLD"].bid == 2401.0)
+check("ismeretlen mezo nem szall el", M.apply(snap3, gui_dash) and gui_dash["GOLD"].bid == 9999.0)
 elotte = dict(gui_dash)
 check("tukor nelkuli kep (regebbi motor) -> False", M.apply({"ts": 1}, gui_dash) is False)
 check("... es a felulet dictje erintetlen", gui_dash == elotte)

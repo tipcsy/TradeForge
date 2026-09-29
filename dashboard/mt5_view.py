@@ -108,17 +108,28 @@ def symbol_info(symbol):
         from core.broker_adapter import mt5
         return mt5.symbol_info(symbol)
     d = _tar(("info", symbol), INFO_TTL, lambda: _op("symbol_info", symbol=symbol))
-    return SimpleNamespace(**d) if d else None
+    if not d:
+        return None
+    d = dict(d)
+    # ⚠ A SPREAD NEM STATIKUS: a szimbólum-adat 5 percig tárolt, a spread viszont
+    # a friss tickből jön (a motor képe), különben 5 percig elavult spreadet
+    # mutatna a tábla és a spread-kapu cellája.
+    tk = (_snap().get("ticks") or {}).get(symbol)
+    if tk and d.get("point"):
+        d["spread"] = int(round((float(tk[1]) - float(tk[0])) / float(d["point"])))
+    return SimpleNamespace(**d)
 
 
 def symbol_info_tick(symbol):
+    """Távoli módban a motor képéből: `[bid, ask, tick-idő]` minden párra
+    (a demó-próbán derült ki, hogy az árakat eddig a FELÜLET töltötte)."""
     if not _remote():
         from core.broker_adapter import mt5
         return mt5.symbol_info_tick(symbol)
-    ds = (_snap().get("dashboard") or {}).get(symbol) or {}
-    if ds.get("bid") is None or ds.get("ask") is None:
+    tk = (_snap().get("ticks") or {}).get(symbol)
+    if not tk:
         return None
-    return SimpleNamespace(bid=ds["bid"], ask=ds["ask"])
+    return SimpleNamespace(bid=float(tk[0]), ask=float(tk[1]), time=int(tk[2]))
 
 
 def copy_rates_from_pos(symbol, timeframe, start, count):

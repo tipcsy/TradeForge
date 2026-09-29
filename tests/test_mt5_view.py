@@ -102,7 +102,10 @@ KEP = {"ts": time.time(), "stopped": False, "engine_alive": True, "mt5_ok": True
        "positions": [{"ticket": 1, "symbol": "GOLD"}],
        "positions_by_symbol": {"GOLD": {"count": 1}},
        "closed_today": [{"ticket": 8}],
-       "dashboard": {"GOLD": {"bid": 2400.1, "ask": 2400.4}}}
+       # ⚠ A demo-proba lelete (2026-09-29): az arakat EDDIG a felulet toltotte,
+       # a motor sosem — a motor most minden parra kozzeteszi [bid, ask, ido].
+       "ticks": {"GOLD": [2400.1, 2400.4, 1_790_000_000]},
+       "dashboard": {"GOLD": {"bid": None, "ask": None}}}
 _regi_read = ES.read
 ES.read = lambda p=None, **kw: dict(KEP, ts=time.time())
 _regi_req = CH.request
@@ -116,7 +119,11 @@ try:
     MV.symbol_info("GOLD")
     check("symbol_info gyorsitotarbol (nincs ujabb keres)", len(kert) == n)
     t = MV.symbol_info_tick("GOLD")
-    check("tick az allapotkep tukrebol", (t.bid, t.ask) == (2400.1, 2400.4))
+    check("tick a motor kozzetett tickjeibol (a dashboard-tukorben NINCS ar)",
+          t is not None and (t.bid, t.ask) == (2400.1, 2400.4), str(t))
+    check("a tick IDEJE is megvan (a nyitva/zarva allapothoz)", t.time == 1_790_000_000)
+    check("a spread a FRISS tickbol (nem az 5 percig tarolt szimbolum-adatbol)",
+          MV.symbol_info("GOLD").spread == 30, str(MV.symbol_info("GOLD").spread))
     check("ismeretlen par tickje: None", MV.symbol_info_tick("XYZ") is None)
     r = MV.copy_rates_from_pos("GOLD", 15, 0, 1)
     check("gyertyak numpy strukturalt tombkent (mint az MT5-e)",

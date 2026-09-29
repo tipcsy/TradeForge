@@ -419,7 +419,24 @@ def cmd_console():
             except Exception:
                 pass
             _extra_tar["t"] = _time.time()
-        return {"slots": {"free": slot_mgr.free(), "max": slot_mgr.max_slots},
+        # ⚠ TICKEK (demó-próba lelete, 2026-09-29): az árakat EDDIG A FELÜLET
+        # töltötte a saját MT5-hívásával — távoli módban a felület nem kapcsolódik,
+        # a motor pedig sosem töltötte → minden ár üres volt. A motor ezért
+        # minden párra közzéteszi: [bid, ask, tick-idő].
+        _ticks = {}
+        try:
+            from core.broker_adapter import mt5 as _m
+            with mt5_connector.MT5_LOCK:
+                for _s in (cfg.get("pairs") or {}):
+                    if not isinstance(cfg["pairs"].get(_s), dict):
+                        continue
+                    _tk = _m.symbol_info_tick(_s)
+                    if _tk:
+                        _ticks[_s] = [float(_tk.bid), float(_tk.ask), int(_tk.time)]
+        except Exception:
+            pass
+        return {"ticks": _ticks,
+                "slots": {"free": slot_mgr.free(), "max": slot_mgr.max_slots},
                 "margin_mode": mt5_connector._MARGIN_MODE,
                 "margin_mode_name": mt5_connector.margin_mode_name(),
                 "positions_by_symbol": mt5_connector.open_positions_by_symbol(),

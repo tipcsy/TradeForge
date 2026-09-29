@@ -89,13 +89,29 @@ def load_state(sym: str, d: dict, cls=None):
     return cls(**kw)
 
 
+# ⚠ A MOTOR MEZŐI (demó-próba lelete, 2026-09-29). Közös processzben a motor és
+# a felület UGYANAZT az objektumot írta, ki-ki a SAJÁT mezőit: az árakat, a
+# spreadet, a napi változást, a tőzsdei állapotot, a TF-együttállást és a
+# leállított párok előnézetét a FELÜLET számolta. Az első tükör MINDEN mezőt
+# felülírt a motor értékeivel — a felület számolt mezői másodpercenként
+# visszanullázódtak (és mivel a motor sosem töltötte az árat, üres lett).
+# A tükör ezért CSAK a motor mezőit írja; a stratégia-cellákat a felület mai
+# szabályával: a motoré nyer, ha FRISS a `cells_ts`.
+ENGINE_FIELDS = ("position_pnl", "pos_count", "risk_free", "risky", "rr_preset",
+                 "daily_pnl", "daily_by_strategy", "market_state",
+                 "market_state_color", "market_strategy", "atr_price", "cells_ts")
+CELLS_FRESH_SEC = 30.0
+
+
 def apply(snap: dict | None, dashboard: dict, instrument_state: dict | None = None,
-          optimizer_status: dict | None = None, cls=None) -> bool:
+          optimizer_status: dict | None = None, cls=None, now: float | None = None) -> bool:
     """Az állapotkép tükrözése a felület dictjeibe (helyben). False, ha a kép
     nem tartalmaz tükröt (régebbi motor)."""
+    import time as _time
     if not snap or not isinstance(snap.get("dashboard"), dict):
         return False
     cls = cls or _state_cls()
+    now = _time.time() if now is None else now
     uj = snap["dashboard"]
     for sym in list(dashboard):
         if sym not in uj:
@@ -103,11 +119,15 @@ def apply(snap: dict | None, dashboard: dict, instrument_state: dict | None = No
     for sym, d in uj.items():
         friss = load_state(sym, d, cls)
         regi = dashboard.get(sym)
-        if isinstance(regi, cls):
-            for f in dataclasses.fields(cls):
-                setattr(regi, f.name, getattr(friss, f.name))
-        else:
-            dashboard[sym] = friss
+        if not isinstance(regi, cls):
+            dashboard[sym] = friss                  # új pár: a motor teljes képe
+            continue
+        for f in ENGINE_FIELDS:
+            if hasattr(friss, f):
+                setattr(regi, f, getattr(friss, f))
+        if friss.cells_ts and now - float(friss.cells_ts) < CELLS_FRESH_SEC:
+            for s, cells in (friss.strategy_cells or {}).items():
+                regi.strategy_cells[s] = cells      # élő pár: a motor jelzés-állapota
     for cel, kulcs in ((instrument_state, "instrument_state"),
                        (optimizer_status, "optimizer_status")):
         if cel is not None and isinstance(snap.get(kulcs), dict):
