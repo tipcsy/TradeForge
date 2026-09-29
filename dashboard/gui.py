@@ -7016,6 +7016,12 @@ class DashboardWindow:
                         self._mt5_cache["positions"] = {}
                         self._mt5_cache["positions_detail"] = []
                         self._mt5_cache["closed_today"] = []
+                    # 0029/5: a TÖBBI bróker órája a motorja állapotképéből
+                    # (egy brókernél üres — nincs mit olvasni)
+                    from core import broker_profile as _bp, engine_status as _es
+                    self._mt5_cache["broker_offsets"] = {
+                        _p.id: (_es.read(_p) or {}).get("server_offset_sec")
+                        for _p in _bp.profiles(self.cfg)[1:]}
                 except Exception:
                     pass
                 _t.sleep(5)
@@ -7050,12 +7056,24 @@ class DashboardWindow:
         # A felső óra a BRÓKER-időt mutatja (a trade_hours/óra-kapu és a chart is
         # ezen jár), az UTC-t másodlagosként. Így nincs félreértés a no-trade
         # órákkal. Ha nincs kapcsolat/offset, csak UTC látszik.
-        _off = getattr(self, "_mt5_cache", {}).get("server_offset_sec")
-        if _off is not None:
-            bt = now + timedelta(seconds=_off)
-            self.lbl_time.config(text=_t("gui.hdr.clock", broker=f"{bt:%H:%M:%S}", utc=f"{now:%H:%M}"))
-        else:
-            self.lbl_time.config(text=now.strftime("%Y-%m-%d %H:%M:%S UTC"))
+        # 0029/5: brókerenként egy sor a SAJÁT szerveridejével („ActivTrades:
+        # 11:23", alatta „RoboForex: 11:23"); az otthonié a saját kapcsolatból,
+        # a többié a motorja állapotképéből (a háttér-lekérdező gyűjti).
+        _cache = getattr(self, "_mt5_cache", {})
+        try:
+            from core import broker_profile as _bp
+            from dashboard.broker_header import clock_text
+            _profs = _bp.profiles(self.cfg)
+            _offs = dict(_cache.get("broker_offsets") or {})
+            _offs[_profs[0].id] = _cache.get("server_offset_sec")
+            _szoveg = clock_text(_profs, _offs, now)
+        except Exception as _ex:
+            if not getattr(self, "_hdr_clock_warned", False):   # 1 mp-enként fut
+                self._hdr_clock_warned = True
+                log.warning("a fejléc-óra nem számolható: %s", _ex)
+            _szoveg = now.strftime("%Y-%m-%d %H:%M:%S UTC")
+        if self.lbl_time.cget("text") != _szoveg:
+            self.lbl_time.config(text=_szoveg)
 
         # ⚠ A licenc-mező IS frissül, mert a türelmi idő FOGY: egy induláskor
         # kiírt „még 51 óra" órákkal később hazugság volna. Olcsó — a mező csak
