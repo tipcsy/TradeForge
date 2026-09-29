@@ -961,6 +961,7 @@
   "gui.piac_eloszuro_piac_allapot": "Piac-előszűrő (piac-állapot osztályozó — 1/instrumentum):",
   "gui.portfolio_backtest": "  Portfólió Backtest  ",
   "gui.pos.build_add": "Ráépítés: +{lot} lot azonos irányba, az összes stop az átlagárra (≈{price}).",
+  "gui.pos.others_title": "Más brókerek pozíciói — csak megtekintés (kezelés: Brókerek fül)",
   "gui.pos.total": "Összes P&L: {pnl}$   |   {n} pozíció",
   "gui.pos.trail_dist": "Trailing követési távolság: {points} pont",
   "gui.pos.trail_tip": ".\nAkkor húz, ha a pozíció kockázatmentes ÉS az ár tovább mozdul a javadra; a bróker minimum stop-távolságánál közelebb nem tud húzni.\nMost: {state}\nKiszállás: {plan}",

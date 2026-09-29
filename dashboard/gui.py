@@ -2288,9 +2288,12 @@ class PositionsTab:
                  on_name_click, on_trail_dist, trail_default_provider,
                  point_provider, strategy_provider=None, on_build=None,
                  on_build_mode=None, on_strategy_click=None, on_exit_click=None,
-                 params_provider=None):
+                 params_provider=None, others_provider=None):
         self.parent = parent
         self.cfg = cfg
+        # 0029/5c: a TÖBBI bróker pozíciói — csak megtekintés (lásd
+        # dashboard/broker_header.other_positions)
+        self._others_provider = others_provider
         self._mono, self._small, self._header = mono_font, small_font, header_font
         self._positions_provider = positions_provider
         self._strategy_provider = strategy_provider
@@ -2354,7 +2357,51 @@ class PositionsTab:
         self._rows_frame = tk.Frame(p, bg=BG)
         self._rows_frame.pack(fill="both", expand=True, padx=2)
 
+        # 0029/5c: a többi bróker pozíciói — CSAK MEGTEKINTÉS (a gombok itt a
+        # ticket alapján az otthoni motornak szólnának). Egy brókernél üres és
+        # rejtett.
+        self._others_frame = tk.Frame(p, bg=BG)
+        self._others_lbl = tk.Label(self._others_frame, text=_t("gui.pos.others_title"),
+                                    bg=BG, fg=FG_GRAY, font=self._small, anchor="w")
+        self._others_lbl.pack(fill="x", padx=8, pady=(6, 2))
+        self._others_rows = tk.Frame(self._others_frame, bg=BG)
+        self._others_rows.pack(fill="x", padx=2)
+        self._others_sig = None
+
+    def _refresh_others(self):
+        others = (self._others_provider() if self._others_provider else None) or []
+        sig = tuple((o.get("broker"), o.get("ticket"), o.get("profit"), o.get("sl"),
+                     o.get("tp"), o.get("price_current")) for o in others)
+        if sig == self._others_sig:
+            return
+        self._others_sig = sig
+        for w in self._others_rows.winfo_children():
+            w.destroy()
+        if not others:
+            self._others_frame.pack_forget()
+            return
+        if not self._others_frame.winfo_ismapped():
+            self._others_frame.pack(fill="x", padx=2, pady=(4, 0))
+        for o in sorted(others, key=lambda x: (x.get("broker") or "", x.get("symbol") or "")):
+            dg = self._digits_provider(o.get("symbol"))
+            pnl = float(o.get("profit") or 0.0)
+            row = tk.Frame(self._others_rows, bg=BG_ROW_EVEN)
+            for txt, w, fg in ((o.get("broker") or "?", 5, FG_BLUE),
+                               (o.get("symbol") or "?", 10, FG_WHITE),
+                               (o.get("type") or "", 6,
+                                FG_GREEN if o.get("type") == "BUY" else FG_RED),
+                               (f'{float(o.get("volume") or 0):.2f}', 6, FG_WHITE),
+                               (_fmt_price(o.get("price_open"), dg), 10, FG_GRAY),
+                               (_fmt_price(o.get("price_current"), dg), 10, FG_WHITE),
+                               (_fmt_price(o.get("sl"), dg) if o.get("sl") else "—", 10, FG_GRAY),
+                               (_fmt_price(o.get("tp"), dg) if o.get("tp") else "—", 10, FG_GRAY),
+                               (f"{pnl:+.2f}", 12, FG_GREEN if pnl >= 0 else FG_RED)):
+                tk.Label(row, text=txt, width=w, anchor="center", bg=BG_ROW_EVEN, fg=fg,
+                         font=self._mono, padx=4, pady=2).pack(side="left")
+            row.pack(fill="x", padx=2)
+
     def refresh(self):
+        self._refresh_others()
         positions = self._positions_provider() or []
         seen = set()
         for pos in positions:
@@ -2527,6 +2574,8 @@ class ClosedTab:
 
         hdr = tk.Frame(p, bg=BG_HEADER)
         hdr.pack(fill="x", padx=2)
+        self._hdr = hdr
+        self._broker_hdr = None       # 0029/5c: csak több brókernél jön létre
         for key, label, w, anchor in CLOSED_COLUMNS:
             tk.Label(hdr, text=label, width=w, anchor=anchor, bg=BG_HEADER,
                      fg=FG_BLUE, font=self._header, padx=4, pady=3).pack(side="left")
@@ -2569,8 +2618,16 @@ class ClosedTab:
             closed = list(self._custom)
         else:
             closed = self._closed_provider() or []
+        # 0029/5c: több brókernél a sorok címkét hordoznak → „Bróker" oszlop elöl
+        if self._broker_hdr is None and any("broker" in c for c in closed):
+            self._broker_hdr = tk.Label(self._hdr, text=_t("col.broker"), width=5,
+                                        anchor="center", bg=BG_HEADER, fg=FG_BLUE,
+                                        font=self._header, padx=4, pady=3)
+            self._broker_hdr.pack(side="left", before=self._hdr.winfo_children()[0])
         for c in closed:
-            pid = c["position"]
+            # ⚠ a pozíció-azonosító csak EGY számlán egyedi — több brókernél a
+            # címke is a kulcs része
+            pid = (c.get("broker"), c["position"]) if "broker" in c else c["position"]
             if pid not in self._rows:
                 self._rows[pid] = self._make_row(c)   # nincs törlés — a lista csak bővül
 
@@ -2671,6 +2728,9 @@ class ClosedTab:
                          FG_GRAY if r is None else (FG_GREEN if r >= 0 else FG_RED)),
         }
         row = tk.Frame(self._rows_frame, bg=BG_ROW_EVEN)
+        if "broker" in c:                                  # 0029/5c
+            tk.Label(row, text=c["broker"], width=5, anchor="center", bg=BG_ROW_EVEN,
+                     fg=FG_BLUE, font=self._mono, padx=4, pady=2).pack(side="left")
         for key, label, w, anchor in CLOSED_COLUMNS:
             txt, fg = vals[key]
             tk.Label(row, text=txt, width=w, anchor=anchor, bg=BG_ROW_EVEN, fg=fg,
@@ -2858,14 +2918,15 @@ class DashboardWindow:
             on_build_mode=self._pos_build_mode,
             on_strategy_click=self._pos_strategy_menu,
             on_exit_click=self._pos_exit_menu,
-            params_provider=self._pos_params)
+            params_provider=self._pos_params,
+            others_provider=self._other_broker_positions)
 
         closed_frame = tk.Frame(self._notebook, bg=BG)
         # A fül neve már nem „(ma)": időszak is választható.
         self._notebook.add(closed_frame, text=_t("gui.lezart"))
         self._closed_tab = ClosedTab(
             closed_frame, mono_font, small_font, header_font,
-            closed_provider=lambda: getattr(self, "_mt5_cache", {}).get("closed_today", []),
+            closed_provider=self._closed_all_brokers,
             strategy_provider=self._strategy_by_magic,
             digits_provider=lambda sym: getattr(self.dashboard_ref.get(sym), "digits", 5),
             range_provider=self._closed_in_range,
@@ -3275,6 +3336,21 @@ class DashboardWindow:
                 on_gate=self._open_gate_dialog,
                 broker_tags=_btags(_profs, sym, _mas)))
         return rows
+
+    def _other_broker_positions(self) -> list:
+        """0029/5c: a többi bróker nyitott pozíciói (csak megtekintés)."""
+        from core import broker_profile as _bp
+        from dashboard.broker_header import other_positions
+        return other_positions(_bp.profiles(self.cfg),
+                               (getattr(self, "_mt5_cache", {}) or {}).get("broker_snaps") or {})
+
+    def _closed_all_brokers(self) -> list:
+        """0029/5c: a mai lezártak minden brókertől (egy brókernél változatlan)."""
+        from core import broker_profile as _bp
+        from dashboard.broker_header import merge_closed
+        _c = getattr(self, "_mt5_cache", {}) or {}
+        return merge_closed(_bp.profiles(self.cfg), _c.get("closed_today", []),
+                            _c.get("broker_snaps") or {})
 
     def _show_broker_column(self) -> bool:
         """0029/5b: a „Bróker” oszlop csak több brókernél látszik."""
@@ -7039,6 +7115,7 @@ class DashboardWindow:
                               for _p in _bp.profiles(self.cfg)[1:]}
                     self._mt5_cache["broker_offsets"] = {
                         _id: _k.get("server_offset_sec") for _id, _k in _kepek.items()}
+                    self._mt5_cache["broker_snaps"] = _kepek      # 5c
                     # 5b: melyik párt futtatja a többi bróker motorja
                     self._mt5_cache["broker_pairs"] = {
                         _id: {_x.get("symbol") for _x in (_k.get("pairs") or [])

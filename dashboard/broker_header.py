@@ -50,3 +50,33 @@ def broker_tags(profiles, symbol: str, other_pairs: dict) -> str:
         if i == 0 or symbol in (other_pairs.get(p.id) or ()):
             tags.append(p.tag or p.id)
     return ", ".join(tags)
+
+
+def other_positions(profiles, snaps: dict) -> list:
+    """A TÖBBI bróker nyitott pozíciói — címkével, CSAK MEGTEKINTÉSRE.
+
+    `snaps`: {id: a motor állapotképe}. A gombok (zárás, BE, trailing) a mai
+    felületen a ticket alapján az OTTHONI motornak szólnak; egy másik bróker
+    pozícióján rossz motornak mennének. Ezért itt nincs művelet: a kezelés a
+    Brókerek fülön, a saját motorján (Tibi döntése, 2026-09-30)."""
+    out = []
+    for p in list(profiles or [])[1:]:
+        for pos in (snaps.get(p.id) or {}).get("positions_detail") or []:
+            if isinstance(pos, dict):
+                out.append({**pos, "broker": p.tag or p.id})
+    return out
+
+
+def merge_closed(profiles, home_closed, snaps: dict) -> list:
+    """A lezárt kötések MINDEN brókertől — soronként a bróker címkéjével.
+
+    Egy brókernél a lista változatlan (címke nélkül): az oszlop sem látszik."""
+    ps = list(profiles or [])
+    if len(ps) <= 1:
+        return list(home_closed or [])
+    out = [{**c, "broker": ps[0].tag or ps[0].id} for c in (home_closed or [])]
+    for p in ps[1:]:
+        for c in (snaps.get(p.id) or {}).get("closed_today") or []:
+            if isinstance(c, dict):
+                out.append({**c, "broker": p.tag or p.id})
+    return out

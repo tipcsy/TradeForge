@@ -961,6 +961,7 @@
   "gui.piac_eloszuro_piac_allapot": "Market pre-filter (market state classifier — 1 per instrument)",
   "gui.portfolio_backtest": "  Portfolio Backtest  ",
   "gui.pos.build_add": "Add-on: +{lot} lot in the same direction, every stop to the average price (≈{price}).",
+  "gui.pos.others_title": "Other brokers' positions — view only (manage on the Brokers tab)",
   "gui.pos.total": "Total P&L: {pnl}$   |   {n} positions",
   "gui.pos.trail_dist": "Trailing follow distance: {points} points",
   "gui.pos.trail_tip": ".\nIt pulls when the position is risk-free AND the price keeps moving in your favour; it cannot pull closer than the broker's minimum stop distance.\nNow: {state}\nExit: {plan}",

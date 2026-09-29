@@ -440,6 +440,8 @@ def cmd_console():
                 "margin_mode": mt5_connector._MARGIN_MODE,
                 "margin_mode_name": mt5_connector.margin_mode_name(),
                 "positions_by_symbol": mt5_connector.open_positions_by_symbol(),
+                # 0029/5c: a felület a TÖBBI bróker pozícióit ebből mutatja
+                "positions_detail": mt5_connector.open_positions_detailed(),
                 "closed_today": _extra_tar["closed"]}
 
     _kozzetevo = engine_status.Publisher(

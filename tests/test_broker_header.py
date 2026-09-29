@@ -87,6 +87,30 @@ check("a felület átadja az oszlop kapcsolóját és a címkéket",
       '"show_broker": self._show_broker_column()' in _g
       and "broker_tags=_btags(_profs, sym, _mas)" in _g)
 
+# ── 5c: a többi bróker pozíciói és lezártjai ──────────────────────────
+from dashboard.broker_header import other_positions, merge_closed      # noqa: E402
+
+_snaps = {"roboforex": {"positions_detail": [{"ticket": 7, "symbol": "GOLD", "profit": 1.5}],
+                        "closed_today": [{"position": 7, "symbol": "GOLD", "pnl": 2.0}]}}
+op = other_positions([at, rob], _snaps)
+check("a többi bróker pozíciója a címkéjével jön", len(op) == 1 and op[0]["broker"] == "Rob", str(op))
+check("egy brókernél nincs „más” pozíció", other_positions([at], _snaps) == [])
+check("nem futó motor (nincs kép): üres, nem hiba", other_positions([at, rob], {}) == [])
+_home = [{"position": 7, "symbol": "EURUSD", "pnl": -1.0}]
+mc = merge_closed([at, rob], _home, _snaps)
+check("a lezártak minden brókertől, soronként címkével",
+      [(c["broker"], c["symbol"]) for c in mc] == [("Act", "EURUSD"), ("Rob", "GOLD")], str(mc))
+check("⚠ egy brókernél a lista VÁLTOZATLAN (nincs címke → nincs oszlop)",
+      merge_closed([at], _home, _snaps) == _home and "broker" not in merge_closed([at], _home, {})[0])
+check("⚠ ugyanaz a pozíció-azonosító két brókernél KÉT sor (a kulcs a címkét is tartalmazza)",
+      'pid = (c.get("broker"), c["position"]) if "broker" in c else c["position"]' in _g)
+_m = (ROOT / "main.py").read_text(encoding="utf-8")
+check("a motor a részletes pozíciólistát is közzéteszi",
+      '"positions_detail": mt5_connector.open_positions_detailed()' in _m)
+check("a többi bróker pozícióin NINCS művelet (külön, csak-megtekintés blokk)",
+      "others_provider=self._other_broker_positions" in _g
+      and "def _refresh_others(self):" in _g)
+
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")
 sys.exit(0 if all(results) else 1)
