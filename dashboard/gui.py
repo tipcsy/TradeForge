@@ -3160,7 +3160,9 @@ class DashboardWindow:
             collapsed={"pnl_mode": self._pnl_display(),
                        # Mely kapu-oszlopok látszanak és milyen sorrendben —
                        # a Beállítások „Kapuk" fülének eredménye.
-                       "gate_columns": _gate_layout.enabled_columns(self.cfg)},
+                       "gate_columns": _gate_layout.enabled_columns(self.cfg),
+                       # 0029/5b: „Bróker” oszlop — csak több brókernél
+                       "show_broker": self._show_broker_column()},
             on_close=self._handle_delete)
         self._live2.frame.pack(fill="both", expand=True)
 
@@ -3231,6 +3233,13 @@ class DashboardWindow:
         _market = {s: (getattr(ds, "session", None) or {})
                    for s, ds in (self.dashboard_ref or {}).items()}
 
+        # 0029/5b: brókercímkék — a többi bróker párjai a motorja állapotképéből
+        # (a háttér-lekérdező gyűjti; a fő szálon nincs fájlolvasás)
+        from core import broker_profile as _bp
+        from dashboard.broker_header import broker_tags as _btags
+        _profs = _bp.profiles(self.cfg)
+        _mas = (getattr(self, "_mt5_cache", {}) or {}).get("broker_pairs") or {}
+
         rows = []
         for sym in syms:
             ds = self.dashboard_ref.get(sym)
@@ -3263,8 +3272,15 @@ class DashboardWindow:
                 # ⚠ GENERIKUS kapu-megnyitó: a behelyezett (`.tfg`) kapuk
                 # cellái ezen keresztül nyílnak, mert rájuk nincs — és nem is
                 # lehet — külön `on_<kapu>` visszahívás a felületen.
-                on_gate=self._open_gate_dialog))
+                on_gate=self._open_gate_dialog,
+                broker_tags=_btags(_profs, sym, _mas)))
         return rows
+
+    def _show_broker_column(self) -> bool:
+        """0029/5b: a „Bróker” oszlop csak több brókernél látszik."""
+        from core import broker_profile as _bp
+        from dashboard.broker_header import show_broker_column
+        return show_broker_column(_bp.profiles(self.cfg))
 
     def _strategy_enabled(self, symbol: str, name: str) -> bool:
         """Engedélyezve van-e ez a stratégia EZEN a páron (`pairs.<sym>.strategies`)?
@@ -7019,9 +7035,15 @@ class DashboardWindow:
                     # 0029/5: a TÖBBI bróker órája a motorja állapotképéből
                     # (egy brókernél üres — nincs mit olvasni)
                     from core import broker_profile as _bp, engine_status as _es
+                    _kepek = {_p.id: (_es.read(_p) or {})
+                              for _p in _bp.profiles(self.cfg)[1:]}
                     self._mt5_cache["broker_offsets"] = {
-                        _p.id: (_es.read(_p) or {}).get("server_offset_sec")
-                        for _p in _bp.profiles(self.cfg)[1:]}
+                        _id: _k.get("server_offset_sec") for _id, _k in _kepek.items()}
+                    # 5b: melyik párt futtatja a többi bróker motorja
+                    self._mt5_cache["broker_pairs"] = {
+                        _id: {_x.get("symbol") for _x in (_k.get("pairs") or [])
+                              if isinstance(_x, dict)}
+                        for _id, _k in _kepek.items()}
                 except Exception:
                     pass
                 _t.sleep(5)

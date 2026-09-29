@@ -212,6 +212,7 @@
   "cli.viz_export.yyyy_mm_dd_a_nap_vegeig": "YYYY-MM-DD (through the END of the day)",
   "col.align": "Align",
   "col.badge": "Gates",
+  "col.broker": "Broker",
   "col.change": "Chg.%",
   "col.cost": "Cost",
   "col.ctrl": "Control",

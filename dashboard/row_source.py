@@ -277,7 +277,8 @@ def row_data(symbol: str, ds, strategy_names, cfg: dict = None,
              on_toggle=None, on_opt=None, on_stages=None,
              on_symbol=None, on_align=None, on_spread=None,
              on_market=None, on_momentum=None, on_cost=None,
-             on_volatility=None, open_charts=None, market_states=None) -> dict:
+             on_volatility=None, open_charts=None, market_states=None,
+             broker_tags: str = "") -> dict:
     """Egy instrumentum sorának adata a `live_row.LiveRow` számára.
 
     `ds`          — `live_trader.PairDashboardState` (duck-typed).
@@ -383,6 +384,7 @@ def row_data(symbol: str, ds, strategy_names, cfg: dict = None,
 
     return {
         "symbol": symbol,
+        "broker": broker_tags,          # 0029/5b: „Act, Rob” (több brókernél)
         "session": {"state": _ms.get("state", "unknown"),
                     "age_sec": _ms.get("age_sec"),
                     "tip": _ms.get("tip", "")},
@@ -452,6 +454,8 @@ def sort_value(row: dict, key: str):
     g = row.get("gates") or {}
     if key == "symbol":
         return (0, str(row.get("symbol") or ""))
+    if key == "broker":
+        return (0, str(row.get("broker") or ""))
     if key in ("bid", "ask", "change"):
         return _num(row.get({"change": "change_pct"}.get(key, key)))
     if key == "spread":

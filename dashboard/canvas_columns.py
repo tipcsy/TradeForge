@@ -15,7 +15,7 @@ azt a hívó adja be).
 
 A SORREND kötött, és pontosan a `live_row.build_header` sorrendje:
 
-    symbol bid ask change | [spread align market? momentum?] badge |
+    symbol [broker] bid ask change | [spread align market? momentum?] badge |
     stratégiánként: stages [position daily] ctrl |
     total_pos total_daily close
 """
@@ -36,7 +36,11 @@ def column_keys(strategies, collapsed: dict = None) -> list:
     külön oszlop, tehát a rendezés arra a blokkra hat, amelyikben kattintottál
     (a widget-tábla fejléce is így azonosítja őket)."""
     collapsed = collapsed or {}
-    keys = ["symbol", "bid", "ask", "change"]
+    keys = ["symbol"]
+    # 0029/5b: a „Bróker” oszlop az instrumentum UTÁN — csak több brókernél
+    if collapsed.get("show_broker"):
+        keys.append("broker")
+    keys += ["bid", "ask", "change"]
     if not collapsed.get("gates"):
         # A kapu-oszlopok KÖRE és SORRENDJE a configból jön (`dashboard.gate_order`,
         # a Beállítások „Kapuk" fülén szerkeszthető). Korábban be volt drótozva, és

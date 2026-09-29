@@ -75,7 +75,7 @@ _SESSION_FG = {
 def _pane_of(key: str) -> str:
     """Melyik rögzített sávba tartozik az oszlop: bal | közép | jobb.
     (A tábla fix–görgethető–fix elrendezésű, mint a mai widget-változat.)"""
-    if key in ("symbol", "bid", "ask", "change"):
+    if key in ("symbol", "broker", "bid", "ask", "change"):
         return "left"
     if key in ("total_pos", "total_daily", "close"):
         return "right"
@@ -106,6 +106,9 @@ def cells_for(d: dict, collapsed: dict, on_close=None) -> dict:
 
     out["symbol"] = Cell("symbol", text=d.get("symbol", "—"), font="mono_bold",
                          on_click=d.get("on_symbol"), tip=_tip)
+    if (collapsed or {}).get("show_broker"):
+        out["broker"] = Cell("broker", text=d.get("broker") or "—", font="small",
+                             fg=FG_GRAY)
     out["bid"] = Cell("bid", text=_lr._fmt_price(d.get("bid"), dg), anchor="e",
                       fg=_price_fg, tip=_tip)
     out["ask"] = Cell("ask", text=_lr._fmt_price(d.get("ask"), dg), anchor="e",

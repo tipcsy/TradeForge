@@ -62,6 +62,8 @@ _SAMPLE = {
     # A spread-hatar OTJEGYU is lehet: nagy point_size-u parnal az ATR-tag
     # ezresekben jon ki (a valodi dashboardon "370/100000" jelent meg).
     "symbol": ("mono_bold", "XXXXXXXX"), "bid": ("mono", "99999.99"),
+    # 0029/5b: brókercímkék („Act, Rob”) — három rövid címke fér ki
+    "broker": ("small", "XXX, XXX, XXX"),
     "ask": ("mono", "99999.99"), "change": ("mono", "+99.99%"),
     "spread": ("mono", "99999/99999"), "align": ("mono", "●●●●"),
     "market": ("small", "Sz.Bika"), "momentum": ("mono", "↑9.99"),
@@ -121,7 +123,7 @@ def pnl_mode(collapsed: dict) -> str:
 # ⚠ A SZAKSZAVAK NEM FORDULNAK: a „Symbol", „BID", „ASK", „Spread", „Opt"
 # minden nyelven ugyanaz — lefordítva nem világosabb, csak szokatlan.
 _HEADER_KEYS = {
-    "change": "col.change", "align": "col.align", "market": "col.market",
+    "change": "col.change", "broker": "col.broker", "align": "col.align", "market": "col.market",
     "momentum": "col.momentum", "cost": "col.cost",
     "volatility": "col.volatility", "badge": "col.badge",
     "sessions": "col.sessions",

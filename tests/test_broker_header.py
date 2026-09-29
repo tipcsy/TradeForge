@@ -54,7 +54,38 @@ _g = (ROOT / "dashboard" / "gui.py").read_text(encoding="utf-8")
 check("a felület ezt a függvényt használja", "clock_text(_profs, _offs, now)" in _g)
 check("a régi „Bróker {broker}” kulcs nincs már használatban", '"gui.hdr.clock"' not in _g)
 check("a többi bróker ideje a motorja állapotképéből",
-      '_es.read(_p) or {}).get("server_offset_sec")' in _g)
+      '_kepek = {_p.id: (_es.read(_p) or {})' in _g
+      and '_k.get("server_offset_sec")' in _g)
+
+# ── 5b: „Bróker" oszlop ────────────────────────────────────────────────
+from dashboard.broker_header import broker_tags, show_broker_column   # noqa: E402
+from dashboard import canvas_columns as CC, canvas_cells as CE, row_source as RS  # noqa: E402
+
+at.tag, rob.tag = "Act", "Rob"
+check("egy brókernél NINCS Bróker oszlop", not show_broker_column([at]))
+check("kettőnél van", show_broker_column([at, rob]))
+check("a címkék: az otthonié mindig, a másiké ahol a motorja futtatja",
+      broker_tags([at, rob], "GOLD", {"roboforex": {"GOLD"}}) == "Act, Rob"
+      and broker_tags([at, rob], "Ger40", {"roboforex": {"GOLD"}}) == "Act")
+check("nem futó (nincs állapotkép) második bróker: csak az otthoni",
+      broker_tags([at, rob], "GOLD", {}) == "Act")
+
+k1 = CC.column_keys(["wpr_sma"], {"gate_columns": []})
+k2 = CC.column_keys(["wpr_sma"], {"gate_columns": [], "show_broker": True})
+check("egy brókernél az oszlop-lista VÁLTOZATLAN", "broker" not in k1)
+check("több brókernél a „broker” a Symbol UTÁN áll",
+      k2[:3] == ["symbol", "broker", "bid"], str(k2[:4]))
+check("a Bróker oszlop a rögzített BAL sávban (a Symbollal együtt görög)",
+      CE.PANE_OF("broker") == "left")
+_d = {"symbol": "GOLD", "broker": "Act, Rob", "digits": 2}
+check("a cella a címkéket mutatja", CE.cells_for(_d, {"show_broker": True})["broker"].text == "Act, Rob")
+check("...egy brókernél nincs ilyen cella", "broker" not in CE.cells_for(_d, {}))
+check("rendezhető", RS.sort_value({"broker": "Act, Rob"}, "broker") == (0, "Act, Rob"))
+from dashboard import live_row as LR                                    # noqa: E402
+check("van szélesség-mintája (különben a layout elszáll)", "broker" in LR._SAMPLE)
+check("a felület átadja az oszlop kapcsolóját és a címkéket",
+      '"show_broker": self._show_broker_column()' in _g
+      and "broker_tags=_btags(_profs, sym, _mas)" in _g)
 
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")

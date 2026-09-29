@@ -30,3 +30,23 @@ def clock_text(profiles, offsets: dict, now_utc: datetime) -> str:
         return now_utc.strftime("%Y-%m-%d %H:%M:%S UTC")
     sorok[0] += _t("gui.hdr.clock_utc", utc=f"{now_utc:%H:%M}")
     return "\n".join(sorok)
+
+
+def show_broker_column(profiles) -> bool:
+    """A „Bróker” oszlop csak TÖBB brókernél látszik (Tibi: „ha csak egy
+    brókercég van, nem látszódik”)."""
+    return len(list(profiles or [])) > 1
+
+
+def broker_tags(profiles, symbol: str, other_pairs: dict) -> str:
+    """Az instrumentum soránál a brókerek címkéi („Act, Rob”).
+
+    Az OTTHONI brókeré mindig (a pár a configjában van); a többié csak akkor,
+    ha a motorja futtatja a párt (`other_pairs`: {id: a motor párjainak
+    halmaza, az állapotképéből}) — ahol az instrumentum nem létezik, ott a
+    bróker nem látszik."""
+    tags = []
+    for i, p in enumerate(profiles or []):
+        if i == 0 or symbol in (other_pairs.get(p.id) or ()):
+            tags.append(p.tag or p.id)
+    return ", ".join(tags)
