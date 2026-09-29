@@ -111,6 +111,51 @@ check("a többi bróker pozícióin NINCS művelet (külön, csak-megtekintés b
       "others_provider=self._other_broker_positions" in _g
       and "def _refresh_others(self):" in _g)
 
+# ── 5d: számlák + pénznemenkénti összesítő; Telegram-előtag ─────────────
+from dashboard.broker_header import accounts_text                     # noqa: E402
+lim = lambda b: 90.0
+check("egy brókernél nincs számla-sor (a fejléc változatlan)",
+      accounts_text([at], {"activtrades": {"balance": 946.64, "currency": "EUR"}}, lim) == "")
+x = accounts_text([at, rob], {
+    "activtrades": {"balance": 946.64, "currency": "EUR", "daily_pnl": 0, "health": "fut"},
+    "roboforex": {"balance": 1000.0, "currency": "USD", "daily_pnl": 3.2, "health": "fut"}}, lim)
+check("soronként egy számla, címkével", x.split(chr(10))[0].startswith("Act: 946.64 EUR")
+      and x.split(chr(10))[1].startswith("Rob: 1,000.00 USD"), x)
+check("⚠ eltérő pénznem: KÜLÖN összesítő (nincs átváltás, nincs keverés)",
+      "Σ EUR: 946.64" in x and "Σ USD: 1,000.00" in x, x)
+y = accounts_text([at, rob], {
+    "activtrades": {"balance": 500.0, "currency": "EUR", "daily_pnl": -10, "health": "fut"},
+    "roboforex": {"balance": 300.0, "currency": "EUR", "daily_pnl": 4, "health": "fut"}}, lim)
+check("azonos pénznem: összeadva", "Σ EUR: 800.00 · napi -6.00" in y or "Σ EUR: 800.00 · daily -6.00" in y, y)
+z = accounts_text([at, rob], {
+    "activtrades": {"balance": 500.0, "currency": "EUR", "daily_pnl": -95, "health": "fut"}}, lim)
+check("a limit elérése a SOR-ban látszik", "LIMIT" in z.split(chr(10))[0], z)
+check("nem futó / adat nélküli motor: állapot, nem hamis szám",
+      z.split(chr(10))[1].startswith("Rob: —"), z)
+check("egyetlen ismert számlánál nincs összesítő (nincs mit összeadni)", "Σ" not in z, z)
+w = accounts_text([at, rob], {
+    "activtrades": {"balance": 1.0, "currency": "EUR", "daily_pnl": 0, "health": "fut"},
+    "roboforex": {"balance": 1.0, "currency": "EUR", "daily_pnl": 0, "health": "hibas"}}, lim)
+check("a hibás motor állapota a sorában", w.split(chr(10))[1].endswith(("hibás", "faulty")), w)
+
+from core import telegram as TG                                        # noqa: E402
+_regi = TG._ELOTAG
+try:
+    TG.set_tag(None)
+    check("egy brókernél a Telegram-szöveg VÁLTOZATLAN", TG._elo("Jelzés") == "Jelzés")
+    TG.set_tag("Rob")
+    check("több brókernél a címke az elején", TG._elo("Jelzés") == "[Rob] Jelzés")
+    check("⚠ nem duplázódik (a hosszú képaláírás kétszer megy át)",
+          TG._elo(TG._elo("Jelzés")) == "[Rob] Jelzés")
+finally:
+    TG._ELOTAG = _regi
+_tg = (ROOT / "core" / "telegram.py").read_text(encoding="utf-8")
+check("mind a négy küldő út előtagol (send, kép, gombos, átírás)",
+      _tg.count("_elo(") >= 4 + 1, str(_tg.count("_elo(")))
+_mc = (ROOT / "core" / "mt5_connector.py").read_text(encoding="utf-8")
+check("a kapcsolódás állítja be (egy brókernél None)",
+      "_tg.set_tag(profil.tag if len(broker_profile.profiles(cfg)) > 1 else None)" in _mc)
+
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")
 sys.exit(0 if all(results) else 1)

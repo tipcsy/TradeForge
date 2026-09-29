@@ -2838,6 +2838,11 @@ class DashboardWindow:
         self.lbl_daily   = tk.Label(info_bar, text="Napi P&L: —",
                                     bg=BG_HEADER, fg=FG_WHITE, font=info_font)
         self.lbl_daily.pack(side="left", padx=10)
+        # 0029/5d: a számlák sora (egyenleg · napi · limit · állapot, alatta
+        # pénznemenkénti összesítő) — CSAK több brókernél látszik
+        self.lbl_accounts = tk.Label(self.root, text="", bg=BG_HEADER, fg=FG_GRAY,
+                                     font=info_font, anchor="w", justify="left")
+        self._accounts_info_bar = info_bar
         self.lbl_slots   = tk.Label(info_bar, text="Szabad slotok: —/—",
                                     bg=BG_HEADER, fg=FG_WHITE, font=info_font)
         self.lbl_slots.pack(side="left", padx=(10, 2))
@@ -6438,6 +6443,34 @@ class DashboardWindow:
         self._save_main_config()
         self._render_limit_label()
 
+    def _render_accounts_label(self, mt5_info, daily_total) -> None:
+        """0029/5d: a számlák sora — egy brókernél rejtett (a fejléc változatlan)."""
+        lbl = getattr(self, "lbl_accounts", None)
+        if lbl is None:
+            return
+        from core import broker_profile as _bp, daily_limit as _dl, engine_status as _es
+        from dashboard.broker_header import accounts_text
+        profs = _bp.profiles(self.cfg)
+        tc = self.cfg.get("trading") or {}
+        szamlak = {}
+        if profs and self._balance > 0:
+            szamlak[profs[0].id] = {"balance": self._balance,
+                                    "currency": (mt5_info or {}).get("currency", ""),
+                                    "daily_pnl": daily_total, "health": "fut"}
+        for _id, _k in ((getattr(self, "_mt5_cache", {}) or {}).get("broker_snaps") or {}).items():
+            _a = _k.get("account") or {}
+            szamlak[_id] = {"balance": _a.get("balance"), "currency": _a.get("currency"),
+                            "daily_pnl": _a.get("daily_pnl"),
+                            "health": _es.health(_k or None)}
+        szoveg = accounts_text(profs, szamlak, lambda b: _dl.value(tc, b))
+        if szoveg:
+            if lbl.cget("text") != szoveg:
+                lbl.config(text=szoveg)
+            if not lbl.winfo_ismapped():
+                lbl.pack(fill="x", padx=14, after=self._accounts_info_bar)
+        elif lbl.winfo_ismapped():
+            lbl.pack_forget()
+
     def _render_limit_label(self):
         """A napi limit címkéje — EGY igazságforrás.
 
@@ -7255,6 +7288,7 @@ class DashboardWindow:
             pnl_src = " (demo)"
         self.lbl_daily.config(text=f"Napi P&L: {daily_total:+.2f}${pnl_src}",
                               fg=FG_GREEN if daily_total >= 0 else FG_RED)
+        self._render_accounts_label(mt5_info, daily_total)
 
         # EGY igazságforrás: a címkét mindig a `_render_slots_label` rajzolja
         # (korábban itt egy második, formázásban eltérő út is volt).

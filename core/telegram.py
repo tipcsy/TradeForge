@@ -100,6 +100,23 @@ def _darabol(szoveg: str) -> list:
     return ki
 
 
+# 0029/5d: több brókernél az üzenet ELEJÉN a bróker címkéje („[Rob] …") —
+# különben két motor ugyanarról a párról jövő riasztása megkülönböztethetetlen.
+# A `mt5_connector.connect` állítja (egy brókernél üres → a szöveg változatlan).
+_ELOTAG = ""
+
+
+def set_tag(tag) -> None:
+    global _ELOTAG
+    _ELOTAG = f"[{tag}] " if tag else ""
+
+
+def _elo(szoveg: str) -> str:
+    s = str(szoveg or "")
+    # ⚠ idempotens: a hosszú képaláírás a `send`-en át MÁSODSZOR is ide jön
+    return s if (not _ELOTAG or s.startswith(_ELOTAG)) else _ELOTAG + s
+
+
 def send(token: str, chat_ids, szoveg: str) -> bool:
     """Üzenet MINDEN engedélyezett címzettnek. `True`, ha legalább egynek ment.
 
@@ -107,6 +124,7 @@ def send(token: str, chat_ids, szoveg: str) -> bool:
     botot, a másiknak akkor is menjen — és a hibáról legyen napló-nyom."""
     if isinstance(chat_ids, (str, int)):
         chat_ids = [chat_ids]
+    szoveg = _elo(szoveg)
     ment = False
     for cid in (chat_ids or ()):
         for darab in _darabol(str(szoveg)):
@@ -152,7 +170,7 @@ def send_photo(token: str, chat_id, png: bytes, caption: str = "",
     együtt, hogy a döntés a szöveg mellett legyen)."""
     if not token:
         return False
-    szoveg = str(caption or "")
+    szoveg = _elo(caption)
     hosszu = len(szoveg) > MAX_CAPTION
     fields = {"chat_id": str(chat_id),
               "caption": (szoveg.split(chr(10))[0][:MAX_CAPTION] if hosszu
@@ -195,7 +213,7 @@ def send_buttons(token: str, chat_id, szoveg: str, gombok) -> bool:
     ⚠ A `callback_data` legfeljebb 64 BÁJT lehet, ezért rövid azonosítót adunk
     át, nem a parancsot magát."""
     ok, res = _hivas(token, "sendMessage", {
-        "chat_id": str(chat_id), "text": str(szoveg)[:MAX_HOSSZ],
+        "chat_id": str(chat_id), "text": _elo(szoveg)[:MAX_HOSSZ],
         "disable_web_page_preview": True,
         "reply_markup": {"inline_keyboard": [[
             {"text": str(f), "callback_data": str(a)[:64]} for f, a in gombok]]},
@@ -220,6 +238,7 @@ def edit_message(token: str, chat_id, message_id: int, szoveg: str) -> bool:
 
     ⚠ EZ AKADÁLYOZZA MEG A KÉTSZERI VÉGREHAJTÁST: a megnyomott gomb helyén
     onnantól az EREDMÉNY áll, tehát nincs mit még egyszer megnyomni."""
+    szoveg = _elo(szoveg)
     ok, res = _hivas(token, "editMessageText", {
         "chat_id": str(chat_id), "message_id": int(message_id),
         "text": str(szoveg)[:MAX_HOSSZ]})

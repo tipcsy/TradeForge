@@ -107,6 +107,9 @@ def connect(cfg: dict) -> bool:
     want_login  = int(broker["login"])
     want_server = broker["server"]
     broker_adapter.configure(profil)
+    # 0029/5d: több brókernél a Telegram-üzenet elején a bróker címkéje
+    from core import telegram as _tg
+    _tg.set_tag(profil.tag if len(broker_profile.profiles(cfg)) > 1 else None)
 
     with MT5_LOCK:
         # Robusztus út: path + portable + login/password/server EGYSZERRE →

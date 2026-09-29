@@ -80,3 +80,47 @@ def merge_closed(profiles, home_closed, snaps: dict) -> list:
             if isinstance(c, dict):
                 out.append({**c, "broker": p.tag or p.id})
     return out
+
+
+def accounts_text(profiles, accounts: dict, limit_of) -> str:
+    """A számlák sora a fejlécben — CSAK több brókernél (egynél: "").
+
+    `accounts`: {id: {"balance", "currency", "daily_pnl", "health"}} — az
+    otthonié a saját kapcsolatból, a többié a motorja állapotképéből.
+    `limit_of(balance) -> float`: a napi veszteséglimit az adott számlára
+    (a `trading` beállításból — százalékos módban számlánként más).
+
+    Soronként: „Act: 946.64 EUR · napi +0.00 · limit 90"; ha a motor nem fut,
+    az állapota is („· áll"). Alul az ÖSSZESÍTŐ PÉNZNEMENKÉNT (Tibi döntése,
+    2026-09-30): eltérő pénznemű számlákat nem adunk össze, átváltás nincs."""
+    ps = list(profiles or [])
+    if len(ps) <= 1:
+        return ""
+    sorok, ossz = [], {}
+    for p in ps:
+        a = accounts.get(p.id) or {}
+        tag = p.tag or p.id
+        allapot = a.get("health")
+        if a.get("balance") is None:
+            sorok.append(_t("gui.acc.row_none", tag=tag,
+                            state=_t("gui.acc.state." + (allapot or "nincs"))))
+            continue
+        bal, cur = float(a["balance"]), str(a.get("currency") or "")
+        napi = float(a.get("daily_pnl") or 0.0)
+        lim = float(limit_of(bal) or 0.0)
+        sor = _t("gui.acc.row", tag=tag, balance=f"{bal:,.2f}", cur=cur,
+                 daily=f"{napi:+.2f}", limit=f"{lim:.0f}")
+        if lim > 0 and napi <= -lim:
+            sor += _t("gui.acc.limit_hit")
+        if allapot and allapot != "fut":
+            sor += _t("gui.acc.state_suffix", state=_t("gui.acc.state." + allapot))
+        sorok.append(sor)
+        o = ossz.setdefault(cur, [0.0, 0.0, 0])
+        o[0] += bal
+        o[1] += napi
+        o[2] += 1
+    if sum(v[2] for v in ossz.values()) > 1:
+        sorok.append("   ".join(
+            _t("gui.acc.total", cur=c, balance=f"{v[0]:,.2f}", daily=f"{v[1]:+.2f}")
+            for c, v in sorted(ossz.items())))
+    return "\n".join(sorok)
