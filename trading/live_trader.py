@@ -4228,6 +4228,10 @@ def run(cfg: dict, slot_mgr: SlotManager):
     _uj_lock = threading.Lock()
     _uj_folyamatban: set = set()      # letöltés alatt (ne induljon kétszer)
     _uj_kesz: dict = {}               # letöltés kész → bekötésre vár
+    # ⚠ sikertelen letöltés után VÁRUNK az újrapróbával — különben a kör
+    # 10 mp-enként újraindította (GBPJPY, demó-próba: ERROR-sorozat a naplóban)
+    _uj_hiba: dict = {}               # szimbólum → legközelebbi próba ideje
+    _UJ_UJRAPROBA_MP = 600
 
     def _uj_par_elokeszit(symbol: str, pair_cfg: dict) -> None:
         """Háttérszál: előzmény-letöltés, majd a pár átadása bekötésre."""
@@ -4245,7 +4249,10 @@ def run(cfg: dict, slot_mgr: SlotManager):
                 # felhasználó azt látná, hogy „felvettem, de nem csinál semmit".
                 log.error("%s — az előzmény-letöltés nem sikerült (%s). A pár "
                           "NEM indul el; ellenőrizd, hogy a bróker ismeri-e a "
-                          "szimbólumot.", symbol, msg)
+                          "szimbólumot. Újrapróba %d perc múlva.", symbol, msg,
+                          _UJ_UJRAPROBA_MP // 60)
+                with _uj_lock:
+                    _uj_hiba[symbol] = time.time() + _UJ_UJRAPROBA_MP
                 return
             with _uj_lock:
                 _uj_kesz[symbol] = pair_cfg
@@ -4621,7 +4628,9 @@ def run(cfg: dict, slot_mgr: SlotManager):
                     if not isinstance(_upc, dict) or _uj in all_pairs:
                         continue
                     with _uj_lock:
-                        if _uj in _uj_folyamatban:
+                        # a kész, de még be nem kötött pár (_uj_kesz) se
+                        # induljon újra (GBPJPY: fölösleges második letöltés)
+                        if _uj in _uj_folyamatban or _uj in _uj_kesz or                                 time.time() < _uj_hiba.get(_uj, 0):
                             continue
                         _uj_folyamatban.add(_uj)
                     log.info("%s — ÚJ instrumentum a configban; előzmény "
@@ -4636,6 +4645,8 @@ def run(cfg: dict, slot_mgr: SlotManager):
                     _behuzando = list(_uj_kesz.items())
                     _uj_kesz.clear()
                 for _uj, _upc in _behuzando:
+                    if _uj in all_pairs:
+                        continue    # ⚠ már bekötve: újra-init törölné az állapotát
                     # ⚠ A `cfg["pairs"]`-be is BE KELL tenni: rengeteg segéd a
                     # TELJES configból keresi ki a pár beállításait, és e nélkül
                     # a bekötött pár némán hiányos maradna.

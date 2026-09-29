@@ -79,13 +79,21 @@ check("a folyamatban-jelölés MINDIG feloldódik (finally)",
 
 # ── 3. Nem indul kétszer ugyanarra a párra ─────────────────────────────
 check("⚠ ugyanarra a párra nem indul két letöltés",
-      "if _uj in _uj_folyamatban:" in _lt and "continue" in _lt)
+      "if _uj in _uj_folyamatban or _uj in _uj_kesz or" in _lt and "continue" in _lt)
+# ⚠ 2026-09-29 (GBPJPY): a sikertelen letöltést a kör 10 mp-enként újraindította
+check("⚠ sikertelen letöltés után VÁRUNK az újrapróbával",
+      "time.time() < _uj_hiba.get(_uj, 0)" in _lt
+      and "_uj_hiba[symbol] = time.time() + _UJ_UJRAPROBA_MP" in _szal)
 check("a két szál KÖZÖS zárral szinkronizál", "_uj_lock" in _lt)
 
 # ── 4. A bekötés teljes: cfg, all_pairs, stratégiák ───────────────────
 _k = _lt.find("for _uj, _upc in _behuzando:")
 _be = _lt[_k:_k + 700]
 check("a bekötés a KÉSZ párokon megy végig", _k > 0)
+# ⚠ 2026-09-29 (AUDJPY, GBPJPY): a pár KÉTSZER kötődött be — egy futó pár
+# újra-inicializálása nyitott pozíciónál az állapotát törölné
+check("⚠ a már bekötött pár NEM kötődik be újra",
+      "if _uj in all_pairs:\n                        continue" in _be)
 check("⚠ a `cfg[\"pairs\"]`-be is bekerül (különben némán hiányos volna)",
       'cfg.setdefault("pairs", {})[_uj] = _upc' in _be)
 check("...az `all_pairs`-be is", "all_pairs[_uj] = _upc" in _be)

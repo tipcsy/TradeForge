@@ -257,6 +257,43 @@ def _fill_gap(out_file: Path, symbol: str, tf_str: str, end: datetime) -> bool:
 # Egy pár letöltése
 # ---------------------------------------------------------------------------
 
+def _native_bars(symbol: str, tf_str: str, start: datetime, end: datetime) -> pd.DataFrame:
+    """Natív gyertyák HAVI darabokban, a jelentől VISSZAFELÉ.
+
+    ⚠ A terminál csak a „Max. gyertya a charton" (terminal_info().maxbars,
+    alapból 100 000) legutóbbi gyertyáját adja: 2 év M1 (~740 ezer) EGY
+    kérésben `Invalid params` → a GBPJPY M1 üres maradt (demó-próba,
+    2026-09-29). Visszafelé haladva ott állunk meg, ahol a terminál már nem ad
+    adatot — a kapott szakasz FOLYTONOS (a régi hónapokból jövő 1-1 gyertya
+    lyukas előzményt adna)."""
+    tf_mt5 = TF_MAP[tf_str]
+    darabok = []
+    veg = end
+    while veg > start:
+        eleje = max(start, (veg - timedelta(days=1)).replace(
+            day=1, hour=0, minute=0, second=0, microsecond=0))
+        with _MT5_LOCK:
+            raw = mt5.copy_rates_range(symbol, tf_mt5, eleje.replace(tzinfo=None),
+                                       veg.replace(tzinfo=None))
+        if raw is None or len(raw) < 10:
+            break                      # innen visszafelé a terminál nem ad adatot
+        darabok.append(pd.DataFrame(raw))
+        veg = eleje
+    if not darabok:
+        return pd.DataFrame()
+    df = pd.concat(darabok[::-1])
+    df["time"] = pd.to_datetime(df["time"], unit="s", utc=True)
+    df = df.set_index("time")
+    df = df[~df.index.duplicated(keep="last")].sort_index()
+    if df.index[0] - start > timedelta(days=7):
+        log.warning("%s %s — natív gyertya CSAK %s-tól (a terminál 'Max. gyertya a "
+                    "charton' korlátja); a teljes előzményhez: MT5 Eszközök → "
+                    "Beállítások → Chartok → Korlátlan, vagy --ticks.",
+                    symbol, tf_str, str(df.index[0])[:10])
+    return df[["open", "high", "low", "close", "tick_volume"]].rename(
+        columns={"tick_volume": "volume"})
+
+
 def download_pair(symbol: str, tf_str: str, start: datetime, overwrite: bool, end: datetime,
                   ticks: bool = True) -> bool:
     from core import broker_paths                 # 0029: az aktív bróker mappája
@@ -286,20 +323,8 @@ def download_pair(symbol: str, tf_str: str, start: datetime, overwrite: bool, en
     if ohlcv.empty:
         # natív gyertya (tick nélkül kérve, vagy nincs tick adat, pl. kripto CFD)
         log.info("%s %s — natív gyertya letöltés...", symbol, tf_str)
-        tf_mt5 = TF_MAP[tf_str]
-        with _MT5_LOCK:
-            raw = mt5.copy_rates_range(
-                symbol, tf_mt5,
-                start.replace(tzinfo=None),
-                end.replace(tzinfo=None),
-            )
-        if raw is not None and len(raw) > 0:
-            df_fb = pd.DataFrame(raw)
-            df_fb["time"] = pd.to_datetime(df_fb["time"], unit="s", utc=True)
-            df_fb = df_fb.set_index("time")
-            ohlcv = df_fb[["open", "high", "low", "close", "tick_volume"]].rename(
-                columns={"tick_volume": "volume"}
-            )
+        ohlcv = _native_bars(symbol, tf_str, start, end)
+        if not ohlcv.empty:
             log.info("%s %s — natív bar fallback: %d gyertya [%s → %s]",
                      symbol, tf_str, len(ohlcv),
                      str(ohlcv.index[0])[:10], str(ohlcv.index[-1])[:10])
@@ -600,11 +625,13 @@ def main():
 
         ok, msg = ensure_history(args.symbol, cfg, tf_labels, status=_st,
                                  ticks=args.ticks)
-        print(msg, flush=True)
         try:
             mt5_connector.disconnect()
         except Exception:
             pass
+        # ⚠ az eredmény az UTOLSÓ sor — a szülő ezt teszi a hibaüzenetbe (előtte
+        # a „MT5 kapcsolat lezárva." került oda, az ok helyett)
+        print(msg, flush=True)
         sys.exit(0 if ok else 1)
 
     if not mt5_connector.connect(cfg):
