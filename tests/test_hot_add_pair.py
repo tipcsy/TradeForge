@@ -59,8 +59,17 @@ check("a szálnak SAJÁT neve van (a naplóban felismerhető)",
       'name=f"UjPar-' in _lt)
 
 _j = _lt.find("def _uj_par_elokeszit(")
-_szal = _lt[_j:_j + 1400]
-check("a háttérszál az ensure_history-t hívja", "ensure_history(" in _szal)
+# a függvény TELJES teste (a következő `def`-ig) — nem egy fix karakterszám,
+# ami egy hosszabb magyarázó komment után csendben kevés lenne
+_k = _lt.find("\n    def ", _j + 10)
+_szal = _lt[_j:_k if _k > 0 else _j + 4000]
+# ⚠ 2026-09-29 (demó-próba): a letöltés KÜLÖN PROCESSZBEN — a motor processzében
+# a tick-letöltés az MT5-zárat, a gyertya-építés a GIL-t fogta, és a motor ÉS a
+# felület 5+ percre megfagyott (NZDJPY felvétele).
+check("a háttérszál a letöltést KÜLÖN PROCESSZBEN indítja",
+      "ensure_history_subprocess(" in _szal)
+check("⚠ ...és nem a motor processzében tölt", "ensure_history(" not in
+      _szal.replace("ensure_history_subprocess(", ""))
 check("⚠ ...és a sikertelen letöltés NEM néma",
       "az előzmény-letöltés nem sikerült" in _szal)
 check("...a szál hibája sem viszi el a többi párt",

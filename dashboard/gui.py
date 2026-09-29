@@ -993,14 +993,18 @@ class OptimizerController:
                 _oplan.set_skip_keys(job_cfg, symbol, strategy, set())
 
             # ── Adat előkészítés (háttérszálon) — a KÖZÖS letöltő úton ────
-            from tools.download_history import ensure_history
+            # ⚠ KÜLÖN PROCESSZBEN (0029, demó-próba): a felület processzében fut
+            # a motor is — egy hiányzó előzmény tick-letöltése mindkettőt
+            # megfagyasztaná (lásd tools/download_history.ensure_history_subprocess).
+            from core import broker_adapter as _ba
+            from tools.download_history import ensure_history_subprocess
 
             def _st(msg):
                 self.optimizer_status[symbol] = msg
 
-            ok, msg = ensure_history(
-                symbol, self.cfg,
-                tuple(t.label for t in job_strat.timeframes()), status=_st)
+            ok, msg = ensure_history_subprocess(
+                symbol, tuple(t.label for t in job_strat.timeframes()),
+                broker_id=getattr(_ba.current(), "id", None), on_line=_st)
             self.optimizer_status[symbol] = (
                 _t("gui2.adat_kesz_optimalizalas") if ok else msg)
 
@@ -3829,6 +3833,14 @@ class DashboardWindow:
             cmd = [sys.executable, "-u",
                    str(ROOT / "tools" / "download_history.py"),
                    "--symbol", symbol, "--tfs", ",".join(tfs)]
+            # 0029: több brókernél a gyerek a JÓ terminálhoz kapcsolódjon
+            try:
+                from core import broker_adapter as _ba
+                _bid = getattr(_ba.current(), "id", None)
+                if _bid:
+                    cmd += ["--broker", str(_bid)]
+            except Exception:
+                pass
             # ⚠ A gyerek is UTF-8-ban ÍRJON, mert mi úgy OLVASSUK.
             # Windowson a Python a CSŐRE írva a területi kódolást használja
             # (`locale.getpreferredencoding`, magyar rendszeren cp1250) — a szülő

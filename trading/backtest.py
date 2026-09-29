@@ -251,8 +251,12 @@ def load_data_ensure(symbol: str, cfg: dict, status=None):
     if df15 is not None:
         return df15, df1, None
     try:
-        from tools.download_history import ensure_history
-        ok, msg = ensure_history(symbol, cfg, status=status)
+        # ⚠ KÜLÖN PROCESSZBEN (0029, demó-próba): a hívó (a felület) processzében
+        # fut a motor is — a tick-letöltés mindkettőt megfagyasztaná.
+        from core import broker_adapter as _ba
+        from tools.download_history import ensure_history_subprocess
+        ok, msg = ensure_history_subprocess(
+            symbol, broker_id=getattr(_ba.current(), "id", None), on_line=status)
     except Exception as ex:
         return None, None, _t("bt.err.no_data_dl", error=ex)
     df15, df1 = load_data(symbol)

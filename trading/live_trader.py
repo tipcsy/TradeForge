@@ -4232,9 +4232,14 @@ def run(cfg: dict, slot_mgr: SlotManager):
     def _uj_par_elokeszit(symbol: str, pair_cfg: dict) -> None:
         """Háttérszál: előzmény-letöltés, majd a pár átadása bekötésre."""
         try:
-            from tools.download_history import ensure_history
-            ok, msg = ensure_history(symbol, cfg,
-                                     status=lambda t: log.info("[%s] %s", symbol, t))
+            # ⚠ KÜLÖN PROCESSZBEN (demó-próba, 2026-09-29): a motor processzében
+            # a tick-letöltés az MT5-zárat, a gyertya-építés a GIL-t fogta — a
+            # motor ÉS a felület 5+ percre megfagyott (NZDJPY felvétele).
+            from core import broker_adapter as _ba
+            from tools.download_history import ensure_history_subprocess
+            ok, msg = ensure_history_subprocess(
+                symbol, broker_id=getattr(_ba.current(), "id", None),
+                on_line=lambda t: log.info("[%s] %s", symbol, t))
             if not ok:
                 # ⚠ NEM néma: adat nélkül a pár nem tud elindulni, és a
                 # felhasználó azt látná, hogy „felvettem, de nem csinál semmit".

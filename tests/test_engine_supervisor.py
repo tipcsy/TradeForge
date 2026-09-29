@@ -58,8 +58,9 @@ SV.running = lambda p: False
 ok, kulcs = SV.start(ROBO, popen=hamis_popen)
 check("indul", ok and kulcs == "started")
 check("a parancs: main.py console --broker roboforex",
-      hivas["args"][2:] == ["console", "--broker", "roboforex", "--headless"]
-      and hivas["args"][1].endswith("main.py"), str(hivas["args"]))
+      hivas["args"][3:] == ["console", "--broker", "roboforex", "--headless"]
+      and hivas["args"][2].endswith("main.py"), str(hivas["args"]))
+check("pufferelés nélkül (-u) — a napló azonnal látsszon", hivas["args"][1] == "-u")
 check("nincs bemenet (nem var input()-ra)", hivas["stdin"] is not None)
 # ⚠ A DEMO-PROBA LELETE (2026-09-29): Windowson a NUL bemenetre az isatty() True,
 # a motor promptot irt, az input() fajlveget kapott, es a motor leallt. A

@@ -14,7 +14,7 @@ import logging
 import sys
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -114,50 +114,65 @@ def _ticks_to_bars(ticks_raw, freq: str) -> pd.DataFrame:
     return ohlcv
 
 
-def _download_via_ticks(symbol: str, tf_str: str, start: datetime, end: datetime) -> pd.DataFrame:
-    """
-    Bars letöltése tick -> resample módszerrel, havi bontásban.
-    Visszatér: összesített OHLCV DataFrame, vagy üres DataFrame ha nincs adat.
-    """
-    freq = RESAMPLE[tf_str]
-    cur = start.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    frames = []
+# ⚠ NAPI DARABOK, EGY LETÖLTÉS TÖBB IDŐSÍKRA (2026-09-29, demó-próba).
+# Az új instrumentum teljes előzménye eddig HAVI darabokban kérte a tickeket
+# (egy hónap = több millió tick), a kérés alatt fogta a processz MT5-zárját, és
+# minden idősíkhoz ÚJRA letöltötte ugyanazokat (M15, aztán M1). Élesben ez
+# 5+ percre megállította a motort ÉS a felületet (NZDJPY felvétele, mérve: a
+# jelzés-napló 316 mp-ig nem frissült). Most:
+#   • napi darabok, köztük rövid szünet — a terminál közben a motort is
+#     kiszolgálja, és az MT5-zár egyszerre csak rövid ideig foglalt;
+#   • a tickek EGYSZER jönnek le, és ugyanabból épül minden kért idősík;
+#   • a pontos spread-oszlopok (avg_spread, close_spread) megmaradnak — a
+#     natív gyertya spreadje ~3× optimista, a backtest költségmodellje ebből él.
+_NAPI_SZUNET = 0.02
+
+
+def _download_ticks_multi(symbol: str, tf_strs, start: datetime,
+                          end: datetime) -> dict:
+    """Bars több idősíkra, EGY tick-letöltésből, NAPI bontásban.
+    Visszatér: {idősík: OHLCV DataFrame} (üres DataFrame, ahol nincs adat)."""
+    tf_strs = [t for t in tf_strs if t in RESAMPLE]
+    frames = {t: [] for t in tf_strs}
+    cur = start.replace(hour=0, minute=0, second=0, microsecond=0)
+    allapot = {"ho": cur.strftime("%Y-%m"), "tick": 0, "t0": time.time()}
+
+    def _havi_sor():
+        # EGY sor / hónap (a GUI sorosan olvassa a stdout-ot)
+        print(f"      {allapot['ho']} ... {allapot['tick']:>8,} tick -> "
+              + ", ".join(tf_strs)
+              + f"  ({time.time() - allapot['t0']:.1f}s)", flush=True)
 
     while cur < end:
-        chunk_end = min(_next_month(cur), end)
-        month = cur.strftime("%Y-%m")
-        t0 = time.time()
-
+        nap_vege = min(cur + timedelta(days=1), end)
+        if cur.strftime("%Y-%m") != allapot["ho"]:
+            _havi_sor()
+            allapot.update(ho=cur.strftime("%Y-%m"), tick=0, t0=time.time())
         with _MT5_LOCK:
-            ticks_raw = mt5.copy_ticks_range(symbol, cur, chunk_end, mt5.COPY_TICKS_ALL)
+            ticks_raw = mt5.copy_ticks_range(symbol, cur, nap_vege, mt5.COPY_TICKS_ALL)
+        if ticks_raw is not None and len(ticks_raw) > 0:
+            allapot["tick"] += len(ticks_raw)
+            for t in tf_strs:
+                ohlcv = _ticks_to_bars(ticks_raw, RESAMPLE[t])
+                if not ohlcv.empty:
+                    frames[t].append(ohlcv)
+        cur = nap_vege
+        time.sleep(_NAPI_SZUNET)
+    _havi_sor()
 
-        # EGY sor / hónap (nem `end=""` darabolva) — így ha a stdout-ot egy másik
-        # processz (GUI) sorosan olvassa, nem csúszik össze a naplósorokkal.
-        if ticks_raw is None or len(ticks_raw) == 0:
-            err = mt5.last_error()
-            note = str(err) if err[0] != 0 else "üres időszak"
-            print(f"      {month} ... nincs adat ({note})", flush=True)
-            cur = _next_month(cur)
-            continue
+    out = {}
+    for t in tf_strs:
+        if frames[t]:
+            c = pd.concat(frames[t])
+            out[t] = c[~c.index.duplicated(keep="last")].sort_index()
+        else:
+            out[t] = pd.DataFrame()
+    return out
 
-        ohlcv = _ticks_to_bars(ticks_raw, freq)
-        if ohlcv.empty:
-            print(f"      {month} ... {len(ticks_raw):,} tick -> 0 bar", flush=True)
-            cur = _next_month(cur)
-            continue
 
-        frames.append(ohlcv)
-        print(f"      {month} ... {len(ticks_raw):>8,} tick -> "
-              f"{len(ohlcv):>5,} bar  ({time.time()-t0:.1f}s)", flush=True)
-        cur = _next_month(cur)
-        time.sleep(0.05)
-
-    if not frames:
-        return pd.DataFrame()
-
-    combined = pd.concat(frames)
-    combined = combined[~combined.index.duplicated(keep="last")].sort_index()
-    return combined
+def _download_via_ticks(symbol: str, tf_str: str, start: datetime, end: datetime) -> pd.DataFrame:
+    """Bars egy idősíkra (a több-idősíkos, napi darabolású letöltő egy esete)."""
+    return _download_ticks_multi(symbol, [tf_str], start, end).get(tf_str, pd.DataFrame())
 
 
 # ---------------------------------------------------------------------------
@@ -388,13 +403,39 @@ def _ensure_history(symbol, cfg, tf_labels, status) -> tuple[bool, str]:
         "%Y-%m-%d",
     ).replace(tzinfo=timezone.utc)
 
+    # A hiányzó, tickből építhető idősíkok EGY letöltésből (lásd fent) — a
+    # többi (pl. H1) a régi, idősíkonkénti úton.
+    uj_tick = [tf for tf in tf_labels if not _pq(tf).exists() and tf in RESAMPLE]
+    if uj_tick:
+        _say(f"Letöltés {', '.join(uj_tick)}...")
+        try:
+            if mt5.symbol_select(symbol, True):
+                log.info("%s %s — tick letöltés (%s -> %s)...", symbol,
+                         ",".join(uj_tick), hs.strftime("%Y-%m-%d"),
+                         end_dt.strftime("%Y-%m-%d"))
+                for tf, df in _download_ticks_multi(symbol, uj_tick, hs, end_dt).items():
+                    if not df.empty:
+                        pq = _pq(tf)
+                        pq.parent.mkdir(parents=True, exist_ok=True)
+                        df.to_parquet(pq)
+                        log.info("%s %s — %d gyertya mentve -> %s", symbol, tf,
+                                 len(df), pq.name)
+            else:
+                log.warning("%s — nem érhető el ezen a brókerszerveren.", symbol)
+        except Exception as ex:
+            log.warning("%s — tick-letöltés hiba: %s", symbol, ex)
+
     for tf in tf_labels:
         pq = _pq(tf)
         try:
             if pq.exists():
+                if tf in uj_tick:
+                    continue                      # most töltöttük le teljesen
                 _say(f"Gap-fill {tf}...")
                 _fill_gap(pq, symbol, tf, end_dt)
             else:
+                # tick nélküli szimbólum (kripto CFD) vagy nem tick-építésű
+                # idősík: a régi út (natív gyertya tartalékkal)
                 _say(f"Letöltés {tf}...")
                 download_pair(symbol, tf, hs, overwrite=False, end=end_dt)
         except Exception as ex:
@@ -406,6 +447,54 @@ def _ensure_history(symbol, cfg, tf_labels, status) -> tuple[bool, str]:
                        f"({', '.join(failed)}) — nem érhető el ezen a "
                        f"brókerszerveren?")
     return True, f"{symbol}: adat kész."
+
+
+def ensure_history_subprocess(symbol: str, tf_labels=("M15", "M1"),
+                              broker_id: str | None = None, on_line=None,
+                              timeout: float | None = None) -> tuple[bool, str]:
+    """Az `ensure_history` KÜLÖN PROCESSZBEN — a MOTOR és a felület processzéből.
+
+    ⚠ MIÉRT (demó-próba, 2026-09-29): a motor az új instrumentum előzményét a
+    SAJÁT processzében töltötte (`ensure_history` szálon): a tick-letöltés fogta
+    az MT5-zárat, a tick→gyertya építés a Python GIL-t — a motor ÉS a (közös
+    processzű) felület 5+ percre megfagyott. Külön processzben saját GIL-je van,
+    és a napi darabolás miatt a terminál is kiszolgálja közben a motort.
+
+    `broker_id`: a bróker-profil (több brókernél a jó terminál / adatmappa).
+    `on_line(sor)`: a gyerek stdout-sorai (haladás). Visszaad: (siker, utolsó sor)."""
+    import os
+    import subprocess
+    cmd = [sys.executable, "-u", str(Path(__file__).resolve()),
+           "--symbol", symbol, "--tfs", ",".join(tf_labels)]
+    if broker_id:
+        cmd += ["--broker", str(broker_id)]
+    env = dict(os.environ, PYTHONIOENCODING="utf-8")
+    kw = dict(cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+              text=True, encoding="utf-8", errors="replace", bufsize=1, env=env,
+              stdin=subprocess.DEVNULL)
+    if os.name == "nt":
+        kw["creationflags"] = 0x08000000           # CREATE_NO_WINDOW
+    try:
+        proc = subprocess.Popen(cmd, **kw)
+    except Exception as ex:
+        return False, str(ex)
+    utolso = ""
+    for line in proc.stdout:
+        line = line.rstrip()
+        if not line:
+            continue
+        utolso = line
+        if on_line is not None:
+            try:
+                on_line(line)
+            except Exception:
+                pass
+    try:
+        kod = proc.wait(timeout=timeout)
+    except Exception:
+        proc.kill()
+        return False, utolso or "időtúllépés"
+    return kod == 0, utolso
 
 
 # ---------------------------------------------------------------------------
@@ -423,9 +512,16 @@ def main():
     parser.add_argument(
         "--tfs", default="M15,M1",
         help=_t("cli.download_history.vesszovel_elvalasztott_idokere"))
+    parser.add_argument(
+        "--broker", default=None,
+        help="0029: a bróker-profil azonosítója (több brókernél a jó terminál)")
     args = parser.parse_args()
 
     from strategy.settings import load_config
+    if args.broker:
+        # a betöltés ELŐTT — a load_config már a bróker értékeit rakja a párokra
+        from core import broker_profile
+        broker_profile.set_override(args.broker)
     cfg = load_config(ROOT / "config.json")
 
     # ── Egy-szimbólumos mód (GUI külön processz) ─────────────────────────────

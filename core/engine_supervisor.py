@@ -55,8 +55,10 @@ def command(profile) -> list:
     # eszközre ez True-t ad: a motor kiírta a promptot, az `input()` azonnal
     # fájlvéget kapott, és a motor RENDBEN LEÁLLT, egy mp-cel az indulás után
     # (az első demó-próba, 2026-09-29). A kapcsoló ezt egyértelművé teszi.
-    return [sys.executable, str(ROOT / "main.py"), "console", "--broker", profile.id,
-            "--headless"]
+    # ⚠ `-u`: a motor kimenete fájlba megy — pufferelve a demó-próbán percekig
+    # nem látszott, mi történik (a napló 17:56-nál „megállt", a motor futott).
+    return [sys.executable, "-u", str(ROOT / "main.py"), "console", "--broker",
+            profile.id, "--headless"]
 
 
 def start(profile, popen=subprocess.Popen) -> tuple[bool, str]:
