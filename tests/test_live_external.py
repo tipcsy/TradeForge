@@ -110,6 +110,20 @@ try:
         check("KI: a regi ut — kapcsolodni probal (a felulet processzeben)", kapcsolodott == [1])
     finally:
         M.CFG_PATH, sys.argv = _regi_path, _regi_argv
+    print("\n== engine-stop: az otthoni motor leallitasa ==")
+    # ⚠ Kulso motornal az otthoni motor konzol nelkul fut, es a Brokerek ful
+    # csak a TOVABBI brokereket mutatja — enelkul nem lehetne leallitani.
+    _regi_stop, _regi_load = SV.stop, M.load_cfg
+    M.load_cfg = lambda: CFG
+    try:
+        for eredmeny, kod in (((True, "stopping"), 0), ((False, "not_running"), 0),
+                              ((False, "no_answer"), 1)):
+            SV.stop = lambda p, e=eredmeny: e
+            check(f"engine-stop: {eredmeny[1]} -> kilepesi kod {kod}",
+                  M.cmd_engine_stop() == kod)
+    finally:
+        SV.stop, M.load_cfg = _regi_stop, _regi_load
+    check("az engine-stop a parancsok kozott", "engine-stop" in M.COMMANDS)
 finally:
     G.DashboardWindow, SV.running, SV.start, MC.connect = _regi
     GW.reset()

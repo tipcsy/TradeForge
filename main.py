@@ -7,6 +7,7 @@ Parancsok:
   python main.py live         — élő kereskedés + dashboard
   python main.py console      — élő kereskedés FELÜLET NÉLKÜL (gyenge gép, VM, SSH)
   python main.py console --tui — ugyanaz, élő táblázattal (a `rich` csomag kell hozzá)
+  python main.py engine-stop [--broker <id>] — egy (külön processzben futó) motor RENDES leállítása
   python main.py notify-test  — a Telegram-értesítés beüzemelése és próbája
   python main.py dashboard    — csak dashboard (demo mód, MT5 nélkül)
   python main.py backtest     — backtest futtatás az alapértelmezett paraméterekkel
@@ -771,7 +772,25 @@ def cmd_install_gate(argv=None):
     return 0
 
 
+def cmd_engine_stop():
+    """Egy külön processzben futó motor RENDES leállítása (0029, 4b/3 S5).
+
+    ⚠ MIÉRT KELL: külső motornál (`engine.external`) az otthoni motor leválasztva,
+    konzol nélkül fut, a Brókerek fül pedig csak a TOVÁBBI brókereket mutatja —
+    enélkül az otthoni motort nem lehetne kényelmesen leállítani. A leállítás a
+    csatornán megy (`quit`): a motor a SAJÁT rendes kilépési útján áll le (végső
+    „leállt" kép, a futás-zár és az MT5 elengedése). `--broker <id>` nélkül az
+    aktív (otthoni) bróker."""
+    from core import broker_profile, engine_supervisor
+    cfg = load_cfg()
+    profil = broker_profile.active(cfg)
+    ok, kulcs = engine_supervisor.stop(profil)
+    print(_t(f"engine_stop.{kulcs}", tag=profil.tag))
+    return 0 if ok or kulcs == "not_running" else 1
+
+
 COMMANDS = {
+    "engine-stop": (cmd_engine_stop, []),
     "download":  (cmd_download,   []),
     "optimize":  (cmd_optimize,   "symbols"),
     "backtest":  (cmd_backtest,   []),
