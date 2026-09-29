@@ -57,6 +57,7 @@ class HamisMT5:
     def __init__(self):
         self.kerdes = []
         self.gyertya = []
+        self.szinkron_ures = 0
 
     def copy_ticks_range(self, sym, a, b, flags):
         self.kerdes.append((a, b))
@@ -66,6 +67,9 @@ class HamisMT5:
 
     def copy_rates_range(self, sym, tf, a, b):
         self.gyertya.append((sym, tf, a, b))
+        if self.szinkron_ures > 0:                # a szinkron elejen: ures
+            self.szinkron_ures -= 1
+            return None
         if a.weekday() >= 5:                      # hetvege: nincs gyertya
             return None
         t0 = int(dt.datetime(2026, 9, 22, 8, tzinfo=dt.timezone.utc).timestamp())
@@ -87,6 +91,9 @@ _regi_mt5 = DH.mt5
 DH.mt5 = hamis
 _regi_szunet = DH._NAPI_SZUNET
 DH._NAPI_SZUNET = 0
+_regi_nszunet, _regi_proba = DH._NATIV_SZUNET, DH._ELSO_ADAT_PROBA
+DH._NATIV_SZUNET = 0
+_regi_sleep = DH.time.sleep
 try:
     kezd = dt.datetime(2026, 9, 1, tzinfo=dt.timezone.utc)          # kedd
     veg = dt.datetime(2026, 9, 8, tzinfo=dt.timezone.utc)
@@ -166,9 +173,26 @@ try:
               and h1["open"].iloc[1] == m1["open"].iloc[60], str(len(h1)))
         check("...es a gyertya a nyitasi idejere cimkezve",
               h1.index[0] == m1.index[0] and (h1.index[1] - h1.index[0]) == pd.Timedelta("1h"))
+
+        # ⚠ NZDUSD (2026-09-29): a szinkron elejen a terminal 10+ napra ureset
+        # adott, es a letolto „nincs adat"-tal feladta. Az ELSO adatig var.
+        print("\n== Uj szimbolum: a szinkron elejen ures valaszok ==")
+        hamis.gyertya.clear()
+        hamis.szinkron_ures = 15
+        DH.time.sleep = lambda s: None           # ne varjunk valoban
+        try:
+            ok, msg = DH.ensure_history("NZDUSD", {"data": {"history_start_date": "2026-09-21"}},
+                                        ("M15", "M1"))
+        finally:
+            DH.time.sleep = _regi_sleep
+        m1 = TMP / "data" / "m1" / "NZDUSD.parquet"
+        check("15 ures valasz utan is lejott az M1 (nem adta fel)", ok and m1.exists(), msg)
+        check("...es az elso adatig UGYANAZT a napot kerte ujra",
+              len({(a, b) for _, _, a, b in hamis.gyertya[:16]}) == 1)
     finally:
         DH.ROOT, DH.mt5_connector.connect = _regi_root, _regi_conn
 finally:
+    DH._NATIV_SZUNET, DH._ELSO_ADAT_PROBA = _regi_nszunet, _regi_proba
     DH.mt5, DH._NAPI_SZUNET = _regi_mt5, _regi_szunet
 
 print("\n== A kulon processzes seged ==")

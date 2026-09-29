@@ -258,6 +258,7 @@ def _fill_gap(out_file: Path, symbol: str, tf_str: str, end: datetime) -> bool:
 # ---------------------------------------------------------------------------
 
 _NATIV_SZUNET = 0.05
+_ELSO_ADAT_PROBA = 30                  # × 1 mp: ennyit várunk a szinkron indulására
 
 
 def _native_bars(symbol: str, tf_str: str, start: datetime, end: datetime) -> pd.DataFrame:
@@ -280,6 +281,7 @@ def _native_bars(symbol: str, tf_str: str, start: datetime, end: datetime) -> pd
     darabok = []
     veg = end
     ures = 0                           # egymás utáni üres napok (hétvége, ünnep)
+    probak = 0                         # újrapróbák az ELSŐ adatig (szinkron-indulás)
     ho, t0 = veg.strftime("%Y-%m"), time.time()
     while veg > start:
         # az aktuális nap eleje (az első kérés csak a mai részt kéri)
@@ -288,6 +290,13 @@ def _native_bars(symbol: str, tf_str: str, start: datetime, end: datetime) -> pd
         with _MT5_LOCK:
             raw = mt5.copy_rates_range(symbol, tf_mt5, eleje.replace(tzinfo=None),
                                        veg.replace(tzinfo=None))
+        if (raw is None or len(raw) == 0) and not darabok and probak < _ELSO_ADAT_PROBA:
+            # ⚠ NZDUSD (2026-09-29): egy új szimbólumnál a terminál a szinkron
+            # ELEJÉN üreset ad — 10 üres nap után a letöltő „nincs adat"-tal
+            # feladta. Az ELSŐ adatig ugyanazt a napot többször is kérjük.
+            probak += 1
+            time.sleep(1.0)
+            continue
         if raw is None or len(raw) == 0:
             ures += 1
             if ures >= 10:             # innen visszafelé a terminál nem ad adatot
