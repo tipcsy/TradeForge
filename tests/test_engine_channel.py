@@ -162,6 +162,19 @@ for valasz, vart in ((True, [("close 1", False), ("close 1", True)]),
     fr.destroy()
 root.destroy()
 
+print("\n== Arva valaszok takaritasa (demo-proba, 2026-09-29) ==")
+# ⚠ Induláskor a felulet mar kerdez, a motor meg kapcsolodik: a keso valasz a
+# kimeno postaladaban marad — a motor ORPHAN_SEC utan torli.
+import os                                                                # noqa: E402
+OB.mkdir(parents=True, exist_ok=True)
+regi_f, friss_f = OB / "regi.json", OB / "friss.json"
+regi_f.write_text("{}", encoding="utf-8")
+friss_f.write_text("{}", encoding="utf-8")
+os.utime(regi_f, (time.time() - CH.ORPHAN_SEC - 10,) * 2)
+CH.process_once(ctx, ROBO, inbox=IB, outbox=OB)
+check("a regi arva valasz torolve", not regi_f.exists())
+check("a friss valasz (meg varhatnak ra) megmarad", friss_f.exists())
+
 print()
 if _fail:
     print("HIBA: " + ", ".join(_fail))

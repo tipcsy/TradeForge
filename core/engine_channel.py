@@ -38,6 +38,11 @@ from core.i18n import t as _t
 INBOX, OUTBOX = "engine_inbox", "engine_outbox"
 ALLOWED = frozenset({"play", "stop", "close", "mode", "quit", "pos", "pairs"})
 MAX_AGE_SEC = 60.0
+# ⚠ ÁRVA VÁLASZOK (demó-próba, 2026-09-29): ha a motor később válaszol, mint
+# ameddig a felület vár (pl. induláskor, amikor a felület már kérdez, a motor
+# még kapcsolódik), a válasz a kimenő postaládában marad. A motor ezeket
+# `ORPHAN_SEC` után törli — különben a mappa lassan telne.
+ORPHAN_SEC = 120.0
 POLL_SEC = 1.0
 
 
@@ -122,6 +127,21 @@ def _parancs_nev(line: str) -> str:
     return C.ALIASES.get(nev, nev)
 
 
+def _arvak_torlese(ob: Path, now: float) -> int:
+    """A senki által át nem vett, `ORPHAN_SEC`-nél régebbi válaszok törlése."""
+    n = 0
+    if not ob.exists():
+        return 0
+    for f in ob.glob("*.json"):
+        try:
+            if now - f.stat().st_mtime > ORPHAN_SEC:
+                f.unlink()
+                n += 1
+        except Exception:
+            pass
+    return n
+
+
 def process_once(ctx, profile, *, now=None, inbox=None, outbox=None,
                  ops: dict | None = None) -> list:
     """A postaláda EGY feldolgozása. Visszaad: a feldolgozott válaszok listája
@@ -130,6 +150,7 @@ def process_once(ctx, profile, *, now=None, inbox=None, outbox=None,
     now = time.time() if now is None else now
     ib = inbox or _dir(INBOX, profile)
     ob = outbox or _dir(OUTBOX, profile)
+    _arvak_torlese(ob, now)
     if not ib.exists():
         return []
     kesz = []
