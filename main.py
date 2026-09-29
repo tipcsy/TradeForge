@@ -158,6 +158,11 @@ def cmd_live():
 
     cfg = load_cfg()
 
+    # ⚠ 0029 (4b/3 S5): KÜLSŐ MOTOR — a motor külön processzben fut, a felület
+    # csak mutat és vezérel. ALAPBÓL KI; a régi út alább változatlan.
+    if (cfg.get("engine") or {}).get("external"):
+        return _cmd_live_external(cfg)
+
     if not mt5_connector.connect(cfg):
         sys.exit(1)
 
@@ -221,6 +226,60 @@ def cmd_live():
         win.run()
     finally:
         mt5_connector.disconnect()
+
+
+def _cmd_live_external(cfg: dict):
+    """A felület egy KÜLÖN processzben futó otthoni motorral (0029, 4b/3 S5).
+
+    ⚠ Kapcsoló: `"engine": {"external": true}` — ALAPBÓL KI. Bekapcsolva:
+      • a felület NEM kapcsolódik MT5-höz és NEM indít motort (Tibi döntése, B:
+        több brókernél egy processz egyszerre csak egy terminált ér el);
+      • ha az otthoni motor nem fut, a felügyelő elindítja
+        (`main.py console --broker <id>`, leválasztva — a licencet, a futás-
+        zárat és az MT5-kapcsolatot a MOTOR intézi);
+      • a felület távoli módban (tükör, config-figyelő, csatorna, mt5_view);
+      • ⚠ a felület BEZÁRÁSA NEM állítja le a motort — ez volt a külön processz
+        célja. Leállítani a Brókerek fülről / a konzolból lehet.
+    """
+    from core import broker_profile, engine_supervisor
+    from dashboard import mt5_view
+    from dashboard.gui import DashboardWindow
+
+    profil = broker_profile.active(cfg)
+    if not engine_supervisor.running(profil):
+        ok, kulcs = engine_supervisor.start(profil)
+        print(_t(f"brokers.start.{kulcs}", tag=profil.tag))
+
+    # ⚠ A TÁVOLI MÓD MÁR A FELÜLET LÉTREHOZÁSA ELŐTT: a konstruktor háttér-
+    # lekérdezőt indíthat, ami különben egy pillanatig HELYI MT5-öt hívna (a
+    # felület itt nincs is kapcsolódva). A pumpát a `start_remote_mode` adja hozzá.
+    from dashboard import engine_gateway
+    engine_gateway.configure(profil, None)
+
+    # A felület SAJÁT dictjei — a tükör tölti őket a motor állapotképéből.
+    win = DashboardWindow(
+        cfg, {}, {}, {},
+        on_play_pair=None,
+        on_stop_pair=None,
+        on_slots_change=None,        # a slot-szám a configon át ér a motorhoz
+        auto_resume_opt=True,
+    )
+    win.start_remote_mode(profil)
+
+    def update_header():
+        try:
+            info = mt5_view.connection_info(cfg)
+            win.set_balance(float(info.get("balance") or 0.0))
+            from core import engine_status as _es
+            sl = (_es.read(profil) or {}).get("slots") or {}
+            if sl:
+                win.set_slots(int(sl.get("free", 0)), int(sl.get("max", 0)))
+        except Exception:
+            pass
+        win.root.after(5000, update_header)
+
+    win.root.after(1000, update_header)
+    win.run()
 
 
 def cmd_dashboard():
@@ -355,7 +414,8 @@ def cmd_console():
             except Exception:
                 pass
             _extra_tar["t"] = _time.time()
-        return {"margin_mode": mt5_connector._MARGIN_MODE,
+        return {"slots": {"free": slot_mgr.free(), "max": slot_mgr.max_slots},
+                "margin_mode": mt5_connector._MARGIN_MODE,
                 "margin_mode_name": mt5_connector.margin_mode_name(),
                 "positions_by_symbol": mt5_connector.open_positions_by_symbol(),
                 "closed_today": _extra_tar["closed"]}

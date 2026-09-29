@@ -143,7 +143,7 @@
   "brokers.cmd.no_answer": "{tag}: a motor nem válaszolt (nem fut vagy lefagyott) — a parancsot visszavontam.",
   "brokers.cmd.cancelled": "Megszakítva.",
   "brokers.btn.start": "Motor indítása",
-  "brokers.start.started": "{tag}: a motor indul (a napló: data/accounts/…/engine_console.log).",
+  "brokers.start.started": "{tag}: a motor indul (a kimenete: engine_console.log a számla adatmappájában).",
   "brokers.start.already_running": "{tag}: a motor már fut.",
   "brokers.start.failed": "{tag}: a motor nem indítható: {error}",
   "brokers.sv.restarted": "{id}: a motor leállt — a felügyelő újraindította (autostart).",

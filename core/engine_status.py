@@ -107,7 +107,14 @@ def snapshot(ctx, profile, *, server_offset_sec=None, stopped=False,
 # fájlt épp OLVASSÁK (a felület 2 mp-enként olvas, a motor 5 mp-enként ír — ez
 # a teszt első futásán azonnal előjött). Rövid várakozással újrapróbáljuk; az
 # olvasó is újrapróbál. Enélkül a fül rendszeresen „nincs adat"-ra villanna.
-_PROBA, _VAR = 6, 0.05
+# ⚠ 2026-09-29: a 6 × 50 ms (0,3 s) terhelés alatt kevés volt — a verseny-teszt
+# időnként elbukott (az olvasó folyamatosan nyitva tartotta a fájlt). NÖVEKVŐ
+# várakozás: 10 ms-tól duplázva, 200 ms-nál megállva, összesen ~1,2 mp.
+_PROBA = 10
+
+
+def _var(i: int) -> float:
+    return min(0.01 * (2 ** i), 0.2)
 
 
 def _tukor_dashboard(ctx) -> dict:
@@ -129,7 +136,7 @@ def write(data: dict, p: Path) -> None:
         except PermissionError:
             if i == _PROBA - 1:
                 raise
-            time.sleep(_VAR)
+            time.sleep(_var(i))
 
 
 class Publisher:
@@ -191,7 +198,7 @@ def read(profile=None, p: Path | None = None) -> dict | None:
         except FileNotFoundError:
             return None
         except (PermissionError, json.JSONDecodeError):
-            time.sleep(_VAR)
+            time.sleep(_var(i))
         except Exception:
             return None
     return None

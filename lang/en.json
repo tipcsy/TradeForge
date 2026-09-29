@@ -143,7 +143,7 @@
   "brokers.cmd.no_answer": "{tag}: the engine did not answer (not running or hung) — the command was withdrawn.",
   "brokers.cmd.cancelled": "Cancelled.",
   "brokers.btn.start": "Start engine",
-  "brokers.start.started": "{tag}: the engine is starting (log: data/accounts/…/engine_console.log).",
+  "brokers.start.started": "{tag}: the engine is starting (its output: engine_console.log in the account data folder).",
   "brokers.start.already_running": "{tag}: the engine is already running.",
   "brokers.start.failed": "{tag}: the engine cannot be started: {error}",
   "brokers.sv.restarted": "{id}: the engine stopped — the supervisor restarted it (autostart).",

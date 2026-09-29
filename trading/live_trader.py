@@ -4381,7 +4381,15 @@ def run(cfg: dict, slot_mgr: SlotManager):
             # (core/config_watch). A felület processzében futó motornál üres.
             try:
                 from core import config_watch as _cw
-                _cw.apply_pending(cfg)
+                if _cw.apply_pending(cfg):
+                    # A slot-szám a felületen állítható; közös processzben egy
+                    # visszahívás írta a SlotManagerbe — külön processzben csak
+                    # a configon át érkezik (0029 4b/3 S5).
+                    try:
+                        slot_mgr.max_slots = int(cfg["trading"]["max_open_slots"])
+                    except Exception as _e:
+                        log.warning("a slot-szám átvétele az új configból "
+                                    "elbukott (a régi marad): %s", _e)
             except Exception as _e:
                 log.warning("config-újratöltés kihagyva: %s", _e)
             # ⚠ 4b/3 S3a: az állapot-modulok (rr_state, adopted, position_meta…)
