@@ -92,6 +92,15 @@ try:
           "avg_spread" in out["M1"].columns, str(list(out["M1"].columns)))
     check("nincs duplikalt gyertya a napi hatarokon", out["M1"].index.is_unique)
 
+    # ⚠ v3.120.0 regresszio (demo-proba, 2026-09-29): a H1 potlasa 730 napi
+    # tick-kerest inditott a SEMMIERT (a H1 nem tickbol epul) — a terminal
+    # szerver-szinkronja 110 mp-re megfagyasztotta a motort es a feluletet.
+    hamis.kerdes.clear()
+    check("tick-idosik nelkul EGYETLEN tick-keres sincs (H1)",
+          DH._download_ticks_multi("Ger40", ["H1"], kezd, veg) == {}
+          and not hamis.kerdes, f"{len(hamis.kerdes)} keres")
+    check("a H1 a nativ gyertya-uton ismert (nincs KeyError)", "H1" in DH.TF_MAP)
+
     print("\n== Uj szimbolum: egy kozos letoltesbol mindket fajl ==")
     TMP = Path(tempfile.mkdtemp())
     _regi_root, _regi_conn = DH.ROOT, DH.mt5_connector.connect

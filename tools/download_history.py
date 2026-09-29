@@ -44,6 +44,10 @@ log = logging.getLogger(__name__)
 TF_MAP = {
     "M1":  mt5.TIMEFRAME_M1,
     "M15": mt5.TIMEFRAME_M15,
+    # ⚠ H1: NATÍV gyertyából (nincs a RESAMPLE-ben → nincs tick-út). Eddig
+    # hiányzott innen, és a H1 minden letöltése 'H1' KeyError-ral elbukott
+    # (2026-09-23 óta minden indításkor, minden páron).
+    "H1":  mt5.TIMEFRAME_H1,
 }
 
 RESAMPLE = {
@@ -133,6 +137,12 @@ def _download_ticks_multi(symbol: str, tf_strs, start: datetime,
     """Bars több idősíkra, EGY tick-letöltésből, NAPI bontásban.
     Visszatér: {idősík: OHLCV DataFrame} (üres DataFrame, ahol nincs adat)."""
     tf_strs = [t for t in tf_strs if t in RESAMPLE]
+    if not tf_strs:
+        # ⚠ NINCS tick-építésű idősík → NINCS tick-letöltés. A v3.120.0 itt
+        # 730 napi tick-kérést indított a H1-hez a semmiért (egy gyertya sem
+        # épült belőle), és a terminál szerver-szinkronja 100+ mp-re megfagyasztotta
+        # a motort és a felületet — páronként ismételve (demó-próba, 20:55).
+        return {}
     frames = {t: [] for t in tf_strs}
     cur = start.replace(hour=0, minute=0, second=0, microsecond=0)
     allapot = {"ho": cur.strftime("%Y-%m"), "tick": 0, "t0": time.time()}
@@ -249,10 +259,14 @@ def download_pair(symbol: str, tf_str: str, start: datetime, overwrite: bool, en
     if out_file.exists() and not overwrite:
         return _fill_gap(out_file, symbol, tf_str, end)
 
-    # Teljes letöltés tick -> resample módszerrel
-    log.info("%s %s — tick letöltés (%s -> %s)...", symbol, tf_str,
-             start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))
-    ohlcv = _download_via_ticks(symbol, tf_str, start, end)
+    # Teljes letöltés tick -> resample módszerrel — CSAK tick-építésű idősíkra;
+    # a többi (H1) közvetlenül natív gyertyából.
+    if tf_str in RESAMPLE:
+        log.info("%s %s — tick letöltés (%s -> %s)...", symbol, tf_str,
+                 start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))
+        ohlcv = _download_via_ticks(symbol, tf_str, start, end)
+    else:
+        ohlcv = pd.DataFrame()
 
     if ohlcv.empty:
         # Fallback: natív bar letöltés (ha tick adat nem elérhető, pl. crypto CFD-k)
