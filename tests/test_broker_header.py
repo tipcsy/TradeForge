@@ -156,6 +156,20 @@ _mc = (ROOT / "core" / "mt5_connector.py").read_text(encoding="utf-8")
 check("a kapcsolódás állítja be (egy brókernél None)",
       "_tg.set_tag(profil.tag if len(broker_profile.profiles(cfg)) > 1 else None)" in _mc)
 
+# ── Brókerek fül: nem villog (Tibi, 2026-09-30) ───────────────────────
+from dashboard.brokers_tab import structure_signature                  # noqa: E402
+_r = lambda clock, age, pnl, sl=0: [{"tag": "At", "name": "A", "account": "1", "health": "fut",
+     "balance": "1", "daily": "0", "n_pos": 1, "clock": clock, "age": age,
+     "pairs": [{"symbol": "GOLD", "state": "LIVE", "strategies": [["wpr_sma", True]]}],
+     "positions": [{"ticket": 7, "symbol": "GOLD", "sl": sl, "profit": pnl}]}]
+check("az óra, a kor és a P&L változása NEM szerkezeti (helyben frissül)",
+      structure_signature(_r("11:00:01", "1 mp", 1.0)) == structure_signature(_r("11:00:03", "3 mp", 9.0)))
+check("egy SL-mozgás igen (újraépít)",
+      structure_signature(_r("x", "1", 1.0)) != structure_signature(_r("x", "1", 1.0, sl=5)))
+_bt = (ROOT / "dashboard" / "brokers_tab.py").read_text(encoding="utf-8")
+check("a fül csak szerkezeti változásnál rombol",
+      "if alairas == getattr(self, \"_alairas\", None):" in _bt and "self._helyben(adat)" in _bt)
+
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")
 sys.exit(0 if all(results) else 1)

@@ -76,6 +76,24 @@ def rows(profiles, now=None, reader=ES.read) -> list:
     return out
 
 
+def structure_signature(adat) -> tuple:
+    """A Brókerek fül SZERKEZETE: minden, ami újraépítést igényel — az
+    időfüggő értékek (óra, életjel kora, pozíció P&L) NÉLKÜL. Ha ez nem
+    változott, a fül helyben frissít (nem villog)."""
+    out = []
+    for r in adat or []:
+        out.append((
+            r.get("tag"), r.get("name"), r.get("account"), r.get("health"),
+            r.get("balance"), r.get("daily"), r.get("n_pos"),
+            tuple((p.get("symbol"), p.get("state"),
+                   tuple(tuple(s) for s in (p.get("strategies") or [])))
+                  for p in (r.get("pairs") or [])),
+            tuple((x.get("ticket"), x.get("symbol"), x.get("type"), x.get("volume"),
+                   x.get("price_open"), x.get("sl"), x.get("tp"))
+                  for x in (r.get("positions") or []))))
+    return tuple(out)
+
+
 def toggle_line(symbol: str, strategy: str, running: bool) -> str:
     """A Play/Stop gomb parancssora — ugyanaz, amit a konzolba írnál."""
     return f"{'stop' if running else 'play'} {symbol} {strategy}"
@@ -204,6 +222,32 @@ class BrokersTab:
                  on_result=_eredmeny, request=self._request)
 
     # ── frissítés ─────────────────────────────────────────────────────────
+    def _helyben(self, adat) -> None:
+        """Az időfüggő cellák helyben: a fő tábla órája (4.) és kora (8.), a
+        pozíciók P&L-je (8.). A `_sor` a címkéket a gombok ELŐTT hozza létre,
+        tehát a `winfo_children()` első elemei a címkék."""
+        fo = self._fo.winfo_children()
+        poz = self._poz.winfo_children()
+        k_poz = 0
+        for i, r in enumerate(adat):
+            if i < len(fo):
+                cimkek = [w for w in fo[i].winfo_children() if isinstance(w, tk.Label)]
+                for idx, v in ((4, r["clock"]), (8, r["age"])):
+                    if idx < len(cimkek) and cimkek[idx].cget("text") != str(v):
+                        cimkek[idx].config(text=str(v))
+            for x in r["positions"]:
+                if k_poz < len(poz):
+                    cimkek = [w for w in poz[k_poz].winfo_children()
+                              if isinstance(w, tk.Label)]
+                    pnl = x.get("profit")
+                    if len(cimkek) > 8:
+                        try:
+                            szin = FG_GREEN if float(pnl) >= 0 else FG_RED
+                        except (TypeError, ValueError):
+                            szin = FG_WHITE
+                        cimkek[8].config(text=_penz(pnl), fg=szin)
+                k_poz += 1
+
     def _frissit(self):
         def _olvas(p):
             snap = ES.read(p)
@@ -215,6 +259,19 @@ class BrokersTab:
             adat = rows(self._profiles(), reader=_olvas)
         except Exception:
             adat = []
+        # ⚠ VILLOGÁS (Tibi, 2026-09-30: „törli és újratölti"): eddig 2 mp-enként
+        # MINDEN sort újraépítettünk, akkor is, ha csak az óra és az életjel kora
+        # változott. Most csak SZERKEZETI változásnál; egyébként helyben írjuk át
+        # az időfüggő cellákat.
+        alairas = structure_signature(adat)
+        if alairas == getattr(self, "_alairas", None):
+            try:
+                self._helyben(adat)
+                self.parent.after(FRISSITES_MS, self._frissit)
+            except tk.TclError:
+                pass
+            return
+        self._alairas = alairas
         for w in (list(self._fo.winfo_children()) + list(self._par.winfo_children())
                   + list(self._poz.winfo_children())):
             w.destroy()
