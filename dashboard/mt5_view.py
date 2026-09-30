@@ -34,7 +34,9 @@ import numpy as np
 
 from dashboard import engine_gateway as _gw
 
-INFO_TTL, RATES_TTL, SNAP_TTL = 300.0, 5.0, 1.0
+# SNAP_TTL: a motor 0,5 mp-enként ír (engine_status.PERIOD_SEC) — 1 mp-es
+# gyorsítótár a friss képet fél másodpercig eltakarta volna
+INFO_TTL, RATES_TTL, SNAP_TTL = 300.0, 5.0, 0.4
 _cache: dict = {}
 
 

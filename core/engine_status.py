@@ -34,7 +34,11 @@ from pathlib import Path
 
 VERSION = 1
 FILE = "engine_status.json"
-PERIOD_SEC = 2.0                 # 4b/3 S2: a fő tábla is ebből él (volt 5 mp)
+# ⚠ 2026-09-30 (Tibi: „két instrumentum között 3-5 mp alatt frissül"): külső
+# módban az ÁRAK is ebből a képből jönnek — 2 mp + a felület 3 mp-es ár-szála
+# + 1 mp rajzolás = átlag 3-4 mp késés. 0,5 mp-re sűrítve; a kép elkészítése
+# mérve (lásd Publisher: ha a periódus felénél tovább tart, a napló szól).
+PERIOD_SEC = 0.5                 # 4b/3 S2: a fő tábla is ebből él (volt 5, majd 2 mp)
 STALE_SEC = 30.0                 # ennél régebbi kép = a motor nem ír → hibás
 
 NINCS, ALL, HIBAS, FUT = "nincs", "all", "hibas", "fut"
@@ -156,6 +160,7 @@ class Publisher:
         self.p = path(profile)
 
     def _egyszer(self, stopped=False):
+        t0 = time.perf_counter()
         try:
             write(snapshot(self.ctx, self.profile, server_offset_sec=self.offset_fn(),
                            stopped=stopped, optimizer_status=self.optimizer_status,
@@ -164,6 +169,15 @@ class Publisher:
         except Exception as ex:                      # a kereskedést sosem állítja meg
             import logging
             logging.getLogger(__name__).warning("motor-állapotkép írási hiba: %s", ex)
+        # ⚠ a sűrű közzététel (0,5 mp) csak akkor ér valamit, ha a kép elkészül
+        # addig — ha nem, EGYSZER szólunk (a periódus nem csúszik némán)
+        dt = time.perf_counter() - t0
+        if dt > self.period * 0.5 and not getattr(self, "_lassu_jelezve", False):
+            self._lassu_jelezve = True
+            import logging
+            logging.getLogger(__name__).warning(
+                "motor-állapotkép: egy kép %.0f ms (a periódus %.0f ms) — a felület "
+                "késve frissül", dt * 1000, self.period * 1000)
 
     def _extra(self) -> dict:
         try:

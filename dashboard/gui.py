@@ -6613,6 +6613,11 @@ class DashboardWindow:
         import time as _time
         _time.sleep(5)  # UI stabilizálódjon
         price_sec  = max(1, self._price_refresh_sec)
+        # ⚠ KÜLSŐ MÓDBAN az ár a motor képéből jön (MT5-hívás nincs, a kép
+        # 0,5 mp-enként friss) — a 3 mp-es ár-szál volt a késés fő oka
+        # (Tibi, 2026-09-30: „3-5 mp alatt frissül"). Normál módban változatlan.
+        if getattr(self, "_remote", None) is not None:
+            price_sec = 0.5
         live_every = max(1, round(self._fast_refresh_sec / price_sec))
         all_every  = max(1, round(self._all_refresh_sec  / price_sec))
         counter = 0
