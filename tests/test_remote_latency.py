@@ -34,7 +34,7 @@ check("külső módban az ár-szál 0,5 mp-enként fut (nem a 3 mp-es alap)",
       'if getattr(self, "_remote", None) is not None:\n            price_sec = 0.5' in _g)
 _es = (ROOT / "core" / "engine_status.py").read_text(encoding="utf-8")
 check("a lassú kép-elkészítés NEM néma (a napló szól)",
-      "a felület késve frissül" in _es)
+      '"késve frissül"' in _es and "_lassu_jelezve" in _es)
 lepcsok = ES.PERIOD_SEC + MV.SNAP_TTL + 0.5 + 1.0
 check("a legrosszabb eset összesen legfeljebb ~2,5 mp", lepcsok <= 2.5, f"{lepcsok:.1f}")
 
