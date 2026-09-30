@@ -83,7 +83,7 @@ def structure_signature(adat) -> tuple:
     out = []
     for r in adat or []:
         out.append((
-            r.get("tag"), r.get("name"), r.get("account"), r.get("health"),
+            r.get("tag"), r.get("name"), r.get("account"), r.get("health"), r.get("proc"),
             r.get("balance"), r.get("daily"), r.get("n_pos"),
             tuple((p.get("symbol"), p.get("state"),
                    tuple(tuple(s) for s in (p.get("strategies") or [])))
@@ -263,6 +263,14 @@ class BrokersTab:
         # MINDEN sort újraépítettünk, akkor is, ha csak az óra és az életjel kora
         # változott. Most csak SZERKEZETI változásnál; egyébként helyben írjuk át
         # az időfüggő cellákat.
+        # ⚠ 2026-09-30: a leállított motor nem írta ki a záró képét → „hibás"
+        # maradt, és a gomb „Motor leállítása" (tiltva) → ÚJRAINDÍTANI SEM
+        # lehetett. A processz életét a futás-zár mondja meg (MÉRT adat).
+        for r in adat:
+            try:
+                r["proc"] = bool(self._running(r["profile"]))
+            except Exception:
+                r["proc"] = r["health"] == ES.FUT
         alairas = structure_signature(adat)
         if alairas == getattr(self, "_alairas", None):
             try:
@@ -286,7 +294,7 @@ class BrokersTab:
             szinek[3] = _ALLAPOT_SZIN.get(r["health"], FG_GRAY)
             sor, bg = self._sor(self._fo, i, [(v, w, c) for v, (_, w), c
                                              in zip(ertek, self._fo_oszlop, szinek)])
-            if r["health"] in (ES.FUT, ES.HIBAS):
+            if r["health"] in (ES.FUT, ES.HIBAS) and r.get("proc", True):
                 self._gomb(sor, bg, _t("brokers.btn.quit"),
                            lambda p=prof: self._leallit(p), FG_RED, aktiv=fut)
             else:

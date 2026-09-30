@@ -216,6 +216,14 @@ class CanvasTable:
         # hallgatja, tehát a kötés PUSZTA LÉTÉBŐL nem lehet a kurzorra
         # következtetni; ez a halmaz teszi mérhetővé.
         self._hand_tags = set()
+        # ⚠ MEMÓRIASZIVÁRGÁS (2026-09-30: a felület 2,4 óra alatt 3,2 GB-ra nőtt).
+        # Minden `tag_bind` egy ÚJ Tcl-parancsot regisztrál, ami csak a vászon
+        # megszűnésekor szabadul fel — és a `_redraw_row` a vásznat MEGTARTJA.
+        # A buborék `add="+"`-szal ráadásul HALMOZÓDOTT. Ezért (vászon, címke,
+        # esemény) hármasonként EGYSZER kötünk; a változó adat (kattintás,
+        # buborék-szöveg) szótárból jön (`_clicks`, `_tips`).
+        self._bound = set()
+        self._tips = {}
         self.frame = tk.Frame(parent, bg=BG)
         self._build()
 
@@ -227,6 +235,9 @@ class CanvasTable:
         self._visual.clear()
         self._clicks.clear()
         self._hand_tags.clear()
+        # a vásznak fent megsemmisültek → a kötéseik is (új vásznon újra kell)
+        self._bound.clear()
+        self._tips.clear()
         rows = self._visible()
         strategies = self._strategy_names()
         self._cols = _cols.layout(self._f, strategies, self._collapsed)
@@ -480,16 +491,16 @@ class CanvasTable:
                     # nem reagáló gomb rosszabb, mint egy halvány, ami megmondja,
                     # miért nem. (Ugyanez volt a widget-változat receptje.)
                     self._clicks[(i, cell.key, sub)] = cb
-                    bc.tag_bind(f"{tag}_{sub}", "<Button-1>",
-                                lambda _e, a=(i, cell.key, sub): self.fire(*a))
+                    self._tb(bc, f"{tag}_{sub}", "<Button-1>",
+                             lambda _e, a=(i, cell.key, sub): self.fire(*a))
                     # KÉZ-KURZOR csak az AKTÍV vezérlőn — a halványon nem, mert
                     # az azt ígérné, hogy most tenni fog valamit.
                     if active:
                         self._hand_tags.add(f"{tag}_{sub}")
-                        bc.tag_bind(f"{tag}_{sub}", "<Enter>",
-                                    lambda _e, b=bc: b.configure(cursor="hand2"))
-                        bc.tag_bind(f"{tag}_{sub}", "<Leave>",
-                                    lambda _e, b=bc: b.configure(cursor=""))
+                        self._tb(bc, f"{tag}_{sub}", "<Enter>",
+                                 lambda _e, b=bc: b.configure(cursor="hand2"), add="+")
+                        self._tb(bc, f"{tag}_{sub}", "<Leave>",
+                                 lambda _e, b=bc: b.configure(cursor=""), add="+")
                 sx += pw + (_lr.CTRL_GAP if sub == "run" else 0)
         else:
             if cell.anchor == "e":
@@ -510,21 +521,26 @@ class CanvasTable:
             bc.tag_lower(hit)
             ids.insert(0, hit)
             self._clicks[(i, cell.key)] = cell.on_click
-            bc.tag_bind(tag, "<Button-1>",
-                        lambda _e, a=(i, cell.key): self.fire(*a))
+            self._tb(bc, tag, "<Button-1>", lambda _e, a=(i, cell.key): self.fire(*a))
             self._hand_tags.add(tag)
-            bc.tag_bind(tag, "<Enter>", lambda _e, b=bc: b.configure(cursor="hand2"))
-            bc.tag_bind(tag, "<Leave>", lambda _e, b=bc: b.configure(cursor=""))
+            self._tb(bc, tag, "<Enter>", lambda _e, b=bc: b.configure(cursor="hand2"),
+                     add="+")
+            self._tb(bc, tag, "<Leave>", lambda _e, b=bc: b.configure(cursor=""),
+                     add="+")
         # ⚠ BUBORÉK — MINDEN cellafajtára. A `ctrl` a RÉSZ-tagjeire köt, mert ott
         # a szöveg nem a cella-tagen ül. `add="+"`, hogy a kéz-kurzor kötése
         # (ami ugyanezt az eseményt hallgatja) ne vesszen el.
-        if getattr(cell, "tip", ""):
-            _tags = ([f"{tag}_{p[0]}" for p in (cell.parts or [])]
-                     if cell.kind == "ctrl" else [tag])
-            for _tg in _tags:
-                bc.tag_bind(_tg, "<Enter>",
-                            lambda e, t=cell.tip: self._tip_show(e, t), add="+")
-                bc.tag_bind(_tg, "<Leave>", self._tip_hide, add="+")
+        _tags = ([f"{tag}_{p[0]}" for p in (cell.parts or [])]
+                 if cell.kind == "ctrl" else [tag])
+        for _tg in _tags:
+            # a szöveg a SZÓTÁRBAN — a kötés egyszeri, a tartalom friss
+            self._tips[(str(bc), _tg)] = getattr(cell, "tip", "") or ""
+            if self._tips[(str(bc), _tg)]:
+                self._tb(bc, _tg, "<Enter>",
+                         lambda e, c=bc, g=_tg: (self._tip_of(c, g)
+                                                 and self._tip_show(e, self._tip_of(c, g))),
+                         add="+")
+                self._tb(bc, _tg, "<Leave>", self._tip_hide, add="+")
         self._items[(i, cell.key)] = ids
         self._visual[(i, cell.key)] = cell.visual()
         if cell.kind == "dots" and cell.frame:
@@ -548,6 +564,18 @@ class CanvasTable:
     #
     # EGYETLEN ablakot használunk újra (nem cellánként egyet): a tábla több száz
     # cellát rajzol, és annyi Toplevel létrehozása mérhetően akadna.
+
+    def _tb(self, canvas, tag, event, fn, add=None) -> None:
+        """`tag_bind` EGYSZER (vászon, címke, esemény) hármasonként — lásd
+        `self._bound`. A `fn` ne zárjon be változó adatot (azt szótárból)."""
+        k = (str(canvas), tag, event, bool(add))
+        if k in self._bound:
+            return
+        self._bound.add(k)
+        canvas.tag_bind(tag, event, fn, add=add)
+
+    def _tip_of(self, canvas, tag) -> str:
+        return self._tips.get((str(canvas), tag), "")
 
     def _tip_show(self, ev, text: str):
         import tkinter as tk
