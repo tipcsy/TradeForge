@@ -227,6 +227,41 @@ def cmd_live():
         win.run()
     finally:
         mt5_connector.disconnect()
+        # a TÖBBI bróker motorja is (az otthoni ebben a processzben fut, és vele
+        # együtt áll le) — Tibi döntése, 2026-09-30
+        from core import broker_profile as _bp
+        try:
+            stop_all_engines(cfg, skip_ids=(_bp.active(cfg).id,))
+        except Exception as _ex:
+            print(f"a többi motor leállítása nem sikerült: {_ex}")
+
+
+def stop_all_engines(cfg: dict, skip_ids=()) -> list:
+    """A program bezárásakor MINDEN bróker motorjának leállítása (Tibi döntése,
+    2026-09-30: „amikor leállítom a programot, álljon le minden engine is").
+
+    A rendes kilépési úton (`quit` a csatornán → záró „leállt" kép, futás-zár
+    és MT5 elengedése). ⚠ Leállítás után a nyitott pozíciókat SENKI nem kezeli
+    (breakeven, trailing, kiszállás) — ez a választás ára, a napló kiírja.
+    Visszaad: [(tag, kulcs)] — kulcs: stopping | not_running | no_answer."""
+    from core import broker_profile, engine_supervisor
+    out = []
+    try:
+        profs = broker_profile.profiles(cfg)
+    except Exception:
+        return out
+    for p in profs:
+        if p.id in skip_ids:
+            continue
+        try:
+            _ok, kulcs = engine_supervisor.stop(p)
+        except Exception as ex:
+            kulcs = f"hiba: {ex}"
+        out.append((p.tag, kulcs))
+        if kulcs != "not_running":
+            print(_t(f"engine_stop.{kulcs}", tag=p.tag) if not kulcs.startswith("hiba")
+                  else f"{p.tag}: {kulcs}")
+    return out
 
 
 def _cmd_live_external(cfg: dict):
@@ -239,8 +274,8 @@ def _cmd_live_external(cfg: dict):
         (`main.py console --broker <id>`, leválasztva — a licencet, a futás-
         zárat és az MT5-kapcsolatot a MOTOR intézi);
       • a felület távoli módban (tükör, config-figyelő, csatorna, mt5_view);
-      • ⚠ a felület BEZÁRÁSA NEM állítja le a motort — ez volt a külön processz
-        célja. Leállítani a Brókerek fülről / a konzolból lehet.
+      • ⚠ 2026-09-30 (Tibi döntése): a felület BEZÁRÁSA MINDEN motort leállít
+        (`stop_all_engines`) — korábban a motor tovább futott.
     """
     from core import broker_profile, engine_supervisor
     from dashboard import mt5_view
@@ -280,7 +315,10 @@ def _cmd_live_external(cfg: dict):
         win.root.after(5000, update_header)
 
     win.root.after(1000, update_header)
-    win.run()
+    try:
+        win.run()
+    finally:
+        stop_all_engines(cfg)
 
 
 def cmd_dashboard():
