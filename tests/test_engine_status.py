@@ -155,7 +155,8 @@ ES.read = lambda p=None, **kw: dict(s, ts=time.time())
 try:
     root = tk.Tk(); root.withdraw()
     fr = tk.Frame(root); fr.pack()
-    tab = BT.BrokersTab(fr, profiles_provider=lambda: [ROBO])
+    tab = BT.BrokersTab(fr, profiles_provider=lambda: [ROBO],
+                        running=lambda p: True)      # a hamis kep motorja „el"
     root.update_idletasks()
     szovegek = [w.cget("text") for sor in tab._fo.winfo_children()
                 for w in sor.winfo_children()]

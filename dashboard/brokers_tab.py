@@ -106,14 +106,16 @@ class BrokersTab:
     cserélhető; alapból `core.engine_channel.request`)."""
 
     def __init__(self, parent, profiles_provider, confirm=None, request=None,
-                 starter=None, supervisor=None):
+                 starter=None, supervisor=None, running=None):
         self.parent = parent
         self._profiles = profiles_provider
         self._confirm = confirm or (lambda szoveg: False)
         self._request = request or CH.request
         from core import engine_supervisor as SV
         self._starter = starter or SV.start
-        self._running = SV.running
+        # `running(profile) -> bool`: él-e a motor processze (a futás-zár) —
+        # beadható, hogy a fül hamis képpel, valódi zár nélkül is tesztelhető
+        self._running = running or SV.running
         self._supervisor = supervisor or SV.Supervisor()
         # Az utolsó JÓ kép brókerenként: egy átmeneti olvasási hiba (a motor épp
         # cseréli a fájlt) ne villantsa „nincs adat"-ra a sort. Nem hazudik: az
@@ -271,6 +273,10 @@ class BrokersTab:
                 r["proc"] = bool(self._running(r["profile"]))
             except Exception:
                 r["proc"] = r["health"] == ES.FUT
+            # a halott processz utolsó képe még „fut"-ot mondhat (30 mp-ig nem
+            # elavult) — az Állapot és a gomb ne mondjon ellent egymásnak
+            if not r["proc"] and r["health"] in (ES.FUT, ES.HIBAS):
+                r["health"] = ES.ALL
         alairas = structure_signature(adat)
         if alairas == getattr(self, "_alairas", None):
             try:

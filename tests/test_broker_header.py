@@ -170,6 +170,14 @@ _bt = (ROOT / "dashboard" / "brokers_tab.py").read_text(encoding="utf-8")
 check("a fül csak szerkezeti változásnál rombol",
       "if alairas == getattr(self, \"_alairas\", None):" in _bt and "self._helyben(adat)" in _bt)
 
+# ── leállítás: a záró kép + az ellentmondás (2026-09-30) ────────────────
+check("halott processznél az Állapot „áll” (nem a régi kép „fut”-ja)",
+      'if not r["proc"] and r["health"] in (ES.FUT, ES.HIBAS):' in _bt)
+_mn = (ROOT / "main.py").read_text(encoding="utf-8")
+check("⚠ a második leállítás-hívó MEGVÁRJA az elsőt (különben a processz a "
+      "záró kép előtt kilép)", "_kilep_kesz.wait(timeout=30)" in _mn
+      and "_kilep_kesz.set()" in _mn)
+
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")
 sys.exit(0 if all(results) else 1)

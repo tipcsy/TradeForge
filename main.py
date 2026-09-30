@@ -376,25 +376,36 @@ def cmd_console():
     szal.start()
 
     _kilepve = [False]
+    # ⚠ 2026-09-30: a távoli „quit" a CSATORNA szálán indítja a leállítást; fej
+    # nélkül a FŐSZÁL közben a kereskedési szál végére vár, és amint az kilép,
+    # a főszál `_kilep()`-je az „egyszer" jelző miatt AZONNAL visszatért → a
+    # processz kilépett, a (daemon) csatorna-szálat félúton megölve: nem íródott
+    # ki a záró „leállt" kép, a zár árván maradt → a felület „fut"/„hibás"-t
+    # mutatott egy leállt motorra. A második hívó most MEGVÁRJA az elsőt.
+    _kilep_kesz = threading.Event()
 
     def _kilep():
         """A leállítás EGY helyen: a motor körhatáron áll meg, aztán elengedjük
         a zárat és a kapcsolatot. ⚠ A zár elengedése nem elhagyható — enélkül a
         következő indulás egy elárvult zárat találna."""
         if _kilepve[0]:                         # csak EGYSZER (távoli + helyi)
+            _kilep_kesz.wait(timeout=30)        # …de a második MEGVÁRJA az elsőt
             return
         _kilepve[0] = True
-        print(_t("console.quit"))
-        lt.request_stop()
-        szal.join(timeout=15)
         try:
-            _csatorna.stop()
-        except NameError:
-            pass
-        _kozzetevo.stop()                       # a végső kép: „rendben leállt"
-        print(_t("console.stopped"))
-        live_lock.release(_szamla)
-        mt5_connector.disconnect()
+            print(_t("console.quit"))
+            lt.request_stop()
+            szal.join(timeout=15)
+            try:
+                _csatorna.stop()
+            except NameError:
+                pass
+            _kozzetevo.stop()                   # a végső kép: „rendben leállt"
+            print(_t("console.stopped"))
+            live_lock.release(_szamla)
+            mt5_connector.disconnect()
+        finally:
+            _kilep_kesz.set()
 
     ctx = console_cmd.live_context(cfg, CFG_PATH)
     # ⚠ `--headless` (a felügyelő így indít): NINCS kezelő. Az `isatty()` erre
