@@ -517,8 +517,7 @@ def set_trade_mode(ctx: Context, symbol: str, names: list, mode: str,
     # miközben a motor figyelmen kívül hagyja. Pontosan az a néma állapot, amit a
     # `set_mode` takarítása (a `live` TÖRLI a kulcsot) megelőz — csak oda kell
     # engedni, akkor is, ha a mód „nem változik".
-    szemet = [n for n in kert if _tarolt_mod(ctx.cfg, symbol, n)
-              not in (None, _tm.MODE_SIGNAL)]
+    szemet = [n for n in kert if not _tm.stored_is_valid(ctx.cfg, symbol, n)]
     if not valtozo and not szemet:
         return Result([_t("console.mode.nochange", symbol=symbol,
                           names=", ".join(kert), mode=_tm.LABELS.get(mode, mode))])

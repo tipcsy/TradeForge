@@ -230,7 +230,13 @@ BROKER_PAIR_KEYS = ("point_size", "pv1_point", "min_lot", "lot_step", "max_lot",
 # bróker motorja ugyanazokat a párokat indítaná, és a Play/Stop-ja az OTTHONI
 # szándékot írná át. Nem-otthoni brókernél ezért a saját blokkjából jönnek, és
 # ha ott nincsenek: LEÁLLÍTVA — egy új bróker motorja magától semmit nem indít.
-BROKER_INTENT_DEFAULTS = {"run_state": {}, "enabled": False}
+# ⚠ A KÖTÉS-MÓD IS (0031, 2026-09-30): nem-otthoni brókernél MINDEN stratégia
+# alapból CSAK JELEZ (`{"*": "signal"}`, core/trade_mode.WILDCARD). Közösen a
+# RoboForex motor az otthoni módot látta, és ahol az hiányzott, VALÓDI kötést
+# próbált nyitni (AUDCHF SELL 0,09 lot — csak a terminál AutoTrading-tiltása
+# állította meg). A valódi kötés egy új brókeren KIFEJEZETT választás.
+BROKER_INTENT_DEFAULTS = {"run_state": {}, "enabled": False,
+                          "strategy_mode": {"*": "signal"}}
 OVERLAY_KEY = "_broker_overlay"
 
 

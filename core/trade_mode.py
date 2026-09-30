@@ -26,6 +26,14 @@ MODE_SIGNAL = "signal"    # csak jelzés/riasztás, megbízás NEM megy ki
 
 # Emberi nevek a felülethez (a táblázat legördülője ezeket mutatja).
 MODES = (MODE_LIVE, MODE_SIGNAL)
+# ⚠ 0029/0031 (2026-09-30): a MINDEN stratégiára érvényes alapérték. Egy
+# NEM-otthoni bróker minden párja ezzel indul (`{"*": "signal"}`, lásd
+# core/broker_profile.BROKER_INTENT_DEFAULTS): a RoboForex motor az otthoni
+# (ActivTrades) módot látta, és egy hiányzó mód = VALÓDI kötés — élesben
+# megpróbált egy valódi AUDCHF SELL-t nyitni (csak a terminál AutoTrading-
+# tiltása állította meg). Ahol a helyettesítő `signal`, ott a valódi kötést
+# KIFEJEZETTEN be kell írni (`"live"`).
+WILDCARD = "*"
 LABELS = _LabelMap("trade_mode", MODES)
 
 
@@ -39,7 +47,21 @@ def mode_of(cfg: dict, symbol: str, strategy_name: str) -> str:
     per = pc.get("strategy_mode")
     if not isinstance(per, dict):
         return MODE_LIVE
-    return MODE_SIGNAL if per.get(strategy_name) == MODE_SIGNAL else MODE_LIVE
+    v = per.get(strategy_name, per.get(WILDCARD))
+    return MODE_SIGNAL if v == MODE_SIGNAL else MODE_LIVE
+
+
+def stored_is_valid(cfg: dict, symbol: str, strategy_name: str) -> bool:
+    """A configban TÁROLT érték érvényes-e (nem elgépelt maradék). Helyettesítő
+    `signal` mellett a kifejezett `live` is érvényes (az kapcsolja be a valódit)."""
+    pc = (cfg.get("pairs") or {}).get(symbol)
+    per = pc.get("strategy_mode") if isinstance(pc, dict) else None
+    if not isinstance(per, dict):
+        return True
+    v = per.get(strategy_name)
+    if v in (None, MODE_SIGNAL):
+        return True
+    return v == MODE_LIVE and per.get(WILDCARD) == MODE_SIGNAL
 
 
 def is_signal_only(cfg: dict, symbol: str, strategy_name: str) -> bool:
@@ -57,6 +79,9 @@ def set_mode(cfg: dict, symbol: str, strategy_name: str, mode: str) -> None:
         per = {}
     if mode == MODE_SIGNAL:
         per[strategy_name] = MODE_SIGNAL
+    elif per.get(WILDCARD) == MODE_SIGNAL:
+        # a helyettesítő „csak jelzés" → a valódi kötés KIFEJEZETT bejegyzés
+        per[strategy_name] = MODE_LIVE
     else:
         per.pop(strategy_name, None)
     if per:
@@ -74,5 +99,6 @@ def signal_only_pairs(cfg: dict) -> list:
             continue
         per = pc.get("strategy_mode")
         if isinstance(per, dict):
-            out += [(sym, n) for n, m in per.items() if m == MODE_SIGNAL]
+            out += [(sym, n) for n, m in per.items()
+                    if m == MODE_SIGNAL and n != WILDCARD]
     return sorted(out)
