@@ -6621,6 +6621,21 @@ class DashboardWindow:
         live_every = max(1, round(self._fast_refresh_sec / price_sec))
         all_every  = max(1, round(self._all_refresh_sec  / price_sec))
         counter = 0
+        # ⚠ KÜLSŐ MÓDBAN az ár KÜLÖN SZÁLON: a kapu/indikátor-út a motortól
+        # kéri a gyertyákat (páronként több kérés) — egy szálon az ár addig
+        # állt, amíg a teljes kör le nem futott (Tibi, 2026-09-30: „lassú").
+        _kulon_ar = getattr(self, "_remote", None) is not None
+        if _kulon_ar:
+            def _ar_szal():
+                while getattr(self, "_poll_running", False):
+                    for _s in [s for s in list(self.dashboard_ref)
+                               if isinstance(self.cfg["pairs"].get(s), dict)]:
+                        try:
+                            self._refresh_price(_s)
+                        except Exception:
+                            pass
+                    _time.sleep(price_sec)
+            threading.Thread(target=_ar_szal, daemon=True, name="MarketPrice").start()
         while getattr(self, "_poll_running", False):
             all_syms = [s for s in self.dashboard_ref
                         if isinstance(self.cfg["pairs"].get(s), dict)]
@@ -6632,7 +6647,8 @@ class DashboardWindow:
             #    eltűnt a BID/ASK minden páron, a live DJ30-on is.
             for sym in all_syms:
                 try:
-                    self._refresh_price(sym)
+                    if not _kulon_ar:
+                        self._refresh_price(sym)
                     self._refresh_light_extras(sym)   # napi nyitóár + max spread (opt közben is)
                 except Exception:
                     pass

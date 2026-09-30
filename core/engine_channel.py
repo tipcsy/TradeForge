@@ -43,7 +43,11 @@ MAX_AGE_SEC = 60.0
 # még kapcsolódik), a válasz a kimenő postaládában marad. A motor ezeket
 # `ORPHAN_SEC` után törli — különben a mappa lassan telne.
 ORPHAN_SEC = 120.0
-POLL_SEC = 1.0
+# ⚠ 2026-09-30, MÉRVE élesben: minden kérés ~900-1000 ms volt a MÉRETTŐL
+# FÜGGETLENÜL (419 B és 35 KB ugyanannyi) — a késés a postaláda-figyelés volt,
+# nem az adat. Páronként 3-5 kérés × 27 pár = percekig „számolgatta a kapukat".
+# Egy üres mappa listázása 50 ms-onként elhanyagolható terhelés.
+POLL_SEC = 0.05
 
 
 def _dir(nev: str, profile=None) -> Path:
@@ -106,7 +110,7 @@ def request(profile, line: str = "", confirmed: bool = False, timeout: float = 1
         r = result(profile, azon, outbox=outbox)
         if r is not None:
             return r
-        time.sleep(0.2)
+        time.sleep(0.02)             # a válaszra várás is sűrű (volt 0,2 mp)
     # ⚠ A válasz nélkül maradt parancsot VISSZAVONJUK — különben a motor egy
     # későbbi induláskor (a MAX_AGE-en belül) még végrehajthatná.
     try:

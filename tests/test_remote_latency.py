@@ -35,6 +35,14 @@ check("külső módban az ár-szál 0,5 mp-enként fut (nem a 3 mp-es alap)",
 _es = (ROOT / "core" / "engine_status.py").read_text(encoding="utf-8")
 check("a lassú kép-elkészítés NEM néma (a napló szól)",
       '"késve frissül"' in _es and "_lassu_jelezve" in _es)
+# ⚠ MÉRVE élesben (2026-09-30): minden postaláda-kérés ~1 mp volt a méretétől
+# függetlenül — a motor 1 mp-enként nézte a postaládát.
+from core import engine_channel as EC                            # noqa: E402
+check("a motor legfeljebb 0,1 mp-enként nézi a postaládát", EC.POLL_SEC <= 0.1, str(EC.POLL_SEC))
+_ec = (ROOT / "core" / "engine_channel.py").read_text(encoding="utf-8")
+check("a válaszra várás is sűrű", "time.sleep(0.02)" in _ec)
+check("külső módban az ár KÜLÖN szálon (a kapu-út nem tartja vissza)",
+      'name="MarketPrice"' in _g and "if not _kulon_ar:" in _g)
 lepcsok = ES.PERIOD_SEC + MV.SNAP_TTL + 0.5 + 1.0
 check("a legrosszabb eset összesen legfeljebb ~2,5 mp", lepcsok <= 2.5, f"{lepcsok:.1f}")
 
