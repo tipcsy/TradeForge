@@ -80,10 +80,11 @@ def _deal(d) -> Deal:
         comment=str(getattr(d, "comment", "") or ""), order=int(getattr(d, "order", 0) or 0))
 
 
-def _spec(i) -> SymbolSpec:
+def _spec(i, symbol: str = "") -> SymbolSpec:
     g = lambda k, alap=0: getattr(i, k, alap)   # noqa: E731
     return SymbolSpec(
-        name=i.name, point=float(i.point), digits=int(i.digits),
+        name=g("name", symbol) or symbol, point=float(g("point", 0.0) or 0.0),
+        digits=int(g("digits", 0) or 0),
         trade_tick_size=float(g("trade_tick_size", 0.0) or 0.0),
         trade_tick_value=float(g("trade_tick_value", 0.0) or 0.0),
         trade_contract_size=float(g("trade_contract_size", 0.0) or 0.0),
@@ -122,7 +123,7 @@ class MT5Connector:
     def symbol_spec(self, symbol: str) -> Optional[SymbolSpec]:
         with _lock():
             i = mt5.symbol_info(symbol)
-        return _spec(i) if i is not None else None
+        return _spec(i, symbol) if i is not None else None
 
     def tick(self, symbol: str) -> Optional[Tick]:
         with _lock():

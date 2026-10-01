@@ -375,7 +375,7 @@ def _pos_risk_ccy(p) -> float:
         if not p.sl or p.sl == 0.0:
             return 0.0
         with MT5_LOCK:
-            info = mt5.symbol_info(p.symbol)
+            info = _connector.get().symbol_spec(p.symbol)
         if info is None or not info.point:
             return 0.0
         tick_sz = float(info.trade_tick_size or 0.0) or float(info.point)
@@ -439,7 +439,7 @@ def open_positions_detailed() -> list:
             # így nem lehet némán nyomkodni, amíg a profit nem fedezi a költséget).
             be_feasible = False
             try:
-                _pinfo = mt5.symbol_info(p.symbol)
+                _pinfo = _connector.get().symbol_spec(p.symbol)
                 if _pinfo is not None:
                     _, be_feasible = _breakeven_plan(p, _pinfo)
             except Exception:
@@ -866,7 +866,7 @@ def breakeven_reached(ticket: int) -> bool:
             if not pos or not pos[0].sl:
                 return False
             p = pos[0]
-            info = mt5.symbol_info(p.symbol)
+            info = _connector.get().symbol_spec(p.symbol)
             if info is None:
                 return False
             target_sl, _ = _breakeven_plan(p, info)
@@ -888,7 +888,7 @@ def breakeven_feasible(ticket: int) -> bool:
             pos = _connector.get().positions(ticket=ticket)
             if not pos:
                 return False
-            info = mt5.symbol_info(pos[0].symbol)
+            info = _connector.get().symbol_spec(pos[0].symbol)
             if info is None:
                 return False
             _, feasible = _breakeven_plan(pos[0], info)
@@ -916,7 +916,7 @@ def move_to_breakeven(ticket: int) -> bool:
             if not pos:
                 return False
             p = pos[0]
-            info = mt5.symbol_info(p.symbol)
+            info = _connector.get().symbol_spec(p.symbol)
             if info is None:
                 return False
             # Költség-tudatos cél-SL + feasibility (közös a kézi-gomb tiltásával).
@@ -1057,7 +1057,7 @@ def server_offset_sec(symbols) -> Optional[float]:
         latest = None
         with MT5_LOCK:
             for sym in symbols:
-                tick = mt5.symbol_info_tick(sym)
+                tick = _connector.get().tick(sym)
                 if tick and tick.time and (latest is None or tick.time > latest):
                     latest = int(tick.time)
         if latest is not None:

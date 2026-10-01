@@ -428,7 +428,7 @@ def get_candles(symbol: str, timeframe, count: int) -> Optional[pd.DataFrame]:
     # close_spread-je). Enélkül a chart-jelölők a spread-kaput nem modelleznék.
     if "spread" in df.columns:
         with MT5_LOCK:
-            info = mt5.symbol_info(symbol)
+            info = _connector.get().symbol_spec(symbol)
         pt = getattr(info, "point", 0.0) if info else 0.0
         if pt and pt > 0:
             df["spread"] = df["spread"].astype(float) * pt
@@ -2274,7 +2274,7 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
     # NEM a valós UTC — így a trade_hours pontosan azt jelenti, amit a charton
     # látsz, és a no-trade szürke sáv is illeszkedik. (A tick.time szerver-epoch.)
     with MT5_LOCK:
-        _tick = mt5.symbol_info_tick(symbol)
+        _tick = _connector.get().tick(symbol)
     hour = (datetime.fromtimestamp(_tick.time, tz=timezone.utc).hour
             if _tick else datetime.now(timezone.utc).hour)
     # STRATÉGIA-hatókörű óra-kapu: a stratégia saját `{symbol}_hours.json`-ja (ha
@@ -2288,7 +2288,7 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
     # nyereséget adná vissza, amit a kúszás védeni hivatott.
     try:
         with MT5_LOCK:
-            _si_trail = mt5.symbol_info(symbol)
+            _si_trail = _connector.get().symbol_spec(symbol)
         package_trail(symbol, _sn, pair_cfg, _tick, _si_trail)
     except Exception:
         log.debug("%s — csomag-stop kúsztatás kimaradt", symbol, exc_info=True)
@@ -2311,7 +2311,7 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
         if _preset in (_rr.PRESET_OFF, _rr.PRESET_RISKY):
             try:
                 with MT5_LOCK:
-                    _sinfo = mt5.symbol_info(symbol)
+                    _sinfo = _connector.get().symbol_spec(symbol)
                 for _p in get_open_positions(magic, _sn):
                     if _p.symbol != symbol:
                         continue
@@ -2473,7 +2473,7 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
     # amíg nincs jegyzés: olyankor a kapu fail-open, mint eddig.
     current_spread_points = _cap_pips = None
     with MT5_LOCK:
-        sym_info = mt5.symbol_info(symbol)
+        sym_info = _connector.get().symbol_spec(symbol)
     if ds is not None and atr_val is not None:
         ds.atr_price = float(atr_val)
     if sym_info and atr_val is not None and sym_info.point > 0:
@@ -3261,7 +3261,7 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
                 return
 
             with MT5_LOCK:
-                tick = mt5.symbol_info_tick(symbol)
+                tick = _connector.get().tick(symbol)
             if tick:
                 # Az árak a szimbólum RÁCSÁRA igazítva (tick_size többszöröse,
                 # digits szerint) — a fix 5 tizedes a nem tizedes tick-méretű
@@ -3408,7 +3408,7 @@ def manual_entry(offer_id: str, drift_confirmed: bool = False) -> tuple:
         # ── Aktuális ár és ELMOZDULÁS ─────────────────────────────────
         try:
             with MT5_LOCK:
-                _tick = mt5.symbol_info_tick(o.symbol)
+                _tick = _connector.get().tick(o.symbol)
             ar = float(_tick.ask if o.direction == "BUY" else _tick.bid)
         except Exception:
             return "hiba", _t("tg.offer.no_price", symbol=o.symbol), False
@@ -3662,10 +3662,11 @@ def remote_ops(cfg: dict) -> dict:
     def _symbol_info(symbol):
         with MT5_LOCK:
             mt5.symbol_select(symbol, True)
-            i = mt5.symbol_info(symbol)
+            i = _connector.get().symbol_spec(symbol)
         if i is None:
             return None
-        d = i._asdict()
+        import dataclasses as _dc
+        d = _dc.asdict(i)            # 0032: semleges rekord (SymbolSpec)
         return {k: d.get(k) for k in ("name", "description", "point", "digits",
                                       "spread", "trade_tick_value", "trade_tick_size",
                                       "volume_min", "volume_step", "volume_max")}
@@ -3747,7 +3748,7 @@ def manual_build(symbol: str, strategy_name: "str | None" = None) -> bool:
     # kezelte, magictől függetlenül — így több stratégiánál a másik lábainak is
     # átírta az SL-jét és TÖRÖLTE a TP-jüket.
     with MT5_LOCK:
-        info = mt5.symbol_info(symbol)
+        info = _connector.get().symbol_spec(symbol)
     positions = strategy_positions(symbol, strategy_name)
     if not positions:
         build_runtime.pop((symbol, strategy_name), None)
@@ -3833,7 +3834,7 @@ def manual_build(symbol: str, strategy_name: "str | None" = None) -> bool:
     avg = _position_build.average_price(
         [(p.price_open, p.volume) for p in positions_new])
     with MT5_LOCK:
-        _tick = mt5.symbol_info_tick(symbol)
+        _tick = _connector.get().tick(symbol)
         _cost_buf = mt5_connector.package_cost_buffer(positions_new, info)
     _price_now = (_tick.bid if direction == "BUY" else _tick.ask) if _tick else 0.0
     _stop, _clamped = _position_build.package_stop(

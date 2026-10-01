@@ -19,6 +19,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+import core.connector_mt5 as _CM   # 0032: a hamis MT5 a csatlakozóba is
 
 from core import applog
 applog.harden_console()
@@ -192,7 +193,7 @@ class _Slot:
 
 try:
     so.REGISTRY = R
-    lt.mt5 = _FakeMt5()
+    lt.mt5 = _CM.mt5 = _FakeMt5()
     lt._run_cfg = {"notify": {"answer_trading": True}, "trading": {}}
     lt._run_slot_mgr = _Slot()
     lt.strategy_positions = lambda s, n, positions=None: []
@@ -227,7 +228,7 @@ try:
     lt._run_slot_mgr = _Slot()
 
     # Megcsúszott ár → NEM köt, hanem újra kérdez, és az ajánlat NYITVA marad.
-    lt.mt5 = _FakeMt5(ar=100.5)                 # 0,5 = 0,5 R elmozdulás
+    lt.mt5 = _CM.mt5 = _FakeMt5(ar=100.5)                 # 0,5 = 0,5 R elmozdulás
     _st, _sz, _u = lt.manual_entry(o5.id)
     check("⚠ 0,25 R fölötti elmozdulásnál NEM köt", _st == "sodrodas" and not _nyitott)
     check("...hanem ÚJRA KÉRDEZ", _u is True)
@@ -250,7 +251,7 @@ try:
           _st == "lejart" and len(_nyitott) == 1)
 
     # A megbízás elbukása → NEM hallgatunk.
-    lt.mt5 = _FakeMt5(ar=100.0)
+    lt.mt5 = _CM.mt5 = _FakeMt5(ar=100.0)
     lt._execute_entry = lambda *a, **kw: None
     o6 = ajanlat()
     _st, _sz, _u = lt.manual_entry(o6.id)
@@ -262,7 +263,7 @@ finally:
     lt._run_slot_mgr = _eredeti["slot"]
     lt._run_cfg = _eredeti["cfg"]
     lt._execute_entry = _eredeti["exec"]
-    lt.mt5 = _eredeti["mt5"]
+    lt.mt5 = _CM.mt5 = _eredeti["mt5"]
     so.REGISTRY = _eredeti["reg"]
 
 # ── 8. A GOMBOK ÚTJA ─────────────────────────────────────────────────────
