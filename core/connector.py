@@ -170,6 +170,11 @@ class Connector(Protocol):
         """Mint a `positions`: None = hiba, [] = nincs kötés."""
         ...
 
+    def margin_required(self, symbol: str, side: str, volume: float,
+                        price: float) -> Optional[float]:
+        """A kötéshez szükséges fedezet a számla devizájában (None: nem ismert)."""
+        ...
+
     # ── végrehajtás ──
     def open_market(self, symbol: str, side: str, volume: float, sl: float,
                     tp: float, magic: int, comment: str = "",

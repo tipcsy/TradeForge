@@ -59,8 +59,9 @@ def check(cfg: dict) -> list:
         if not isinstance(pc, dict):
             continue
         try:
+            from core import connector as _connector     # 0032
             with mc.MT5_LOCK:
-                info = mt5.symbol_info(symbol)
+                info = _connector.get().symbol_spec(symbol)
             if info is None:
                 continue
             point_size = float(pc.get("point_size") or 0.0)

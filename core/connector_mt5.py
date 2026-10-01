@@ -178,6 +178,14 @@ class MT5Connector:
             return None                       # HIBA ≠ üres előzmény (lásd fent)
         return [_deal(d) for d in r]
 
+    def margin_required(self, symbol: str, side: str, volume: float,
+                        price: float) -> Optional[float]:
+        with _lock():
+            v = mt5.order_calc_margin(
+                mt5.ORDER_TYPE_BUY if side == BUY else mt5.ORDER_TYPE_SELL,
+                symbol, volume, price)
+        return None if v is None else float(v)
+
     # ── végrehajtás ──
     def _kuld(self, request: dict) -> OrderResult:
         with _lock():

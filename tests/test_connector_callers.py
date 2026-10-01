@@ -43,6 +43,7 @@ class HamisCsatlakozo:
     def tick(self, s): return C.Tick(1.0, 1.1)
     def bars(self, *a, **k): return None
     def deals(self, **k): return []
+    def margin_required(self, *a, **k): return None
 
     def symbol_spec(self, s):
         return C.SymbolSpec(name=s, point=0.01, digits=2, volume_min=0.01, volume_step=0.01)

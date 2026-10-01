@@ -92,8 +92,9 @@ def info_of(symbol: str, max_age_sec: int = MAX_AGE_SEC) -> dict:
     try:
         from core.broker_adapter import mt5
         from core.mt5_connector import MT5_LOCK
+        from core import connector as _connector     # 0032
         with MT5_LOCK:
-            t = mt5.symbol_info_tick(symbol)
+            t = _connector.get().tick(symbol)
     except Exception as ex:
         log.debug("tick-lekérdezés hiba (%s): %s", symbol, ex)
         return out

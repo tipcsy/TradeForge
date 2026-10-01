@@ -2168,10 +2168,8 @@ def _execute_entry(symbol: str, strategy_name: str, direction: str, lot: float,
     # stratégia, hanem a tőkeáttétel/egyenleg a korlát.
     try:
         with MT5_LOCK:
-            _need = mt5.order_calc_margin(
-                mt5.ORDER_TYPE_BUY if direction == "BUY" else mt5.ORDER_TYPE_SELL,
-                symbol, lot, open_price)
-            _acct = mt5.account_info()
+            _need = _connector.get().margin_required(symbol, direction, lot, open_price)
+            _acct = _connector.get().account()
         _free = float(getattr(_acct, "margin_free", 0.0) or 0.0) if _acct else 0.0
         if _need is not None and _free > 0 and float(_need) > _free:
             log.warning("⏭ %s %s jel — belépő KIHAGYVA: nincs elég szabad "

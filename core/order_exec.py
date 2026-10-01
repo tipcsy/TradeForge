@@ -52,7 +52,8 @@ def filling_mode(symbol: str, info=None) -> int:
     if cached is not None:
         return cached
     if info is None:
-        info = mt5.symbol_info(symbol)
+        from core import connector as _connector     # 0032
+        info = _connector.get().symbol_spec(symbol)
     mask = getattr(info, "filling_mode", 0) if info is not None else 0
     if mask & SYMBOL_FILLING_IOC:
         mode = mt5.ORDER_FILLING_IOC
@@ -85,7 +86,8 @@ def deviation_points(symbol: str, cfg: dict | None = None, info=None) -> int:
         except (TypeError, ValueError):
             base = DEFAULT_DEVIATION_POINTS
     if info is None:
-        info = mt5.symbol_info(symbol)
+        from core import connector as _connector     # 0032
+        info = _connector.get().symbol_spec(symbol)
     spread = int(getattr(info, "spread", 0) or 0) if info is not None else 0
     return max(1, base, spread)
 
@@ -132,7 +134,8 @@ def point_value(symbol: str, point_size: float, info=None) -> "float | None":
     if not point_size or point_size <= 0:
         return None
     if info is None:
-        info = mt5.symbol_info(symbol)
+        from core import connector as _connector     # 0032
+        info = _connector.get().symbol_spec(symbol)
     if info is None:
         return None
     tv = float(getattr(info, "trade_tick_value", 0.0) or 0.0)

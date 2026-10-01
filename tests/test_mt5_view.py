@@ -63,7 +63,10 @@ BA._raw = lambda: NyersMT5()
 BA.configure(None)
 GW.reset()
 MV.clear_cache()
-check("symbol_info: UGYANAZ az objektum", MV.symbol_info("GOLD") is nyers_info)
+# 0032: helyi módban a CSATLAKOZÓN át — a semleges rekord, ugyanazzal az adattal
+_si = MV.symbol_info("GOLD")
+check("symbol_info: a bróker adata (a csatlakozón át, semleges rekordban)",
+      _si is not None and _si.point == 0.01 and _si.name == "GOLD", repr(_si))
 from core.mt5_connector import MT5_LOCK                                  # noqa: E402
 check("lock(): a valodi MT5-zar", MV.lock() is MT5_LOCK)
 

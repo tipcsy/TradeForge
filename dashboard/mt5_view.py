@@ -107,8 +107,8 @@ def symbols_get():
 
 def symbol_info(symbol):
     if not _remote():
-        from core.broker_adapter import mt5
-        return mt5.symbol_info(symbol)
+        from core import connector as _connector     # 0032
+        return _connector.get().symbol_spec(symbol)
     d = _tar(("info", symbol), INFO_TTL, lambda: _op("symbol_info", symbol=symbol))
     if not d:
         return None
@@ -126,8 +126,8 @@ def symbol_info_tick(symbol):
     """Távoli módban a motor képéből: `[bid, ask, tick-idő]` minden párra
     (a demó-próbán derült ki, hogy az árakat eddig a FELÜLET töltötte)."""
     if not _remote():
-        from core.broker_adapter import mt5
-        return mt5.symbol_info_tick(symbol)
+        from core import connector as _connector     # 0032
+        return _connector.get().tick(symbol)
     tk = (_snap().get("ticks") or {}).get(symbol)
     if not tk:
         return None
@@ -136,8 +136,9 @@ def symbol_info_tick(symbol):
 
 def copy_rates_from_pos(symbol, timeframe, start, count):
     if not _remote():
-        from core.broker_adapter import mt5
-        return mt5.copy_rates_from_pos(symbol, timeframe, start, count)
+        from core import connector as _connector     # 0032
+        from core.connector_mt5 import minutes_of
+        return _connector.get().bars(symbol, minutes_of(timeframe), int(count), int(start))
     d = _tar(("rates", symbol, int(timeframe), int(start), int(count)), RATES_TTL,
              lambda: _op("rates", symbol=symbol, tf=int(timeframe), start=int(start),
                          count=int(count)))
