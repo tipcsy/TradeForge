@@ -820,7 +820,7 @@ def tf_bars(symbol: str, tf: int, count: int):
     try:
         import pandas as pd
         with MT5_LOCK:
-            r = mt5.copy_rates_from_pos(symbol, const, 1, int(count))
+            r = _connector.get().bars(symbol, int(tf), int(count), 1)
         if r is None or not len(r):
             return None
         df = pd.DataFrame(r)
@@ -845,7 +845,7 @@ def tf_closes(symbol: str, timeframes: list, count: int) -> dict:
                 const = _TF_CONST.get(int(tf))
                 if const is None:
                     continue
-                r = mt5.copy_rates_from_pos(symbol, const, 0, int(count))
+                r = _connector.get().bars(symbol, int(tf), int(count), 0)
                 if r is not None and len(r):
                     out[int(tf)] = [float(x["close"]) for x in r]
     except Exception:

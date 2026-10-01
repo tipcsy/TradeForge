@@ -415,8 +415,9 @@ def request_viz_clear(symbol: str) -> None:
 def get_candles(symbol: str, timeframe, count: int) -> Optional[pd.DataFrame]:
     # Csak a LEKÉRÉS van lock alatt — a DataFrame-építés (a drágább rész) nem,
     # különben a mély viz-ablakok (~43 000 M1 gyertya) kiéheztetnék a kereskedést.
+    from core.connector_mt5 import minutes_of as _perc
     with MT5_LOCK:
-        rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, count)
+        rates = _connector.get().bars(symbol, _perc(timeframe), count, 0)
     if rates is None or len(rates) == 0:
         return None
     df = pd.DataFrame(rates)
@@ -3674,7 +3675,8 @@ def remote_ops(cfg: dict) -> dict:
     def _rates(symbol, tf, start, count):
         with MT5_LOCK:
             mt5.symbol_select(symbol, True)
-            r = mt5.copy_rates_from_pos(symbol, int(tf), int(start), int(count))
+            from core.connector_mt5 import minutes_of as _perc
+            r = _connector.get().bars(symbol, _perc(tf), int(count), int(start))
         if r is None:
             return None
         return {"names": list(r.dtype.names), "rows": [list(map(lambda v: v.item()

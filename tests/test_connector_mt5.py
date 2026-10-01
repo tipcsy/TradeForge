@@ -141,6 +141,18 @@ try:
 finally:
     CM.mt5, CM._lock = _regi_mt5, _regi_lock
 
+# ── idősík: MT5-konstans vagy perc → perc ──
+import MetaTrader5 as _m                                          # noqa: E402
+check("H1-konstans (16385) → 60 perc", CM.minutes_of(_m.TIMEFRAME_H1) == 60)
+check("M15 (konstans = perc) → 15", CM.minutes_of(_m.TIMEFRAME_M15) == 15)
+check("a perc maga is elfogadott (60 → 60, 240 → 240)",
+      CM.minutes_of(60) == 60 and CM.minutes_of(240) == 240)
+try:
+    CM.minutes_of(7)
+    check("ismeretlen idősík → hiba (nem néma rossz adat)", False)
+except ValueError:
+    check("ismeretlen idősík → hiba (nem néma rossz adat)", True)
+
 # ── az aktív csatlakozó ──
 C.set_active(None)
 check("alapból az MT5-ös csatlakozó", isinstance(C.get(), CM.MT5Connector))

@@ -40,6 +40,19 @@ _TF = {1: "TIMEFRAME_M1", 5: "TIMEFRAME_M5", 15: "TIMEFRAME_M15",
        1440: "TIMEFRAME_D1"}
 
 
+def minutes_of(tf) -> int:
+    """MT5 idősík-konstans VAGY perc → perc. A mai hívók egy része az MT5-
+    konstanst adja (`mt5.TIMEFRAME_H1` = 16385), a semleges felület percet vár.
+    (M1–M30 konstansa egyezik a percével, ezért mindkét irány egyértelmű.)"""
+    tf = int(tf)
+    if tf in _TF:
+        return tf
+    for perc, nev in _TF.items():
+        if getattr(mt5, nev, None) == tf:
+            return perc
+    raise ValueError(f"ismeretlen idősík: {tf}")
+
+
 def _lock():
     from core.mt5_connector import MT5_LOCK
     return MT5_LOCK
@@ -133,7 +146,7 @@ class MT5Connector:
         return Tick(bid=float(t.bid), ask=float(t.ask), time=int(getattr(t, "time", 0) or 0))
 
     def bars(self, symbol: str, timeframe_min: int, count: int, start: int = 0):
-        tf = getattr(mt5, _TF[int(timeframe_min)])
+        tf = getattr(mt5, _TF[minutes_of(timeframe_min)])
         with _lock():
             return mt5.copy_rates_from_pos(symbol, tf, int(start), int(count))
 
