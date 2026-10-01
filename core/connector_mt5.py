@@ -193,18 +193,25 @@ class MT5Connector:
         }
         return self._kuld(request)
 
-    def modify_sltp(self, ticket: int, sl: float, tp: float) -> OrderResult:
+    def modify_sltp(self, ticket: int, sl: float,
+                    tp: Optional[float] = None) -> OrderResult:
         with _lock():
             r = mt5.positions_get(ticket=int(ticket))
             if not r:
                 return OrderResult(Code.NOT_FOUND, message=f"#{ticket} nincs nyitva")
             p = r[0]
             info = mt5.symbol_info(p.symbol)
+        if tp is None:
+            uj_tp = p.tp                                  # a mostani marad (trailing)
+        elif not tp:
+            uj_tp = 0.0                                   # TÖRLÉS — nem rácsra igazítjuk
+        else:
+            uj_tp = order_exec.normalize_price(tp, info)
         request = {
             "action":   mt5.TRADE_ACTION_SLTP,
             "symbol":   p.symbol,
             "sl":       order_exec.normalize_price(sl, info),
-            "tp":       tp,
+            "tp":       uj_tp,
             "position": int(ticket),
         }
         return self._kuld(request)

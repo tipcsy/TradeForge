@@ -596,39 +596,18 @@ def closed_positions_range(frm, to) -> list:
 
 
 def close_position(ticket: int) -> bool:
-    """Egy pozíció azonnali piaci zárása (Pánik gomb)."""
+    """Egy pozíció azonnali piaci zárása (Pánik gomb) — a csatlakozón át (0032):
+    csúszás-tűrés + a szimbólum TÁMOGATOTT kitöltési módja (enélkül a zárás pont
+    akkor bukhat el — requote / 10030 —, amikor a legfontosabb)."""
     try:
-        with MT5_LOCK:
-            pos = mt5.positions_get(ticket=ticket)
-            if not pos:
-                return False
-            p = pos[0]
-            tick = mt5.symbol_info_tick(p.symbol)
-            if tick is None:
-                return False
-            close_type = mt5.ORDER_TYPE_SELL if p.type == 0 else mt5.ORDER_TYPE_BUY
-            price = tick.bid if p.type == 0 else tick.ask
-            # Csúszás-tűrés + a szimbólum által TÁMOGATOTT kitöltési mód: enélkül a
-            # zárás pont akkor bukhat el (requote / 10030), amikor a legfontosabb.
-            info = mt5.symbol_info(p.symbol)
-            req = {
-                "action":       mt5.TRADE_ACTION_DEAL,
-                "symbol":       p.symbol,
-                "volume":       p.volume,
-                "type":         close_type,
-                "position":     ticket,
-                "price":        price,
-                "deviation":    order_exec.deviation_points(p.symbol, None, info),
-                "magic":        p.magic,
-                "comment":      "panic_close",
-                "type_time":    mt5.ORDER_TIME_GTC,
-                "type_filling": order_exec.filling_mode(p.symbol, info),
-            }
-            res = mt5.order_send(req)
-        if res is None or res.retcode != mt5.TRADE_RETCODE_DONE:
-            log.error("%s #%d — zárás SIKERTELEN: retcode=%s %s", p.symbol, ticket,
-                      getattr(res, "retcode", "—"),
-                      res.comment if res else mt5.last_error())
+        from core import connector as _conn
+        res = _conn.get().close(ticket, None, comment="panic_close")
+        if res.code in (_conn.Code.NOT_FOUND,) or (not res.ok and not res.request):
+            return False
+        if not res.ok:
+            log.error("%s #%d — zárás SIKERTELEN: retcode=%s %s",
+                      res.request.get("symbol", "?"), ticket,
+                      res.raw_code if res.raw_code is not None else "—", res.message)
             return False
         return True
     except Exception as e:
@@ -644,14 +623,15 @@ def close_position_partial(ticket: int, volume: float) -> bool:
     NEM zár."""
     try:
         import math
-        with MT5_LOCK:
-            pos = mt5.positions_get(ticket=ticket)
+        from core import connector as _conn
+        k = _conn.get()
+        with MT5_LOCK:                 # a mennyiség-döntés és a küldés EGY zár alatt
+            pos = k.positions(ticket=ticket)
             if not pos:
                 return False
             p = pos[0]
-            info = mt5.symbol_info(p.symbol)
-            tick = mt5.symbol_info_tick(p.symbol)
-            if info is None or tick is None:
+            info = k.symbol_spec(p.symbol)
+            if info is None or k.tick(p.symbol) is None:
                 return False
             step = info.volume_step or 0.01
             vmin = info.volume_min or 0.01
@@ -659,28 +639,13 @@ def close_position_partial(ticket: int, volume: float) -> bool:
             vol = round(vol, 8)
             if vol < vmin - 1e-9 or vol > p.volume - vmin + 1e-9:
                 return False   # a lezárt rész vagy a runner min_lot alá menne
-            close_type = mt5.ORDER_TYPE_SELL if p.type == 0 else mt5.ORDER_TYPE_BUY
-            price = tick.bid if p.type == 0 else tick.ask
-            # A RÉSZLEGES zárás IOC-t igényel (a FOK a rész-mennyiséget elutasítja),
-            # de csak akkor, ha a szimbólum engedi — ezt az order_exec dönti el.
-            req = {
-                "action":       mt5.TRADE_ACTION_DEAL,
-                "symbol":       p.symbol,
-                "volume":       vol,
-                "type":         close_type,
-                "position":     ticket,
-                "price":        price,
-                "deviation":    order_exec.deviation_points(p.symbol, None, info),
-                "magic":        p.magic,
-                "comment":      "rr_partial",
-                "type_time":    mt5.ORDER_TIME_GTC,
-                "type_filling": order_exec.filling_mode(p.symbol, info),
-            }
-            res = mt5.order_send(req)
-        if res is None or res.retcode != mt5.TRADE_RETCODE_DONE:
+            # ⚠ a `rr_partial` megjegyzés NEM kozmetika: a `has_partial_close`
+            # (újraindítás-védelem — ne duplázzon) erre a szövegre keres.
+            res = k.close(ticket, vol, comment="rr_partial")
+        if not res.ok:
             log.error("%s #%d — RÉSZLEGES zárás (%.2f lot) SIKERTELEN: retcode=%s %s",
-                      p.symbol, ticket, vol, getattr(res, "retcode", "—"),
-                      res.comment if res else mt5.last_error())
+                      p.symbol, ticket, vol,
+                      res.raw_code if res.raw_code is not None else "—", res.message)
             return False
         return True
     except Exception as e:
@@ -720,25 +685,15 @@ def modify_position_sltp(ticket: int, new_sl: float, new_tp: float) -> bool:
     (ami a TP nélküli adalékokat védtelenül hagyná) — a csomag EGYBEN fut, az átlagár-
     stopig / kiszállási jelig / kézi zárásig."""
     try:
-        with MT5_LOCK:
-            pos = mt5.positions_get(ticket=ticket)
-            if not pos:
-                return False
-            p = pos[0]
-            info = mt5.symbol_info(p.symbol)
-            req = {
-                "action":   mt5.TRADE_ACTION_SLTP,
-                "symbol":   p.symbol,
-                "position": ticket,
-                "sl":       order_exec.normalize_price(new_sl, info),
-                # tp=0 a TP TÖRLÉSE — azt nem szabad a rácsra igazítani.
-                "tp":       order_exec.normalize_price(new_tp, info) if new_tp else 0.0,
-            }
-            res = mt5.order_send(req)
-        if res is None or res.retcode != mt5.TRADE_RETCODE_DONE:
+        from core import connector as _conn
+        # tp=0 a TP TÖRLÉSE — a csatlakozó azt nem igazítja rácsra (0032)
+        res = _conn.get().modify_sltp(ticket, new_sl, new_tp or 0.0)
+        if res.code == _conn.Code.NOT_FOUND:
+            return False
+        if not res.ok:
             log.error("%s #%d — SL/TP beállítás SIKERTELEN (sl=%s tp=%s): retcode=%s %s",
-                      p.symbol, ticket, new_sl, new_tp, getattr(res, "retcode", "—"),
-                      res.comment if res else mt5.last_error())
+                      res.request.get("symbol", "?"), ticket, new_sl, new_tp,
+                      res.raw_code if res.raw_code is not None else "—", res.message)
             return False
         return True
     except Exception as e:
@@ -970,15 +925,11 @@ def move_to_breakeven(ticket: int) -> bool:
             if not feasible:
                 return False
 
-            req = {
-                "action":   mt5.TRADE_ACTION_SLTP,
-                "symbol":   p.symbol,
-                "position": ticket,
-                "sl":       target_sl,
-                "tp":       p.tp,
-            }
-            res = mt5.order_send(req)
-            return res is not None and res.retcode == mt5.TRADE_RETCODE_DONE
+            # a csatlakozón át (0032); a TP MARAD (tp=None). A cél-SL már a
+            # rácson van (`_breakeven_plan` → normalize_price), a csatlakozó
+            # ismételt igazítása nem változtat rajta.
+            from core import connector as _conn
+            return _conn.get().modify_sltp(ticket, target_sl, None).ok
     except Exception:
         return False
 

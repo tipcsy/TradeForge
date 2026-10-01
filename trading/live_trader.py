@@ -454,51 +454,27 @@ def open_position(
                   _szunet - time.time())
         return None
 
-    order_type = mt5.ORDER_TYPE_BUY if direction == "BUY" else mt5.ORDER_TYPE_SELL
-    with MT5_LOCK:
-        tick = mt5.symbol_info_tick(symbol)
-    if tick is None:
-        log.error("%s — nem sikerült az ár lekérdezés.", symbol)
-        return None
-
-    price = tick.ask if direction == "BUY" else tick.bid
-
-    # A megbízás BRÓKER-FÜGGŐ paraméterei (core.order_exec — közös forrás):
-    #   • deviation: enélkül 0 pont csúszást engedne, azaz gyors piacon requote /
-    #     „Invalid price" a válasz, és a jel elveszik;
-    #   • type_filling: a szimbólum TÁMOGATOTT módja (a fixen bedrótozott IOC ott,
-    #     ahol a bróker FOK-ot vár, minden kötést elbukott — retcode 10030).
-    with MT5_LOCK:
-        _info = mt5.symbol_info(symbol)
-    request = {
-        "action":    mt5.TRADE_ACTION_DEAL,
-        "symbol":    symbol,
-        "volume":    lot,
-        "type":      order_type,
-        "price":     price,
-        "sl":        sl,
-        "tp":        tp,
-        "deviation": order_exec.deviation_points(symbol, _run_cfg, _info),
-        "magic":     magic,
-        "comment":   comment,
-        "type_time": mt5.ORDER_TIME_GTC,
-        "type_filling": order_exec.filling_mode(symbol, _info),
-    }
-
-    with MT5_LOCK:
-        result = mt5.order_send(request)
-    if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
-        # A retcode is kell, ne csak a szöveg: 10030 = nem támogatott kitöltési mód,
-        # 10016 = érvénytelen stop, 10004/10021 = requote/nincs ár. Enélkül nem
-        # derül ki, MIÉRT nem ment ki a kötés.
-        _rc = getattr(result, "retcode", None)
+    # ⚠ 0032: a megbízás a BRÓKER-SEMLEGES csatlakozón át (core/connector) —
+    # az MT5-ös megvalósítás UGYANAZT a kérést küldi, mint eddig itt: csúszás-
+    # tűrés (`order_exec.deviation_points`, enélkül gyors piacon requote), a
+    # szimbólum TÁMOGATOTT kitöltési módja (a fix IOC FOK-os brókernél minden
+    # kötést elbukott — 10030), GTC, bid/ask (test_connector_mt5 őrzi).
+    from core import connector as _conn
+    result = _conn.get().open_market(symbol, direction, lot, sl, tp, magic,
+                                     comment, cfg=_run_cfg)
+    if not result.ok:
+        if not result.request:                     # ki sem ment: nincs ár
+            log.error("%s — nem sikerült az ár lekérdezés.", symbol)
+            return None
+        # A nyers kód is kell, ne csak a szöveg: 10030 = nem támogatott kitöltési
+        # mód, 10016 = érvénytelen stop, 10004/10021 = requote/nincs ár.
+        _rc = result.raw_code
         _reszlet = ("retcode=%s %s | lot=%.2f SL=%g TP=%g deviation=%s filling=%s"
-                    % (_rc if _rc is not None else "—",
-                       result.comment if result else mt5.last_error(),
-                       lot, sl, tp, request["deviation"],
-                       request["type_filling"]))
+                    % (_rc if _rc is not None else "—", result.message,
+                       lot, sl, tp, result.request.get("deviation", "—"),
+                       result.request.get("type_filling", "—")))
         _order_hiba_jelent(symbol, _rc, _reszlet)
-        if _rc in FEDEZET_RETCODE:
+        if result.code == _conn.Code.NO_MONEY:
             _FEDEZET_SZUNET[symbol] = time.time() + FEDEZET_SZUNET_MP
         return None
 
@@ -507,35 +483,26 @@ def open_position(
     # folytatása — különben egy valódi, új probléma ismétlésnek látszana.
     _order_hiba_rendben(symbol)
     log.info("✅ [%s] %s %s | Lot: %.2f | SL: %.5f | TP: %.5f | Ticket: %d | magic: %d",
-             strategy_name or comment, symbol, direction, lot, sl, tp, result.order, magic)
-    return result.order
+             strategy_name or comment, symbol, direction, lot, sl, tp, result.ticket, magic)
+    return result.ticket
 
 
 def modify_sl(ticket: int, new_sl: float) -> bool:
-    with MT5_LOCK:
-        position = mt5.positions_get(ticket=ticket)
-    if not position:
+    """Csak az SL (a TP marad) — a csatlakozón át (0032). Az SL a szimbólum
+    rácsára igazítva (a hívó pip-alapú kerekítése önmagában érvénytelen árat
+    adhat a nem tizedes lépésű piacokon)."""
+    from core import connector as _conn
+    result = _conn.get().modify_sltp(ticket, new_sl, None)
+    if result.code == _conn.Code.NOT_FOUND:
         return False
-    pos = position[0]
-    # Az SL a szimbólum rácsára igazítva (tick_size/digits) — a hívó pip-alapú
-    # kerekítése önmagában érvénytelen árat adhat a nem tizedes lépésű piacokon.
-    with MT5_LOCK:
-        request = {
-            "action":   mt5.TRADE_ACTION_SLTP,
-            "symbol":   pos.symbol,
-            "sl":       order_exec.normalize_price(new_sl, mt5.symbol_info(pos.symbol)),
-            "tp":       pos.tp,
-            "position": ticket,
-        }
-        result = mt5.order_send(request)
-    ok = result is not None and result.retcode == mt5.TRADE_RETCODE_DONE
-    if not ok:
+    if not result.ok:
         # Gyakori ok: az új SL túl közel az árhoz (bróker min. stop-távolság) →
         # a hívó a stops_level figyelembevételével számolja az új SL-t.
         log.debug("%s #%d — SL módosítás elutasítva (%s): retcode=%s %s",
-                  pos.symbol, ticket, new_sl, getattr(result, "retcode", "—"),
-                  result.comment if result else mt5.last_error())
-    return ok
+                  result.request.get("symbol", "?"), ticket, new_sl,
+                  result.raw_code if result.raw_code is not None else "—",
+                  result.message)
+    return result.ok
 
 
 def get_open_positions(magic: int, strategy_name: str | None = None,

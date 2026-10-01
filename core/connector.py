@@ -167,9 +167,19 @@ class Connector(Protocol):
 
     # ── végrehajtás ──
     def open_market(self, symbol: str, side: str, volume: float, sl: float,
-                    tp: float, magic: int, comment: str = "") -> OrderResult: ...
-    def modify_sltp(self, ticket: int, sl: float, tp: float) -> OrderResult: ...
-    def close(self, ticket: int, volume: Optional[float] = None) -> OrderResult: ...
+                    tp: float, magic: int, comment: str = "",
+                    cfg: Optional[dict] = None) -> OrderResult:
+        """`cfg`: a futó config (pl. a pár csúszás-tűréséhez)."""
+        ...
+    def modify_sltp(self, ticket: int, sl: float,
+                    tp: Optional[float] = None) -> OrderResult:
+        """`tp`: None → a mostani marad; 0 → a TP TÖRLÉSE; különben az új TP."""
+        ...
+    def close(self, ticket: int, volume: Optional[float] = None,
+              comment: str = "close") -> OrderResult:
+        """`volume` None → a teljes pozíció. A `comment` a bróker-oldali jelölés
+        (pl. `rr_partial` — az újraindítás-védelem erre épül)."""
+        ...
 
 
 # ── az aktív csatlakozó ─────────────────────────────────────────────────────
