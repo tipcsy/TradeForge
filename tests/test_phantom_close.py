@@ -9,6 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+import core.connector_mt5 as _CM   # 0032: a hamis MT5 a csatlakozóba is
 
 import trading.live_trader as lt
 
@@ -34,7 +35,7 @@ class FakeMT5:
 
 
 def with_history(history):
-    lt.mt5 = FakeMT5(history)
+    lt.mt5 = _CM.mt5 = FakeMT5(history)
 
 
 def no_adoptions():

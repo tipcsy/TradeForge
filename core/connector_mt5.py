@@ -52,9 +52,10 @@ def code_of(retcode) -> str:
 
 
 def _pos(p) -> Position:
+    g = lambda k, alap=0: getattr(p, k, alap)   # noqa: E731
     return Position(
-        ticket=int(p.ticket), symbol=p.symbol, type=int(p.type),
-        volume=float(p.volume), price_open=float(p.price_open),
+        ticket=int(g("ticket") or 0), symbol=g("symbol", ""), type=int(g("type") or 0),
+        volume=float(g("volume") or 0.0), price_open=float(g("price_open") or 0.0),
         price_current=float(getattr(p, "price_current", 0.0) or 0.0),
         sl=float(getattr(p, "sl", 0.0) or 0.0), tp=float(getattr(p, "tp", 0.0) or 0.0),
         profit=float(getattr(p, "profit", 0.0) or 0.0),
@@ -66,10 +67,11 @@ def _pos(p) -> Position:
 
 
 def _deal(d) -> Deal:
+    g = lambda k, alap=0: getattr(d, k, alap)   # noqa: E731
     return Deal(
-        ticket=int(d.ticket), position_id=int(getattr(d, "position_id", 0) or 0),
-        symbol=d.symbol, type=int(d.type), entry=int(d.entry),
-        volume=float(d.volume), price=float(d.price),
+        ticket=int(g("ticket") or 0), position_id=int(g("position_id") or 0),
+        symbol=g("symbol", ""), type=int(g("type") or 0), entry=int(g("entry") or 0),
+        volume=float(g("volume") or 0.0), price=float(g("price") or 0.0),
         profit=float(getattr(d, "profit", 0.0) or 0.0),
         commission=float(getattr(d, "commission", 0.0) or 0.0),
         swap=float(getattr(d, "swap", 0.0) or 0.0),
@@ -143,7 +145,11 @@ class MT5Connector:
                 r = mt5.positions_get(symbol=symbol)
             else:
                 r = mt5.positions_get()
-        return [_pos(p) for p in (r or ())]
+        # ⚠ None = HIBA (nem „nincs pozíció"): a lezárás-felismerés erre épül —
+        # egy pillanatnyi hiba nem könyvelhet el minden pozíciót lezártnak
+        if r is None:
+            return None
+        return [_pos(p) for p in r]
 
     def deals(self, *, position: Optional[int] = None, frm=None, to=None,
               symbol: Optional[str] = None) -> list:
@@ -154,7 +160,9 @@ class MT5Connector:
                 r = mt5.history_deals_get(frm, to, group=f"*{symbol}*")
             else:
                 r = mt5.history_deals_get(frm, to)
-        return [_deal(d) for d in (r or ())]
+        if r is None:
+            return None                       # HIBA ≠ üres előzmény (lásd fent)
+        return [_deal(d) for d in r]
 
     # ── végrehajtás ──
     def _kuld(self, request: dict) -> OrderResult:

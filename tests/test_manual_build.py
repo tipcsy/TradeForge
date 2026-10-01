@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import core.connector_mt5 as _CM   # 0032: a hamis MT5 a csatlakozóba is
 
 from core import position_build as pb
 from core import mt5_connector as mc
@@ -92,6 +93,7 @@ class FakeMT5:
         return Tick()
 
 
+_CM_ORIG = _CM.mt5
 orig = (lt.mt5, lt.open_position, mc.modify_position_sltp, lt.get_strategy_by_name,
         lt.adopted.strategy_of, lt.adopted.tickets_for, lt.adopted.adopt)
 
@@ -100,7 +102,7 @@ def setup(positions, after, sltp_results=None, stops_level=0, adopted_map=None):
     Info.trade_stops_level = stops_level
     sltp_results = sltp_results or {}
     adopted_map = adopted_map or {}          # ticket -> strategia
-    lt.mt5 = FakeMT5(positions, after)
+    lt.mt5 = _CM.mt5 = FakeMT5(positions, after)
     lt._run_cfg = {"broker": {"magic": MAGIC_A}}
     lt.get_strategy_by_name = lambda n: Strat(MAGIC_A if n == "A" else MAGIC_B)
     lt.adopted.strategy_of = lambda t: adopted_map.get(t)
@@ -208,6 +210,7 @@ check("...es nem is nyitott labat", "t" not in opened)
 
 (lt.mt5, lt.open_position, mc.modify_position_sltp, lt.get_strategy_by_name,
  lt.adopted.strategy_of, lt.adopted.tickets_for, lt.adopted.adopt) = orig
+_CM.mt5 = _CM_ORIG
 
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")

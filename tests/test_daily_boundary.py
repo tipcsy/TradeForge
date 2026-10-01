@@ -5,6 +5,7 @@ from pathlib import Path
 from datetime import datetime, timezone, timedelta, date
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import core.connector_mt5 as _CM   # 0032: a hamis MT5 a csatlakozóba is
 
 from core import mt5_connector as mc
 
@@ -109,7 +110,7 @@ DEALS = [Deal(0, 0.0),            # nyito -> nem szamit
          Deal(3, -80.0)]          # OUT_BY (close-by) -> EDDIG KIMARADT
 
 orig = mc.mt5
-mc.mt5 = FakeMT5(DEALS)
+mc.mt5 = _CM.mt5 = FakeMT5(DEALS)
 mc._server_offset["v"] = 0.0
 mc._daily_pnl_cache.update({"t": 0.0, "v": None})
 v = mc.daily_pnl()
@@ -120,7 +121,7 @@ check("a nyito deal nem szamit bele", v == -130.0)
 # A hatas: 100$ napi limitnel a regi -50 meg ATENGEDTE volna a kereskedest
 check("a regi (-50) a 100$-os limit alatt maradt volna, az uj (-130) tiltja",
       abs(-50.0) < 100 <= abs(v))
-mc.mt5 = orig
+mc.mt5 = _CM.mt5 = orig
 
 print()
 print(f"{sum(results)}/{len(results)} teszt PASS")

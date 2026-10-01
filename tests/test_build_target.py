@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import core.connector_mt5 as _CM   # 0032: a hamis MT5 a csatlakozóba is
 
 from core import position_build as pb
 from core import build_state as bst
@@ -202,6 +203,7 @@ class FakeBState:
         return {**pb.default_config(), "target_r": self._t}
 
 
+_CM_ORIG = _CM.mt5
 _orig = (lt.mt5, lt.open_position, lt.mt5_connector.modify_position_sltp,
          lt.get_strategy_by_name, lt.adopted.strategy_of, lt.adopted.tickets_for,
          lt.adopted.adopt, lt.position_meta.record, lt.position_meta.risk_of,
@@ -212,7 +214,7 @@ def epits(target_r, riskek):
     """Egy raepites `target_r` mellett -> a `modify_position_sltp` hivasok."""
     regi = P(1, 1.1000, 0.10, 1.0980)
     uj = P(999, 1.1051, 0.07, 1.0980)
-    lt.mt5 = FakeMT5([regi], [regi, uj])
+    lt.mt5 = _CM.mt5 = FakeMT5([regi], [regi, uj])
     lt._run_cfg = {"broker": {"magic": MAGIC},
                    "pairs": {SYM: {"point_size": PS, "pv1_point": PV1}}}
     lt.get_strategy_by_name = lambda n: Strat()
@@ -267,7 +269,7 @@ def kuszas(target_r, pct, ar, sl_most, riskek=None, labak=2):
     """Egy `package_trail` hivas -> a `modify_sl` hivasok [(ticket, sl)]."""
     riskek = riskek if riskek is not None else {1: 20.0, 999: 10.0}
     pos = [P(1, 1.1000, 0.10, sl_most), P(999, 1.1051, 0.07, sl_most)][:labak]
-    lt.mt5 = FakeMT5(pos, pos)
+    lt.mt5 = _CM.mt5 = FakeMT5(pos, pos)
     lt._magic_to_strategy.clear()
     lt._magic_to_strategy[MAGIC] = "A"
     lt.get_strategy_by_name = lambda n: Strat()
@@ -324,6 +326,7 @@ lt.modify_sl = _orig_msl
  lt.get_strategy_by_name, lt.adopted.strategy_of, lt.adopted.tickets_for,
  lt.adopted.adopt, lt.position_meta.record, lt.position_meta.risk_of,
  lt._pos_risk_ccy_of, lt._bstate, lt._run_cfg) = _orig
+_CM.mt5 = _CM_ORIG
 
 print(f"\n{sum(results)}/{len(results)} teszt PASS")
 sys.exit(0 if all(results) else 1)

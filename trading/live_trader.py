@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from core import connector as _connector   # 0032: bróker-semleges lekérdezések
 from core.broker_adapter import mt5
 import pandas as pd
 import numpy as np
@@ -520,7 +521,7 @@ def get_open_positions(magic: int, strategy_name: str | None = None,
     detektálás is mér. None → saját lekérés (a régi viselkedés)."""
     if positions is None:
         with MT5_LOCK:
-            positions = mt5.positions_get()
+            positions = _connector.get().positions()
     if positions is None:
         return []
     own = [p for p in positions if p.magic == magic]
@@ -554,7 +555,7 @@ def closed_deal_summary(ticket: int):
     limit és a trades.csv ugyanazt a számot mutassa."""
     try:
         with MT5_LOCK:
-            history = mt5.history_deals_get(position=ticket)
+            history = _connector.get().deals(position=ticket)
     except Exception:
         return None
     if not history:
@@ -1258,9 +1259,9 @@ def actual_trade_objects(symbol: str, since_ts: int,
     dt_to   = datetime.now(timezone.utc) + timedelta(days=1)
     try:
         with mt5_connector.MT5_LOCK:
-            deals     = mt5.history_deals_get(dt_from, dt_to, group=f"*{symbol}*")
+            deals     = _connector.get().deals(frm=dt_from, to=dt_to, symbol=symbol)
             orders    = mt5.history_orders_get(dt_from, dt_to, group=f"*{symbol}*")
-            positions = mt5.positions_get(symbol=symbol)
+            positions = _connector.get().positions(symbol=symbol)
     except Exception:
         deals = orders = positions = None
     if not deals:
@@ -1966,7 +1967,7 @@ def _refresh_position(ticket: int):
     ráépülő döntések (trailing) a RÉGI stophoz hasonlítanának."""
     try:
         with MT5_LOCK:
-            r = mt5.positions_get(ticket=ticket)
+            r = _connector.get().positions(ticket=ticket)
         return r[0] if r else None
     except Exception:
         return None
@@ -2493,7 +2494,7 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
     # sosem csúszhat szét. A None (MT5-hiba) megkülönböztetve az ÜREStől: hiba
     # esetén nem szabad mindent „lezártnak" venni.
     with MT5_LOCK:
-        _pos_snapshot = mt5.positions_get()
+        _pos_snapshot = _connector.get().positions()
     _snapshot_ok   = _pos_snapshot is not None
     _all_positions = list(_pos_snapshot or [])
 
@@ -4281,7 +4282,7 @@ def run(cfg: dict, slot_mgr: SlotManager):
     # visszaadja. Előbb takarítás: a program állása közben lezárt bejegyzések.
     try:
         with MT5_LOCK:
-            _all_now = mt5.positions_get() or []
+            _all_now = _connector.get().positions() or []
         # KÖZÖS retenció: a ticket-szintű nyilvántartások (stratégia-hozzárendelés
         # és belépéskori kockázat) ugyanaddig élnek — 0 = soha ne takarítson.
         _keep = int(trading_cfg.get("position_record_keep_days", 3) or 0)

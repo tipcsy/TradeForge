@@ -131,6 +131,13 @@ try:
     check("kötés-előzmény (a jutalékkal — a RoboForex-kutatáshoz kell)",
           d.commission == -0.3 and d.entry == C.ENTRY_IN)
     check("ár", k.tick("GOLD").ask == 4110.5)
+    # ⚠ fantom-zárás elleni védelem: a HIBA (None) nem azonos az üres listával
+    hamis.positions_get = lambda **kw: None
+    hamis.history_deals_get = lambda *a, **kw: None
+    check("⚠ hibás pozíció-lekérdezés → None (NEM üres lista)", k.positions() is None)
+    check("⚠ hibás előzmény → None", k.deals(position=7) is None)
+    hamis.positions_get = lambda **kw: ()
+    check("üres számla → [] (nem None)", k.positions() == [])
 finally:
     CM.mt5, CM._lock = _regi_mt5, _regi_lock
 

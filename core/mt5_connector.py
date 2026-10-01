@@ -5,6 +5,7 @@ import threading
 from pathlib import Path
 from typing import Optional
 
+from core import connector as _connector   # 0032: bróker-semleges lekérdezések
 from core import order_exec
 
 log = logging.getLogger(__name__)
@@ -312,7 +313,7 @@ def daily_pnl() -> Optional[float]:
     try:
         frm, to = server_day_bounds()
         with MT5_LOCK:
-            deals = mt5.history_deals_get(frm, to)
+            deals = _connector.get().deals(frm=frm, to=to)
         if deals is None:
             return None
         return sum(d.profit + d.commission + d.swap for d in deals
@@ -401,7 +402,7 @@ def open_positions_by_symbol() -> dict:
     """
     try:
         with MT5_LOCK:
-            positions = mt5.positions_get()
+            positions = _connector.get().positions()
         if not positions:
             return {}
         result = {}
@@ -429,7 +430,7 @@ def open_positions_detailed() -> list:
     A pozíciókezelő fül ezt használja."""
     try:
         with MT5_LOCK:
-            positions = mt5.positions_get()
+            positions = _connector.get().positions()
         if not positions:
             return []
         out = []
@@ -539,7 +540,7 @@ def closed_positions_range(frm, to) -> list:
     """
     try:
         with MT5_LOCK:
-            deals = mt5.history_deals_get(frm, to)
+            deals = _connector.get().deals(frm=frm, to=to)
         if not deals:
             return []
         agg: dict = {}
@@ -559,7 +560,7 @@ def closed_positions_range(frm, to) -> list:
             din = p["in"]
             if din is None:                  # korábban nyitott, itt zárt → nyitó deal külön
                 with MT5_LOCK:
-                    hist = mt5.history_deals_get(position=pid)
+                    hist = _connector.get().deals(position=pid)
                 for d in hist or []:
                     if d.entry == mt5.DEAL_ENTRY_IN:
                         din = d
@@ -658,7 +659,7 @@ def has_partial_close(ticket: int) -> bool:
     a Felező/Pajzs kockázatcsökkentéshez — hogy újraindítás után NE duplázzon."""
     try:
         with MT5_LOCK:
-            deals = mt5.history_deals_get(position=ticket)
+            deals = _connector.get().deals(position=ticket)
         for d in deals or []:
             if (d.entry in (mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_OUT_BY)
                     and "rr_partial" in (getattr(d, "comment", "") or "")):
@@ -723,7 +724,7 @@ def _position_cost_ccy(p) -> float:
             commission = _commission_cache[pid]
         else:
             commission = 0.0
-            deals = mt5.history_deals_get(position=pid)
+            deals = _connector.get().deals(position=pid)
             if deals:
                 commission = sum(getattr(d, "commission", 0.0) for d in deals)
             if pid is not None:
@@ -861,7 +862,7 @@ def breakeven_reached(ticket: int) -> bool:
     költség-tudatos. Nincs order_send."""
     try:
         with MT5_LOCK:
-            pos = mt5.positions_get(ticket=ticket)
+            pos = _connector.get().positions(ticket=ticket)
             if not pos or not pos[0].sl:
                 return False
             p = pos[0]
@@ -884,7 +885,7 @@ def breakeven_feasible(ticket: int) -> bool:
     Pontosan azt a feltételt adja, amit a `move_to_breakeven` is használ."""
     try:
         with MT5_LOCK:
-            pos = mt5.positions_get(ticket=ticket)
+            pos = _connector.get().positions(ticket=ticket)
             if not pos:
                 return False
             info = mt5.symbol_info(pos[0].symbol)
@@ -911,7 +912,7 @@ def move_to_breakeven(ticket: int) -> bool:
     """
     try:
         with MT5_LOCK:
-            pos = mt5.positions_get(ticket=ticket)
+            pos = _connector.get().positions(ticket=ticket)
             if not pos:
                 return False
             p = pos[0]

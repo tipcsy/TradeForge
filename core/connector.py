@@ -161,9 +161,14 @@ class Connector(Protocol):
         tick_volume, spread) — a legfrissebbtől `start` gyertyával vissza."""
         ...
     def positions(self, symbol: Optional[str] = None,
-                  ticket: Optional[int] = None) -> list: ...
+                  ticket: Optional[int] = None) -> Optional[list]:
+        """⚠ None = a lekérdezés HIBÁS (nem „nincs pozíció"); [] = nincs. A
+        lezárás-felismerés erre épül (fantom-zárás elleni védelem)."""
+        ...
     def deals(self, *, position: Optional[int] = None, frm=None, to=None,
-              symbol: Optional[str] = None) -> list: ...
+              symbol: Optional[str] = None) -> Optional[list]:
+        """Mint a `positions`: None = hiba, [] = nincs kötés."""
+        ...
 
     # ── végrehajtás ──
     def open_market(self, symbol: str, side: str, volume: float, sl: float,
