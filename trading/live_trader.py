@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Optional
 
 from core import connector as _connector   # 0032: bróker-semleges lekérdezések
+from core import cycle_profile as _cprof   # 0030/1: a motor-kör profilja
 from core.broker_adapter import mt5
 import pandas as pd
 import numpy as np
@@ -4393,6 +4394,7 @@ def run(cfg: dict, slot_mgr: SlotManager):
             # halad-e. A kör végére tenni hiba volna: egy félbeszakadt körnél
             # sosem frissülne, és a motor holtnak látszana, miközben dolgozik.
             last_cycle_ts = time.time()
+            _cpu0 = time.thread_time()          # 0030/1: a szál SAJÁT CPU-ja
             # ⚠ 0029 (4b/3, S1): KÜLÖN processzben futó motornál a felületen
             # átállított config itt, a kör ELEJÉN, biztonságos ponton áll át
             # (core/config_watch). A felület processzében futó motornál üres.
@@ -4774,7 +4776,9 @@ def run(cfg: dict, slot_mgr: SlotManager):
                         if _opt_paused.pop(key, None):
                             log.info("%s/%s — optimalizálás kész: a stratégia "
                                      "folytatja", symbol, st.name)
+                        _pp0 = time.perf_counter()
                         process_pair(pair_states[key], slot_mgr, balance, st)
+                        _cprof.pair(f"{symbol}/{st.name}", time.perf_counter() - _pp0)
 
             # A chart-vizualizációt a VIZ-SZÁL rajzolja — itt csak a munkalistát
             # frissítjük (egy atomi referencia-csere). Így a mély adatablakok
@@ -4784,6 +4788,7 @@ def run(cfg: dict, slot_mgr: SlotManager):
             # A kör MUNKA-ideje (a várakozás nélkül) — ebből mérhető, mennyibe
             # kerül a felület, és látszik, ha a motor nem bírja a 10 mp-es ütemet.
             _cycle_times.append(time.time() - last_cycle_ts)
+            _cprof.cpu(time.thread_time() - _cpu0)
 
             # ⚠ ÉS NAPLÓZZUK IS, KÖRÖNKÉNT EGYSZER a mintaablak betelte után.
             # Eddig ezt a számot CSAK a konzolos `state` parancs mutatta —
@@ -4799,6 +4804,9 @@ def run(cfg: dict, slot_mgr: SlotManager):
                 _cw_atl, _cw_max = cycle_work_stats()
                 log.info("kör-idő (utolsó %d kör): átlag %.2f mp · max %.2f mp",
                          len(_cycle_times), _cw_atl, _cw_max)
+                # 0030/1: HOVÁ megy el az idő (a lassulás oka mérve, nem találgatva)
+                log.info("kör-profil: %s", _cprof.report_and_reset(
+                    _CYCLE_MINTA, sum(_cycle_times)))
 
             # ⚠ `wait` és nem `sleep`: a leállítás-kérés azonnal felébreszti, de
             # csak KÖRHATÁRON — a folyamatban lévő pozíció-kezelés lefut.

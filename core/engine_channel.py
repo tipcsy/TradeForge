@@ -180,7 +180,10 @@ def process_once(ctx, profile, *, now=None, inbox=None, outbox=None,
                 valasz["reason"] = "not_allowed"
             else:
                 try:
+                    _t0 = time.perf_counter()
                     eredmeny = fn(**(cmd.get("args") or {}))
+                    from core import cycle_profile as _cp    # 0030/1
+                    _cp.op(muvelet, time.perf_counter() - _t0)
                     valasz.update(ok=eredmeny is not False and eredmeny is not None,
                                   result=eredmeny)
                 except Exception as ex:             # a motort nem viheti el
