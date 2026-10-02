@@ -811,6 +811,31 @@ class InstrumentParamsDialog:
         _attach_tooltip(self._cc_frame,
                         _t("idlg.ido_stop_tananyag_ha"))
 
+        # Idő-kilépés — napvégi zárás (HH:MM, magyar idő) + max. tartás (perc).
+        # A NYERŐT is zárja (a cost-cut csak a veszteségest); bármely presettel.
+        self._te_frame = tk.Frame(row, bg=BG)
+        self._te_frame.grid(row=0, column=6, padx=(10, 0), sticky="w")
+        _te0 = _rrs.get_time_exit(self.symbol)
+        tk.Label(self._te_frame, text=_t("idlg.time_exit_eod"), bg=BG, fg=FG_GRAY,
+                 font=self._sf).pack(side="left")
+        self._te_eod_var = tk.StringVar(value=str(_te0.get("eod_close") or ""))
+        _tee = tk.Entry(self._te_frame, textvariable=self._te_eod_var, width=6,
+                        bg=BG_HEADER, fg=FG_WHITE, font=self._sf, relief="flat",
+                        insertbackground=FG_WHITE)
+        _tee.pack(side="left", padx=(4, 0))
+        tk.Label(self._te_frame, text=_t("idlg.time_exit_max"), bg=BG, fg=FG_GRAY,
+                 font=self._sf).pack(side="left", padx=(8, 0))
+        _mh0 = int(float(_te0.get("max_hold_min") or 0))
+        self._te_max_var = tk.StringVar(value=str(_mh0) if _mh0 else "")
+        _tem = tk.Entry(self._te_frame, textvariable=self._te_max_var, width=5,
+                        bg=BG_HEADER, fg=FG_WHITE, font=self._sf, relief="flat",
+                        insertbackground=FG_WHITE)
+        _tem.pack(side="left", padx=(4, 0))
+        for _w in (_tee, _tem):
+            _w.bind("<FocusOut>", self._on_time_exit_save)
+            _w.bind("<Return>",   self._on_time_exit_save)
+        _attach_tooltip(self._te_frame, _t("idlg.time_exit_tip"))
+
         # Exit — csak Felező/Pajzs + Runner=Kiszállási jel (a maradékot indikátor zárja)
         self._exit_frame = tk.Frame(row, bg=BG)
         self._exit_frame.grid(row=0, column=4, padx=(10, 0), sticky="w")
@@ -2418,6 +2443,12 @@ class InstrumentParamsDialog:
                     _bits.append(_t("idlg3.ovatos_meret"))
                 if getattr(self, "_cc_var", None) is not None and self._cc_var.get():
                     _bits.append(f"cost-cut {self._cc_bars_var.get()}")
+                _te = self._rrs.get_time_exit(self.symbol)
+                if _te.get("eod_close"):
+                    _bits.append(_t("idlg.time_exit_sum_eod", t=_te["eod_close"]))
+                if float(_te.get("max_hold_min") or 0) > 0:
+                    _bits.append(_t("idlg.time_exit_sum_max",
+                                    m=int(float(_te["max_hold_min"]))))
                 _bm = getattr(self, "_build_mode_name", None)
                 if _bm is not None and _bm.get() not in ("Ki", ""):
                     _bits.append(_t("idlg.build_mode", mode=_bm.get()))
@@ -4124,6 +4155,30 @@ class InstrumentParamsDialog:
             self._rrs.set_cost_cut_bars(self.symbol, v)
             self._refresh_section_summaries()
 
+    def _on_time_exit_save(self, _event=None):
+        """A napvégi zárás és a max. tartás mentése. Üres mező = kikapcsolva.
+        ⚠ Érvénytelen bevitelnél (pl. „25:00", „abc") NEM mentünk és nem is
+        kapcsolunk ki csendben: a mezők a TÁROLT értékre állnak vissza."""
+        from core import risk_reduction as _rr
+        eod = self._te_eod_var.get().strip()
+        raw = self._te_max_var.get().strip().replace(",", ".")
+        try:
+            mh = float(raw) if raw else 0.0
+        except ValueError:
+            mh = -1.0
+        if (eod and _rr.parse_hhmm(eod) is None) or mh < 0:
+            cur = self._rrs.get_time_exit(self.symbol)
+            self._te_eod_var.set(str(cur.get("eod_close") or ""))
+            _m = int(float(cur.get("max_hold_min") or 0))
+            self._te_max_var.set(str(_m) if _m else "")
+            return
+        if eod:                              # „9:5" → „09:05" (egységes alak)
+            _p = _rr.parse_hhmm(eod)
+            eod = f"{_p // 60:02d}:{_p % 60:02d}"
+            self._te_eod_var.set(eod)
+        self._rrs.set_time_exit(self.symbol, eod, int(mh))
+        self._refresh_section_summaries()
+
     def _on_runner_change(self, name: str):
         self._rrs.set_runner(self.symbol, self._runner_from_name(name))
         self._update_rr_visibility()   # Exit csak Runner=Kiszállási jelnél látszik
@@ -4387,6 +4442,9 @@ class InstrumentParamsDialog:
                 spec["cost_cut_bars"] = _b
         except ValueError:
             pass
+        # Idő-kilépés: a MENTETT per-pár érték (a mezők mentéskor írnak) — a
+        # `None` ágon a motor `spec_for`-ja amúgy is ezt adná.
+        spec.update(self._rrs.get_time_exit(self.symbol))
         return spec
 
     # ── Backtest önálló ablak (progress + időszak + élő egyenleg) ────────────

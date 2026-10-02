@@ -1853,6 +1853,12 @@ def _exit_plan(symbol: str, pstate: dict | None, ctx: dict | None = None) -> dic
     if cost_cut:
         text += " +CC"
         tip += _t("gui.exit.costcut", bars=cc_bars)
+    _eod = (spec or {}).get("eod_close") or ""
+    _mh = int(float((spec or {}).get("max_hold_min") or 0))
+    if _eod or _mh:
+        text += " +⏰"
+        tip += _t("gui.exit.timeexit",
+                  eod=_eod or "—", max=(f"{_mh}" if _mh else "—"))
 
     return {"text": text, "color": color, "trails": trails, "tooltip": tip}
 

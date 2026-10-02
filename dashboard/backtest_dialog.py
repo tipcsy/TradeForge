@@ -265,6 +265,8 @@ class BacktestDialog:
                 spec["cost_cut_bars"] = _b
         except ValueError:
             pass
+        # Idő-kilépés: a pár MENTETT beállítása (az instrumentum-ablakban állítható).
+        spec.update(_rrs.get_time_exit(self.symbol))
         return spec
 
     def _cfg_max_slots(self) -> int:

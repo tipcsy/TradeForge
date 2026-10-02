@@ -39,3 +39,4 @@ test_indicator_window.py          # a vagas bitre-azonossaga a valodi Ger40/GOLD
 test_server_zone_real.py         # a valodi data/m1 (UsaTec, USDJPY) szerver-zonajat meri
 test_quiet_breakout_parity.py     # a valodi UsaTec data/m1+m15 kell (a modul es a labor belepoinek bitre-egyezese)
 test_time_exit.py                 # a valodi UsaTec data/m1+m15 kell (run_pair idokilepessel)
+test_time_exit_ui.py              # valodi InstrumentParamsDialog az eles config.json parjaibol (a risk_mode temp fajlba terelve)
