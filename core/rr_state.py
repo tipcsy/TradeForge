@@ -23,6 +23,7 @@ from core.risk_reduction import (
     PRESET_FIBO, PRESET_THIRDS, PRESET_SHIELD_FIBO, PRESETS,
     RUNNER_KEEP, RUNNER_BREAKEVEN, RUNNER_TRAILING, RUNNER_EXIT,
     BE_TRAIL_KEYS, be_trail_active, default_config, wants_cautious_size,
+    parse_hhmm,
 )
 from core import exit_signal
 from core.i18n import LabelMap as _LabelMap
@@ -82,6 +83,13 @@ def _norm(v) -> dict:
             d["cautious"] = bool(v["cautious"])
         if v.get("cost_cut") is not None:
             d["cost_cut"] = bool(v["cost_cut"])
+        # Idő-kilépés (2026-10-02): napvégi zárás "HH:MM" (kanonikus fal-óra) +
+        # max. tartás percben. Az érvénytelen időt NEM tároljuk (= kikapcsolva).
+        if isinstance(v.get("eod_close"), str) and (
+                v["eod_close"] == "" or parse_hhmm(v["eod_close"]) is not None):
+            d["eod_close"] = v["eod_close"]
+        if isinstance(v.get("max_hold_min"), (int, float)) and v["max_hold_min"] >= 0:
+            d["max_hold_min"] = float(v["max_hold_min"])
         if v.get("runner") in RUNNERS:
             d["runner"] = v["runner"]
         for k in _CALIB_KEYS:
@@ -256,6 +264,23 @@ def set_cost_cut_bars(symbol: str, bars: int):
         _set(symbol, cost_cut_bars=float(int(bars)))
 
 
+def get_time_exit(symbol: str) -> dict:
+    """Az idő-kilépés per-pár beállítása: `{"eod_close": "HH:MM"|"",
+    "max_hold_min": perc}` (hiányzó → a default_config: kikapcsolva)."""
+    dc = default_config()
+    with _lock:
+        e = _entry(symbol)
+        return {"eod_close": e.get("eod_close", dc["eod_close"]),
+                "max_hold_min": float(e.get("max_hold_min", dc["max_hold_min"]))}
+
+
+def set_time_exit(symbol: str, eod_close: str = "", max_hold_min: float = 0):
+    """⚠ Az érvénytelen időpont (pl. "25:00") hibát dob, nem némán kikapcsol."""
+    if eod_close and parse_hhmm(eod_close) is None:
+        raise ValueError(f"érvénytelen napvégi időpont: {eod_close!r} (HH:MM kell)")
+    _set(symbol, eod_close=str(eod_close or ""), max_hold_min=float(max(0, max_hold_min)))
+
+
 def set_from_optimizer(symbol: str, rr: dict):
     """Az optimalizáló nyertes rr-jét a per-pár állapotba írja: preset + runner +
     cautious + numerikus kalibráció (trigger_R/frakciók). A live/GUI ezt veszi át."""
@@ -303,6 +328,8 @@ def spec_for(symbol: str) -> dict:
     spec["cautious"] = wants_cautious_size(preset) if c is None else bool(c)
     # Cost-cut (idő-stop): per-pár kapcsoló — bármely presettel kombinálható.
     spec["cost_cut"] = get_cost_cut(symbol)
+    # Idő-kilépés (napvégi zárás / max. tartás) — szintén per pár.
+    spec.update(get_time_exit(symbol))
     # A kiszállási-modul beállítása (enabled = runner==exit) — a motor/backtest ezt
     # adja tovább az exit_signal.exit_triggered-nek a runner zárásához.
     spec["exit"] = get_exit_config(symbol)

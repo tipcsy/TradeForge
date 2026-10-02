@@ -1,0 +1,52 @@
+{
+  "_comment": "A quiet_breakout stratégia SAJÁT beállításai (2026-10-02). Csendes piacon, legalább két idősík emelkedő szerkezete mellett, visszahúzódás után az előző M15-csúcs átzárására vásárol. CSAK LONG. Az alapértékek MAGA a mért szabály (a 2013–2022-es független próbán előre rögzítve) — nincs és nem is kell optimalizált készlet; az untuned_pair config-lelet ezért várható.",
+  "quality": {
+    "_comment": "Minősítési küszöbök (mint a többi stratégiánál).",
+    "min_trades": 50,
+    "maxdd_mid": 0.18,
+    "maxdd_weak": 0.25,
+    "maxdd_bad": 0.35,
+    "pf_mid": 1.4,
+    "pf_weak": 1.2,
+    "pf_bad": 1.0,
+    "winrate_weak": 0.35,
+    "winrate_good": 0.45
+  },
+  "indicators": {
+    "_comment": "A szabály paraméterei. A vol_max (0,78) a 2023+ adat alsó ötödének határa volt, a min_align (2) az együttállás-mérésből — mindkettő a független 2013–2022-es próba ELŐTT rögzítve. Ne hangold: a próba ezekre az értékekre szól.",
+    "pivot_k": 3,
+    "atr_len": 14,
+    "vol_max": 0.78,
+    "min_align": 2,
+    "sl_min_atr": 0.5,
+    "sl_max_atr": 4.0
+  },
+  "sltp": {
+    "_comment": "A stop SZERKEZETI (az utolsó igazolt M15-völgy), nem ATR-szorzó. A kutatásban NEM volt célár (idő-kilépés volt) — a 15 a keret konvenciója szerint ≈ „nincs célár”.",
+    "tp_rr_ratio": 15.0
+  },
+  "position_mgmt": {
+    "_comment": "⚠ A BELÉPÉS UTÁNI dolgok NEM ezé a modulé. A kutatásban 21:45-kor (magyar idő) / 8 óra után zártunk — ezt a kockázatcsökkentés IDŐ-KILÉPÉSE adja (eod_close / max_hold_min, per pár)."
+  },
+  "optimizer": {
+    "_comment": "Szűk tartományok a mért érték körül — a jel lényege a csendes-küszöb és az együttállás; széles keresés itt illesztés lenne.",
+    "vol_max": {"min": 0.6, "max": 1.0, "step": 0.04},
+    "min_align": {"min": 1, "max": 3, "step": 1},
+    "sl_max_atr": {"min": 2.0, "max": 6.0, "step": 0.5},
+    "tp_rr_ratio": {"min": 2.0, "max": 15.0, "step": 0.5},
+    "constraints": []
+  },
+  "param_meta": {
+    "_comment": "A Paraméterek ablak csoportosítása + megjegyzései.",
+    "categories": ["structure", "filters", "sltp", "other"],
+    "params": {
+      "pivot_k": {"recompute": "signal", "category": "structure", "comment": "Swing-pont: a gyertya magasabb/alacsonyabb a k előtte és k utána lévőnél (k gyertyával később ismert)"},
+      "atr_len": {"recompute": "signal", "category": "structure", "comment": "Az M15 ATR hossza (a true range egyszerű átlaga)"},
+      "vol_max": {"recompute": "signal", "category": "filters", "comment": "Csendes piac: az M15 ATR legfeljebb ennyiszerese az ugyanabban az órában szokásosnak (20 nap)"},
+      "min_align": {"recompute": "signal", "category": "filters", "comment": "Az M1/M5/H1/H4 közül legalább ennyi emelkedő (HH+HL) szerkezetű"},
+      "sl_min_atr": {"recompute": "signal", "category": "sltp", "comment": "A szerkezeti stop legalább ennyi ATR (különben nincs belépő)"},
+      "sl_max_atr": {"recompute": "signal", "category": "sltp", "comment": "A szerkezeti stop legfeljebb ennyi ATR (különben nincs belépő)"},
+      "tp_rr_ratio": {"recompute": "exec", "category": "sltp", "comment": "A célár a stop-táv ennyiszerese (R); 15 ≈ nincs célár"}
+    }
+  }
+}

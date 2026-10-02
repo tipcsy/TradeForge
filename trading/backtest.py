@@ -1581,6 +1581,9 @@ def run_pair(
     # veszteséggel). Bármely presettel kombinálható; default KI.
     _cc_on    = bool(rr_spec.get("cost_cut"))
     _cc_delta = _signal_bar_delta(strategy, params) * int(rr_spec.get("cost_cut_bars", 12))
+    # Idő-kilépés (napvégi zárás / max. tartás) — `core.risk_reduction.time_exit_due`.
+    _te_on    = _rrm.time_exit_active(rr_spec)
+    _M1_LEN   = pd.Timedelta(minutes=1)
     # Pozícióépítés modellezése. BÁRMELY presettel (ahogy élesben is: a live minden
     # KOCKÁZATMENTES pozícióra épít — a Felező/Pajzs runnerére is, nem csak az OFF
     # preset breakeven-jére); a részleges zárás a lábakat arányosan zsugorítja.
@@ -2004,6 +2007,10 @@ def run_pair(
         _nat_indok = "kézi események"
     elif str(rr_spec.get("preset", "")) not in _NATV_PRESETEK:
         _nat_indok = f"preset={rr_spec.get('preset')!r}"
+    # ⚠ A natív mag NEM ismeri az idő-kilépést: nélküle a pozíció éjszakára
+    # nyitva maradna, és a natív út NÉMÁN más kötéseket adna, mint a Python.
+    elif _te_on:
+        _nat_indok = "idő-kilépés (napvégi zárás / max. tartás)"
     # ⚠ A `breakeven_r` KIZÁRÁSA MEGSZŰNT (ABI 5, 2026-09-22). Korábban itt állt:
     # a mag csak a célár-arányos `be_pct`-t ismerte, az R-alapút nem — és hosszú
     # célárnál a kettő gyökeresen mást ad (mérve, Ger40 2025 H1: natív 87 vs
@@ -2210,6 +2217,18 @@ def run_pair(
                     trade.pnl_usd     = calc_pnl(trade, _px)
                     trade.status      = "cut"
                     closed = True
+
+            # ── Idő-kilépés: napvégi zárás / max. tartás — eredménytől
+            # FÜGGETLENÜL (a nyerőt is zárja). A gyertya ZÁRÁSI idejével
+            # (`m1_time` a NYITÓ idő), a gyertyazáró áron, a szemközti oldalon.
+            if (not closed and _te_on
+                    and _rrm.time_exit_due(trade.open_time, m1_time + _M1_LEN, rr_spec)):
+                _px = float(_bar_c if trade.direction == "BUY" else _bar_c + _sp)
+                trade.close_price = _px
+                trade.close_time  = m1_time
+                trade.pnl_usd     = calc_pnl(trade, _px)
+                trade.status      = "time"
+                closed = True
 
             # ── Pozícióépítés (AUTO, off preset): risk-free trade + gyertyás jel
             # (az M15 zárás túllép a build_ref-en) → piramidális ráépítés (új láb),
@@ -3095,6 +3114,21 @@ def run_portfolio_backtest(
                                          else (trade.open_price - _px)) / point_size - sp
                     trade.status      = "cut"
                     closed = True
+
+            # Idő-kilépés (mint a run_pair-ben): napvégi zárás / max. tartás.
+            if (not closed and _rrm2.time_exit_active(rr_spec)
+                    and _rrm2.time_exit_due(trade.open_time,
+                                            m1_time + pd.Timedelta(minutes=1), rr_spec)):
+                # BUY a bid-en, SELL az ask-on (bid + a bar spreadje) zár.
+                _px = float(row["close"]) + (0.0 if trade.direction == "BUY" else _psp)
+                trade.close_price = _px
+                trade.close_time  = m1_time
+                trade.pnl_usd     = calc_pnl(trade, _px)
+                trade.pnl_points    = ((_px - trade.open_price)
+                                     if trade.direction == "BUY"
+                                     else (trade.open_price - _px)) / point_size
+                trade.status      = "time"
+                closed = True
 
             # ── Pozícióépítés (ha bekapcsolva): risk-free runner + gyertyás/R jel
             # → piramidális ráépítés, az SL az új ÁTLAGÁRRA (mint a run_pair-ben).

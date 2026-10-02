@@ -179,7 +179,75 @@ def default_config() -> dict:
         # veszteséggel, a teljes SL kivárása helyett). False = kikapcsolva.
         "cost_cut":         False,
         "cost_cut_bars":    12,
+        # IDŐ-KILÉPÉS (2026-10-02): a pozíciót eredménytől FÜGGETLENÜL zárjuk —
+        # (a) napvégén, a kanonikus (berlini = magyar) fal-óra szerinti
+        # `eod_close` időpontban ("HH:MM"; üres = ki), és/vagy (b) `max_hold_min`
+        # perc tartás után (0 = ki). Bármely presettel kombinálható. A
+        # `cost_cut`-tól abban különbözik, hogy a NYERŐ pozíciót is zárja: a
+        # célja a napon belüli tartás (nincs swap, nincs éjszakai rés), nem a
+        # veszteség levágása. Lásd `time_exit_due`.
+        "eod_close":        "",
+        "max_hold_min":     0,
     }
+
+
+def parse_hhmm(s) -> "int | None":
+    """`"21:45"` → 1305 (perc a nap elejétől); üres/hibás → None (kikapcsolva)."""
+    if not s or not isinstance(s, str):
+        return None
+    try:
+        h, m = s.strip().split(":")
+        h, m = int(h), int(m)
+    except (ValueError, AttributeError):
+        return None
+    if not (0 <= h < 24 and 0 <= m < 60):
+        return None
+    return h * 60 + m
+
+
+def time_exit_active(cfg: dict) -> bool:
+    """Be van-e kapcsolva bármelyik idő-kilépés (a natív mag ezt nem ismeri)."""
+    return (parse_hhmm(cfg.get("eod_close")) is not None
+            or float(cfg.get("max_hold_min", 0) or 0) > 0)
+
+
+def time_exit_due(open_wall, now_wall, cfg: dict) -> "str | None":
+    """Le kell-e MOST zárni a pozíciót idő miatt? `"eod"` / `"max_hold"` / None.
+
+    ⚠ MINDKÉT IDŐPONT KANONIKUS FAL-ÓRA (berlini = magyar helyi idő), ahogy a
+    gyertya-fájlok tárolják (`core/broker_time.py`: a „UTC" címke fal-órát
+    jelöl). A tzinfo-t ezért FIGYELMEN KÍVÜL hagyjuk — átváltani TILOS, az 1–2
+    órás elcsúszást adna (ez 2026-10-02-án egy kutatásban meg is történt). Az
+    élő motor a szerver-epochot a `broker_time.epoch_to_canonical`-lal hozza
+    ide.
+
+    `now_wall` a gyertya ZÁRÁSI ideje (backtest: M1 nyitó + 1 perc; élő: a
+    tick ideje). A napvégi zárás akkor esedékes, ha a pozíció nyitása ÉS a mostani
+    pillanat KÖZÖTT volt egy `eod_close` időpont — így a hétvégén/szünetben
+    átcsúszott pozíció is az első adandó gyertyán zár."""
+    import datetime as _dt
+    o = _naiv(open_wall)
+    n = _naiv(now_wall)
+    mh = float(cfg.get("max_hold_min", 0) or 0)
+    if mh > 0 and (n - o) >= _dt.timedelta(minutes=mh):
+        return "max_hold"
+    e = parse_hhmm(cfg.get("eod_close"))
+    if e is not None:
+        e_ma = _dt.datetime(n.year, n.month, n.day) + _dt.timedelta(minutes=e)
+        e_last = e_ma if n >= e_ma else e_ma - _dt.timedelta(days=1)
+        if o < e_last <= n:
+            return "eod"
+    return None
+
+
+def _naiv(t):
+    """Timestamp/datetime → naiv datetime (a tzinfo eldobva, az óra-érték marad)."""
+    import datetime as _dt
+    if hasattr(t, "to_pydatetime"):
+        t = t.to_pydatetime()
+    if isinstance(t, _dt.datetime):
+        return t.replace(tzinfo=None)
+    raise TypeError(f"időpont kell, nem {type(t).__name__}")
 
 
 # ⚠ A `breakeven_trigger` SZOROS CIKLUSBAN fut (a backteszt minden gyertyán,

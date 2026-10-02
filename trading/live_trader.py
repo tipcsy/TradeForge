@@ -2511,6 +2511,8 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
     _cc_on   = bool(_spec.get("cost_cut"))
     _cc_secs = (int(_spec.get("cost_cut_bars", 12))
                 * strategy.timeframes()[0].minutes * 60)
+    # Idő-kilépés (napvégi zárás / max. tartás): per-pár, a `_spec`-ből.
+    _te_on   = _rr.time_exit_active(_spec)
 
     # Pajzs↔Fibo auto: „nagy mozgás"-e MOST a piac? A generikus (keretrendszer-
     # szintű) ATR-ből (ugyanaz, mint a spread-kapué): aktuális ATR vs a betöltött
@@ -2543,6 +2545,25 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
                 log.info("✂ %s #%d — Cost-cut: %d fő-gyertya után még veszteséges "
                          "(%.2f$) → korai zárás", symbol, ticket,
                          int(_spec.get("cost_cut_bars", 12)), pnl)
+                continue
+
+        # Idő-kilépés (napvégi zárás / max. tartás) — eredménytől FÜGGETLENÜL.
+        # ⚠ A `pos.time` és a `tick.time` a bróker-adapteren át már KANONIKUS
+        # fal-óra epoch (`core/broker_adapter._ki_ido`), ezért itt csak naiv
+        # datetime-má alakítjuk — időzóna-átváltás NÉLKÜL (ugyanaz a konvenció,
+        # mint a backtest gyertya-indexe). Ugyanaz a függvény dönt, mint a
+        # backtestben (`risk_reduction.time_exit_due`).
+        if _te_on and _tick is not None:
+            _why = _rr.time_exit_due(
+                datetime.fromtimestamp(int(pos.time), timezone.utc).replace(tzinfo=None),
+                datetime.fromtimestamp(int(_tick.time), timezone.utc).replace(tzinfo=None),
+                _spec)
+            if _why and mt5_connector.close_position(ticket):
+                log.info("⏰ %s #%d — Idő-kilépés (%s): zárás %.2f$ eredménnyel",
+                         symbol, ticket,
+                         "napvége " + str(_spec.get("eod_close")) if _why == "eod"
+                         else f"max. tartás {int(float(_spec.get('max_hold_min', 0)))} perc",
+                         pnl)
                 continue
 
         # Megosztott pozíció-állapot (GUI ↔ motor): eredeti SL, trailing toggle, BE,
