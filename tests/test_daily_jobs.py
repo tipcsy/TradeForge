@@ -216,6 +216,51 @@ check("a `jobs` a parancs-táblában és a súgóban van; a `forward` NINCS",
       cc.COMMANDS.get("jobs") is cc.cmd_jobs and "forward" not in cc.COMMANDS
       and any(h[0].startswith("jobs") for h in cc._HELP))
 
+# ══ 7. TÖBB PROCESSZ, EGY FUTÁS (2026-10-03) ══════════════════════════════
+# 2026-10-01-én két bróker motorja (két processz) EGYSZERRE indította a
+# `csilla_forward`-ot. A „másik processzt" itt úgy szimuláljuk, hogy az állapot
+# INDÍTÓJA egy élő, de nem a mi processzünk (a szülő), és a memóriánkat
+# eldobjuk (`reset_for_test` = a másik processz saját, régi memóriája).
+import os as _os
+dj.PROVIDERS = [lambda: [PROBA]]
+_masik = _os.getppid()                   # él, és nem mi vagyunk
+dj.reset_for_test(); FakePopen.inditasok.clear()
+d7 = "2026-09-30"
+ind = dj.tick(cfg, now=datetime.fromisoformat(f"{d7} 22:30"))
+check("A processz: időben indul, a nap igénylése megtörtént",
+      ind == ["proba"] and dj._claim_path("proba", d7).exists())
+_st = dj._load()["proba"]
+check("az állapot rögzíti az INDÍTÓ processzt", _st.get("owner_pid") == _os.getpid())
+# → mostantól a „másik processz" nézőpontja: az indító él, de nem mi vagyunk
+dj._load()["proba"]["owner_pid"] = _masik
+dj._save()
+dj.reset_for_test()                      # B: üres memória, a Popen nem nála van
+ind = dj.tick(cfg, now=datetime.fromisoformat(f"{d7} 22:30"))
+check("B processz: a lemezről látja, hogy ma már indult → NEM indít",
+      ind == [] and len(FakePopen.inditasok) == 1)
+check("B a futó feladatot NEM jelöli elveszettnek (az indító él)",
+      dj.status(cfg, "proba")["status"] == dj.RUNNING)
+ok, mi = dj.start("proba", trigger="manual", popen=FakePopen)
+check("B-ből a kézi indítás is elutasítva, amíg A futtatja",
+      not ok and mi == "already_running", mi)
+
+# Verseny: B memóriája / a lemez még „tegnapot" mutat, de A már igényelte a napot
+d8 = "2026-10-01"
+dj._load()["proba"].update(status=dj.OK, last_date="2026-09-30", owner_pid=_masik)
+dj._save()
+dj._claim_path("proba", d8).write_text("4242")        # A igénylése, ugyanabban a percben
+dj.reset_for_test(); FakePopen.inditasok.clear()
+ind = dj.tick(cfg, now=datetime.fromisoformat(f"{d8} 22:30"))
+check("az atomikus napi igénylés eldönti a versenyt: B nem indít",
+      ind == [] and not FakePopen.inditasok)
+
+# Halott indító → elveszett (az újraindulás-szabály változatlan)
+dj._load()["proba"].update(status=dj.RUNNING, owner_pid=2_000_000_000)
+dj._save()
+dj.reset_for_test()
+check("halott indító mellett a „fut” → elveszett",
+      dj.status(cfg, "proba")["status"] == dj.LOST)
+
 # ══ ÖSSZESÍTÉS ════════════════════════════════════════════════════════════
 jo = sum(results)
 print(f"\n{jo}/{len(results)} teszt PASS")

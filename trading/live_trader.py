@@ -4457,8 +4457,10 @@ def run(cfg: dict, slot_mgr: SlotManager):
             # ── NAPI FELADATOK (pl. a Csilla-sáv forward-napló) ───────────
             # ⚠ NEM A KARMESTERÉ, ezért nem a fokától függ. Alprocesszt indít
             # naponta egyszer a beállított idő után, és learatja — a körre
-            # nem mérhető költség (`core/daily_jobs.py`). A fájl-olvasás egyszer
-            # van (a modul az állapotot memóriában tartja).
+            # nem mérhető költség (`core/daily_jobs.py`). ⚠ Több-brókeres módban
+            # MINDEN motor-processz ide ér: az állapotot a modul ezért körönként
+            # a lemezről olvassa (egy kis JSON), és az indítást egy atomikus napi
+            # igénylés dönti el — 2026-10-01-én enélkül kétszer futott.
             try:
                 from core import daily_jobs as _djobs
                 for _dj_nev in _djobs.tick(cfg):

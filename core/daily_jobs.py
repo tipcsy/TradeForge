@@ -30,6 +30,19 @@ tehát egy elhaló alprocessz sem indul újra percenként. Ha a futás elbukott,
 és a napi időzítő ugyanazt a `start()`-ot hívja — egy második indítási út
 elcsúszna az elsőtől (a projekt visszatérő hibája).
 
+⚠ TÖBB PROCESSZ, EGY FUTÁS (2026-10-03). Külső motoros, több-brókeres módban
+MINDEN bróker motorja (külön processz) hívja a `tick()`-et. 2026-10-01-én a
+`csilla_forward` így KÉTSZER indult (pid 29296 22:30:07-kor, pid 8064 2 mp-cel
+később): mindkét processz a SAJÁT memóriabeli állapotából látta, hogy „ma még
+nem futott". A két alprocessz ugyanabba a naplóba és a git-követett forward-
+naplóba írt; a második fejléc-sort a Windows nem atomikus hozzáfűzése el is
+tüntette. Ezért:
+  • a döntés előtt az állapotot MINDIG a lemezről olvassuk újra (`_refresh`);
+  • az időzített indítás előtt a processz egy NAPRA szóló igénylő fájlt hoz
+    létre ATOMIKUSAN (`O_CREAT|O_EXCL`, `_claim`) — csak a győztes indít;
+  • a „fut, de nincs Popen-je" állapot csak akkor „elveszett", ha az INDÍTÓ
+    processz (`owner_pid`) már nem él, vagy mi magunk voltunk (újraindultunk).
+
 A config csak az ELTÉRÉST rögzíti (`daily_jobs.<név>.enabled` / `.time`), az
 alap: bekapcsolva, a feladat saját idején. Egy kikapcsolt feladat a felületen
 is kikapcsoltként látszik — nem tűnik el némán.
@@ -39,6 +52,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import subprocess
 import sys
 import time
@@ -146,6 +160,60 @@ def _load() -> dict:
     return _state
 
 
+def _refresh() -> dict:
+    """Az állapot ÚJRAOLVASÁSA a lemezről — minden döntés előtt. Egy másik
+    processz (másik bróker motorja) közben indíthatott vagy learathatott."""
+    global _state
+    _state = None
+    return _load()
+
+
+def _claim_path(name: str, day: str) -> Path:
+    return STATE_FILE.with_name(f"daily_jobs.{name}.{day}.claim")
+
+
+def _claim(name: str, day: str) -> bool:
+    """A napi futás ATOMIKUS igénylése a processzek között. `True` = mi indítunk.
+
+    ⚠ Itt KELL az `O_EXCL` (szemben a `core/opt_lock`-kal, ahol szándékosan
+    nincs): a verseny pont az, hogy két processz UGYANABBAN a percben ér ide. Az
+    elárvult zár gondja itt nem létezik, mert a fájl egy NAPRA szól — holnap
+    új név. Ha a fájl nem írható (jogosultság), engedünk: a védelem vész el,
+    a futás nem."""
+    p = _claim_path(name, day)
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(str(p), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        return False
+    except OSError:
+        log.warning("daily_jobs: %s — az igénylő fájl nem írható (%s), védelem "
+                    "nélkül indul", name, p)
+        return True
+    try:
+        os.write(fd, f"{os.getpid()}".encode())
+    finally:
+        os.close(fd)
+    # A régi (7 napnál idősebb) igénylő fájlok takarítása.
+    for q in p.parent.glob(f"daily_jobs.{name}.*.claim"):
+        try:
+            if time.time() - q.stat().st_mtime > 7 * 86400:
+                q.unlink()
+        except OSError:
+            pass
+    return True
+
+
+def _owner_alive(st: dict) -> bool:
+    """Az indító processz él-e — és NEM mi vagyunk-e az (a saját Popen-ünket a
+    `_popen` tartja; ha az nincs meg, akkor mi indultunk újra)."""
+    owner = int(st.get("owner_pid") or 0)
+    if not owner or owner == os.getpid():
+        return False
+    from core.opt_lock import _pid_alive
+    return _pid_alive(owner)
+
+
 def _save() -> bool:
     try:
         STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -188,10 +256,10 @@ def start(name: str, *, trigger: str = "manual", now: datetime | None = None,
     naplófájlt (és a feladat saját fájljait) írná."""
     if name not in jobs():
         return False, "unknown_job"
-    reap()
+    reap()                                   # (a lemezről frissít)
     st = _load().setdefault(name, {})
-    if st.get("status") == RUNNING and name in _popen:
-        return False, "already_running"
+    if st.get("status") == RUNNING and (name in _popen or _owner_alive(st)):
+        return False, "already_running"      # itt, vagy EGY MÁSIK processzben
     now = now or datetime.now()
     popen = popen or subprocess.Popen        # futásidőben: a teszt kicserélheti
     lp = log_path(name)
@@ -209,7 +277,8 @@ def start(name: str, *, trigger: str = "manual", now: datetime | None = None,
         log.warning("daily_jobs: %s — az indítás nem sikerült: %s", name, ex)
         return False, "spawn_failed"
     _popen[name] = (p, fh, time.time())
-    st.update({"status": RUNNING, "pid": getattr(p, "pid", None), "trigger": trigger,
+    st.update({"status": RUNNING, "pid": getattr(p, "pid", None),
+               "owner_pid": os.getpid(), "trigger": trigger,
                "last_date": f"{now:%Y-%m-%d}",
                "last_start": now.isoformat(timespec="seconds"),
                "last_end": None, "last_rc": None, "last_error": ""})
@@ -221,6 +290,7 @@ def start(name: str, *, trigger: str = "manual", now: datetime | None = None,
 def reap() -> int:
     """A befejezett alprocesszek learatása. Vissza: hány fejeződött be."""
     kesz = 0
+    _refresh()
     for name in list(_popen):
         p, fh, t0 = _popen[name]
         rc = p.poll()
@@ -241,8 +311,10 @@ def reap() -> int:
             "daily_jobs: %s befejeződött (kód %s, %.0f s)", name, rc, time.time() - t0)
     # ⚠ NINCS Popen, de „fut": a program ÚJRAINDULT a futás közben. Nem tudjuk,
     # mi lett vele — ezt mondjuk is, ne álljon örökre „fut"-on.
+    # ⚠ …DE CSAK, HA AZ INDÍTÓ PROCESSZ MÁR NEM ÉL. Egy másik bróker motorja
+    # (külön processz) futtathatja épp — annak a futását nem jelölhetjük el.
     for name, st in _load().items():
-        if st.get("status") == RUNNING and name not in _popen:
+        if st.get("status") == RUNNING and name not in _popen                 and not _owner_alive(st):
             st.update({"status": LOST, "pid": None})
             kesz += 1
     if kesz:
@@ -265,9 +337,11 @@ def tick(cfg: dict, now: datetime | None = None) -> list:
         dp = _perc(c["time"])
         if dp is None or p_most < dp:
             continue
-        st = _load().get(name) or {}
+        st = _load().get(name) or {}    # a `reap()` fent a lemezről frissített
         if st.get("last_date") == ma:
-            continue                    # ma már volt (akár kézzel)
+            continue                    # ma már volt (akár kézzel, akár máshol)
+        if not _claim(name, ma):
+            continue                    # egy MÁSIK processz épp most igényelte
         ok, _ = start(name, trigger="daily", now=now)
         if ok:
             indult.append(name)
