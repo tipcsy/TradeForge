@@ -33,6 +33,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from core import mt5_connector
+from core import bar_sanity
 
 logging.basicConfig(
     level=logging.INFO,
@@ -99,9 +100,17 @@ def _ticks_to_bars(ticks_raw, freq: str) -> pd.DataFrame:
     # ellenőrzéseink UGYANAZON a soron dolgoznak, mint az MT5 → a backtest és az
     # MT5-replay összevethető. Az `avg_spread` (ask−bid) mellé megy, ebből áll elő
     # az ask-sorozat a motorban (ask = bid + spread).
+    # ⚠ TÖRÖTT tickek (GOLD/USDJPY 2016-05-20: bid 0,34) — lásd core/bar_sanity.py.
+    ask_ok = None
+    if has_bid:
+        keep, ask_ok = bar_sanity.tick_masks(df.index, df["bid"].to_numpy(),
+                                             df["ask"].to_numpy() if has_ask else None)
+        if not keep.all():
+            df, ask_ok = df[keep], ask_ok[keep]
+
     if has_bid and has_ask:
         df["mid"] = df["bid"]                      # BID a bar-alap (nem közép!)
-        valid = (df["bid"] > 0) & (df["ask"] > 0) & (df["ask"] > df["bid"])
+        valid = (df["bid"] > 0) & (df["ask"] > 0) & (df["ask"] > df["bid"]) & ask_ok
         df["spread"] = float("nan")
         df.loc[valid, "spread"] = df.loc[valid, "ask"] - df.loc[valid, "bid"]
     elif has_bid:
@@ -248,6 +257,7 @@ def _fill_gap(out_file: Path, symbol: str, tf_str: str, end: datetime) -> bool:
 
     combined = pd.concat([existing, df_new])
     combined = combined[~combined.index.duplicated(keep="last")].sort_index()
+    combined = bar_sanity.clean_bars(combined, symbol, tf_str, tail=len(df_new))
     combined.to_parquet(out_file)
     log.info("%s %s — +%d bar hozzáadva -> összesen %d", symbol, tf_str, len(df_new), len(combined))
     return True
@@ -364,6 +374,7 @@ def download_pair(symbol: str, tf_str: str, start: datetime, overwrite: bool, en
         log.warning("%s %s — nincs letölthető adat (tick és natív bar is üres).", symbol, tf_str)
         return False
 
+    ohlcv = bar_sanity.clean_bars(ohlcv, symbol, tf_str)
     ohlcv.to_parquet(out_file)
     log.info("%s %s — %d gyertya mentve -> %s  [%s -> %s]",
              symbol, tf_str, len(ohlcv), out_file.name,
@@ -461,6 +472,7 @@ def _derive_from_m1(m1_file: Path, out_file: Path, symbol: str, tf_str: str) -> 
     bars = (m1[list(agg)].resample(RESAMPLE.get(tf_str) or DERIVED[tf_str],
                                    label="left", closed="left")
             .agg(agg).dropna(subset=["open"]))
+    bars = bar_sanity.clean_bars(bars, symbol, tf_str)
     out_file.parent.mkdir(parents=True, exist_ok=True)
     bars.to_parquet(out_file)
     log.info("%s %s — %d gyertya az M1-ből -> %s", symbol, tf_str, len(bars),
@@ -534,6 +546,7 @@ def _ensure_history(symbol, cfg, tf_labels, status, ticks=False) -> tuple[bool, 
                 for tf, df in _download_ticks_multi(symbol, uj_tick, hs, end_dt).items():
                     if not df.empty:
                         pq = _pq(tf)
+                        df = bar_sanity.clean_bars(df, symbol, tf)
                         pq.parent.mkdir(parents=True, exist_ok=True)
                         df.to_parquet(pq)
                         log.info("%s %s — %d gyertya mentve -> %s", symbol, tf,

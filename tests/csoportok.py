@@ -77,7 +77,7 @@ CSOPORTOK = {
                 "tools.nested_ab", "tools.ma_exit_ab", "tools.feature_analysis",
                 "tools.regime_analysis", "tools.tf_align_analysis"),
     "adat": ("tools.build_bars", "tools.download_history", "tools.download_ticks",
-             "tools.mt5_export", "core.fs_cache", "core.config_freshness",
+             "tools.mt5_export", "core.fs_cache", "core.config_freshness", "core.bar_sanity",
              "core.symbol_policy", "core.params_store", "core.run_state",
              "core.bulk_apply", "core.config_check", "core.scope_check"),
     "nyelv": ("core.i18n",),

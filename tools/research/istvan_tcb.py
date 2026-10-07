@@ -41,6 +41,7 @@ import pandas as pd
 import lab
 from swing_mtf import structure, htf_at, pivots
 from istvan_ind import gann_state, nonlag
+from core import bar_sanity
 
 SYMS = ["GOLD", "UsaTec", "Ger40", "EURUSD", "Usa500"]
 K = 3
@@ -92,15 +93,8 @@ def prep(sym, k=K):
     m1 = lab.load_m1(sym)
     if m1.index.tz is not None:      # fal-óra "UTC" címkével -> csak a címkét vesszük le
         m1 = m1.tz_localize(None)
-    # TÖRÖTT tick-gyertyák ki (GOLD és USDJPY 2016-05-20 13:00–13:08: low 0,34): bármely
-    # ár > 50%-kal eltér a környező 31 záróár mediánjától. ⚠ A 3%-os küszöb VALÓDI mozgásokat
-    # is kidobott (2025-04-07 16:13 vámhír, 2020-03-16, CPI-napok) — ezért ilyen tág.
-    med = m1["close"].rolling(31, center=True, min_periods=5).median()
-    dev = pd.concat([(m1[col] / med - 1).abs() for col in ("open", "high", "low", "close")], axis=1).max(axis=1)
-    bad = dev > 0.5
-    if bad.any():
-        print(f"  {sym}: {int(bad.sum())} hibás M1 gyertya kidobva", flush=True)
-        m1 = m1[~bad]
+    # törött árak ki (a data/ 2026-10-07 óta javítva; ez a régi/más bróker adatára véd)
+    m1 = bar_sanity.clean_bars(m1, sym, "M1")
     d5 = lab.resample(m1, 5)
     h15 = lab.resample(m1, 15)
     h60 = lab.resample(m1, 60)

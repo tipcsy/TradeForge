@@ -46,6 +46,7 @@ import pyarrow.parquet as pq
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from core.i18n import t as _t
+from core import bar_sanity
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s  %(levelname)-8s %(message)s",
@@ -98,6 +99,12 @@ def _bars_from_ticks(df: pd.DataFrame, freq: str, point: float) -> pd.DataFrame:
     idx = pd.to_datetime(df["time_msc"].to_numpy(), unit="ms", utc=True)
     bid_pt = df["bid_pt"].to_numpy(dtype=np.float64)
     ask_pt = df["ask_pt"].to_numpy(dtype=np.float64)
+    # ⚠ TÖRÖTT tickek (GOLD/USDJPY 2016-05-20: bid 0,34) — lásd core/bar_sanity.py.
+    # A törött bid-ű tick kimarad; ha csak az ask törött, a spreadje érvénytelen.
+    keep, ask_ok = bar_sanity.tick_masks(df["time_msc"].to_numpy(), bid_pt, ask_pt)
+    if not keep.all():
+        idx, bid_pt, ask_pt, ask_ok = idx[keep], bid_pt[keep], ask_pt[keep], ask_ok[keep]
+    ask_pt = np.where(ask_ok, ask_pt, 0.0)
     bid = bid_pt * point
     # `ask_pt == 0` = érvénytelen ask (lásd `download_ticks.to_frame`): a tick a
     # volumenbe és az OHLC-be BELESZÁMÍT, a spread-átlagba nem. Ugyanaz, mint a
@@ -269,6 +276,7 @@ def main() -> int:
                         log.error("%s %s — a meglévő fájl nem olvasható (%s); "
                                   "NEM írok, hogy ne vesszen adat.", sym, tf, ex)
                         continue
+                bars = bar_sanity.clean_bars(bars, sym, tf)
                 out.parent.mkdir(parents=True, exist_ok=True)
                 tmp = out.with_suffix(".tmp")
                 bars.to_parquet(tmp)
