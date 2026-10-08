@@ -34,6 +34,7 @@ import sys as _sys
 from pathlib import Path as _Path
 ROOT = _Path(__file__).resolve().parents[2]
 _sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 _sys.path.insert(0, str(_Path(__file__).resolve().parent))
 
 import numpy as np
@@ -323,8 +324,8 @@ if __name__ == "__main__":
         print(s, {v: len(x) for v, x in ev.items()}, flush=True)
     tr = pd.concat(T, ignore_index=True)
     st = pd.concat(S, ignore_index=True)
-    tr.to_parquet(ROOT / "data" / "istvan_tcb_trades.parquet")
-    st.to_parquet(ROOT / "data" / "istvan_tcb_setups.parquet")
+    tr.to_parquet(_BP.research_dir() / "istvan_tcb_trades.parquet")
+    st.to_parquet(_BP.research_dir() / "istvan_tcb_setups.parquet")
     summ, full = [], []
     for (v, tm), g in tr.groupby(["version", "trend"]):
         g2 = g[g["kind"] != "OPEN"]
@@ -340,4 +341,4 @@ if __name__ == "__main__":
                     report(g, st[(st.version == v) & (st.trend == tm)]))
     txt = pd.DataFrame(summ).round(3).to_string(index=False)
     print(txt)
-    (ROOT / "data" / "istvan_tcb_report.txt").write_text(txt + "\n" + "\n".join(full), encoding="utf-8")
+    (_BP.research_dir() / "istvan_tcb_report.txt").write_text(txt + "\n" + "\n".join(full), encoding="utf-8")

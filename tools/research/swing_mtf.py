@@ -31,6 +31,7 @@ import sys as _sys
 from pathlib import Path as _Path
 ROOT = _Path(__file__).resolve().parents[2]
 _sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 _sys.path.insert(0, str(_Path(__file__).resolve().parent))
 
 import numpy as np
@@ -159,6 +160,6 @@ if __name__ == "__main__":
     ap.add_argument("--ltf", type=int, default=15)
     a = ap.parse_args()
     out = pd.concat([run_sym(s, a.ltf) for s in SYMS], ignore_index=True)
-    p = ROOT / "data" / f"swing_mtf_m{a.ltf}.parquet"
+    p = _BP.research_dir() / f"swing_mtf_m{a.ltf}.parquet"
     out.to_parquet(p)
     print("mentve:", p, len(out))

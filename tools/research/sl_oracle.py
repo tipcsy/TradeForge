@@ -59,6 +59,7 @@ from pathlib import Path as _Path
 
 ROOT = _Path(__file__).resolve().parents[2]
 _sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 _sys.path.insert(0, str(_Path(__file__).resolve().parent))
 
 import argparse
@@ -407,7 +408,7 @@ def fuss(sym: str, db: int, mag: int, h: int, blokk: int, null: bool) -> None:
         print("      elhelyezése nem szerkezetet használ ki, csak a volatilitás")
         print("      alakját — és nincs mit optimalizálni rajta.")
 
-    K.to_parquet(ROOT / "data" / f"sl_oracle_{sym}.parquet", index=False)
+    K.to_parquet(_BP.research_dir() / f"sl_oracle_{sym}.parquet", index=False)
     print(f"\n   kivonat elmentve: data/sl_oracle_{sym}.parquet")
 
 

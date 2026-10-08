@@ -27,6 +27,7 @@ from pathlib import Path as _Path
 
 ROOT = _Path(__file__).resolve().parents[2]
 _sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 _sys.path.insert(0, str(_Path(__file__).resolve().parent))
 
 import numpy as np
@@ -265,7 +266,7 @@ def main():
             if r:
                 rows.append(r)
     res = pd.DataFrame(rows)
-    res.to_csv(ROOT / "data" / "intraday_screen.csv", index=False)
+    res.to_csv(_BP.research_dir() / "intraday_screen.csv", index=False)
 
     print("\n=== ELFOGADVA: t>=2 ES ev>=60% ES instr>=3 ES MINDKET IRANY pozitiv ===")
     ok = res[(res.t >= 2) & (res["ev_poz%"] >= 60) & (res.instr_poz >= 3)

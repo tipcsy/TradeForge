@@ -45,7 +45,7 @@ NINCS, ALL, HIBAS, FUT = "nincs", "all", "hibas", "fut"
 
 
 def path(profile=None) -> Path:
-    """A bróker állapotfájlja (az otthoninál `data/engine_status.json`)."""
+    """A bróker állapotfájlja (`data/accounts/<id>/engine_status.json`)."""
     from core import broker_paths
     return broker_paths.account(broker_paths.DATA / FILE, profile)
 

@@ -25,6 +25,7 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+from core import broker_paths as _BP                      # noqa: E402
 
 import core.applog as _applog
 _applog.harden_console()
@@ -109,8 +110,8 @@ from core.indicator_engine import compute_indicators      # noqa: E402
 
 _broken, _fixed = [], []
 for sym in ("EURCHF", "EURJPY", "Euro50", "GOLD", "UsaInd", "Ger40", "UsaTec"):
-    pq15 = ROOT / "data" / "m15" / f"{sym}.parquet"
-    pq1 = ROOT / "data" / "m1" / f"{sym}.parquet"
+    pq15 = _BP.bars_file("m15", sym)
+    pq1 = _BP.bars_file("m1", sym)
     pf = ROOT / "data" / "optimized_params" / "wpr_sma" / f"{sym}.json"
     if not (pq15.exists() and pq1.exists() and pf.exists()):
         continue

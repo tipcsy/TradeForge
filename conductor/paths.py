@@ -39,7 +39,7 @@ DIR = Path(_BASE) / "data" / "conductor"
 
 def _dir():
     """A `DIR` az AKTÍV bróker számla-mappájában (0029, core/broker_paths).
-    Az otthoni brókernél (és a tesztek ideiglenes útvonalainál) VÁLTOZATLAN."""
+    A tesztek ideiglenes (data/-n kívüli) útvonalainál VÁLTOZATLAN."""
     from core import broker_paths
     return broker_paths.account(DIR)
 
@@ -61,6 +61,14 @@ def journal_file() -> Path:
 
 def state_file() -> Path:
     return _dir() / "state.json"
+
+
+def inbox_file() -> Path:
+    return _dir() / "inbox.json"
+
+
+def optqueue_file() -> Path:
+    return _dir() / "opt_queue.json"
 
 
 def trades_csv() -> Path:

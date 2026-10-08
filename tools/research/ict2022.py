@@ -60,6 +60,7 @@ from pathlib import Path as _Path
 
 ROOT = _Path(__file__).resolve().parents[2]
 _sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 _sys.path.insert(0, str(_Path(__file__).resolve().parent))
 
 from concurrent.futures import ProcessPoolExecutor
@@ -76,7 +77,7 @@ LIMIT_PERC = 60
 ZARAS_NY = 16 * 60
 CELOK = (1.0, 2.0, 3.0)
 FO_CEL = 2.0
-KIMENET = ROOT / "data" / "ict2022_trades.parquet"
+KIMENET = _BP.research_dir() / "ict2022_trades.parquet"
 
 
 def _ny_ido(idx: pd.DatetimeIndex) -> pd.DatetimeIndex:
@@ -316,7 +317,7 @@ def osszegez(T: pd.DataFrame, valt: str, cel: float, cimke: str):
 
 
 def main():
-    syms = _sys.argv[1:] or [s for s in SYMS if (ROOT / "data" / "m1" / f"{s}.parquet").exists()]
+    syms = _sys.argv[1:] or [s for s in SYMS if (_BP.bars_file("m1", s)).exists()]
     with ProcessPoolExecutor(len(syms)) as ex:
         T = pd.concat(list(ex.map(fut, syms)), ignore_index=True)
     T.to_parquet(KIMENET)

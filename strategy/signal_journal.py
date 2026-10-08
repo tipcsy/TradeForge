@@ -45,7 +45,7 @@ DIR = Path(__file__).resolve().parents[1] / "data" / "signal_journal"
 
 def _dir():
     """A `DIR` az AKTÍV bróker feed-mappájában (0029, core/broker_paths).
-    Az otthoni brókernél (és a tesztek ideiglenes útvonalainál) VÁLTOZATLAN."""
+    A tesztek ideiglenes (data/-n kívüli) útvonalainál VÁLTOZATLAN."""
     from core import broker_paths
     return broker_paths.feed(DIR)
 

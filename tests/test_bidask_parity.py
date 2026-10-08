@@ -22,6 +22,7 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+from core import broker_paths as _BP                      # noqa: E402
 
 import core.applog as _applog
 _applog.harden_console()
@@ -54,7 +55,7 @@ def _setup(sym, strat_name):
 
 
 SYM, STRAT = "Ger40", "wpr_sma"
-_data_ok = ((ROOT / "data" / "m1" / f"{SYM}.parquet").exists()
+_data_ok = ((_BP.bars_file("m1", SYM)).exists()
             and (ROOT / "data" / "optimized_params" / STRAT / f"{SYM}.json").exists())
 
 if not _data_ok:
@@ -65,8 +66,8 @@ if not _data_ok:
 cfg, params = _setup(SYM, STRAT)
 pair_cfg = cfg["pairs"][SYM]
 ps = float(pair_cfg["point_size"])
-m15 = pd.read_parquet(ROOT / "data" / "m15" / f"{SYM}.parquet")
-m1 = pd.read_parquet(ROOT / "data" / "m1" / f"{SYM}.parquet")
+m15 = pd.read_parquet(_BP.bars_file("m15", SYM))
+m1 = pd.read_parquet(_BP.bars_file("m1", SYM))
 strat = get_strategy_by_name(STRAT)
 
 START, END = "2026-06-01", "2026-07-15"

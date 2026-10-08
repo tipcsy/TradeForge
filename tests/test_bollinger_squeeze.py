@@ -18,6 +18,7 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+from core import broker_paths as _BP                      # noqa: E402
 
 import core.applog as _applog
 _applog.harden_console()
@@ -122,13 +123,13 @@ check("a leiras nem ures", len((s.doc_text() or "").strip()) > 200)
 print("== Indikatorok es jel igazi adaton ==")
 from core.execution_params import load_execution_params                  # noqa: E402
 SYM = "Ger40"
-_ok_data = (ROOT / "data" / "m15" / f"{SYM}.parquet").exists()
+_ok_data = (_BP.bars_file("m15", SYM)).exists()
 if not _ok_data:
     print("  (kihagyva: nincs adat)")
 else:
     prm = {**(load_execution_params(SYM, cfg) or {}), **base}
-    m15 = pd.read_parquet(ROOT / "data" / "m15" / f"{SYM}.parquet").iloc[-8000:]
-    m1 = pd.read_parquet(ROOT / "data" / "m1" / f"{SYM}.parquet").iloc[-20000:]
+    m15 = pd.read_parquet(_BP.bars_file("m15", SYM)).iloc[-8000:]
+    m1 = pd.read_parquet(_BP.bars_file("m1", SYM)).iloc[-20000:]
     ind, lo = s.bt_indicators(m15, m1, prm)
 
     for c in ("bb_ub", "bb_lb", "bb_bw", "bb_pb", "kc_ub", "kc_lb",

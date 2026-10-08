@@ -92,8 +92,8 @@ check("szerveriora: UTC 08:23 + 3 ora = 11:23", ora.strftime("%H:%M") == "11:23"
 check("eltolas nelkul nincs ora", ES.server_clock({"server_offset_sec": None}) is None)
 
 print("\n== Az allapotfajl helye ==")
-check("otthoni: data/engine_status.json", ES.path(HOME) == ROOT / "data" / "engine_status.json"
-      or ES.path(HOME).name == "engine_status.json" and "accounts" not in ES.path(HOME).parts)
+check("otthoni: data/accounts/<otthoni>/engine_status.json (2026-10-08 ota az otthoni is)",
+      ES.path(HOME).parts[-3:] == ("accounts", HOME.id, "engine_status.json"), str(ES.path(HOME)))
 check("roboforex: data/accounts/roboforex/engine_status.json",
       ES.path(ROBO).parts[-3:] == ("accounts", "roboforex", "engine_status.json"),
       str(ES.path(ROBO)))

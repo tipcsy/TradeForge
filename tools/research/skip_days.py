@@ -28,6 +28,7 @@ from pathlib import Path as _Path
 
 ROOT = _Path(__file__).resolve().parents[2]
 _sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 
 import numpy as np
 import pandas as pd
@@ -50,13 +51,13 @@ def napi_R(sym: str) -> pd.Series:
     """A VALODI hangolt parameterekkel elert napi R-osszeg."""
     raw = json.loads((ROOT / "config.json").read_text(encoding="utf-8"))
     cfg = config_for_strategy(raw, STRAT)
-    p = json.loads((ROOT / "data" / "optimized_params" / STRAT /
+    p = json.loads((_BP.research_dir() / "optimized_params" / STRAT /
                     f"{sym}.json").read_text(encoding="utf-8"))["params"]
     p = {**(load_execution_params(sym, cfg) or {}), **p}
     legacy = (cfg.get("pairs", {}).get(sym, {}) or {}).get("trade_hours")
     hrs = resolve_trade_hours(sym, STRAT, legacy)
-    m15 = pd.read_parquet(ROOT / "data" / "m15" / f"{sym}.parquet")
-    m1 = pd.read_parquet(ROOT / "data" / "m1" / f"{sym}.parquet")
+    m15 = pd.read_parquet(_BP.bars_file("m15", sym))
+    m1 = pd.read_parquet(_BP.bars_file("m1", sym))
     r = run_pair(sym, m15, m1, p, cfg["pairs"][sym], cfg["trading"], 1000.0,
                  strategy=get_strategy_by_name(STRAT),
                  allowed_hours=set(hrs) if hrs else None, cfg=cfg,
@@ -70,7 +71,7 @@ def napi_R(sym: str) -> pd.Series:
 
 def elore_jellemzok(sym: str) -> pd.DataFrame:
     """Napi jellemzok — MIND az ELOZO napokbol (shift(1) mindenutt)."""
-    f = ROOT / "data" / "flow" / f"{sym}_m5.parquet"
+    f = _BP.research_dir() / "flow" / f"{sym}_m5.parquet"
     d = pd.read_parquet(f).sort_index()
     ts = pd.to_datetime(d.index.to_numpy(np.int64), unit="ms")
     d = d.set_index(ts)
@@ -197,7 +198,7 @@ def _jellemzo_tabla(B, feats):
 
 def main():
     for s in (_sys.argv[1:] or ["Ger40", "UsaInd", "UsaTec"]):
-        if not (ROOT / "data" / "flow" / f"{s}_m5.parquet").exists():
+        if not (_BP.research_dir() / "flow" / f"{s}_m5.parquet").exists():
             print(f"({s}: nincs flow-gyorsitotar, kihagyva)")
             continue
         ertekel(s)

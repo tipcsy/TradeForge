@@ -1,11 +1,12 @@
 """BRÓKER-ADAT ÉS SZÁMLA-ÁLLAPOT SZÉTVÁLASZTÁSA + bróker-függő instrumentum-értékek.
 
-⚠ MIT ŐRZÜNK (0029 „Több bróker egyszerre", 3. lépés, 2026-09-28):
-  1. OTTHONI BRÓKER: minden útvonal PONTOSAN a régi (data/m1, trades.csv,
-     data/adopted_positions.json…) — nincs adat-költöztetés, a mai működés
-     bitre változatlan.
-  2. MÁSIK BRÓKER: a feed a `data/brokers/<id>/`, a számla-állapot a
-     `data/accounts/<id>/` alá kerül — a modulok SAJÁT útvonal-függvényein át is.
+⚠ MIT ŐRZÜNK (0029 „Több bróker egyszerre", 3. lépés, 2026-09-28; az otthoni
+  bróker átköltözése 2026-10-08):
+  1. MINDEN BRÓKER — AZ OTTHONI IS: a feed a `data/brokers/<id>/`, a számla-
+     állapot a `data/accounts/<id>/` alá kerül — a modulok SAJÁT útvonal-
+     függvényein át is. Profil nélkül a config aktív (otthoni) profilja számít,
+     a `TRADEFORGE_BROKER` környezeti változó felülírja. A kutatási kimenetek
+     brókerenként külön: `data/research/<id>/`.
      A `data/`-n kívüli útvonal (a tesztek ideiglenes fájljai) érintetlen, és egy
      már áthelyezett útvonal nem duplázódik.
   3. A MENTÉS NEM KEVERHET: egy nem-otthoni bróker betöltéskor felülírt
@@ -51,14 +52,48 @@ print("== A profilok otthoni jelzoje ==")
 check("a lista elso eleme az otthoni", HOME.home and not ROBO.home)
 check("a regi config egyetlen profilja otthoni", P.active({"broker": {"login": 1}}).home)
 
-print("\n== OTTHONI broker: minden utvonal a REGI ==")
-for prof, cim in ((None, "nincs profil"), (HOME, "otthoni profil")):
-    A.configure(prof)
-    check(f"{cim}: feed data/m1", BP.feed_dir("m1") == D / "m1")
-    check(f"{cim}: gyertya-fajl", BP.bars_file("m15", "GOLD") == D / "m15" / "GOLD.parquet")
-    check(f"{cim}: trades.csv a gyokerben", BP.account(BP.TRADES) == BP.TRADES)
-    check(f"{cim}: szamla-allapot", BP.account(D / "adopted_positions.json")
-          == D / "adopted_positions.json")
+print("\n== OTTHONI broker: a SAJAT mappajaban (2026-10-08) ==")
+A.configure(HOME)
+check("otthoni: feed data/brokers/activtrades/m1",
+      BP.feed_dir("m1") == D / "brokers" / "activtrades" / "m1", str(BP.feed_dir("m1")))
+check("otthoni: gyertya-fajl", BP.bars_file("m15", "GOLD")
+      == D / "brokers" / "activtrades" / "m15" / "GOLD.parquet")
+check("otthoni: trades.csv a szamla-mappaban",
+      BP.account(BP.TRADES) == D / "accounts" / "activtrades" / "trades.csv")
+check("otthoni: szamla-allapot", BP.account(D / "adopted_positions.json")
+      == D / "accounts" / "activtrades" / "adopted_positions.json")
+check("otthoni: kutatasi mappa", BP.research_dir() == D / "research" / "activtrades")
+check("a kutatasi mappa NEM helyezodik at meg egyszer",
+      BP.feed(D / "research" / "x.parquet") == D / "research" / "x.parquet")
+
+print("\n== Profil NELKUL: a config aktiv profilja; TRADEFORGE_BROKER felulirja ==")
+import os                                                                # noqa: E402
+A.configure(None)
+_cfg_regi = BP._config
+BP._config = lambda: CFG                                # a valodi config.json-t NEM olvassuk
+try:
+    os.environ.pop(BP.ENV, None)
+    check("nincs profil -> a config elso (otthoni) profilja",
+          BP.feed_dir("m1") == D / "brokers" / "activtrades" / "m1", str(BP.feed_dir("m1")))
+    os.environ[BP.ENV] = "roboforex"
+    check("TRADEFORGE_BROKER=roboforex -> a roboforex gyertyai",
+          BP.bars_file("m1", "GOLD") == D / "brokers" / "roboforex" / "m1" / "GOLD.parquet")
+    check("TRADEFORGE_BROKER=roboforex -> a roboforex kutatasi mappaja",
+          BP.research_dir() == D / "research" / "roboforex")
+    os.environ[BP.ENV] = "nincsilyen"
+    try:
+        BP.feed_dir("m1")
+        check("ismeretlen TRADEFORGE_BROKER -> ValueError (NEM csendes otthoni)", False)
+    except ValueError:
+        check("ismeretlen TRADEFORGE_BROKER -> ValueError (NEM csendes otthoni)", True)
+    A.configure(ROBO)
+    os.environ[BP.ENV] = "activtrades"
+    check("a beallitott aktiv profil erosebb a kornyezeti valtozonal",
+          BP.feed_dir("m1") == D / "brokers" / "roboforex" / "m1")
+finally:
+    os.environ.pop(BP.ENV, None)
+    BP._config = _cfg_regi
+    A.configure(None)
 
 print("\n== MASIK broker: feed brokerenkent, allapot szamlankent ==")
 A.configure(ROBO)
@@ -72,7 +107,8 @@ check("szamla-allapot: data/accounts/roboforex/…",
 check("data/-n KIVULI utvonal (teszt ideiglenes fajlja) erintetlen", BP.account(tmp) == tmp)
 m = BP.feed_dir("m1")
 check("mar athelyezett utvonal NEM duplazodik", BP.feed(m) == m, str(BP.feed(m)))
-check("explicit profil felulirja az aktivat", BP.feed_dir("m1", HOME) == D / "m1")
+check("explicit profil felulirja az aktivat",
+      BP.feed_dir("m1", HOME) == D / "brokers" / "activtrades" / "m1")
 
 print("\n== A modulok SAJAT utvonal-fuggvenyei is athelyeznek ==")
 from core import adopted, position_meta, signal_delivery, mt5_connector   # noqa: E402
@@ -92,7 +128,8 @@ adopted.PATH = tmp                                     # igy cserelnek a tesztek
 check("a teszt allando-csereje tovabbra is ervenyes", adopted._path() == tmp)
 adopted.PATH = _regi
 A.configure(HOME)
-check("otthoni: adopted a regi helyen", adopted._path() == adopted.PATH)
+check("otthoni: adopted a sajat szamla-mappajaban",
+      adopted._path() == D / "accounts" / "activtrades" / "adopted_positions.json")
 A.configure(None)
 
 # ---------------------------------------------------------------------------

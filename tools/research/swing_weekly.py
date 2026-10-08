@@ -24,6 +24,7 @@ import sys as _sys
 from pathlib import Path as _Path
 ROOT = _Path(__file__).resolve().parents[2]
 _sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 _sys.path.insert(0, str(_Path(__file__).resolve().parent))
 
 import numpy as np
@@ -143,6 +144,6 @@ if __name__ == "__main__":
     tag = "" if not arg.no_close else f"_nyitva{arg.hold}h"
     if arg.start:
         tag += f"_{arg.start[:4]}_{(arg.end or 'x')[:4]}"
-    p = ROOT / "data" / f"swing_weekly_m15{tag}.parquet"
+    p = _BP.research_dir() / f"swing_weekly_m15{tag}.parquet"
     out.to_parquet(p)
     print("mentve:", p, len(out))

@@ -32,6 +32,7 @@ from pathlib import Path as _Path
 
 ROOT = _Path(__file__).resolve().parents[2]
 _sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 _sys.path.insert(0, str(_Path(__file__).resolve().parent))
 
 import numpy as np
@@ -163,9 +164,9 @@ def main():
         print(tab.fillna("").to_string())
 
     outp = ev.groupby(["tf", "nev", "piac"]).apply(_cell, include_groups=False).reset_index()
-    outp.to_csv(ROOT / "data" / "candle_split_piac.csv", index=False)
+    outp.to_csv(_BP.research_dir() / "candle_split_piac.csv", index=False)
     outn = ev.groupby(["tf", "nev", "ns"]).apply(_cell, include_groups=False).reset_index()
-    outn.to_csv(ROOT / "data" / "candle_split_napszak.csv", index=False)
+    outn.to_csv(_BP.research_dir() / "candle_split_napszak.csv", index=False)
     print("\nCSV: data/candle_split_piac.csv, data/candle_split_napszak.csv")
 
 

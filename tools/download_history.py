@@ -444,7 +444,9 @@ from core.i18n import t as _t
 def _history_lock(symbol: str):
     """Per-szimbólum zár, ami PROCESSZEK KÖZÖTT is soroba állít (lásd fent)."""
     with _thread_lock(symbol):
-        lock_dir = ROOT / "data"
+        # a zár a gyertya-fájlok írását védi → a bróker saját feed-mappájában
+        from core import broker_paths
+        lock_dir = broker_paths.feed(ROOT / "data" / "m1").parent
         lock_dir.mkdir(parents=True, exist_ok=True)
         fh = open(lock_dir / f".{symbol}.history.lock", "w")
         try:

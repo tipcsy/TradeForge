@@ -22,6 +22,7 @@ import sys as _sys
 from pathlib import Path as _Path
 ROOT = _Path(__file__).resolve().parents[2]
 _sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 _sys.path.insert(0, str(_Path(__file__).resolve().parent))
 
 import numpy as np
@@ -179,7 +180,7 @@ if __name__ == "__main__" and "--legs" in _sys.argv:
                 rows.append(r)
         print(s, flush=True)
     out = pd.concat(rows, ignore_index=True)
-    out.to_parquet(ROOT / "data" / "swing_leg_size.parquet")
+    out.to_parquet(_BP.research_dir() / "swing_leg_size.parquet")
     print("kesz", len(out))
 elif __name__ == "__main__":
     rows = []
@@ -194,5 +195,5 @@ elif __name__ == "__main__":
                     rows.append(r)
         print(s, flush=True)
     out = pd.concat(rows, ignore_index=True)
-    out.to_parquet(ROOT / "data" / "swing_trend_length.parquet")
+    out.to_parquet(_BP.research_dir() / "swing_trend_length.parquet")
     print("kesz", len(out))

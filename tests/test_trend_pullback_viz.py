@@ -22,6 +22,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 
 from core import applog
 applog.harden_console()
@@ -52,7 +53,7 @@ cfg = load_config("config.json")
 cs = config_for_strategy(cfg, SN)
 
 SYM = "UsaTec"
-_pq1 = ROOT / "data" / "m1" / f"{SYM}.parquet"
+_pq1 = _BP.bars_file("m1", SYM)
 if not _pq1.exists():
     print(f"      (nincs {SYM} M1 parquet — a teszt kimarad)")
     print()
@@ -65,7 +66,7 @@ p = {**p, "symbol": SYM, "point_size": cfg["pairs"][SYM]["point_size"]}
 w1 = st.visual_lookback_bars(p, "M1")
 w15 = st.visual_lookback_bars(p, "M15")
 d1 = pd.read_parquet(_pq1).tail(w1)
-d15 = pd.read_parquet(ROOT / "data" / "m15" / f"{SYM}.parquet").tail(w15)
+d15 = pd.read_parquet(_BP.bars_file("m15", SYM)).tail(w15)
 md = MarketData(symbol=SYM, params=p, bars={"M1": d1, "M15": d15})
 objs = st.visual_objects(md)
 

@@ -20,6 +20,7 @@ from pathlib import Path as _Path
 
 ROOT = _Path(__file__).resolve().parents[2]
 _sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 _sys.path.insert(0, str(_Path(__file__).resolve().parent))
 
 import numpy as np
@@ -62,7 +63,7 @@ def fuss(sym: str, mintazat: str, irany: str, cfg, params, m15, m1,
 
 def main():
     sym = _sys.argv[1] if len(_sys.argv) > 1 else "UsaTec"
-    _j = json.loads((ROOT / "data" / f"jeloltek_{sym}.json")
+    _j = json.loads((_BP.research_dir() / f"jeloltek_{sym}.json")
                     .read_text(encoding="utf-8"))
     # a jelolt lehet puszta string (regi alak) vagy {mintazat, irany} (uj)
     jeloltek = [(d, "BUY") if isinstance(d, str)
@@ -72,8 +73,8 @@ def main():
     cfg = config_for_strategy(raw, "wpr_sma")      # a VAZ configja (kapuk, slot)
     params = {"sl_atr_mult": 1.5, "tp_rr_ratio": 2.0,
               **(load_execution_params(sym, cfg) or {})}
-    m15 = pd.read_parquet(ROOT / "data" / "m15" / f"{sym}.parquet")
-    m1 = pd.read_parquet(ROOT / "data" / "m1" / f"{sym}.parquet")
+    m15 = pd.read_parquet(_BP.bars_file("m15", sym))
+    m1 = pd.read_parquet(_BP.bars_file("m1", sym))
 
     print(f"=== {sym}: {len(jeloltek)} jelolt a VALODI motoron, {KEZDET}-tol ===")
     print(f"   slot-korlat: {cfg['trading'].get('max_open_slots')}   "

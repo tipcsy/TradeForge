@@ -226,7 +226,7 @@ class BacktestResult:
 # ---------------------------------------------------------------------------
 
 def load_data(symbol: str) -> tuple[Optional[pd.DataFrame], Optional[pd.DataFrame]]:
-    # ⚠ 0029: az AKTÍV bróker gyertyái (az otthoninál a régi data/m1, data/m15)
+    # ⚠ 0029: az AKTÍV bróker gyertyái (data/brokers/<id>/m1, m15)
     from core import broker_paths
     m15_path = broker_paths.feed(ROOT / "data" / "m15" / f"{symbol}.parquet")
     m1_path  = broker_paths.feed(ROOT / "data" / "m1"  / f"{symbol}.parquet")

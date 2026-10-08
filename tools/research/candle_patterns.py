@@ -39,6 +39,7 @@ from pathlib import Path as _Path
 
 ROOT = _Path(__file__).resolve().parents[2]
 _sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 _sys.path.insert(0, str(_Path(__file__).resolve().parent))
 
 import numpy as np
@@ -80,7 +81,7 @@ def candle_masks(sym: str, racs_ido: pd.DatetimeIndex, tfs) -> dict:
 
 
 def _load(sym):
-    o = pd.read_parquet(ROOT / "data" / "outcomes" / f"{sym}.parquet")
+    o = pd.read_parquet(_BP.research_dir() / "outcomes" / f"{sym}.parquet")
     ido = pd.DatetimeIndex(o["ido"])
     R = {"long": o["long"].to_numpy(float), "short": o["short"].to_numpy(float)}
     return ido, R
@@ -91,7 +92,7 @@ def _load(sym):
 def lepcso_a():
     per_sym = {}       # sym -> {cimke: dict(net, exc, mir, ev)}
     for sym in SYMS:
-        p = ROOT / "data" / "outcomes" / f"{sym}.parquet"
+        p = _BP.research_dir() / "outcomes" / f"{sym}.parquet"
         if not p.exists():
             print(f"   ({sym}: nincs kimenet-racs, kihagyva)")
             continue
@@ -159,7 +160,7 @@ def _print_a(t: pd.DataFrame):
 # ── B) holdout-kereses csak a gyertya-esemenyekkel (0. + 1. szint) ───────────
 
 def lepcso_b(sym: str):
-    p = ROOT / "data" / "outcomes" / f"{sym}.parquet"
+    p = _BP.research_dir() / "outcomes" / f"{sym}.parquet"
     if not p.exists():
         print(f"   ({sym}: nincs kimenet-racs)")
         return None, None
@@ -211,7 +212,7 @@ def lepcso_b(sym: str):
     print(f"   {n0} jelolt 0. szinten, {len(t) - n0:,} 1. szinten "
           f"(min. {MIN_N} kotes a keresoben)")
     tag = ("_" + "_".join(CSAK)) if CSAK else ""
-    t.to_parquet(ROOT / "data" / f"search_candle{tag}_{sym}.parquet", index=False)
+    t.to_parquet(_BP.research_dir() / f"search_candle{tag}_{sym}.parquet", index=False)
 
     # ── holdout: a harom teszt (holdout.py) — csak a holdouton is ertekelheto jeloltek
     h = t[np.isfinite(t.R_h)].copy()
@@ -258,7 +259,7 @@ def main():
     print("════ A) SZURES A TELJES MINTAN ════", flush=True)
     ta = lepcso_a()
     _print_a(ta)
-    ta.to_csv(ROOT / "data" / ("candle_A" + ("_" + "_".join(CSAK) if CSAK else "") + ".csv"),
+    ta.to_csv(_BP.research_dir() / ("candle_A" + ("_" + "_".join(CSAK) if CSAK else "") + ".csv"),
               index=False)
     atment = ta[ta.A_atment & ta.tf.isin(PRIMARY_TFS)]
     print(f"\nA) atment (elsodleges idosikok): {len(atment)} / "

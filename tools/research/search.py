@@ -42,6 +42,7 @@ from pathlib import Path as _Path
 
 ROOT = _Path(__file__).resolve().parents[2]
 _sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 _sys.path.insert(0, str(_Path(__file__).resolve().parent))
 
 import numpy as np
@@ -69,7 +70,7 @@ def _t(v):
 
 
 def fuss(sym: str, max_par: int = 400000):
-    o = pd.read_parquet(ROOT / "data" / "outcomes" / f"{sym}.parquet")
+    o = pd.read_parquet(_BP.research_dir() / "outcomes" / f"{sym}.parquet")
     ido = pd.DatetimeIndex(o["ido"])
     kereso = np.asarray(ido < pd.Timestamp(VAGAS, tz=ido.tz))
     hold = ~kereso
@@ -140,7 +141,7 @@ def fuss(sym: str, max_par: int = 400000):
         print("   nincs ertekelheto jelolt")
         return None
     t["sym"] = sym
-    dst = ROOT / "data" / f"search_{sym}.parquet"
+    dst = _BP.research_dir() / f"search_{sym}.parquet"
     t.to_parquet(dst, index=False)
     print(f"\n   {len(t):,} jelolt elmentve: {dst}")
     print("   jeloltek szintenkent:")
@@ -154,7 +155,7 @@ def fuss(sym: str, max_par: int = 400000):
 
 def main():
     for sym in (_sys.argv[1:] or ["UsaTec", "UsaInd"]):
-        if not (ROOT / "data" / "outcomes" / f"{sym}.parquet").exists():
+        if not (_BP.research_dir() / "outcomes" / f"{sym}.parquet").exists():
             print(f"({sym}: nincs kimenet-gyorsitotar)")
             continue
         fuss(sym)

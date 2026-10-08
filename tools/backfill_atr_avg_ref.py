@@ -49,7 +49,8 @@ def main():
             print(f"{sym}: már van mérce ({prm['atr_avg_ref']:.6g}), kihagyva")
             skipped += 1
             continue
-        f = ROOT / "data" / "m15" / f"{sym}.parquet"
+        from core import broker_paths
+        f = broker_paths.bars_file("m15", sym)
         if not f.exists():
             print(f"{sym}: nincs letöltött M15 előzmény, kihagyva")
             skipped += 1

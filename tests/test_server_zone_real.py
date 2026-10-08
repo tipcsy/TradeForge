@@ -13,6 +13,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 sys.path.insert(0, str(ROOT / "tools"))
 
 from core import applog                                                  # noqa: E402
@@ -33,7 +34,7 @@ def check(name, ok, detail=""):
 
 
 for sym in ("UsaTec", "Ger40"):
-    f = ROOT / "data" / "m1" / f"{sym}.parquet"
+    f = _BP.bars_file("m1", sym)
     check(f"{sym}: van adat", f.exists(), str(f))
     if not f.exists():
         continue
@@ -48,7 +49,7 @@ for sym in ("UsaTec", "Ger40"):
 
 # ⚠ A DEVIZA NEM ALKALMAS — az eszkoznek ezt KI KELL MONDANIA, nem magabiztosan
 # tevednie (az EURUSD a 2026-09-28-i meresen „Europe/London"-t adott).
-f = ROOT / "data" / "m1" / "EURUSD.parquet"
+f = _BP.bars_file("m1", "EURUSD")
 if f.exists():
     it = D.itelet(D.felismer(pd.read_parquet(f, columns=["high", "low"])))
     check("EURUSD (deviza): NINCS magabiztos itelet", it.startswith("!!"), it)

@@ -24,6 +24,7 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+from core import broker_paths as _BP                      # noqa: E402
 
 import core.applog as _applog
 _applog.harden_console()
@@ -88,7 +89,7 @@ check("avg_spread nelkul a fix spread lep eletbe",
 # ---------------------------------------------------------------------------
 print("== Eles paritas: cimke vs backtest UGYANAZOKON a koteseken ==")
 SYM = "EURCHF"        # ezen a paron a legrosszabb a rollover-torzitas
-_ok_data = ((ROOT / "data" / "m1" / f"{SYM}.parquet").exists()
+_ok_data = ((_BP.bars_file("m1", SYM)).exists()
             and (ROOT / "data" / "optimized_params" / "ml_ai" / f"{SYM}.json").exists())
 if not _ok_data:
     print("  (kihagyva: nincs adat)")
@@ -108,8 +109,8 @@ else:
                       f"{SYM}.json").read_text(encoding="utf-8")).get("params") or {}
     prm = {**(load_execution_params(SYM, cfg) or {}), **prm}
 
-    m15 = pd.read_parquet(ROOT / "data" / "m15" / f"{SYM}.parquet")
-    m1 = pd.read_parquet(ROOT / "data" / "m1" / f"{SYM}.parquet")
+    m15 = pd.read_parquet(_BP.bars_file("m15", SYM))
+    m1 = pd.read_parquet(_BP.bars_file("m1", SYM))
     r = run_pair(SYM, m15, m1, prm, pc, cfg["trading"], 1000.0, strategy=strat,
                  test_start="2026-01-01", test_end="2026-08-07", cfg=cfg)
     tr = [t for t in r.trades if t.close_time is not None]

@@ -35,6 +35,7 @@ from pathlib import Path as _Path
 
 ROOT = _Path(__file__).resolve().parents[2]
 _sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 _sys.path.insert(0, str(_Path(__file__).resolve().parent))
 
 import numpy as np
@@ -48,7 +49,7 @@ SYMS = ["Ger40", "UsaInd", "UsaTec", "GOLD", "USDJPY"]
 TFS = {60: dict(hold=5 * 1440, alap_lepes=4), 240: dict(hold=15 * 1440, alap_lepes=1)}
 STOP_ATR, BE_R, TRAIL_R = 1.5, 0.67, 2.0
 MINTA = "pipa2"
-ALAP_CACHE = ROOT / "data" / "alap_h1h4.parquet"
+ALAP_CACHE = _BP.research_dir() / "alap_h1h4.parquet"
 T_MIN, YEAR_FRAC, INSTR_MIN, MIN_N, MIN_YEAR_N = 2.0, 0.60, 3, 300, 20
 
 
@@ -193,7 +194,7 @@ def main():
             alap[(sym, tf)] = a
             egy[(sym, tf)] = e
     df = pd.concat(dfs, ignore_index=True)
-    df.to_parquet(ROOT / "data" / f"{MINTA}_h4_trades{tag}.parquet", index=False)
+    df.to_parquet(_BP.research_dir() / f"{MINTA}_h4_trades{tag}.parquet", index=False)
 
     for tf in TFS:
         print(f"\n════ M{tf} — paronkent (fuggetlen, elsodleges kilepes) ════")

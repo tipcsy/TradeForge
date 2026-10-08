@@ -85,7 +85,8 @@ def spread_from_history(symbol: str, pair_cfg: dict, days: int):
     érvényes egyetlen szám, egy tick viszont a nap/hét egy véletlen pillanata.
     A median a napszakok és a hírek zaját is kisimítja; a p75-öt tájékoztatásul
     adjuk vissza (mennyire hosszú a farok)."""
-    f = M1_DIR / f"{symbol}.parquet"
+    from core import broker_paths
+    f = broker_paths.feed(M1_DIR) / f"{symbol}.parquet"
     if not f.exists():
         return None
     try:

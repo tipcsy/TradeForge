@@ -18,6 +18,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 
 from core import applog  # noqa: E402
 applog.harden_console()
@@ -83,8 +84,8 @@ cfg = config_for_strategy(raw, "quiet_breakout")
 st = get_strategy_by_name("quiet_breakout")
 params = {**st.base_params(cfg), **(load_execution_params(SYM, cfg) or {})}
 t0, t1 = pd.Timestamp("2025-01-01", tz="UTC"), pd.Timestamp("2025-07-01", tz="UTC")
-m15 = pd.read_parquet(ROOT / "data" / "m15" / f"{SYM}.parquet")
-m1 = pd.read_parquet(ROOT / "data" / "m1" / f"{SYM}.parquet")
+m15 = pd.read_parquet(_BP.bars_file("m15", SYM))
+m1 = pd.read_parquet(_BP.bars_file("m1", SYM))
 m1 = m1[~m1.index.duplicated(keep="last")].sort_index()
 m1 = m1[(m1.index >= t0 - pd.Timedelta(days=120)) & (m1.index < t1)]
 m15 = m15[(m15.index >= t0 - pd.Timedelta(days=120)) & (m15.index < t1)]

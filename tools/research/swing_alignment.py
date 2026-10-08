@@ -15,6 +15,7 @@ import sys as _sys
 from pathlib import Path as _Path
 ROOT = _Path(__file__).resolve().parents[2]
 _sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 _sys.path.insert(0, str(_Path(__file__).resolve().parent))
 
 import numpy as np
@@ -22,7 +23,7 @@ import pandas as pd
 from swing_weekly_long import oat, controls, tstat
 
 if __name__ == "__main__":
-    X = pd.read_parquet(ROOT / "data" / "swing_weekly_m15.parquet")
+    X = pd.read_parquet(_BP.research_dir() / "swing_weekly_m15.parquet")
     X = X[(X.time >= pd.Timestamp("2023-01-01", tz="UTC")) & (X.side == 1)].copy()
     X["egy4"] = X.m1_ok + X.m5_ok + X.h1_ok + X.h4_ok
     wk = (X.time.max() - X.time.min()).days / 7
@@ -50,4 +51,4 @@ if __name__ == "__main__":
               f"{100*a.rand.mean():+8.2f} {100*a['diff'].mean():+6.2f} {tstat(a['diff']):+6.2f} | "
               + " ".join(f"{yr.get(y,0):+6.0f}" for y in (2023, 2024, 2025, 2026)) + f" | {(s>0).sum()}/{len(s)}")
         res.append(a.assign(csoport=name))
-    pd.concat(res).to_parquet(ROOT / "data" / "swing_alignment.parquet")
+    pd.concat(res).to_parquet(_BP.research_dir() / "swing_alignment.parquet")

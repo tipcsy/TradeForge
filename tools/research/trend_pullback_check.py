@@ -19,6 +19,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 
 from core import applog
 applog.harden_console()
@@ -134,7 +135,7 @@ def main() -> None:
     n_instr = 0
     ev_osszes = {}
     for sym in ("GOLD", "USDJPY", "Ger40", "UsaTec", "UsaInd", "Usa500", "EURUSD"):
-        if not (ROOT / "data" / "m1" / f"{sym}.parquet").exists():
+        if not (_BP.bars_file("m1", sym)).exists():
             continue
         try:
             res = merj(sym)

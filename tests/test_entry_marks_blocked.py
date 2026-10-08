@@ -21,6 +21,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 
 from core import applog
 applog.harden_console()
@@ -165,7 +166,7 @@ for _f in ("trend_pullback.py", "wpr_sma.py", "bollinger_squeeze.py"):
     check(f"{_f}: a kötne/kimarad jelölést KÉRI", "viz.mark_blocked(" in _src)
 
 # ── 10. ÉLES ADATON: tényleg kevesebb a kötés, mint a jelzés ──────────────
-_pq = ROOT / "data" / "m1" / "UsaTec.parquet"
+_pq = _BP.bars_file("m1", "UsaTec")
 if _pq.exists():
     from strategy import get_strategy_by_name
     from strategy.base import MarketData
@@ -178,7 +179,7 @@ if _pq.exists():
     p = strategy_params(SYM, SN, _cs, fallback=default_params(st, _cs))
     p = {**p, "symbol": SYM, "point_size": cfg["pairs"][SYM]["point_size"]}
     d1 = pd.read_parquet(_pq).tail(st.visual_lookback_bars(p, "M1"))
-    d15 = pd.read_parquet(ROOT / "data" / "m15" / f"{SYM}.parquet").tail(
+    d15 = pd.read_parquet(_BP.bars_file("m15", SYM)).tail(
         st.visual_lookback_bars(p, "M15"))
     _r = []
     md = MarketData(symbol=SYM, params=p, bars={"M1": d1, "M15": d15})

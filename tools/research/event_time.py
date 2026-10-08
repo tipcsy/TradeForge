@@ -40,6 +40,7 @@ from pathlib import Path as _Path
 
 ROOT = _Path(__file__).resolve().parents[2]
 _sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 
 import argparse
 import glob
@@ -51,7 +52,7 @@ import numpy as np
 import pandas as pd
 
 SYMS = ["GOLD", "USDJPY", "UsaInd", "UsaTec", "Ger40"]
-OUT = ROOT / "data" / "event_time"
+OUT = _BP.research_dir() / "event_time"
 CLOCK_MIN = 15
 KS = (4, 16, 64)
 HORIZ = (60, 240)
@@ -60,7 +61,7 @@ RHO_MIN, INSTR_MIN, YEAR_FRAC = 0.03, 4, 0.60
 
 # ── tick → barok (havi darabokban, átvitellel) ──────────────────────────────
 def _tick_files(sym):
-    return sorted(glob.glob(str(ROOT / "data" / "ticks" / sym / "*.parquet")))
+    return sorted(glob.glob(str(_BP.feed_dir("ticks") / sym / "*.parquet")))
 
 
 def _load_month(f):

@@ -57,7 +57,7 @@ TICK_DIR = ROOT / "data" / "ticks"
 
 def _tick_dir():
     """A `TICK_DIR` az AKTÍV bróker feed-mappájában (0029, core/broker_paths).
-    Az otthoni brókernél (és a tesztek ideiglenes útvonalainál) VÁLTOZATLAN."""
+    A tesztek ideiglenes (data/-n kívüli) útvonalainál VÁLTOZATLAN."""
     from core import broker_paths
     return broker_paths.feed(TICK_DIR)
 
@@ -65,7 +65,7 @@ MANIFEST_DIR = ROOT / "data" / "bars_manifest"
 
 def _manifest_dir():
     """A `MANIFEST_DIR` az AKTÍV bróker feed-mappájában (0029, core/broker_paths).
-    Az otthoni brókernél (és a tesztek ideiglenes útvonalainál) VÁLTOZATLAN."""
+    A tesztek ideiglenes (data/-n kívüli) útvonalainál VÁLTOZATLAN."""
     from core import broker_paths
     return broker_paths.feed(MANIFEST_DIR)
 
@@ -253,7 +253,8 @@ def main() -> int:
             if bars.empty:
                 log.warning("%s %s — 0 gyertya", sym, tf)
                 continue
-            out = ROOT / "data" / TF_DIR[tf] / f"{sym}.parquet"
+            from core import broker_paths
+            out = broker_paths.bars_file(TF_DIR[tf], sym)
             cmp_ = compare(bars, out)
             log.info("%s %s — %s gyertya (%s … %s) | összevetés: %s",
                      sym, tf, f"{len(bars):,}", bars.index[0], bars.index[-1],

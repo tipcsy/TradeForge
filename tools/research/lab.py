@@ -12,6 +12,7 @@ import sys as _sys
 from pathlib import Path as _Path
 ROOT = _Path(__file__).resolve().parents[2]
 _sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 _sys.path.insert(0, str(_Path(__file__).resolve().parent))
 
 
@@ -29,7 +30,7 @@ _CACHE: dict[str, pd.DataFrame] = {}
 
 def load_m1(sym: str) -> pd.DataFrame:
     if sym not in _CACHE:
-        df = pd.read_parquet(ROOT / "data" / "m1" / f"{sym}.parquet")
+        df = pd.read_parquet(_BP.bars_file("m1", sym))
         df = df[~df.index.duplicated(keep="last")].sort_index()
         _CACHE[sym] = df
     return _CACHE[sym]

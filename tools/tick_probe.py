@@ -150,7 +150,8 @@ def sample_days(sym: str, point: float, keep: bool, n_days: int = SAMPLE_DAYS) -
         return {"nap": 0, "tick_nap": 0}
 
     allf = pd.concat(frames, ignore_index=True)
-    out_dir = TICK_DIR / sym / "_minta"
+    from core import broker_paths
+    out_dir = broker_paths.feed(TICK_DIR) / sym / "_minta"
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"minta_{len(per_day)}nap.parquet"
     allf.to_parquet(path, compression="zstd", index=False)
@@ -236,7 +237,8 @@ def main() -> int:
             log.warning("Egyetlen szimbólumot sem sikerült megmérni.")
             return 1
         df = pd.DataFrame(rows)
-        out = ROOT / "data" / "tick_probe.csv"
+        from core import broker_paths
+        out = broker_paths.feed(ROOT / "data" / "tick_probe.csv")
         df.to_csv(out, sep=";", index=False, decimal=",")
         print()
         print(df.to_string(index=False))

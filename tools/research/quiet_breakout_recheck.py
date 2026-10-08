@@ -15,6 +15,7 @@ import sys as _sys
 from pathlib import Path as _Path
 ROOT = _Path(__file__).resolve().parents[2]
 _sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 _sys.path.insert(0, str(_Path(__file__).resolve().parent))
 
 import numpy as np
@@ -26,7 +27,7 @@ def main():
     for fname, lbl, vstart, vend, cstart in (
             ("swing_weekly_m15_2013_2023.parquet", "2013-2022 (fuggetlen)", "2013-03-01", "2023-01-01", "2013-03-01"),
             ("swing_weekly_m15.parquet", "2023-2026", "2022-09-01", None, "2022-11-01")):
-        X = pd.read_parquet(ROOT / "data" / fname)
+        X = pd.read_parquet(_BP.research_dir() / fname)
         X = X[(X.side == 1)].copy()
         if "2013" not in fname:
             X = X[X.time >= pd.Timestamp("2023-01-01", tz="UTC")]

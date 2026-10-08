@@ -18,6 +18,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 
 from core import applog
 applog.harden_console()
@@ -293,7 +294,7 @@ if _TK:
     _cfg = _json.loads((ROOT / "config.json").read_text(encoding="utf-8"))
     _par = next((k for k, v in (_cfg.get("pairs") or {}).items()
                  if isinstance(v, dict)
-                 and (ROOT / "data" / "m15" / f"{k}.parquet").exists()), None)
+                 and (_BP.bars_file("m15", k)).exists()), None)
     if _par is None:
         check("van pár, amivel az ablak felépíthető", False, "nincs letöltött adat")
     else:

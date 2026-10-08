@@ -24,6 +24,7 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 
 import core.applog as _applog
 _applog.harden_console()
@@ -143,7 +144,7 @@ check("nyers jelzes modban (exec_gates=False) nem szur",
 
 # ══ 5. Motor: NEM ures — run_pair + portfolio ══════════════════════════════
 print("== 5. motor (valodi adat) ==")
-_m1p = ROOT / "data" / "m1" / "Ger40.parquet"
+_m1p = _BP.bars_file("m1", "Ger40")
 if not _m1p.exists():
     print("  (kihagyva: nincs Ger40 adat)")
 else:
@@ -162,7 +163,7 @@ else:
         return c
 
     st = get_strategy_by_name("wpr_sma")
-    M15 = pd.read_parquet(ROOT / "data" / "m15" / "Ger40.parquet")
+    M15 = pd.read_parquet(_BP.bars_file("m15", "Ger40"))
     M1 = pd.read_parquet(_m1p)
     e = pd.Timestamp("2026-09-24", tz=M1.index.tz)
     M15 = M15[(M15.index >= e - pd.Timedelta(days=200)) & (M15.index < e)]

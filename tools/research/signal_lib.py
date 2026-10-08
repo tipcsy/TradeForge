@@ -26,6 +26,7 @@ from pathlib import Path as _Path
 
 ROOT = _Path(__file__).resolve().parents[2]
 _sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 _sys.path.insert(0, str(_Path(__file__).resolve().parent))
 
 import numpy as np
@@ -208,7 +209,7 @@ def onteszt(sym: str, racs_ido: pd.DatetimeIndex) -> None:
 
 if __name__ == "__main__":
     sym = _sys.argv[1] if len(_sys.argv) > 1 else "Ger40"
-    o = pd.read_parquet(ROOT / "data" / "outcomes" / f"{sym}.parquet")
+    o = pd.read_parquet(_BP.research_dir() / "outcomes" / f"{sym}.parquet")
     ido = pd.DatetimeIndex(o["ido"])
     onteszt(sym, ido)
     A, E = build(sym, ido)

@@ -274,7 +274,8 @@ def main() -> int:
         if args.max_cost is not None:
             rows = [r for r in rows if r["koltsegR"] <= args.max_cost]
 
-        out = ROOT / "data" / "symbol_scan.csv"
+        from core import broker_paths
+        out = broker_paths.feed(ROOT / "data" / "symbol_scan.csv")
         cols = list(rows[0].keys()) if rows else []
         with io.open(out, "w", encoding="utf-8", newline="") as f:
             f.write(";".join(cols) + "\n")

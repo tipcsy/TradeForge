@@ -89,7 +89,7 @@ TRADES_CSV   = ROOT / "trades.csv"
 
 def trades_csv():
     """A `TRADES_CSV` az AKTÍV bróker számla-mappájában (0029, core/broker_paths).
-    Az otthoni brókernél (és a tesztek ideiglenes útvonalainál) VÁLTOZATLAN."""
+    A tesztek ideiglenes (data/-n kívüli) útvonalainál VÁLTOZATLAN."""
     from core import broker_paths
     return broker_paths.account(TRADES_CSV)
 
@@ -830,7 +830,7 @@ SL_MOVES_DIR = ROOT / "data" / "sl_moves"
 
 def _sl_moves_dir():
     """A `SL_MOVES_DIR` az AKTÍV bróker számla-mappájában (0029, core/broker_paths).
-    Az otthoni brókernél (és a tesztek ideiglenes útvonalainál) VÁLTOZATLAN."""
+    A tesztek ideiglenes (data/-n kívüli) útvonalainál VÁLTOZATLAN."""
     from core import broker_paths
     return broker_paths.account(SL_MOVES_DIR)
 

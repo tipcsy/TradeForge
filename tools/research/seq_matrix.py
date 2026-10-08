@@ -64,6 +64,7 @@ from pathlib import Path as _Path
 
 ROOT = _Path(__file__).resolve().parents[2]
 _sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 _sys.path.insert(0, str(_Path(__file__).resolve().parent))
 
 import argparse
@@ -89,7 +90,7 @@ Z_KUSZOB = 4.0              # az 1. kérdés „találat" küszöbe a szűrő z-
 
 
 def _betolt(sym: str):
-    o = pd.read_parquet(ROOT / "data" / "outcomes" / f"{sym}.parquet")
+    o = pd.read_parquet(_BP.research_dir() / "outcomes" / f"{sym}.parquet")
     ido = pd.DatetimeIndex(o["ido"])
     R = {"long": o["long"].to_numpy(float), "short": o["short"].to_numpy(float)}
     nap = ST.ns(pd.DatetimeIndex(ido).floor("D"))
@@ -283,7 +284,7 @@ def visszhang(t: pd.DataFrame) -> pd.DataFrame:
 
 def fuss(sym: str, ablakok, null_korok: int, top: int,
          szintetikus: bool = False) -> pd.DataFrame | None:
-    p = ROOT / "data" / "outcomes" / f"{sym}.parquet"
+    p = _BP.research_dir() / "outcomes" / f"{sym}.parquet"
     if not p.exists():
         print(f"({sym}: nincs kimenet-gyorsítótár — futtasd: "
               f"python tools/research/outcomes.py {sym})")
@@ -313,14 +314,14 @@ def fuss(sym: str, ablakok, null_korok: int, top: int,
         print(ny[["ablak_perc", "cellak", "talalat_%", "szintetikus_%",
                   "null_atlag"]].to_string(index=False,
                                            float_format=lambda v: f"{v:8.2f}"))
-    ny.to_parquet(ROOT / "data" / f"seq_nyelvtan_{sym}.parquet", index=False)
+    ny.to_parquet(_BP.research_dir() / f"seq_nyelvtan_{sym}.parquet", index=False)
 
     print("\n--- 2. KÉRDÉS: fizet-e a sorrend? ---")
     t = fizet_teszt(sym, jelek, ido, R, nap, kereso, ablakok)
     if t.empty:
         print("   nincs értékelhető cella")
         return None
-    t.to_parquet(ROOT / "data" / f"seq_{sym}.parquet", index=False)
+    t.to_parquet(_BP.research_dir() / f"seq_{sym}.parquet", index=False)
     oszl = ["A", "B", "ablak_perc", "irany", "n_AB", "R_B", "R_AB",
             "sorrend_delta", "t_nap", "evek_poz", "sorrend_delta_h"]
     print(f"\n   {len(t):,} cella. A KERESŐ szakasz legjobb {min(top, len(t))}:")

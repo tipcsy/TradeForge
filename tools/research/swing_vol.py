@@ -15,6 +15,7 @@ import sys as _sys
 from pathlib import Path as _Path
 ROOT = _Path(__file__).resolve().parents[2]
 _sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 _sys.path.insert(0, str(_Path(__file__).resolve().parent))
 
 import numpy as np
@@ -42,7 +43,7 @@ def vol_ratio(sym, start="2022-09-01", end=None):
 
 
 if __name__ == "__main__":
-    X = pd.read_parquet(ROOT / "data" / "swing_weekly_m15.parquet")
+    X = pd.read_parquet(_BP.research_dir() / "swing_weekly_m15.parquet")
     X = X[(X.time >= pd.Timestamp("2023-01-01", tz="UTC")) & (X.side == 1)].copy()
     X["egy4"] = X.m1_ok + X.m5_ok + X.h1_ok + X.h4_ok
     X["vol"] = np.nan
@@ -91,4 +92,4 @@ if __name__ == "__main__":
     row("vol>=1,3 (egyezes nelkul)", X[X.vol >= 1.3])
     row("JELOLT: vol>=1,3 + >=2 egyezes", X[(X.vol >= 1.3) & (X.egy4 >= 2)])
     row("vol>=1,3 + >=3 egyezes", X[(X.vol >= 1.3) & (X.egy4 >= 3)])
-    X.to_parquet(ROOT / "data" / "swing_vol.parquet")
+    X.to_parquet(_BP.research_dir() / "swing_vol.parquet")

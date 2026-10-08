@@ -29,6 +29,7 @@ from pathlib import Path as _Path
 
 ROOT = _Path(__file__).resolve().parents[2]
 _sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 _sys.path.insert(0, str(_Path(__file__).resolve().parent))
 
 import numpy as np
@@ -130,7 +131,7 @@ def main():
     r["szignifikans"] = np.where(r.t.abs() >= 2, "IGEN", "nem")
     print(r.to_string(index=False, float_format=lambda x: f"{x:9.3f}"))
 
-    out = ROOT / "data" / "regime_change.csv"
+    out = _BP.research_dir() / "regime_change.csv"
     pd.concat({s: per[s] for s in SYMS}, names=["sym"]).to_csv(out)
     print(f"\nreszletes tabla: {out}")
 

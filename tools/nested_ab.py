@@ -194,7 +194,8 @@ def main() -> int:
             print("\n⚠ KEVES holdout-kotes (<30) — a kulonbseg zaj is lehet. "
                   "Hosszabb holdout vagy tobb par kell a donteshez.")
 
-    res_path = ROOT / "data" / f"nested_ab_{sym}_{st.name}.json"
+    from core import broker_paths
+    res_path = broker_paths.research_dir() / f"nested_ab_{sym}_{st.name}.json"
     res_path.write_text(json.dumps(out, indent=2, default=str), encoding="utf-8")
     print(f"\nreszletek: {res_path}")
     shutil.rmtree(tmp, ignore_errors=True)

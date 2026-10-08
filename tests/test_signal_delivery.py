@@ -43,7 +43,8 @@ def check(name, ok, detail=""):
 
 _tmp = pathlib.Path(tempfile.mkdtemp(prefix="sigdel_"))
 sd.PATH = _tmp / "signal_delivery.csv"
-_VALODI = ROOT / "data" / "signal_delivery.csv"
+from core import broker_paths as _BP                      # noqa: E402
+_VALODI = _BP.account(ROOT / "data" / "signal_delivery.csv")   # a valodi (szamlankenti) fajl
 _valodi_elotte = _VALODI.stat().st_mtime if _VALODI.exists() else None
 
 # ══ 1. A dontes rogzitese ══════════════════════════════════════════════════

@@ -41,6 +41,7 @@ from pathlib import Path as _Path
 
 ROOT = _Path(__file__).resolve().parents[2]
 _sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 _sys.path.insert(0, str(_Path(__file__).resolve().parent))
 
 import numpy as np
@@ -61,8 +62,8 @@ def _maszk(cimke: str, A: dict, E: dict) -> np.ndarray:
 
 
 def ertekel(sym: str):
-    t = pd.read_parquet(ROOT / "data" / f"search_{sym}.parquet")
-    o = pd.read_parquet(ROOT / "data" / "outcomes" / f"{sym}.parquet")
+    t = pd.read_parquet(_BP.research_dir() / f"search_{sym}.parquet")
+    o = pd.read_parquet(_BP.research_dir() / "outcomes" / f"{sym}.parquet")
     ido = pd.DatetimeIndex(o["ido"])
     kereso = np.asarray(ido < pd.Timestamp(VAGAS, tz=ido.tz))
     hold = ~kereso
@@ -139,13 +140,13 @@ def ertekel(sym: str):
     print(f"   a rangsor elorejelzo (t>2):               {'IGEN' if f2 else 'NEM'}")
     print(f"   a top-{TOP} veri a veletlent (p<0,05):     {'IGEN' if f3 else 'NEM'}")
     print(f"   => {'TALALAT — erdemes tovabbvinni' if (f1 and f2 and f3) else 'NINCS bizonyitott talalat'}")
-    t.to_parquet(ROOT / "data" / f"holdout_{sym}.parquet", index=False)
+    t.to_parquet(_BP.research_dir() / f"holdout_{sym}.parquet", index=False)
     return t
 
 
 def main():
     for sym in (_sys.argv[1:] or ["UsaTec"]):
-        if not (ROOT / "data" / f"search_{sym}.parquet").exists():
+        if not (_BP.research_dir() / f"search_{sym}.parquet").exists():
             print(f"({sym}: nincs kereses-eredmeny)")
             continue
         ertekel(sym)

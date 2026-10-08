@@ -17,6 +17,7 @@ from pathlib import Path as _Path
 
 ROOT = _Path(__file__).resolve().parents[2]
 _sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 _sys.path.insert(0, str(_Path(__file__).resolve().parent))
 
 import matplotlib
@@ -28,7 +29,7 @@ import pandas as pd
 import candle_lib
 import lab
 
-OUT = ROOT / "data" / "candle_draw"
+OUT = _BP.research_dir() / "candle_draw"
 ELOTT, UTAN = 70, 20
 
 
@@ -191,7 +192,7 @@ def rajz(row: pd.Series, n_cimke: str) -> _Path:
 
 def main():
     minta, irany, tf = _sys.argv[1], _sys.argv[2], int(_sys.argv[3])
-    ev = pd.read_csv(ROOT / "data" / "candle_desc_events.csv")
+    ev = pd.read_csv(_BP.research_dir() / "candle_desc_events.csv")
     sel = ev[(ev.minta == minta) & (ev.irany == irany) & (ev.tf == tf)].reset_index(drop=True)
     print(f"{minta} {irany} M{tf}: {len(sel):,} találat")
     if _sys.argv[4] == "random":

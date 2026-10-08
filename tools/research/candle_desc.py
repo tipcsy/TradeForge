@@ -26,6 +26,7 @@ from pathlib import Path as _Path
 
 ROOT = _Path(__file__).resolve().parents[2]
 _sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 _sys.path.insert(0, str(_Path(__file__).resolve().parent))
 
 import numpy as np
@@ -125,7 +126,7 @@ def main():
     ev["ev"] = ev.ido.dt.year
     ev["ho"] = ev.ido.dt.to_period("M").astype(str)
     ev["nap"] = ev.ido.dt.date.astype(str)
-    ev.to_csv(ROOT / "data" / "candle_desc_events.csv", index=False)
+    ev.to_csv(_BP.research_dir() / "candle_desc_events.csv", index=False)
 
     for tf in tfs:
         e, a = ev[ev.tf == tf], alap[alap.tf == tf]
@@ -179,9 +180,9 @@ def main():
 
     # havi + napi bontas CSV-be (a konzolra tul sok)
     ev.groupby(["tf", "minta", "ho"]).kat.apply(_aranyok).unstack().to_csv(
-        ROOT / "data" / "candle_desc_havi.csv")
+        _BP.research_dir() / "candle_desc_havi.csv")
     ev.groupby(["tf", "minta", "nap"]).kat.apply(_aranyok).unstack().to_csv(
-        ROOT / "data" / "candle_desc_napi.csv")
+        _BP.research_dir() / "candle_desc_napi.csv")
     print("\nCSV: data/candle_desc_events.csv (minden felismert minta), "
           "candle_desc_havi.csv, candle_desc_napi.csv")
 

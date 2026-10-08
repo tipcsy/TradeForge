@@ -32,6 +32,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 from core import applog
 applog.harden_console()
 
@@ -98,7 +99,7 @@ _mert = False
 for sym, sn in CELLAK:
     if sym not in (cfg.get("pairs") or {}):
         continue
-    if not (ROOT / "data" / "m1" / f"{sym}.parquet").exists():
+    if not (_BP.bars_file("m1", sym)).exists():
         continue
     set_active_strategy(sn)
     st = get_strategy_by_name(sn)

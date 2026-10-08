@@ -21,6 +21,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 
 from core import applog  # noqa: E402
 applog.harden_console()
@@ -121,8 +122,8 @@ check("a stages szelesseg-mintaja legalabb OT pottyot fed",
 # ---------------------------------------------------------------------------
 print("== Paritas a laborral, valos adaton ==")
 SYM = "Ger40"
-_m1p = ROOT / "data" / "m1" / f"{SYM}.parquet"
-_m15p = ROOT / "data" / "m15" / f"{SYM}.parquet"
+_m1p = _BP.bars_file("m1", SYM)
+_m15p = _BP.bars_file("m15", SYM)
 if not _m1p.exists():
     print("  (kihagyva: nincs adat)")
 else:

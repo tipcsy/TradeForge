@@ -66,7 +66,7 @@ TICK_DIR = ROOT / "data" / "ticks"
 
 def _tick_dir():
     """A `TICK_DIR` az AKTÍV bróker feed-mappájában (0029, core/broker_paths).
-    Az otthoni brókernél (és a tesztek ideiglenes útvonalainál) VÁLTOZATLAN."""
+    A tesztek ideiglenes (data/-n kívüli) útvonalainál VÁLTOZATLAN."""
     from core import broker_paths
     return broker_paths.feed(TICK_DIR)
 
@@ -345,7 +345,7 @@ def main() -> int:
 
     # a MÉRT legkorábbi tick (tick_probe kimenete) — ne találgassunk
     probe = {}
-    pcsv = ROOT / "data" / "tick_probe.csv"
+    pcsv = _tick_dir().parent / "tick_probe.csv"
     if pcsv.exists():
         try:
             t = pd.read_csv(pcsv, sep=";")

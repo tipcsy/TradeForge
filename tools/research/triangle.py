@@ -52,13 +52,14 @@ from pathlib import Path as _Path
 
 ROOT = _Path(__file__).resolve().parents[2]
 _sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 
 from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
 import pandas as pd
 
-TICKS = ROOT / "data" / "ticks"
+TICKS = _BP.feed_dir("ticks")
 LABAK = {"EURUSD": 1e-5, "USDJPY": 1e-3, "EURJPY": 1e-3}   # point
 KERESZT = "EURJPY"
 RACS_MS = 1000
@@ -67,7 +68,7 @@ KUSZOB = (0.5, 1.0, 2.0, 3.0)
 TARTAS = (5, 30, 120, 600)
 KESES = (0, 1, 2, 5)
 FO = (1.0, 30, 1)
-KIMENET = ROOT / "data" / "triangle_result.csv"
+KIMENET = _BP.research_dir() / "triangle_result.csv"
 
 
 def _racs(ho: str):
@@ -220,7 +221,7 @@ def m1_haromszog(kereszt: str, h_perc=(1, 5, 15, 60), k_bp=(0.5, 1.0, 2.0, 3.0))
     labak = HAROMSZOG_M1[kereszt]
     B = {}
     for s in [kereszt, *labak]:
-        d = pd.read_parquet(ROOT / "data" / "m1" / f"{s}.parquet")
+        d = pd.read_parquet(_BP.bars_file("m1", s))
         d = d[~d.index.duplicated(keep="last")]
         sp = d.close_spread.where(d.close_spread > 0, d.avg_spread)
         B[s] = pd.DataFrame({"b": d.close, "a": d.close + sp})

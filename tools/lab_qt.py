@@ -551,6 +551,12 @@ def tick_pontok(arak, szazalek: float = 100.0):
 TICK_DIR = ROOT / "data" / "ticks"
 
 
+def _tick_dir():
+    """A `TICK_DIR` az AKTÍV bróker feed-mappájában (core/broker_paths)."""
+    from core import broker_paths
+    return broker_paths.feed(TICK_DIR)
+
+
 def tick_nap(sym: str, nap, point_size: float):
     """EGY NAP tickjei `(idő-index UTC, bid-ár)` DataFrame-ként — vagy `None`.
 
@@ -564,7 +570,7 @@ def tick_nap(sym: str, nap, point_size: float):
         _nap = pd.Timestamp(nap).tz_localize(None).normalize()
     except (TypeError, ValueError):
         return None
-    _d = TICK_DIR / sym
+    _d = _tick_dir() / sym
     if not _d.is_dir():
         return None
     _napi = _d / "_napok" / ("%s.parquet" % _nap.strftime("%Y-%m-%d"))
@@ -610,7 +616,7 @@ def tick_van(sym: str) -> bool:
     nem változik, egy válasz elég."""
     if sym in _TICK_VAN:
         return _TICK_VAN[sym]
-    _d = TICK_DIR / sym
+    _d = _tick_dir() / sym
     _van = _d.is_dir() and (any(_d.glob("*.parquet"))
                             or any((_d / "_napok").glob("*.parquet")))
     _TICK_VAN[sym] = bool(_van)

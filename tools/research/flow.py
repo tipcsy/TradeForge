@@ -36,13 +36,14 @@ from pathlib import Path as _Path
 
 ROOT = _Path(__file__).resolve().parents[2]
 _sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 
 import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
 
-TICKS = ROOT / "data" / "ticks"
-CACHE = ROOT / "data" / "flow"
+TICKS = _BP.feed_dir("ticks")
+CACHE = _BP.research_dir() / "flow"
 BAR_MS = 5 * 60_000                      # M5
 
 FEATS = ["imb_tick", "q_imb", "narrow", "widen", "aggr",
@@ -170,7 +171,7 @@ def main():
     s = t[t.t.abs() >= 3].sort_values("t", key=abs, ascending=False)
     print(s.to_string(index=False, float_format=lambda v: f"{v:+.4f}")
           if len(s) else "   NINCS ilyen.")
-    out = ROOT / "data" / "flow_ic.csv"
+    out = _BP.research_dir() / "flow_ic.csv"
     t.to_csv(out, index=False)
     print(f"\nteljes tabla: {out}")
 

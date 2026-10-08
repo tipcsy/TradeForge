@@ -60,6 +60,7 @@ from pathlib import Path as _Path
 
 ROOT = _Path(__file__).resolve().parents[2]
 _sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 _sys.path.insert(0, str(_Path(__file__).resolve().parent))
 
 import time
@@ -76,8 +77,8 @@ SL_ATR = 1.5
 TP_RR = 2.0
 MAX_HOLD = 480
 MIN_KOTES = 200
-NAPLO = ROOT / "data" / "rotation_trades.parquet"
-KIMENET = ROOT / "data" / "rotation_result.csv"
+NAPLO = _BP.research_dir() / "rotation_trades.parquet"
+KIMENET = _BP.research_dir() / "rotation_result.csv"
 
 PANEL_FO = (["GOLD", "USDJPY", "UsaTec", "UsaInd"], "2017-04-01")
 PANEL_HOSSZU = (["GOLD", "USDJPY"], "2013-07-01")

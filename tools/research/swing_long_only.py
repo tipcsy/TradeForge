@@ -14,6 +14,7 @@ import sys as _sys
 from pathlib import Path as _Path
 ROOT = _Path(__file__).resolve().parents[2]
 _sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 _sys.path.insert(0, str(_Path(__file__).resolve().parent))
 
 import numpy as np
@@ -41,7 +42,7 @@ def _sim(h, l, c, sp, a, mins, day, i, risk_atr, hold):
 
 
 def main():
-    R = pd.read_parquet(ROOT / "data" / "swing_mtf_m15.parquet").dropna(subset=["net"])
+    R = pd.read_parquet(_BP.research_dir() / "swing_mtf_m15.parquet").dropna(subset=["net"])
     C = R[(~R.mirror) & (R.side == 1) & (R.h1_legs >= 1) & (R.h1_ok == 1)].copy()
     rng = np.random.default_rng(7)
     rows = []
@@ -75,7 +76,7 @@ def main():
             rows.append((sym, r.time, r.net, r.gross, np.mean(nets) if nets else np.nan))
         print(sym, flush=True)
     out = pd.DataFrame(rows, columns=["sym", "time", "net", "gross", "rand_net"])
-    out.to_parquet(ROOT / "data" / "swing_long_only.parquet")
+    out.to_parquet(_BP.research_dir() / "swing_long_only.parquet")
     print("kesz", len(out))
 
 

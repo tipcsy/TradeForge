@@ -138,9 +138,10 @@ def felismer(df: pd.DataFrame, horgony=HORGONYOK,
 
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    fajlok = [Path(a) for a in args] or [ROOT / "data" / "m1" / "UsaTec.parquet"]
+    from core import broker_paths
+    fajlok = [Path(a) for a in args] or [broker_paths.bars_file("m1", "UsaTec")]
     mert = None
-    f_off = ROOT / "data" / "server_offset.json"
+    f_off = broker_paths.feed(ROOT / "data" / "server_offset.json")
     if f_off.exists():
         try:
             mert = float(json.loads(f_off.read_text(encoding="utf-8"))["offset_sec"])

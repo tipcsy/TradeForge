@@ -52,8 +52,9 @@ class BrokerProfile:
     mt5: dict = field(default_factory=dict, compare=False, hash=False)
     server_zone: BT.ServerZone = BT.CANONICAL
     symbols: dict = field(default_factory=dict, compare=False, hash=False)
-    # Az OTTHONI bróker (a lista első eleme; régi config: az egyetlen) adatai a
-    # régi helyükön maradnak — lásd core/broker_paths.py.
+    # Az OTTHONI bróker (a lista első eleme; régi config: az egyetlen). Az adatai
+    # 2026-10-08 óta ugyanúgy a saját mappájában vannak, mint a többié
+    # (core/broker_paths); a jelző a felület és a config-mentés miatt kell.
     home: bool = True
     # A felügyelő újraindítja-e a leállt motort (core/engine_supervisor).
     # Alapból NEM: egy kereskedő motor magától ne induljon, csak ha kérted.

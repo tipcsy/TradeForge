@@ -31,6 +31,7 @@ from pathlib import Path as _Path
 
 ROOT = _Path(__file__).resolve().parents[2]
 _sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 _sys.path.insert(0, str(_Path(__file__).resolve().parent))
 
 import json
@@ -40,7 +41,7 @@ import pandas as pd
 
 import lab
 
-CACHE = ROOT / "data" / "outcomes"
+CACHE = _BP.research_dir() / "outcomes"
 SL_ATR = 1.5            # stop = ennyiszer az M15 ATR
 TP_RR = 2.0             # celar R-ben (0 = nincs TP)
 MAX_HOLD = 480          # perc

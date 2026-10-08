@@ -27,6 +27,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 
 from core import applog  # noqa: E402
 applog.harden_console()
@@ -180,8 +181,8 @@ if native.available() and os.environ.get("TFBT_NATIVE", "1") != "0":
             prm = {**prm, **load_execution_params(sym, cfg)}
             prm.setdefault("point_size",
                            (cfg.get("pairs") or {}).get(sym, {}).get("point_size"))
-            m15 = pd.read_parquet(ROOT / "data" / "m15" / f"{sym}.parquet")
-            m1 = pd.read_parquet(ROOT / "data" / "m1" / f"{sym}.parquet")
+            m15 = pd.read_parquet(_BP.bars_file("m15", sym))
+            m1 = pd.read_parquet(_BP.bars_file("m1", sym))
             return prm, m15, m1
 
         def _fut(sym, nativ, rr_spec):
@@ -219,7 +220,7 @@ if native.available() and os.environ.get("TFBT_NATIVE", "1") != "0":
         _RR_BE_R = {**_RR_NATV, "breakeven_r": 1.0}
 
         for sym in ("Ger40", "GOLD"):
-            if not (ROOT / "data" / "m1" / f"{sym}.parquet").exists():
+            if not (_BP.bars_file("m1", sym)).exists():
                 continue
             _py, _ = _fut(sym, False, _RR_NATV)
             _rs, _ran = _fut(sym, True, _RR_NATV)

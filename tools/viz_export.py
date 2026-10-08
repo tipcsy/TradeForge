@@ -115,7 +115,7 @@ def export_window(symbol: str, t_from: str, t_to: str, strategy_name: str = None
 
     df15, df1 = load_data(symbol)
     if df15 is None or df1 is None:
-        return False, f"{symbol} — nincs letöltött adat (data/m15, data/m1)."
+        return False, f"{symbol} — nincs letöltött adat (data/brokers/<bróker>/m15, …/m1)."
 
     bars, src = {}, {"M15": (df15, 15), "M1": (df1, 1)}
     for tf in strategy.timeframes():

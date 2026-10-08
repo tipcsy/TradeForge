@@ -84,7 +84,7 @@ def _ts(v):
 
 
 def _file():
-    return _paths.DIR / "opt_queue.json"
+    return _paths.optqueue_file()
 
 
 def _load() -> None:

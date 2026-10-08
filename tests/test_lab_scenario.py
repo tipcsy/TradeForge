@@ -20,6 +20,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 
 from core import applog
 applog.harden_console()
@@ -108,7 +109,7 @@ check("ismeretlen instrumentumnál sem",
 
 # ── 2. ÉLES ADAT: paritás és a kézi belépő ───────────────────────────────
 SYM = "UsaTec"
-_pq = ROOT / "data" / "m1" / f"{SYM}.parquet"
+_pq = _BP.bars_file("m1", SYM)
 if not _pq.exists():
     print(f"      (nincs {SYM} M1 parquet — az éles adatos rész kimarad)")
 else:

@@ -28,6 +28,7 @@ import sys as _sys
 from pathlib import Path as _Path
 ROOT = _Path(__file__).resolve().parents[2]
 _sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 _sys.path.insert(0, str(_Path(__file__).resolve().parent))
 
 import numpy as np
@@ -173,6 +174,6 @@ if __name__ == "__main__":
     ap.add_argument("--out", default=None)
     a = ap.parse_args()
     R = run(a.k)
-    out = a.out or str(ROOT / "data" / f"swing_structure_k{a.k}.parquet")
+    out = a.out or str(_BP.research_dir() / f"swing_structure_k{a.k}.parquet")
     R.to_parquet(out)
     print("mentve:", out, len(R))

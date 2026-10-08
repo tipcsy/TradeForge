@@ -173,7 +173,8 @@ def main() -> int:
         print("    (tehat a fenti szam POZITIV). A negativ szam azt jelenti, hogy")
         print("    a kapu jelzest visz el anelkul, hogy vedene.")
 
-    out = ROOT / "data" / f"gate_ab_{st.name}.json"
+    from core import broker_paths
+    out = broker_paths.research_dir() / f"gate_ab_{st.name}.json"
     out.write_text(json.dumps(all_rows, indent=2, default=str), encoding="utf-8")
     print(f"\nreszletek: {out}")
     return 0

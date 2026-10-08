@@ -2,7 +2,10 @@ __pycache__/
 *.pyc
 data/optimized_params/
 data/*
-!data/forward/
+# a forward-napló a bróker feed-mappájában él (core/broker_paths, 2026-10-08)
+!data/brokers/
+data/brokers/*/*
+!data/brokers/*/forward/
 tananyag/
 .venv/
 venv/

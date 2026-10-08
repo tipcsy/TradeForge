@@ -27,6 +27,7 @@ from pathlib import Path as _Path
 
 ROOT = _Path(__file__).resolve().parents[2]
 _sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 
 import numpy as np
 import pandas as pd
@@ -52,7 +53,7 @@ BALANCE = 1000.0
 def setup(sym):
     raw = json.loads((ROOT / "config.json").read_text(encoding="utf-8"))
     cfg = config_for_strategy(raw, STRAT)
-    pf = ROOT / "data" / "optimized_params" / STRAT / f"{sym}.json"
+    pf = _BP.research_dir() / "optimized_params" / STRAT / f"{sym}.json"
     params = json.loads(pf.read_text(encoding="utf-8"))["params"]
     params = {**(load_execution_params(sym, cfg) or {}), **params}
     legacy = (cfg.get("pairs", {}).get(sym, {}) or {}).get("trade_hours")
@@ -62,8 +63,8 @@ def setup(sym):
 
 def run(sym):
     cfg, params, hours = setup(sym)
-    m15 = pd.read_parquet(ROOT / "data" / "m15" / f"{sym}.parquet")
-    m1 = pd.read_parquet(ROOT / "data" / "m1" / f"{sym}.parquet")
+    m15 = pd.read_parquet(_BP.bars_file("m15", sym))
+    m1 = pd.read_parquet(_BP.bars_file("m1", sym))
     strat = get_strategy_by_name(STRAT)
     r = run_pair(sym, m15, m1, params, cfg["pairs"][sym], cfg["trading"],
                  BALANCE, strategy=strat, allowed_hours=hours, cfg=cfg,
@@ -84,13 +85,13 @@ def main():
     syms = _sys.argv[1:] or ["GOLD", "UsaInd", "UsaTec", "Ger40"]
     print(f"=== STRATEGIA: {STRAT} ===")
     for s in syms:
-        f = ROOT / "data" / "optimized_params" / STRAT / f"{s}.json"
+        f = _BP.research_dir() / "optimized_params" / STRAT / f"{s}.json"
         if f.exists():
             j = json.loads(f.read_text(encoding="utf-8"))
             print(f"   {s:8s} hangolva: {j.get('optimized_at','?')[:19]}")
     parts = []
     for s in syms:
-        if not (ROOT / "data" / "m1" / f"{s}.parquet").exists():
+        if not (_BP.bars_file("m1", s)).exists():
             print(f"   ({s}: nincs adat)"); continue
         print(f"   … {s}", flush=True)
         d = run(s)
@@ -139,7 +140,7 @@ def main():
     print(f"\n   Ahol MINDKET irany pozitiv: {len(both)}/{t.sym.nunique()} "
           f"{both if both else ''}")
 
-    out = ROOT / "data" / f"longrun_{STRAT}.csv"
+    out = _BP.research_dir() / f"longrun_{STRAT}.csv"
     t.to_csv(out, index=False)
     print(f"\nkotes-szintu tabla: {out}")
 

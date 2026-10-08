@@ -22,11 +22,12 @@ from pathlib import Path as _Path
 
 ROOT = _Path(__file__).resolve().parents[2]
 _sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 
 import numpy as np
 import pandas as pd
 
-CACHE = ROOT / "data" / "flow"
+CACHE = _BP.research_dir() / "flow"
 BAR_MS = 5 * 60_000
 FEATS = ["imb_tick", "q_imb", "narrow", "widen", "aggr",
          "sp_mean", "sp_chg", "dur_med", "n_tick"]
@@ -112,7 +113,7 @@ def main():
     print(gy.to_string(index=False, float_format=lambda v: f"{v:8.4f}")
           if len(gy) else "   NINCS. Egyetlen jellemzo sem fedezi a koltseget minden instrumentumon.")
 
-    out = ROOT / "data" / "flow_horizon.csv"
+    out = _BP.research_dir() / "flow_horizon.csv"
     t.to_csv(out, index=False)
     print(f"\nteljes tabla: {out}")
 

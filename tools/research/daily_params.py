@@ -39,6 +39,7 @@ from pathlib import Path as _Path
 
 ROOT = _Path(__file__).resolve().parents[2]
 _sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 
 import numpy as np
 import pandas as pd
@@ -55,7 +56,7 @@ from trading.backtest import run_pair
 STRAT = "wpr_sma"
 START = "2022-01-01"
 BALANCE = 1000.0
-CACHE = ROOT / "data" / "daily_params"
+CACHE = _BP.research_dir() / "daily_params"
 
 SMA = [50, 100, 150, 200, 300]
 W15 = [9, 14, 21, 26, 34]
@@ -65,7 +66,7 @@ W1 = [9, 13, 21, 34]
 def setup(sym):
     raw = json.loads((ROOT / "config.json").read_text(encoding="utf-8"))
     cfg = config_for_strategy(raw, STRAT)
-    p = json.loads((ROOT / "data" / "optimized_params" / STRAT /
+    p = json.loads((_BP.research_dir() / "optimized_params" / STRAT /
                     f"{sym}.json").read_text(encoding="utf-8"))["params"]
     p = {**(load_execution_params(sym, cfg) or {}), **p}
     legacy = (cfg.get("pairs", {}).get(sym, {}) or {}).get("trade_hours")
@@ -80,8 +81,8 @@ def build(sym: str) -> pd.DataFrame:
     if dst.exists():
         return pd.read_parquet(dst)
     cfg, base, hours = setup(sym)
-    m15 = pd.read_parquet(ROOT / "data" / "m15" / f"{sym}.parquet")
-    m1 = pd.read_parquet(ROOT / "data" / "m1" / f"{sym}.parquet")
+    m15 = pd.read_parquet(_BP.bars_file("m15", sym))
+    m1 = pd.read_parquet(_BP.bars_file("m1", sym))
     st = get_strategy_by_name(STRAT)
     grid = list(itertools.product(SMA, W15, W1))
     rows = []

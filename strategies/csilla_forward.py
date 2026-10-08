@@ -113,7 +113,7 @@ JOURNAL = ROOT / "data" / "forward" / "csilla_chain_signals.csv"
 
 def _journal():
     """A `JOURNAL` az AKTÍV bróker feed-mappájában (0029, core/broker_paths).
-    Az otthoni brókernél (és a tesztek ideiglenes útvonalainál) VÁLTOZATLAN."""
+    A tesztek ideiglenes (data/-n kívüli) útvonalainál VÁLTOZATLAN."""
     from core import broker_paths
     return broker_paths.feed(JOURNAL)
 
@@ -121,7 +121,7 @@ STATUS_JSON = ROOT / "data" / "forward" / "csilla_status.json"   # a felületnek
 
 def _status_json():
     """A `STATUS_JSON` az AKTÍV bróker feed-mappájában (0029, core/broker_paths).
-    Az otthoni brókernél (és a tesztek ideiglenes útvonalainál) VÁLTOZATLAN."""
+    A tesztek ideiglenes (data/-n kívüli) útvonalainál VÁLTOZATLAN."""
     from core import broker_paths
     return broker_paths.feed(STATUS_JSON)
 

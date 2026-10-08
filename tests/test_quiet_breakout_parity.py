@@ -21,6 +21,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 sys.path.insert(0, str(ROOT / "tools" / "research"))
 
 from core import applog  # noqa: E402
@@ -101,9 +102,9 @@ if com:
 
 # ---------------------------------------------------------------------------
 print("\n== Motor-ut (bt_indicators) ==")
-m15 = pd.read_parquet(ROOT / "data" / "m15" / f"{SYM}.parquet")
+m15 = pd.read_parquet(_BP.bars_file("m15", SYM))
 m15 = m15[(m15.index >= T0 - pd.Timedelta(days=120)) & (m15.index < T1)]
-m1e = pd.read_parquet(ROOT / "data" / "m1" / f"{SYM}.parquet")
+m1e = pd.read_parquet(_BP.bars_file("m1", SYM))
 m1e = m1e[~m1e.index.duplicated(keep="last")].sort_index()
 m1e = m1e[(m1e.index >= T0 - pd.Timedelta(days=120)) & (m1e.index < T1)]
 hi, lo = s.bt_indicators(m15, m1e, {**base, "point_size": 0.01})

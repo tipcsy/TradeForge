@@ -82,7 +82,7 @@ def _load() -> None:
         if _betoltve:
             return
         _betoltve = True
-        ut = _paths.DIR / "inbox.json"
+        ut = _paths.inbox_file()
         if not ut.exists():
             return
         try:
@@ -99,7 +99,7 @@ def _load() -> None:
 def _save_locked() -> bool:
     if not _paths.ensure():
         return False
-    ut = _paths.DIR / "inbox.json"
+    ut = _paths.inbox_file()
     tmp = ut.with_suffix(".json.tmp")
     try:
         with open(tmp, "w", encoding="utf-8") as f:

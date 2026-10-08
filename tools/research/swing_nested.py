@@ -18,6 +18,7 @@ import sys as _sys
 from pathlib import Path as _Path
 ROOT = _Path(__file__).resolve().parents[2]
 _sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 _sys.path.insert(0, str(_Path(__file__).resolve().parent))
 
 import numpy as np
@@ -70,5 +71,5 @@ if __name__ == "__main__":
         print(s, flush=True)
     out = pd.concat(rows, ignore_index=True)
     name = "swing_nested.parquet" if (arg.lo, arg.hi) == (15, 60) else f"swing_nested_{arg.lo}_{arg.hi}.parquet"
-    out.to_parquet(ROOT / "data" / name)
+    out.to_parquet(_BP.research_dir() / name)
     print("kesz", len(out))

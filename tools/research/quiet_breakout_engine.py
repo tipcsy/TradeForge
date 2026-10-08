@@ -17,6 +17,7 @@ from pathlib import Path as _Path
 
 ROOT = _Path(__file__).resolve().parents[2]
 _sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 _sys.path.insert(0, str(_Path(__file__).resolve().parent))
 
 import numpy as np
@@ -36,8 +37,8 @@ RR: dict = {}
 
 
 def run(sym, start, end, exec_gates, cfg, st):
-    m15 = pd.read_parquet(ROOT / "data" / "m15" / f"{sym}.parquet")
-    m1 = pd.read_parquet(ROOT / "data" / "m1" / f"{sym}.parquet")
+    m15 = pd.read_parquet(_BP.bars_file("m15", sym))
+    m1 = pd.read_parquet(_BP.bars_file("m1", sym))
     m1 = m1[~m1.index.duplicated(keep="last")].sort_index()
     m15 = m15[~m15.index.duplicated(keep="last")].sort_index()
     lo = pd.Timestamp(start, tz="UTC") - pd.Timedelta(days=60)
@@ -88,7 +89,7 @@ def main():
         out.append(df)
     res = pd.concat(out, ignore_index=True)
     tag = ("_kapu" if gates else "") + ("_ido" if "ido" in _sys.argv[2:] else "")
-    res.to_parquet(ROOT / "data" / f"quiet_breakout_engine_{period}{tag}.parquet")
+    res.to_parquet(_BP.research_dir() / f"quiet_breakout_engine_{period}{tag}.parquet")
     print("kesz", len(res))
 
 

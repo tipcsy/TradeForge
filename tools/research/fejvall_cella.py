@@ -20,6 +20,7 @@ from pathlib import Path as _Path
 
 ROOT = _Path(__file__).resolve().parents[2]
 _sys.path.insert(0, str(ROOT))
+from core import broker_paths as _BP                      # noqa: E402
 _sys.path.insert(0, str(_Path(__file__).resolve().parent))
 
 import numpy as np
@@ -64,8 +65,8 @@ def _osszegzes(d: pd.DataFrame, cimke: str, min_n=100):
 def main():
     pd.set_option("display.width", 250)
     # ── 1. sajat H1 merohely: a mar lefuttatott trade-tablak ─────────────────
-    a = pd.read_parquet(ROOT / "data" / "fejvall_h4_trades.parquet")
-    b = pd.read_parquet(ROOT / "data" / "fejvall_h4_trades_rep_M60.parquet")
+    a = pd.read_parquet(_BP.research_dir() / "fejvall_h4_trades.parquet")
+    b = pd.read_parquet(_BP.research_dir() / "fejvall_h4_trades_rep_M60.parquet")
     a = a[(a.tf == 60) & (a.irany == "long")].copy()
     b = b[(b.tf == 60) & (b.irany == "long")].copy()
     a["ido"] = pd.to_datetime(a.ido, utc=True)

@@ -68,8 +68,11 @@ def scan(symbols: set) -> list:
     case_sensitive = _case_sensitive_fs()
     lower = {s.lower(): s for s in symbols}
 
-    for sub in ("models", "optimized_params", "sl_moves"):
-        base = DATA / sub
+    # az SL-napló SZÁMLÁNKÉNT él (data/accounts/<id>/sl_moves, core/broker_paths);
+    # a gyökérbeli `sl_moves` a költöztetés előtti elrendezés
+    bases = [DATA / "models", DATA / "optimized_params", DATA / "sl_moves",
+             *sorted((DATA / "accounts").glob("*/sl_moves"))]
+    for base in bases:
         if not base.exists():
             continue
         for path in sorted(base.rglob("*")):
