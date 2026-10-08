@@ -4505,9 +4505,20 @@ class DashboardWindow:
 
         tk.Label(json_page, text=_t("gui.config_json_szerkesztese_menteskor"),
                  bg=BG, fg=FG_BLUE, font=self._header_font).pack(anchor="w", padx=10, pady=(10, 2))
-        tk.Label(json_page, text=_t("gui.megjegyzes_itt_csak_a"),
-                 bg=BG, fg=FG_GRAY, font=self._small_font, justify="left",
-                 wraplength=680).pack(anchor="w", padx=10)
+
+        # Kereső: Enter = következő, Shift+Enter = előző, Ctrl+F = ide ugrik.
+        # Kis-nagybetű-független; az összes találat kiemelve, az aktuális erősebben.
+        search_row = tk.Frame(json_page, bg=BG)
+        search_row.pack(fill="x", padx=10, pady=(4, 0))
+        tk.Label(search_row, text=_t("gui.json.search"), bg=BG, fg=FG_WHITE,
+                 font=self._small_font).pack(side="left")
+        search_var = tk.StringVar()
+        search_entry = tk.Entry(search_row, textvariable=search_var, width=32,
+                                bg=BG_HEADER, fg=FG_WHITE, insertbackground=FG_WHITE,
+                                font=self._small_font)
+        search_entry.pack(side="left", padx=(6, 4))
+        lbl_hits = tk.Label(search_row, text="", bg=BG, fg=FG_GRAY,
+                            font=self._small_font)
 
         txt_frame = tk.Frame(json_page, bg=BG)
         txt_frame.pack(fill="both", expand=True, padx=10, pady=4)
@@ -4537,6 +4548,77 @@ class DashboardWindow:
                     pass
             self._hl_after_id = popup.after(200, lambda: self._highlight_json(text))
         text.bind("<KeyRelease>", _schedule_hl)
+
+        text.tag_configure("search_hit", background="#5a4a00")
+        text.tag_configure("search_cur", background=FG_YELLOW, foreground=BG)
+        text.tag_raise("search_hit")
+        text.tag_raise("search_cur")
+        _hits: list = []
+        _cur = [-1]
+
+        def _find_all(_event=None):
+            text.tag_remove("search_hit", "1.0", "end")
+            text.tag_remove("search_cur", "1.0", "end")
+            _hits.clear()
+            _cur[0] = -1
+            q = search_var.get()
+            if not q:
+                lbl_hits.config(text="")
+                return
+            start, n = "1.0", tk.IntVar()
+            while True:
+                pos = text.search(q, start, stopindex="end", nocase=True, count=n)
+                if not pos or not n.get():
+                    break
+                end = f"{pos}+{n.get()}c"
+                text.tag_add("search_hit", pos, end)
+                _hits.append((pos, end))
+                start = end
+            if _hits:
+                _goto(0)
+            else:
+                lbl_hits.config(text=_t("gui.json.search.none"), fg=FG_RED)
+
+        def _goto(i):
+            if not _hits:
+                return
+            i %= len(_hits)
+            _cur[0] = i
+            text.tag_remove("search_cur", "1.0", "end")
+            pos, end = _hits[i]
+            text.tag_add("search_cur", pos, end)
+            text.see(pos)
+            lbl_hits.config(text=f"{i + 1}/{len(_hits)}", fg=FG_GRAY)
+
+        def _step(d):
+            # a szöveg szerkesztése után a régi pozíciók elcsúszhatnak → újrakeres
+            if not _hits:
+                _find_all()
+            else:
+                _goto(_cur[0] + d)
+            return "break"
+
+        search_var.trace_add("write", lambda *_: _find_all())
+        search_entry.bind("<Return>", lambda e: _step(+1))
+        search_entry.bind("<Shift-Return>", lambda e: _step(-1))
+        search_entry.bind("<Escape>", lambda e: (search_var.set(""), "break")[1])
+        tk.Button(search_row, text="▲", command=lambda: _step(-1), bg=BG_HEADER,
+                  fg=FG_WHITE, relief="flat", font=self._small_font,
+                  padx=6).pack(side="left", padx=1)
+        tk.Button(search_row, text="▼", command=lambda: _step(+1), bg=BG_HEADER,
+                  fg=FG_WHITE, relief="flat", font=self._small_font,
+                  padx=6).pack(side="left", padx=1)
+        lbl_hits.pack(side="left", padx=8)
+
+        def _focus_search(_event=None):
+            search_entry.focus_set()
+            search_entry.select_range(0, "end")
+            return "break"
+        popup.bind("<Control-f>", _focus_search)
+        popup.bind("<Control-F>", _focus_search)
+        text.bind("<Control-f>", _focus_search)
+        # szerkesztés után a tárolt pozíciók elavulnak → a következő léptetés újrakeres
+        text.bind("<KeyRelease>", lambda e: _hits.clear(), add="+")
 
         # ⚠ A két lap KÜLÖN metódusban épül (`_build_appearance_tab`,
         # `_build_language_tab`). Nem stílus: így a teszt önmagában is meg tudja
