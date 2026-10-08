@@ -24,6 +24,8 @@ Használat
     python tools/refresh_costs.py                 # csak MEGMUTATJA
     python tools/refresh_costs.py --write         # be is írja a config.json-ba
     python tools/refresh_costs.py --days 180      # ennyi nap előzményből mér
+    python tools/refresh_costs.py --broker roboforex   # egy MÁSIK bróker számlája
+                                                       # (a beírás a pár brokers.<id> blokkjába)
 
 Alapból NEM ír. A `--write` KIZÁRÓLAG a fenti négy kulcsot érinti.
 
@@ -193,6 +195,12 @@ def main() -> int:
     from core import mt5_connector as mc
     from strategy.settings import load_config
 
+    if "--broker" in sys.argv:
+        # a betöltés ELŐTT (mint a download_history-nál): a connect a bróker
+        # terminálját és számláját veszi, a `_cel` a bróker saját blokkjába ír
+        from core import broker_profile
+        i = sys.argv.index("--broker")
+        broker_profile.set_override(sys.argv[i + 1] if i + 1 < len(sys.argv) else "")
     cfg = load_config(CFG_PATH)
     if not mc.connect(cfg):
         print("Nem sikerult csatlakozni az MT5-hoz.")
@@ -209,6 +217,10 @@ def main() -> int:
         for symbol, pc in pairs.items():
             if not isinstance(pc, dict):
                 continue
+            # OLVASNI a bróker szerinti (felülírt) értékekből — a nyers `pc` az
+            # OTTHONI brókeré: a „változatlan" ág különben egy másik bróker
+            # beírt értékét az otthonival (pl. 0-val) írná felül
+            ec = (cfg.get("pairs") or {}).get(symbol) or pc
             with mc.MT5_LOCK:
                 mt5.symbol_select(symbol, True)
                 info = mt5.symbol_info(symbol)
@@ -220,10 +232,10 @@ def main() -> int:
             comm = m.get("comm_per_lot")
             src_c = f"merve ({m.get('n', 0)} kotes)" if comm is not None else "nincs adat"
             if comm is None:
-                comm = float(pc.get("commission_per_lot", 0.0) or 0.0)
+                comm = float(ec.get("commission_per_lot", 0.0) or 0.0)
                 src_c = "valtozatlan"
 
-            pip = float(pc.get("point_size") or _point_size(info))
+            pip = float(ec.get("point_size") or _point_size(info))
             sw_l, sw_s = swap_from_symbol(mt5, info, pip)
             src_s = "symbol_info"
             if sw_l is None:
@@ -233,8 +245,8 @@ def main() -> int:
                     sw_l = sw_s = mv
                     src_s = "merve"
                 else:
-                    sw_l = float(pc.get("swap_long_per_lot", 0.0) or 0.0)
-                    sw_s = float(pc.get("swap_short_per_lot", 0.0) or 0.0)
+                    sw_l = float(ec.get("swap_long_per_lot", 0.0) or 0.0)
+                    sw_s = float(ec.get("swap_short_per_lot", 0.0) or 0.0)
                     src_s = "valtozatlan (ismeretlen swap_mode)"
 
             w3 = getattr(info, "swap_rollover3days", None)

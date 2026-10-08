@@ -23,6 +23,8 @@ Használat
     python tools/refresh_point_values.py            # csak MEGMUTATJA az eltéréseket
     python tools/refresh_point_values.py --write    # be is írja a config.json-ba
     python tools/refresh_point_values.py --days 365 # ennyi nap a spread-mediánhoz
+    python tools/refresh_point_values.py --broker roboforex   # egy MÁSIK bróker
+                       # (a bróker saját értékeiből olvas, a brokers.<id> blokkba ír)
 
 Alapból NEM ír (a config.json a te élő beállításod). A `--write` a
 `pv1_point`, `min_lot`, `lot_step`, `max_lot` és `backtest_spread_points` mezőket
@@ -137,6 +139,11 @@ def main() -> int:
     applog.harden_console()
     from strategy.settings import load_config
 
+    if "--broker" in sys.argv:
+        # a betöltés ELŐTT: a load_config már a bróker értékeit rakja a párokra
+        from core import broker_profile
+        i = sys.argv.index("--broker")
+        broker_profile.set_override(sys.argv[i + 1] if i + 1 < len(sys.argv) else "")
     cfg = load_config(CFG_PATH)
     if not mt5_connector.connect(cfg):
         print("Nem sikerult csatlakozni az MT5-hoz.")
@@ -153,6 +160,9 @@ def main() -> int:
         for symbol, pc in pairs.items():
             if not isinstance(pc, dict):
                 continue
+            # OLVASNI a bróker szerinti (felülírt) értékekből kell — a nyers `pc`
+            # az OTTHONI brókeré; ÍRNI a nyersbe, a `_cel` célblokkjába
+            ec = (cfg.get("pairs") or {}).get(symbol) or pc
             with mt5_connector.MT5_LOCK:
                 mt5.symbol_select(symbol, True)
                 info = mt5.symbol_info(symbol)
@@ -160,14 +170,14 @@ def main() -> int:
                 rows.append((symbol, "—", "—", "NINCS ilyen szimbolum a brokerne1"))
                 continue
 
-            point_size = float(pc.get("point_size") or _point_size(info))
+            point_size = float(ec.get("point_size") or _point_size(info))
             pv1_new  = order_exec.point_value(symbol, point_size, info)
             vb       = order_exec.volume_bounds(info)
             if pv1_new is None:
-                rows.append((symbol, pc.get("pv1_point"), "—", "nincs tick-ertek"))
+                rows.append((symbol, ec.get("pv1_point"), "—", "nincs tick-ertek"))
                 continue
 
-            pv1_old = float(pc.get("pv1_point") or 0.0)
+            pv1_old = float(ec.get("pv1_point") or 0.0)
             diff = (abs(pv1_new - pv1_old) / pv1_old) if pv1_old > 0 else 1.0
             note = ""
             if diff > SIGNIFICANT:
@@ -177,7 +187,7 @@ def main() -> int:
 
             # ── Spread: a valós ELŐZMÉNY mediánja a kereskedett órákra ──────
             # Tartalék a pillanatnyi tick, ha nincs elég historikus adat.
-            hist = spread_from_history(symbol, pc, days)
+            hist = spread_from_history(symbol, ec, days)
             if hist is not None:
                 sp_new, n_bar, sp_p75 = hist
                 sp_src = f"median {n_bar} bar (p75 {sp_p75:.2f})"
@@ -186,7 +196,7 @@ def main() -> int:
                 sp_src = "PILLANATNYI tick (nincs eleg elozmeny)"
             else:
                 sp_new, sp_src = None, "-"
-            sp_old = pc.get("backtest_spread_points")
+            sp_old = ec.get("backtest_spread_points")
             spread_rows.append((symbol, sp_old, sp_new, sp_src))
 
             if write:
@@ -198,7 +208,9 @@ def main() -> int:
                     if vmax != float("inf"):
                         _cel(pc)["max_lot"] = vmax
                 if sp_new is not None:
-                    pc["backtest_spread_points"] = round(sp_new, 2)
+                    # ⚠ a `_cel`-en át: közvetlenül a `pc`-be írva egy MÁSIK
+                    # bróker spreadje az otthoni értéket írta volna felül
+                    _cel(pc)["backtest_spread_points"] = round(sp_new, 2)
     finally:
         mt5_connector.disconnect()
 
