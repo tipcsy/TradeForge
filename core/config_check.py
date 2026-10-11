@@ -154,6 +154,40 @@ def _check_costs(cfg: dict, out: list) -> None:
                    keys=", ".join(missing)), sym))
 
 
+def _check_zero_spread(cfg: dict, out: list) -> None:
+    """KIFEJEZETT `backtest_spread_points: 0` → a pár NULLA spreaddel fut.
+
+    ⚠ MÉRVE (2026-10-11): az otthoni brókernél öt FX-páron 0.0 állt. A szám nem
+    csak a backteszt tartaléka (ahol a gyertyának nincs `avg_spread`-je — a GBPJPY
+    TELJES előzménye ilyen volt, és a natívan pótolt farok MINDEN páron), hanem
+    élesben is két helyen dönt: a swing-stop puffere és a spread-kapu padlója
+    (`gates/spread_gate`, a normál spread ×1,5). Nullánál a padló a 2 pontos
+    tartalékra esik, és a kapu csendesebb órákban a szabályos spreadet is tiltja:
+    GBPUSD-n a mért spreaddel 2551 kötés lett volna, a 0-val 1497.
+
+    A HIÁNYZÓ kulcs más eset (régi config, a kód saját tartalékára esik); csak a
+    kifejezett nem-pozitív értéket jelezzük — a bróker-blokkokban is."""
+    for sym, pc in (cfg.get("pairs") or {}).items():
+        if not isinstance(pc, dict):
+            continue
+        blocks = [("", pc)] + [
+            (bid, b) for bid, b in (pc.get("brokers") or {}).items()
+            if isinstance(b, dict)]
+        for bid, blk in blocks:
+            v = blk.get("backtest_spread_points")
+            if v is None:
+                continue
+            try:
+                bad = not (float(v) > 0)
+            except (TypeError, ValueError):
+                bad = True
+            if bad:
+                out.append(_finding(
+                    WARN, "zero_spread",
+                    _t("cfgchk.zero_spread", sym=sym,
+                       where=(f" [{bid}]" if bid else ""), value=v), sym))
+
+
 # ---------------------------------------------------------------------------
 # 3b. HIÁNYZÓ MÉRETEZÉSI KULCS — ez nem kényelmi kérdés, ez leállás
 # ---------------------------------------------------------------------------
@@ -563,6 +597,7 @@ _CHECKS = (
     _check_gate_preconditions,
     _check_stale_strategy_keys,
     _check_costs,
+    _check_zero_spread,
     _check_sizing,
     _check_volatility_gate_off,
     _check_incompatible_strategies,

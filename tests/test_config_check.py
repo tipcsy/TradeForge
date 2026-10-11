@@ -387,7 +387,9 @@ _ismert = {"build_target_idle", "daily_limit_pct_dead", "market_gate_no_classifi
            "tp_vs_preset", "empty_strategies_fallback", "broker_profiles",
            # 0029/6b: ugyanaz az instrumentum+strategia tobb brokeren LIVE
            # (2026-09-30 ota ket broker van az eles configban)
-           "shared_instrument", "volatility_gate_off"}
+           "shared_instrument", "volatility_gate_off",
+           # 2026-10-11: kifejezett 0 spread (az otthoni FX-parokon allt)
+           "zero_spread"}
 import re as _re
 _modul_kodok = set(_re.findall(
     r'_finding\(\s*\w+,\s*"(\w+)"',
@@ -588,6 +590,24 @@ try:
            not [x for x in cc.check(_cfg_bt) if x["code"] == "build_trail_without_target"])
 finally:
     _bs_t.get_config = _bs_orig
+
+
+# ══ A NULLA spread (2026-10-11) ═══════════════════════════════════════════
+# Az otthoni brokernel ot FX-paron `backtest_spread_points: 0.0` allt: a backteszt
+# ott, ahol a gyertyanak nincs avg_spread-je, NULLA spreaddel szamolt, es elesben
+# a swing-stop puffere es a spread-kapu padloja is elcsuszott.
+def _zs(**kw):
+    return codes(dict(BASE, pairs={"X": pair(strategies=["wpr_sma"], **kw)}),
+                 "zero_spread")
+
+check_("0.0 spread -> lelet", len(_zs(backtest_spread_points=0.0)) == 1)
+check_("negativ spread -> lelet", len(_zs(backtest_spread_points=-1)) == 1)
+check_("pozitiv spread -> nincs lelet", _zs(backtest_spread_points=12.7) == [])
+check_("HIANYZO kulcs -> nincs lelet (regi config, a kod tartaleka)", _zs() == [])
+_zb = _zs(backtest_spread_points=9.5,
+          brokers={"roboforex": {"backtest_spread_points": 0}})
+check_("a BROKER-blokk nullaja is lelet, a bróker nevevel",
+       len(_zb) == 1 and "roboforex" in _zb[0]["message"], str(_zb))
 
 
 print()

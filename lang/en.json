@@ -164,6 +164,7 @@
   "cfgchk.map.strategy_viz": "visualization shown",
   "cfgchk.market_gate_no_classifier": "{sym}/{sname}: the Market gate is enabled ({effect}), but no market pre-filter is selected for this pair (pairs.{sym}.market_strategy) → the gate has NOTHING to measure and never fires. Pick a classifier ({classifiers}), or set the gate effect to 'none'.",
   "cfgchk.missing_costs": "{sym}: missing cost key ({keys}) → the backtest would assume ZERO cost on this pair. Fill it in: `python tools/refresh_costs.py --write`.",
+  "cfgchk.zero_spread": "{sym}{where}: `backtest_spread_points` is {value} → the backtest charges ZERO spread wherever a bar has no `avg_spread`, and live the swing-stop buffer and the spread-gate floor are wrong too. Measure it: `python tools/refresh_point_values.py --write`.",
   "cfgchk.missing_sizing": "{sym}: a REQUIRED sizing key is missing ({keys}) → this pair will NOT trade (skipped at startup). Fill it in: `python tools/refresh_point_values.py --write`.",
   "cfgchk.optimizer_skip": "{sym}/{strategy}: the search space is TRUNCATED — {n} parameters are skipped{extra}. An optimization run therefore does not tune what the ranges promise (and finishes sooner). If this is no longer intentional, re-enable them on the Optimization tab of the parameter window. Skipped: {skipped}.",
   "cfgchk.optimizer_skip_extra": ", only {left} of {total} remain",

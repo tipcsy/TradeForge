@@ -33,7 +33,11 @@ frissíti; minden mást (engedélyezés, órák, stratégiák, run_state) érint
 A `backtest_spread_points` a VALÓS ELŐZMÉNY mediánjából jön (a `data/m1/<sym>.parquet`
 `avg_spread` oszlopa, a kereskedett órákra szűrve), NEM a pillanatnyi tickből — egy
 tick a nap egy véletlen pillanata, a backtestre érvényes szám viszont a tipikus
-spread. Ha nincs elég historikus adat, a tick a tartalék.
+spread. Ha nincs elég historikus adat (natív letöltésű gyertya: nincs
+`avg_spread` oszlop), a TICK-előzmény mintája a tartalék (`SAMPLE_DAYS` hétköznap
+`copy_ticks_range`-dzsel); ha az sincs, a régi érték MARAD — a pillanatnyi tick
+sosem íródik be (hétvégén a zárt piac spreadje: így lett NZDUSD=120 a valós ~12
+helyett).
 """
 
 import json
@@ -112,6 +116,63 @@ def spread_from_history(symbol: str, pair_cfg: dict, days: int):
     return float(sp.median() / pip), int(len(sp)), float(sp.quantile(0.75) / pip)
 
 
+SAMPLE_DAYS = 10           # ennyi hétköznap tickje a mintavételes tartalékhoz
+
+
+def spread_from_tick_sample(symbol: str, pair_cfg: dict, days: int,
+                            n_days: int = SAMPLE_DAYS, mt5=None):
+    """Tartalék, ha nincs `avg_spread`-előzmény: a TICK-előzmény MINTÁJA.
+
+    `n_days` hétköznap, egyenletesen szétszórva az utolsó `days` napon; naponként
+    egy `copy_ticks_range`. A tickekből percenkénti átlag-spread (mint a gyertya
+    `avg_spread`-je), a kereskedett órákra szűrve → `(median, n_perc, p75)`
+    PONTBAN, vagy None.
+
+    ⚠ MIÉRT NEM A PILLANATNYI TICK (2026-10-11): az eddigi tartalék a
+    `symbol_info.spread` volt — hétvégén/éjjel a zárt piac TÁG spreadje. Így
+    került a configba NZDUSD=120 és AUDUSD=135 pont, a valós ~12 és ~9 helyett
+    (vasárnap mérve a pillanatnyi tick 55 és 80 volt). A szám élesben is dönt (a
+    spread-kapu padlója = ×1,5, a swing-stop puffere), tehát a 10× túlbecslés
+    a kaput némává tette."""
+    import pandas as pd
+    from datetime import datetime, timedelta
+    from core import mt5_connector
+    if mt5 is None:
+        from core.broker_adapter import mt5
+    pip = float(pair_cfg.get("point_size") or 0.0)
+    if pip <= 0 or n_days <= 0:
+        return None
+    hours = traded_hours(symbol, pair_cfg)
+    today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    span = max(int(days), n_days * 2)
+    weekdays = [today - timedelta(days=d) for d in range(1, span + 1)]
+    weekdays = [d for d in weekdays if d.weekday() < 5]
+    step = max(1, len(weekdays) // n_days)
+    sample = weekdays[::step][:n_days]
+    parts = []
+    for d in sample:
+        with mt5_connector.MT5_LOCK:
+            t = mt5.copy_ticks_range(symbol, d, d + timedelta(days=1),
+                                     mt5.COPY_TICKS_ALL)
+        if t is None or len(t) == 0:
+            continue
+        df = pd.DataFrame(t)
+        ts = pd.to_datetime(df["time"], unit="s")
+        sp = (df["ask"] - df["bid"]) / pip
+        m = (df["bid"] > 0) & (sp > 0)
+        if hours:
+            m &= ts.dt.hour.isin(hours)
+        if m.any():
+            parts.append(pd.Series(sp[m].to_numpy(), index=ts[m])
+                         .resample("1min").mean().dropna())
+    if not parts:
+        return None
+    allv = pd.concat(parts)
+    if len(allv) < MIN_SPREAD_BARS:
+        return None
+    return float(allv.median()), int(len(allv)), float(allv.quantile(0.75))
+
+
 def _point_size(info) -> float:
     """A szimbólum PONT-mérete. A `symbol_info.point` maga — nincs digits-alapú
     szorzás, mert az a PIP-et adná (5 tizedesnél ×10, 2-3 tizedesnél ×100).
@@ -186,16 +247,26 @@ def main() -> int:
             rows.append((symbol, f"{pv1_old:.4f}", f"{pv1_new:.4f}", note))
 
             # ── Spread: a valós ELŐZMÉNY mediánja a kereskedett órákra ──────
-            # Tartalék a pillanatnyi tick, ha nincs elég historikus adat.
+            # Tartalék a tick-előzmény MINTÁJA. A pillanatnyi tick csak
+            # tájékoztatás — SOSEM íródik be (hétvégén a zárt piac spreadje).
             hist = spread_from_history(symbol, ec, days)
             if hist is not None:
                 sp_new, n_bar, sp_p75 = hist
                 sp_src = f"median {n_bar} bar (p75 {sp_p75:.2f})"
-            elif point_size > 0 and info.point > 0:
-                sp_new = info.spread * info.point / point_size
-                sp_src = "PILLANATNYI tick (nincs eleg elozmeny)"
             else:
-                sp_new, sp_src = None, "-"
+                print(f"{symbol}: nincs avg_spread-elozmeny -> tick-minta "
+                      f"({SAMPLE_DAYS} nap)...", flush=True)
+                smp = spread_from_tick_sample(symbol, ec, days, mt5=mt5)
+                now_s = (f"{info.spread * info.point / point_size:.1f}"
+                         if point_size > 0 and info.point > 0 else "?")
+                if smp is not None:
+                    sp_new, n_bar, sp_p75 = smp
+                    sp_src = (f"tick-minta median {n_bar} perc (p75 {sp_p75:.2f}; "
+                              f"pillanatnyi {now_s})")
+                else:
+                    sp_new = None
+                    sp_src = (f"NINCS meres (pillanatnyi tick {now_s} — NEM irom "
+                              f"be); a regi ertek marad")
             sp_old = ec.get("backtest_spread_points")
             spread_rows.append((symbol, sp_old, sp_new, sp_src))
 

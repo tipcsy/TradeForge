@@ -210,6 +210,74 @@ def _download_via_ticks(symbol: str, tf_str: str, start: datetime, end: datetime
 # Gap feltöltés meglévő parquet-hez
 # ---------------------------------------------------------------------------
 
+# ⚠ A PÓTOLT FAROK SPREADJE (2026-10-11). A gap-fill natív gyertyát kér (gyors, nem
+# fogja a terminált) — de a natív gyertyának NINCS `avg_spread`/`close_spread`-je.
+# 2026-08-26 / 09-04 óta így MINDEN otthoni pár farka NaN-spreaddel nőtt, és a
+# backteszt ott a pár `backtest_spread_points`-ére esett (USDJPY/GBPUSD-n 0.0 →
+# NULLA spread). Most a farok spreadje is pótlódik:
+#   • M1: a rés TICKJEIBŐL — de CSAK ha a fájlnak már van spread-oszlopa (tickből
+#     épült, a terminál ismeri a szimbólum tick-előzményét), és a rés legfeljebb
+#     `GAP_SPREAD_TICK_DAYS` nap. Új / natívan letöltött szimbólumnál SOHA (az
+#     AUDJPY tick-szinkronja 10 percre megállította a motort — lásd fent).
+#   • M15 (és minden nagyobb): a frissen pótolt M1-ből — terminál-hívás nélkül.
+# Hosszabb résre / régi NaN-farokra: `--repair-spread`.
+GAP_SPREAD_TICK_DAYS = 7
+_SPREAD_COLS = ("avg_spread", "close_spread")
+_SPREAD_AGG = {"avg_spread": "mean", "close_spread": "last"}
+
+
+def _spread_from_m1(out_file: Path, tf_str: str, frm) -> "pd.DataFrame | None":
+    """A nagyobb idősík spread-oszlopai a SZOMSZÉD M1 fájlból (`frm`-től)."""
+    m1f = out_file.parent.parent / "m1" / out_file.name
+    freq = RESAMPLE.get(tf_str) or DERIVED.get(tf_str)
+    if not freq or not m1f.exists():
+        return None
+    try:
+        import pyarrow.parquet as _pq
+        cols = [c for c in _SPREAD_COLS if c in _pq.read_schema(m1f).names]
+        if not cols:
+            return None
+        m1 = pd.read_parquet(m1f, columns=cols)
+    except Exception as ex:
+        log.warning("%s — M1 spread nem olvasható: %s", out_file.name, ex)
+        return None
+    if m1.index.tzinfo is None:
+        m1.index = m1.index.tz_localize("UTC")
+    m1 = m1[m1.index >= pd.Timestamp(frm).floor(freq)]
+    if m1.empty:
+        return None
+    return (m1.resample(freq, label="left", closed="left")
+            .agg({c: _SPREAD_AGG[c] for c in cols}))
+
+
+def _spread_from_ticks(symbol: str, frm, end) -> "pd.DataFrame | None":
+    """M1 spread-oszlopok a [frm, end) szakasz tickjeiből (napi darabokban)."""
+    try:
+        bars = _download_ticks_multi(symbol, ["M1"], frm, end).get("M1")
+    except Exception as ex:
+        log.warning("%s — spread-tick letöltés hiba: %s", symbol, ex)
+        return None
+    if bars is None or bars.empty:
+        return None
+    cols = [c for c in _SPREAD_COLS if c in bars.columns]
+    return bars[cols] if cols else None
+
+
+def _gap_spreads(out_file: Path, existing: pd.DataFrame, symbol: str,
+                 tf_str: str, frm, end) -> "pd.DataFrame | None":
+    """A pótolt szakasz spread-oszlopai — lásd `GAP_SPREAD_TICK_DAYS` fent."""
+    if not any(c in existing.columns for c in _SPREAD_COLS):
+        return None                       # natív fájl: nem kezdünk tickezni
+    if tf_str != "M1":
+        return _spread_from_m1(out_file, tf_str, frm)
+    if (pd.Timestamp(end) - pd.Timestamp(frm)) > pd.Timedelta(days=GAP_SPREAD_TICK_DAYS):
+        log.warning("%s M1 — a rés > %d nap: a farok spread NÉLKÜL kerül be "
+                    "(pótlás: python tools/download_history.py --repair-spread "
+                    "--symbol %s)", symbol, GAP_SPREAD_TICK_DAYS, symbol)
+        return None
+    return _spread_from_ticks(symbol, frm, end)
+
+
 def _fill_gap(out_file: Path, symbol: str, tf_str: str, end: datetime) -> bool:
     """
     Meglévő parquet fájlba hozzáírja az utolsó bar óta hiányzó adatokat.
@@ -254,6 +322,13 @@ def _fill_gap(out_file: Path, symbol: str, tf_str: str, end: datetime) -> bool:
         existing.index = existing.index.tz_localize("UTC")
     if df_new.index.tzinfo is None:
         df_new.index = df_new.index.tz_localize("UTC")
+
+    sp = _gap_spreads(out_file, existing, symbol, tf_str, from_dt, end)
+    if sp is not None and not sp.empty:
+        df_new = df_new.join(sp, how="left")
+        log.info("%s %s — a pótolt farok spreadje: %d/%d gyertya", symbol, tf_str,
+                 int(df_new["avg_spread"].notna().sum()) if "avg_spread" in df_new
+                 else 0, len(df_new))
 
     combined = pd.concat([existing, df_new])
     combined = combined[~combined.index.duplicated(keep="last")].sort_index()
@@ -482,6 +557,77 @@ def _derive_from_m1(m1_file: Path, out_file: Path, symbol: str, tf_str: str) -> 
     return True
 
 
+REPAIR_SPREAD_DAYS = 90
+
+
+def repair_spread(symbol: str, days: int = REPAIR_SPREAD_DAYS) -> str:
+    """A NaN-spreadű gyertyák (`avg_spread`/`close_spread`) pótlása TICKBŐL.
+
+    Csak a NaN cellákat tölti (meglévő értéket nem ír felül, OHLC-t nem
+    érint), az utolsó `days` napon. Az M1 tickből, utána az M15/H1 az M1-ből.
+    A natívan letöltött fájlt (nincs spread-oszlop) NEM alakítja át — ott a
+    teljes tick-előzmény kellene (`tools/download_ticks.py` + `build_bars.py`),
+    addig a backteszt a pár `backtest_spread_points`-ét használja.
+    Hívó: MT5-kapcsolat kell (a `main --repair-spread` csatlakozik)."""
+    from core import broker_paths
+    m1f = broker_paths.feed(ROOT / "data" / "m1" / f"{symbol}.parquet")
+    if not m1f.exists():
+        return f"{symbol}: nincs M1 fajl"
+    with _history_lock(symbol):
+        df = pd.read_parquet(m1f)
+        if "avg_spread" not in df.columns:
+            return (f"{symbol}: NINCS spread-oszlop (nativ letoltes) — kihagyva; "
+                    f"a backteszt a config backtest_spread_points-et hasznalja")
+        if df.index.tzinfo is None:
+            df.index = df.index.tz_localize("UTC")
+        cut = df.index[-1] - pd.Timedelta(days=days)
+        hol = df.index[(df.index >= cut) & df["avg_spread"].isna().to_numpy()]
+        if not len(hol):
+            return f"{symbol}: nincs NaN-spread az utolso {days} napon"
+        frm = hol[0].floor("1D").to_pydatetime()
+        end = (hol[-1] + pd.Timedelta(minutes=1)).to_pydatetime()
+        sp = _spread_from_ticks(symbol, frm, end)
+        if sp is None or sp.empty:
+            return f"{symbol}: {len(hol)} NaN-gyertya, de nem jott tick ({frm:%Y-%m-%d}–)"
+        for c in _SPREAD_COLS:
+            if c in sp.columns:
+                if c not in df.columns:
+                    df[c] = float("nan")
+                df[c] = df[c].fillna(sp[c].reindex(df.index))
+        maradt = int(df.loc[hol, "avg_spread"].isna().sum())
+        # a spreaddel a farok MOST a 2. (beragadt jegyzés) szabállyal is szűrhető
+        df = bar_sanity.clean_bars(df, symbol, "M1",
+                                   tail=int((df.index >= hol[0]).sum()))
+        tmp = m1f.with_suffix(".parquet.tmp")
+        df.to_parquet(tmp)
+        tmp.replace(m1f)
+        msg = (f"{symbol}: M1 {len(hol) - maradt}/{len(hol)} NaN-gyertya potolva "
+               f"({hol[0]:%Y-%m-%d} -> {hol[-1]:%Y-%m-%d})")
+        for tf in ("M15", "H1"):
+            f = broker_paths.feed(ROOT / "data" / tf.lower() / f"{symbol}.parquet")
+            if not f.exists():
+                continue
+            d = pd.read_parquet(f)
+            if "avg_spread" not in d.columns:
+                continue
+            if d.index.tzinfo is None:
+                d.index = d.index.tz_localize("UTC")
+            s2 = _spread_from_m1(f, tf, frm)
+            if s2 is None:
+                continue
+            elotte = int(d["avg_spread"].isna().sum())
+            for c in s2.columns:
+                if c in d.columns:
+                    d[c] = d[c].fillna(s2[c].reindex(d.index))
+            d = bar_sanity.clean_bars(d, symbol, tf,
+                                      tail=int((d.index >= pd.Timestamp(frm)).sum()))
+            tmp = f.with_suffix(".parquet.tmp")
+            d.to_parquet(tmp)
+            tmp.replace(f)
+            msg += f"; {tf} {elotte - int(d['avg_spread'].isna().sum())} potolva"
+        return msg
+
+
 def ensure_history(symbol: str, cfg: dict, tf_labels=("M15", "M1"),
                    status=None, ticks: bool = False) -> tuple[bool, str]:
     """Gondoskodik róla, hogy `symbol`-nak legyen letöltött előzmény-adata.
@@ -659,6 +805,11 @@ def main():
         "--ticks", action="store_true",
         help="új szimbólumnál a teljes TICK-előzmény (pontos spread) — lassú, és "
              "a terminál szinkronja alatt a futó motort is megállítja")
+    parser.add_argument(
+        "--repair-spread", action="store_true",
+        help="a NaN-spreadű (natívan pótolt) gyertyák avg_spread/close_spread "
+             "értékét tickből pótolja (--symbol vagy minden M1 fájl); --days N")
+    parser.add_argument("--days", type=int, default=REPAIR_SPREAD_DAYS)
     args = parser.parse_args()
 
     from strategy.settings import load_config
@@ -667,6 +818,22 @@ def main():
         from core import broker_profile
         broker_profile.set_override(args.broker)
     cfg = load_config(ROOT / "config.json")
+
+    if args.repair_spread:
+        from core import broker_paths
+        syms = ([args.symbol] if args.symbol else
+                sorted(p.stem for p in
+                       broker_paths.feed(ROOT / "data" / "m1").glob("*.parquet")))
+        if not mt5_connector.connect(cfg):
+            sys.exit(1)
+        try:
+            for s in syms:
+                with _MT5_LOCK:
+                    mt5.symbol_select(s, True)
+                print(repair_spread(s, args.days), flush=True)
+        finally:
+            mt5_connector.disconnect()
+        sys.exit(0)
 
     # ── Egy-szimbólumos mód (GUI külön processz) ─────────────────────────────
     # A haladást stdout-ra írjuk (a szülő GUI sorosan olvassa és a sor-státuszba

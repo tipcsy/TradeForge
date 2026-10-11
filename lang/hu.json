@@ -164,6 +164,7 @@
   "cfgchk.map.strategy_viz": "vizualizáció látszik",
   "cfgchk.market_gate_no_classifier": "{sym}/{sname}: a Piac-kapu be van kapcsolva ({effect}), de a páron nincs piac-előszűrő kiválasztva (pairs.{sym}.market_strategy) → a kapunak NINCS mit mérnie, sosem tüzel. Válassz osztályozót ({classifiers}), vagy vedd a kapu hatását 'none'-ra.",
   "cfgchk.missing_costs": "{sym}: hiányzó költség-kulcs ({keys}) → a backteszt NULLA költséggel számolna ezen a páron. Töltsd fel: `python tools/refresh_costs.py --write`.",
+  "cfgchk.zero_spread": "{sym}{where}: a `backtest_spread_points` értéke {value} → a backteszt NULLA spreadet számol, ahol a gyertyának nincs `avg_spread`-je, és élesben a swing-stop puffere és a spread-kapu padlója is hibás. Mérd meg: `python tools/refresh_point_values.py --write`.",
   "cfgchk.missing_sizing": "{sym}: hiányzik a méretezéshez KÖTELEZŐ kulcs ({keys}) → ez a pár NEM fog kereskedni (kimarad az indításnál). Töltsd fel: `python tools/refresh_point_values.py --write`.",
   "cfgchk.optimizer_skip": "{sym}/{strategy}: a keresési tér MEGCSONKÍTVA — {n} paraméter ki van hagyva{extra}. Egy optimalizálás így nem azt hangolja, amit a tartományok ígérnek (és hamarabb is „végez”). Ha ez már nem szándékos, a paraméter-ablak Optimalizálás lapján kapcsold vissza őket. Kihagyva: {skipped}.",
   "cfgchk.optimizer_skip_extra": ", csak {left} marad a {total}-ből",
