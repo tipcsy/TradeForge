@@ -990,6 +990,7 @@
   "gui.saved_restart": "Mentve. A betű azonnal érvényes; {what} csak a program következő indításakor változik.",
   "gui.sl_t_trailing_mozgatta": "   SL ⇘T = trailing mozgatta   |   SL P&L / TP cél = R + $, ha az SL / a TP bekövetkezik   |   P&L = a folyó eredmény ($ + R)   |   a Trail-tooltip ≈R/$ = a követési táv a kockázathoz mérve",
   "gui.stopped_elrejtese": "STOPPED elrejtése",
+  "gui.ismeretlen_elrejtese": "Ismeretlen elrejtése",
   "gui.kikapcsolt_ures": "Kikapcsolt üres",
   "gui.strategia": "Stratégia:",
   "gui.szimbolumok_betoltese": "Szimbólumok betöltése...",

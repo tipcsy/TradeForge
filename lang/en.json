@@ -990,6 +990,7 @@
   "gui.saved_restart": "Saved. The font applies immediately; {what} only changes the next time the program starts.",
   "gui.sl_t_trailing_mozgatta": "   SL ⇘T = moved by trailing   |   SL P&L / TP target = R + $ if it gets there",
   "gui.stopped_elrejtese": "Hide STOPPED",
+  "gui.ismeretlen_elrejtese": "Hide unknown",
   "gui.kikapcsolt_ures": "Blank disabled",
   "gui.strategia": "Strategy:",
   "gui.szimbolumok_betoltese": "Loading symbols...",

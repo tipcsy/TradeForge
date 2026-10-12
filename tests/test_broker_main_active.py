@@ -117,5 +117,14 @@ check("kapcsolóval a kikapcsolt stratégia blokkja ÜRES",
       not any(k.startswith("b|") for k in _ures))
 check("...a bekapcsolt érintetlen", "a|stages" in _ures and "a|ctrl" in _ures)
 
+# ── ismeretlen piacú instrumentumok szűrője ─────────────────────────────
+from dashboard.row_source import filter_rows                    # noqa: E402
+_rows = [{"symbol": "GOLD", "session": {"state": "open"}},
+         {"symbol": "UK100", "session": {"state": "unknown"}},
+         {"symbol": "Fra40", "session": {"state": "closed"}}]
+check("alapból az ismeretlen is LÁTSZIK", len(filter_rows(_rows)) == 3)
+check("pipával az ismeretlen eltűnik, a zárt piac marad",
+      [r["symbol"] for r in filter_rows(_rows, hide_unknown=True)] == ["GOLD", "Fra40"])
+
 print(f"\n{sum(results)}/{len(results)} PASS")
 sys.exit(0 if all(results) else 1)

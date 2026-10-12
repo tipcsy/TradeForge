@@ -507,11 +507,16 @@ def sort_rows(rows, key: str = None, reverse: bool = False) -> list:
     return have + missing
 
 
-def filter_rows(rows, search: str = "", hide_stopped: bool = False) -> list:
-    """Keresés a szimbólum nevében + a STOPPED sorok elrejtése.
+def filter_rows(rows, search: str = "", hide_stopped: bool = False,
+                hide_unknown: bool = False) -> list:
+    """Keresés a szimbólum nevében + a STOPPED sorok elrejtése + az ISMERETLEN
+    piacú sorok elrejtése.
 
     „Stopped" = a soron EGYETLEN stratégia sem fut. Több stratégiánál ez a
-    helyes olvasat: ha bármelyik él, az instrumentum dolgozik."""
+    helyes olvasat: ha bármelyik él, az instrumentum dolgozik.
+    „Ismeretlen" = a piac-állapot `unknown` (nincs tick — tipikusan az aktív
+    brókernél nem létező instrumentum, pl. UK100 a RoboForexen). Ugyanez az
+    állapot adja a lenti „Piac: N ismeretlen" számot."""
     out = []
     s = (search or "").strip().upper()
     for r in rows or []:
@@ -519,6 +524,8 @@ def filter_rows(rows, search: str = "", hide_stopped: bool = False) -> list:
             continue
         if hide_stopped and not any(x.get("live")
                                     for x in (r.get("strategies") or [])):
+            continue
+        if hide_unknown and (r.get("session") or {}).get("state", "unknown") == "unknown":
             continue
         out.append(r)
     return out

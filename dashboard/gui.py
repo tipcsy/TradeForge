@@ -3026,6 +3026,15 @@ class DashboardWindow:
                        bg=BG, fg=FG_GRAY, selectcolor=BG_HEADER,
                        activebackground=BG, activeforeground=FG_WHITE, font=small_font,
                        command=self._apply_filter_sort).pack(side="left", padx=4)
+        # Az aktív brókernél NEM létező (ismeretlen piacú) instrumentumok —
+        # alapból LÁTSZANAK (Tibi, 2026-10-12), a pipával elrejthetők. A
+        # választás a configba kerül (`dashboard.hide_unknown_instruments`).
+        self._hide_unknown_var = tk.BooleanVar(
+            value=bool((self.cfg.get("dashboard") or {}).get("hide_unknown_instruments", False)))
+        tk.Checkbutton(toolbar, text=_t("gui.ismeretlen_elrejtese"), variable=self._hide_unknown_var,
+                       bg=BG, fg=FG_GRAY, selectcolor=BG_HEADER,
+                       activebackground=BG, activeforeground=FG_WHITE, font=small_font,
+                       command=self._toggle_hide_unknown).pack(side="left", padx=4)
         # Kikapcsolt stratégia sora: halvány jelek vagy ÜRES (2026-10-12, Tibi:
         # „nézzük meg, melyik a zavaróbb"). A választás a configba kerül
         # (`dashboard.hide_disabled_strategies`).
@@ -3280,6 +3289,13 @@ class DashboardWindow:
             tbl.rebuild()
         self._save_main_config()
 
+    def _toggle_hide_unknown(self) -> None:
+        """Eszközsáv-kapcsoló: az ismeretlen piacú sorok szűrése + mentés."""
+        self.cfg.setdefault("dashboard", {})["hide_unknown_instruments"] = bool(
+            self._hide_unknown_var.get())
+        self._apply_filter_sort()
+        self._save_main_config()
+
     def _live2_visible_rows(self) -> list:
         """A MEGJELENÍTENDŐ sorok: keresés + „STOPPED elrejtése" alkalmazva.
 
@@ -3291,7 +3307,9 @@ class DashboardWindow:
             self._live2_rows(),
             search=(self._search_var.get() if hasattr(self, "_search_var") else ""),
             hide_stopped=(self._hide_stopped_var.get()
-                          if hasattr(self, "_hide_stopped_var") else False))
+                          if hasattr(self, "_hide_stopped_var") else False),
+            hide_unknown=(self._hide_unknown_var.get()
+                          if hasattr(self, "_hide_unknown_var") else False))
 
     def _live2_rows(self) -> list:
         """A 2.0 sorok adata. Minden külső forrás ITT kötődik be — a leképezés
