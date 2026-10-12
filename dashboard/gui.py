@@ -3276,8 +3276,10 @@ class DashboardWindow:
         return list(available_strategy_names(self.cfg))
 
     def _hide_disabled_on(self) -> bool:
-        """A kikapcsolt stratégia blokkja üres-e (`dashboard.hide_disabled_strategies`)."""
-        return bool((self.cfg.get("dashboard") or {}).get("hide_disabled_strategies", False))
+        """A kikapcsolt stratégia blokkja üres-e (`dashboard.hide_disabled_strategies`).
+        Alapból IGEN (Tibi, 2026-10-12: a két változatot összevetve „a kikapcsolt
+        üres verzió jobban tetszik"); a pipával a halvány jelek visszahozhatók."""
+        return bool((self.cfg.get("dashboard") or {}).get("hide_disabled_strategies", True))
 
     def _toggle_hide_disabled(self) -> None:
         """Eszközsáv-kapcsoló: azonnal újrarajzol ÉS a configba ment."""
