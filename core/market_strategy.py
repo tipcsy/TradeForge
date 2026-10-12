@@ -2,9 +2,10 @@
 Piac-stratégia (MarketStrategy) — pluggable PIAC-OSZTÁLYOZÓK könnyű registere.
 
 A kereskedő-stratégiákkal szimmetrikus, DE instrumentumonként EGY (a piac-képnek
-egy koherens forrása kell). Config: `pairs.<sym>.market_strategy` = a név vagy
-hiányzik/`""`/`"none"` = NINCS. A `market_viz` (bool) dönti, hogy a chart-sávon
-megjelenjen-e.
+egy koherens forrása kell). A választás 2026-10-12 óta a PIAC-KAPU beállítása
+(`gates.market.classifier`, alap `regime`; feloldás: `core.gates.market_classifier`)
+— korábban az instrumentum (`pairs.<sym>.market_strategy`) kapcsolta be, és
+nélküle a kapu némán semmit nem csinált. A chart-sáv: `gates.market.viz`.
 
 Jelenleg egyetlen osztályozó: `regime` (core.regime, ADX/DI/ATR → 8 kategória).
 Új piac-stratégia = egy név ide + a classify/legend ág. A dashboard és a viz
@@ -42,13 +43,10 @@ def registered_market_names() -> list[str]:
     return list(_REGISTERED)
 
 
-def market_name_of(cfg_pair: dict) -> "str | None":
-    """A pár kiválasztott piac-stratégiája (`pairs.<sym>.market_strategy`), vagy
-    None, ha nincs / ismeretlen."""
-    name = (cfg_pair or {}).get("market_strategy")
-    if not name or name in ("none", "Nincs"):
-        return None
-    return name if name in _REGISTERED else None
+def name_for(cfg: dict, symbol: str) -> "str | None":
+    """A piac-kapu osztályozója ezen a páron (lásd `core.gates.market_classifier`)."""
+    from core import gates as _g
+    return _g.market_classifier(cfg, symbol)
 
 
 def classify_series(name: str, df15):
@@ -58,12 +56,31 @@ def classify_series(name: str, df15):
     return None
 
 
+# Az utolsó besorolás gyertyánként: a kijelzés-út (felület, motor) ütemenként
+# kérdez, a besorolás viszont csak ÚJ M15 gyertyánál változhat. Mérve párankként
+# 6–16 ms — mióta MINDEN páron fut (nem csak ahol az instrumentum bekapcsolta),
+# ez ~26 párnál ütemenként már érezhető volna.
+_LATEST: dict = {}
+
+
 def latest_category(name: str, df15) -> "str | None":
     """A LEGUTOLSÓ gyertya piac-kategóriája (a dashboard-kijelzéshez)."""
-    s = classify_series(name, df15)
-    if s is None or len(s) == 0:
+    if df15 is None or len(df15) == 0:
         return None
-    return s.iloc[-1]
+    try:
+        kulcs = (name, len(df15), df15.index[-1], float(df15["close"].iloc[-1]),
+                 float(df15["close"].iloc[0]))
+    except Exception:
+        kulcs = None
+    if kulcs is not None and kulcs in _LATEST:
+        return _LATEST[kulcs]
+    s = classify_series(name, df15)
+    cat = None if s is None or len(s) == 0 else s.iloc[-1]
+    if kulcs is not None:
+        if len(_LATEST) > 512:
+            _LATEST.clear()
+        _LATEST[kulcs] = cat
+    return cat
 
 
 def code(name: str, category: str) -> int:

@@ -80,15 +80,18 @@ _TF_CHOICES = [(1, "M1"), (5, "M5"), (15, "M15"), (30, "M30"),
 
 
 def _market_choices():
-    """A piac-osztályozók + a „nincs" tétel. Lusta import: a `market_strategy`
-    a `regime`-et húzza be, és ez a modul enélkül is használható."""
+    """A piac-osztályozók. Lusta import: a `market_strategy` a `regime`-et húzza
+    be, és ez a modul enélkül is használható.
+
+    ⚠ NINCS „Nincs" tétel (2026-10-12): a kapu mérése nem kapcsolható ki — ha nem
+    kell, a HATÁSA legyen „Ki"; a besorolás attól még látszik a `Piac` oszlopban."""
     try:
         from core import market_strategy as _ms
         names = _ms.registered_market_names()
         labels = _ms.NAME_HU
     except Exception:
         names, labels = [], {}
-    return [("", "Nincs")] + [(n, labels.get(n, n)) for n in names]
+    return [(n, labels.get(n, n)) for n in names]
 
 
 def _adverse_choices():
@@ -123,10 +126,11 @@ _SPECS = {
         ParamSpec("viz", BOOL, False),
     ),
     _g.MARKET: (
-        ParamSpec("market_strategy", CHOICE, "", choices=_market_choices),
+        ParamSpec("classifier", CHOICE, _g.MARKET_CLASSIFIER_DEFAULT,
+                  choices=_market_choices),
         ParamSpec("adverse", MULTI, list(_g.MARKET_ADVERSE_DEFAULT),
                   choices=_adverse_choices),
-        ParamSpec("market_viz", BOOL, False),
+        ParamSpec("viz", BOOL, False),
     ),
     _g.COST: (
         ParamSpec("max_rr_distortion", FLOAT, 0.25, lo=0.0, hi=10.0),

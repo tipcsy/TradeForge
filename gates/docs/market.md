@@ -16,13 +16,18 @@ Bizonyt.  Átmenet      nem eldönthető
 
 ## Beállítások
 
-- **Piac-osztályozó** — `pairs.<SYM>.market_strategy`. „Nincs" → a kapu néma.
+- **Piac-osztályozó** — `gates.market.classifier` (alap: *Regime*). MINDEN
+  instrumentumon fut, így a `Piac` oszlop mindenhol mutatja az állapotot.
 - **Kedvezőtlen besorolások** — alap: *Érdektelen* + *Bizonytalan*.
-- **Piac-sáv a charton** — csak rajz.
+- **Piac-sáv a charton** — `gates.market.viz`, csak rajz.
 
-> ⚠ **Két dolog kell hozzá.** A hatás beállítása önmagában kevés: a páron KI IS
-> KELL VÁLASZTANI egy osztályozót, különben a kapunak nincs mit mérnie, és sosem
-> tüzel. A config-ellenőrző szól, ha ez az állapot előáll.
+Mindhárom páronként felülírható a szokásos `pairs.<SYM>.gates.market` blokkban
+(a kapu-ablak oda ment), mint bármely más kapu mérési beállítása.
+
+> ⚠ **2026-10-12 előtt az instrumentum kapcsolta be** (`pairs.<SYM>.market_strategy`,
+> „Piac-előszűrő"). Nélküle a kapu NÉMÁN átengedett mindent, hiába volt
+> `block`-ra állítva — az instrumentum beleszólt a kapu működésébe. A régi
+> kulcsokat a program már nem olvassa (a config-ellenőrző jelzi, ha még ott vannak).
 
 ## Sávos hatás (v3.28.0)
 

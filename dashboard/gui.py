@@ -4896,21 +4896,9 @@ class DashboardWindow:
                  bg=BG, fg=FG_GRAY_DIM, font=self._small_font,
                  wraplength=360, justify="left").pack(anchor="w", padx=12, pady=(0, 4))
 
-        # ── Piac-előszűrő (piac-állapot osztályozó) — instrumentumonként EGY ──
-        from core import market_strategy as _ms
-        _pc0 = (self.cfg.get("pairs", {}).get(symbol, {}) or {})
-        tk.Label(popup, text=_t("gui.piac_eloszuro_piac_allapot"),
-                 bg=BG, fg=FG_GRAY, font=self._small_font).pack(anchor="w", padx=12, pady=(8, 2))
-        ms_var = tk.StringVar(value=(_ms.market_name_of(_pc0) or "Nincs"))
-        _om = tk.OptionMenu(popup, ms_var, *(["Nincs"] + _ms.registered_market_names()))
-        _om.config(bg=BG_HEADER, fg=FG_WHITE, font=self._small_font, relief="flat",
-                   highlightthickness=0, activebackground=BG_HEADER)
-        _om["menu"].config(bg=BG_HEADER, fg=FG_WHITE)
-        _om.pack(anchor="w", padx=20)
-        viz_var = tk.BooleanVar(value=bool(_pc0.get("market_viz", True)))
-        tk.Checkbutton(popup, text=_t("gui.piac_allapot_sav_a"), variable=viz_var,
-                       bg=BG, fg=FG_WHITE, selectcolor=BG_HEADER, font=self._small_font,
-                       activebackground=BG, activeforeground=FG_WHITE).pack(anchor="w", padx=20)
+        # ⚠ A „Piac-előszűrő" sora 2026-10-12 óta NINCS itt: az osztályozó és a
+        # chart-sáv a Piac-KAPU beállítása (kapu-ablak). Az instrumentum nem
+        # kapcsolhatja ki a kapu mérését — a többi kapu sem így működik.
 
         # ── Kockázatcsökkentő PRESET — instrumentumonként EGY ────────────────
         # MIÉRT ITT. A preset PER INSTRUMENTUM él (nem per stratégia és nem per
@@ -4991,8 +4979,6 @@ class DashboardWindow:
             "notify_signal": {n: bool(_vp.notify_signal_on(self.cfg, symbol, n))
                               for n in _names},
             "mode":   {n: _tm.mode_of(self.cfg, symbol, n)         for n in _names},
-            "market":     (_ms.market_name_of(_pc0) or "Nincs"),
-            "market_viz": bool(_pc0.get("market_viz", True)),
             "rr_preset":  _rr_cur,
             "atr_period": _atr_cur,
         }
@@ -5024,8 +5010,6 @@ class DashboardWindow:
                                   for n in _names},
                 "mode":   {n: _l2m.get(_mode_vars[n].get(), _tm.MODE_LIVE)
                            for n in _names},
-                "market":     ms_var.get(),
-                "market_viz": bool(viz_var.get()),
                 "rr_preset":  _rr_by_label.get(rr_var.get(), _rr_cur),
                 "atr_period": _parse_atr(),
             }
@@ -5081,16 +5065,6 @@ class DashboardWindow:
                     pc.pop("strategies", None)
                 else:
                     pc["strategies"] = list(chosen)
-            if "market" in rows:
-                if cur_vals["market"] in ("Nincs", "", "none"):
-                    pc.pop("market_strategy", None)
-                else:
-                    pc["market_strategy"] = cur_vals["market"]
-            if "market_viz" in rows:
-                if cur_vals["market_viz"]:
-                    pc.pop("market_viz", None)     # True az alap → ne szennyezze
-                else:
-                    pc["market_viz"] = False
             if "atr_period" in rows:
                 # ⚠ CSAK AZ ELTÉRÉST írjuk: a mentés egy párra MINDEN sort
                 # alkalmaz, és egy változatlan (a globálisból örökölt) érték
@@ -5129,8 +5103,6 @@ class DashboardWindow:
             if ds is not None:
                 if "strategies" in rows:
                     ds.enabled_strategies = list(chosen)
-                if "market" in rows:
-                    ds.market_strategy = pc.get("market_strategy")
 
         def _save():
             chosen = [n for n in _names if _vars[("strategies", n)].get()]
@@ -6931,7 +6903,7 @@ class DashboardWindow:
         if _df15 is not None:
             try:
                 from core import market_strategy as _ms
-                _msname = _ms.market_name_of(self.cfg.get("pairs", {}).get(symbol, {}) or {})
+                _msname = _ms.name_for(self.cfg, symbol)
                 ds.market_strategy = _msname
                 if _msname:
                     _cat = _ms.latest_category(_msname, _df15)
@@ -7124,10 +7096,11 @@ class DashboardWindow:
         from strategy import enabled_strategy_names, get_strategy_by_name
         enabled = enabled_strategy_names(self.cfg, symbol)
         ds.enabled_strategies = enabled
-        # Piac-előszűrő AKTUÁLIS állapota a „Piac" oszlophoz (ha van kiválasztva).
+        # A piac-kapu AKTUÁLIS besorolása a „Piac" oszlophoz — minden páron (a
+        # kapu osztályozója, nem az instrumentum választása).
         from core import market_strategy as _ms
         _pcfg = self.cfg.get("pairs", {}).get(symbol, {}) or {}
-        ds.market_strategy = _ms.market_name_of(_pcfg)
+        ds.market_strategy = _ms.name_for(self.cfg, symbol)
         if ds.market_strategy and bars.get("M15") is not None:
             try:
                 _cat = _ms.latest_category(ds.market_strategy, bars["M15"])

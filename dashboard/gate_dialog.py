@@ -87,26 +87,31 @@ def _save_tf_align(cfg: dict, symbol: str, values: dict, all_symbols: list):
 
 
 def _load_market(cfg: dict, symbol: str) -> dict:
-    pc = ((cfg.get("pairs") or {}).get(symbol) or {})
-    return {"market_strategy": pc.get("market_strategy") or "",
+    # ⚠ 2026-10-12 óta MINDHÁROM a kapu saját blokkjában él
+    # (`pairs.<SYM>.gates.market`), mint a többi kapu mérési beállítása — nem az
+    # instrumentum `market_strategy` / `market_viz` kulcsában.
+    return {"classifier": _g.market_classifier(cfg, symbol) or _g.MARKET_CLASSIFIER_DEFAULT,
             "adverse": sorted(_g.market_adverse(cfg, symbol)),
-            "market_viz": bool(pc.get("market_viz", False))}
+            "viz": _g.market_viz(cfg, symbol)}
 
 
 def _save_market(cfg: dict, symbol: str, values: dict, all_symbols: list):
     for sym in all_symbols:
         pc = cfg.setdefault("pairs", {}).setdefault(sym, {})
-        if "market_strategy" in values:
-            v = values["market_strategy"]
-            if v:
-                pc["market_strategy"] = v
+        gates = pc.setdefault("gates", {})
+        m = gates.setdefault(_g.MARKET, {})
+        # A config csak az ELTÉRÉST rögzítse (alap: `regime`, sáv nélkül).
+        if "classifier" in values:
+            if values["classifier"] == _g.MARKET_CLASSIFIER_DEFAULT:
+                m.pop("classifier", None)
             else:
-                pc.pop("market_strategy", None)
-        if "market_viz" in values:
-            pc["market_viz"] = values["market_viz"]
+                m["classifier"] = values["classifier"]
+        if "viz" in values:
+            if values["viz"]:
+                m["viz"] = True
+            else:
+                m.pop("viz", None)
         if "adverse" in values:
-            gates = pc.setdefault("gates", {})
-            m = gates.setdefault(_g.MARKET, {})
             # Az ALAPÉRTELMEZÉSSEL egyező listát nem írjuk ki: a config csak az
             # ELTÉRÉST rögzítse, különben egy jövőbeli alapérték-változás némán
             # hatástalan maradna ezen a páron.
@@ -114,10 +119,13 @@ def _save_market(cfg: dict, symbol: str, values: dict, all_symbols: list):
                 m.pop("adverse", None)
             else:
                 m["adverse"] = list(values["adverse"])
-            if not m:
-                gates.pop(_g.MARKET, None)
-            if not gates:
-                pc.pop("gates", None)
+        # a régi instrumentum-szintű kulcsok mentéskor eltűnnek (már nem olvassuk)
+        pc.pop("market_strategy", None)
+        pc.pop("market_viz", None)
+        if not m:
+            gates.pop(_g.MARKET, None)
+        if not gates:
+            pc.pop("gates", None)
 
 
 def _load_momentum(cfg: dict, symbol: str) -> dict:

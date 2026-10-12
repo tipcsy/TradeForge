@@ -34,8 +34,7 @@ def snap(**kw):
             "viz":    {"wpr_sma": True,  "ml_ai": True},
             "trades": {"wpr_sma": True,  "ml_ai": True},
             "mode":   {"wpr_sma": "live", "ml_ai": "signal"},
-            "market": "Nincs",
-            "market_viz": True}
+            "atr_period": 14}
     base.update(kw)
     return base
 
@@ -55,8 +54,12 @@ check("a csak-viz valtozas NEM erint penzt", ba.affects_money(only_viz) is False
 
 # ══ 3. Tobb sor egyszerre ════════════════════════════════════════════════
 multi = ba.changed_rows(snap(), snap(viz={"wpr_sma": False, "ml_ai": True},
-                                     market="regime_adx"))
-check("ket sor valtozott -> mindketto terjed", multi == {"viz", "market"}, str(multi))
+                                     trades={"wpr_sma": False, "ml_ai": True}))
+check("ket sor valtozott -> mindketto terjed", multi == {"viz", "trades"}, str(multi))
+# 2026-10-12: a piac-osztalyozo es a sav a Piac-KAPU beallitasa lett (kapu-ablak),
+# az instrumentum-ablakban nincs ilyen sor -> tomegesen sem terjedhet innen.
+check("a regi piac-sorok NINCSENEK a terjeszthetok kozott",
+      "market" not in ba.ROWS and "market_viz" not in ba.ROWS)
 
 # ══ 4. Penzt erinto sorok ════════════════════════════════════════════════
 mode_ch = ba.changed_rows(snap(), snap(mode={"wpr_sma": "live", "ml_ai": "live"}))
@@ -66,7 +69,7 @@ strat_ch = ba.changed_rows(snap(), snap(strategies=["wpr_sma", "ml_ai"]))
 check("strategia bekapcsolasa -> PENZT ERINT",
       strat_ch == {"strategies"} and ba.affects_money(strat_ch))
 check("a megjelenitesi sorok NEM erintenek penzt",
-      ba.affects_money({"viz", "trades", "market_viz"}) is False)
+      ba.affects_money({"viz", "trades"}) is False)
 check("vegyes halmaz -> penzt erint (eleg egy)",
       ba.affects_money({"viz", "mode"}) is True)
 check("ures halmaz -> nem erint penzt", ba.affects_money(set()) is False)
@@ -81,8 +84,8 @@ check("ismeretlen kulcs valtozasa NEM terjed",
       ba.changed_rows(a, b) == set(), str(ba.changed_rows(a, b)))
 
 # Hianyzo kulcs egyik oldalon -> szinten nem terjed (nem talalgatunk)
-c = snap(); del c["market"]
-check("felig hianyzo kulcs -> nem terjed", "market" not in ba.changed_rows(c, snap()))
+c = snap(); del c["atr_period"]
+check("felig hianyzo kulcs -> nem terjed", "atr_period" not in ba.changed_rows(c, snap(atr_period=20)))
 
 # ══ 6. Cel-instrumentumok ════════════════════════════════════════════════
 PAIRS = {"GOLD": {}, "Ger40": {}, "EURUSD": {"enabled": False}, "rossz": "nem dict"}

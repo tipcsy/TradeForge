@@ -58,11 +58,19 @@ def _check_gate_preconditions(cfg: dict, out: list) -> None:
     for sym, pc in (cfg.get("pairs") or {}).items():
         if not isinstance(pc, dict):
             continue
+        # A RÉGI instrumentum-szintű piac-kulcsok (2026-10-12 előtt): a program
+        # már NEM olvassa őket — az osztályozó és a sáv a kapué.
+        _regi = [k for k in ("market_strategy", "market_viz") if k in pc]
+        if _regi:
+            out.append(_finding(
+                INFO, "legacy_market_keys",
+                _t("cfgchk.legacy_market_keys", sym=sym, keys=", ".join(_regi)), sym))
         for sname in enabled_strategy_names(cfg, sym) or []:
-            # PIAC: a besorolás a per-pár kiválasztott osztályozóból jön. Nincs
-            # osztályozó → `ds.market_state` üres marad → a kapu sosem bukik.
+            # PIAC: a besorolás a kapu osztályozójából jön (alapból `regime`).
+            # Ha kifejezetten kikapcsolták / elgépelték → `ds.market_state` üres
+            # marad → a kapu sosem bukik.
             if _g.active(_g.effects_for(cfg, sym, sname), _g.MARKET):
-                if not _ms.market_name_of(pc):
+                if not _ms.name_for(cfg, sym):
                     out.append(_finding(
                         WARN, "market_gate_no_classifier",
                         _t("cfgchk.market_gate_no_classifier", sym=sym,

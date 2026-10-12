@@ -61,20 +61,28 @@ BASE = {"strategy": {"name": "wpr_sma"},
 
 # ══ 1. Piac-kapu osztalyozo nelkul ════════════════════════════════════════
 
+# 2026-10-12: az osztalyozo a KAPUE (alap: regime) -> a lelet csak akkor jon,
+# ha a kapu osztalyozojat kifejezetten kikapcsoltak / elgepeltek.
 CFG = dict(BASE, pairs={"X": pair(strategies=["wpr_sma"],
-                                  gates={"market": {"wpr_sma": "reduce"}})})
+                                  gates={"market": {"wpr_sma": "reduce",
+                                                    "classifier": "none"}})})
 f = codes(CFG, "market_gate_no_classifier")
-check_("A LELET: bekapcsolt Piac-kapu, de nincs piac-eloszuro -> figyelmeztetes",
+check_("A LELET: bekapcsolt Piac-kapu, de kikapcsolt osztalyozo -> figyelmeztetes",
        len(f) == 1 and f[0]["level"] == cc.WARN, str(len(f)))
 check_("a lelet a szimbolumot is hordozza (a felulet ki tudja emelni)",
        f and f[0]["symbol"] == "X")
-check_("az uzenet MEGMONDJA a ket kiutat", f and "market_strategy" in f[0]["message"]
+check_("az uzenet MEGMONDJA a ket kiutat", f and "gates.market.classifier" in f[0]["message"]
        and "'none'" in f[0]["message"])
 
 CFG_OK = dict(BASE, pairs={"X": pair(strategies=["wpr_sma"],
-                                     market_strategy="regime",
                                      gates={"market": {"wpr_sma": "reduce"}})})
-check_("osztalyozoval NINCS lelet", codes(CFG_OK, "market_gate_no_classifier") == [])
+check_("⚠ instrumentum-szintu eloszuro NELKUL sincs lelet (a kapu alapbol mer)",
+       codes(CFG_OK, "market_gate_no_classifier") == [])
+_leg = codes(dict(BASE, pairs={"X": pair(strategies=["wpr_sma"],
+                                         market_strategy="regime")}),
+             "legacy_market_keys")
+check_("a regi `market_strategy` kulcsra INFO-lelet (mar nem olvassuk)",
+       len(_leg) == 1 and _leg[0]["level"] == cc.INFO, str(_leg))
 
 CFG_OFF = dict(BASE, pairs={"X": pair(strategies=["wpr_sma"],
                                       gates={"market": {"wpr_sma": "none"}})})

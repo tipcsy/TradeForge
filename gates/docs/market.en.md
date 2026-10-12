@@ -16,14 +16,17 @@ Uncert.   Transit.     cannot be decided
 
 ## Settings
 
-- **Market classifier** — `pairs.<SYM>.market_strategy`. „None" → the gate is
-  silent.
+- **Market classifier** — `gates.market.classifier` (default: *Regime*). It runs
+  on EVERY instrument, so the `Market` column shows the state everywhere.
 - **Adverse classifications** — default: *Dead* + *Uncertain*.
-- **Market band on the chart** — drawing only.
+- **Market band on the chart** — `gates.market.viz`, drawing only.
 
-> ⚠ **It takes two things.** Setting the effect alone is not enough: you must
-> ALSO SELECT a classifier on the pair, otherwise the gate has nothing to measure
-> and never fires. The config checker warns when this state occurs.
+All three can be overridden per pair in the usual `pairs.<SYM>.gates.market`
+block (the gate dialog saves there), like any other gate's measurement settings.
+
+> ⚠ **Before 2026-10-12 the instrument switched it on** (`pairs.<SYM>.market_strategy`,
+> „Market pre-filter"). Without it the gate SILENTLY let everything through, even
+> when set to `block`. The old keys are no longer read (the config checker flags them).
 
 ## Banded effect (v3.28.0)
 

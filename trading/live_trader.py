@@ -1015,25 +1015,25 @@ def apply_no_trade(objects: list, pair_cfg: dict, trade_hours=None) -> list:
     return result
 
 
-def apply_market_state(objects: list, df15, pair_cfg: dict = None) -> list:
+def apply_market_state(objects: list, df15, cfg: dict = None, symbol: str = "") -> list:
     """KERETRENDSZER-szintű PIAC-ÁLLAPOT overlay: minden per-gyertya `BarState`-hez
-    beállítja a `market_state` KÓDOT a per-pár KIVÁLASZTOTT piac-stratégia (config
-    `pairs.<sym>.market_strategy`) M15-ös besorolásából.
+    beállítja a `market_state` KÓDOT a piac-KAPU osztályozójának (`gates.market.
+    classifier`) M15-ös besorolásából.
 
-    Csak akkor tölt, ha (1) van kiválasztott piac-stratégia ÉS (2) a `market_viz`
-    kérve van — különben a `market_state` a BarState alap **-1** értékén marad, amit
+    Csak akkor tölt, ha (1) van osztályozó ÉS (2) a sáv kérve van
+    (`gates.market.viz`) — különben a `market_state` a BarState alap **-1** értékén marad, amit
     a TradeForgeBands „NINCS piac-sáv"-ként értelmez (nem rajzol sávot, 3-sávos
     elrendezés). OSZTÁLYOZÓ-FÜGGETLEN: ha más piac-stratégiát választasz, CSAK a
     besorolás (0..8) cserélődik; a mező + a sáv marad."""
-    from core import market_strategy as _ms
-    pc = pair_cfg or {}
-    name = _ms.market_name_of(pc)
-    if not name or not pc.get("market_viz", True):
+    from core import gates as _g
+    name = _g.market_classifier(cfg or {}, symbol)
+    if not name or not _g.market_viz(cfg or {}, symbol):
         return objects                      # nincs osztályozó VAGY nem kérik a charton
     if df15 is None or len(df15) < 3:
         return objects
     try:
         from strategy import visual as viz
+        from core import market_strategy as _ms
         s = _ms.classify_series(name, df15)
         code_by_epoch = {int(ts.timestamp()): _ms.code(name, cat)
                          for ts, cat in s.items()}
@@ -1530,9 +1530,9 @@ def pair_visual_objects(symbol: str, params: dict, strategy, point_size: float,
     md.on_entry_record = _recs.append
 
     objects = apply_no_trade(strategy.visual_objects(md), pair_cfg or {}, th)
-    # + a GENERIKUS piac-állapot kód a per-gyertya BarState-ekhez (a per-pár
-    #   kiválasztott piac-stratégiából; csak ha kérve van a charton).
-    objects = apply_market_state(objects, bars.get("M15"), pair_cfg)
+    # + a GENERIKUS piac-állapot kód a per-gyertya BarState-ekhez (a piac-kapu
+    #   osztályozójából; csak ha kérve van a charton).
+    objects = apply_market_state(objects, bars.get("M15"), _cfg, symbol)
     # + MIÉRT nem lépne be a motor: a kapu-kód a per-gyertya sáv-állapotba. Enélkül
     #   a chart „belépőt ígért" (trend + M15-ablak kész), miközben egy kapu némán zárt.
     objects = apply_gate_state(objects, bars, symbol, strategy.name,
@@ -2404,7 +2404,7 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
     # tüzelne — némán. A GUI ugyanezt írja, ha rekonstruál (STOPPED pár).
     try:
         from core import market_strategy as _ms
-        _msname = _ms.market_name_of(pair_cfg)
+        _msname = _ms.name_for(_run_cfg or {}, symbol)
         ds.market_strategy = _msname
         if _msname:
             _cat = _ms.latest_category(_msname, bars[strategy.timeframes()[0].label])

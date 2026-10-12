@@ -21,7 +21,11 @@ HATÓKÖRÖK (2026-07-31 állapot, v1.80.0 után):
     per stratégia volt.) A *hatása* viszont továbbra is stratégiánként állítható.
   • **Idősík-együttállás** — a mért állapot instrumentum-tulajdonság (az
     SMA-irányok), a KAPUZÁS viszont per stratégia (`tf_align.gate`).
-  • **Piac-állapot** — instrumentum-szintű (`pairs.<sym>.market_strategy`).
+  • **Piac-állapot** — a besorolást a KAPU választja (`gates.market.classifier`,
+    alap: `regime`; páronkénti felülírás a szokásos `pairs.<sym>.gates.market`
+    blokkban). 2026-10-12 előtt az instrumentum kapcsolta be
+    (`pairs.<sym>.market_strategy`) — nélküle a kapu NÉMÁN átengedett mindent,
+    hiába volt `block`-ra állítva. A kapu így végre hordozható, mint a többi.
   • **Volatilitás** — a küszöbök és a mérce v3.103.0 óta az INSTRUMENTUMÉI
     (`core.execution_params.VOL_KEYS`, `data/execution_params/<SYM>.json`);
     előtte a wpr_sma optimalizált paraméterei voltak. A motor a stratégia
@@ -104,6 +108,38 @@ REDUCE_RISK_FACTOR = 0.5
 # (uncertain). A kapu HATÁSA alapból `none`, tehát ez a lista addig nem számít,
 # amíg a piac-kaput be nem kapcsolod.
 MARKET_ADVERSE_DEFAULT = ("dead", "uncertain")
+
+
+MARKET_CLASSIFIER_DEFAULT = "regime"
+
+
+def _market_setting(cfg: dict, symbol: str, key: str, default):
+    """A piac-kapu egy beállítása: pár ← globális ← alap (a szokásos kapu-sorrend:
+    `pairs.<SYM>.gates.market.<key>`, `gates.market.<key>`)."""
+    for section in (((cfg or {}).get("pairs") or {}).get(symbol) or {},
+                    (cfg or {})):
+        g = (section.get("gates") or {}).get(MARKET)
+        if isinstance(g, dict) and key in g:
+            return g[key]
+    return default
+
+
+def market_classifier(cfg: dict, symbol: str) -> "str | None":
+    """A piac-kapu osztályozója ezen a páron (a regisztrált nevek egyike), vagy
+    None, ha kifejezetten ki van kapcsolva (`"none"`/`""`) vagy ismeretlen.
+
+    ⚠ A KAPU tulajdonsága, nem az instrumentumé: alapból MINDEN páron fut, így a
+    `Piac` oszlop mindenhol mutat állapotot, és a kapu hatása (stratégiánként)
+    dönti el, mi legyen vele."""
+    from core import market_strategy as _ms
+    name = _market_setting(cfg, symbol, "classifier", MARKET_CLASSIFIER_DEFAULT)
+    name = str(name or "")
+    return name if name in _ms.registered_market_names() else None
+
+
+def market_viz(cfg: dict, symbol: str) -> bool:
+    """Kerüljön-e a piac-besorolás sávja a chartra (`gates.market.viz`, alap: nem)."""
+    return bool(_market_setting(cfg, symbol, "viz", False))
 
 
 def market_adverse(cfg: dict, symbol: str) -> set:

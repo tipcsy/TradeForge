@@ -1002,7 +1002,7 @@ def _pair_market_series(cfg, symbol, strategy_name, m15, exec_gates: bool):
                                           for_backtest=True),
                           _gt.MARKET):
             return None
-        name = _ms.market_name_of((cfg.get("pairs") or {}).get(symbol) or {})
+        name = _ms.name_for(cfg or {}, symbol)
         return _ms.classify_series(name, m15) if name else None
     except Exception:
         return None
@@ -1676,7 +1676,7 @@ def run_pair(
     if _exec_gates and _gt.active(_gate_eff, _gt.MARKET):
         try:
             from core import market_strategy as _msx
-            _mname = _msx.market_name_of(pair_cfg)
+            _mname = _msx.name_for(cfg or {}, symbol)
             if _mname:
                 _mkt_series = _msx.classify_series(_mname, df_m15)
                 _mkt_adverse = _gt.market_adverse(cfg or {}, symbol)

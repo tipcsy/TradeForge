@@ -37,8 +37,6 @@ ROWS = {
     "notify_trade":  (_t("bulk.notify_trade"),  False),
     "notify_signal": (_t("bulk.notify_signal"), False),
     "mode":       (_t("bulk.mode"),         True),
-    "market":     (_t("bulk.market"),       False),
-    "market_viz": (_t("bulk.market_viz"),   False),
     # PÉNZT ÉRINT: a preset dönti el, mi történik a pozícióval 1R-nél (részleges
     # zárás, stop-húzás, méret). Nem a config.json-ban él, hanem a per-pár
     # `data/risk_mode.json`-ban — a tömeges alkalmazás mégis ugyanúgy működik rá.
