@@ -187,6 +187,12 @@ def cells_for(d: dict, collapsed: dict, on_close=None) -> dict:
     # ── közép: stratégiánként ────────────────────────────────────────────
     for st in (d.get("strategies") or []):
         n = st.get("name", "")
+        # ⚠ KIKAPCSOLT stratégia ÜRES sora (2026-10-12, Tibi: „zavar a sok
+        # inaktív vonal"). A `hide_disabled` kapcsolóval (eszközsáv) a kikapcsolt
+        # stratégia blokkja ezen a soron SEMMIT nem rajzol — a hiányzó cella a
+        # vásznon üres rekesz. Kikapcsolva a régi halvány „V ●●●●● — — –" látszik.
+        if (collapsed or {}).get("hide_disabled") and not st.get("enabled", True):
+            continue
         coll = _lr.is_collapsed(collapsed, n)
         # ⚠ A pöttyök ELŐTT egy betű: „V" = VALÓDI kötést nyit, „J" = csak
         # jelez. Enélkül a két állapot ránézésre azonos — ugyanaz a pötty-sor,

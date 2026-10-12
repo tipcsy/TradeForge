@@ -57,21 +57,27 @@
     "signal_trade_max_age_hours": 4,
     "_comment_signal_age": "signal_trade_max_age_hours: a Jelzések fülön ennél régebbi jelzésre a Kötés gomb PASSZÍV. Egy fél napja kiadott belépő már nem ugyanaz a szetup — az ár és a piaci állapot is más. Alap: 4 óra."
   },
-  "broker": {
-    "_comment": "MT5 belépési adatok — a valós config.json-ban töltsd ki. is_demo=true amíg demón tesztelsz.",
-    "name": "YourBroker",
-    "server": "YourBroker-Demo",
-    "login": 0,
-    "password": "",
-    "is_demo": true,
-    "magic": 20260627
-  },
-  "mt5": {
-    "_comment": "MetaTrader 5 terminál elérési útja. Kötelező ha egy gépen több MT5 fut!",
-    "path": "C:\\Path\\To\\MetaTrader5\\terminal64.exe",
-    "_comment_portable": "portable=true: az MT5 a saját könyvtárából olvassa az adatait",
-    "portable": true
-  },
+  "_comment_brokers": "Brókerenként egy elem (legfeljebb 5). main=true a FŐSZÁMLA (a felület saját motorja; ha több van bejelölve, az első számít, ha egy sincs, az első aktív). active=false: a bróker KI VAN KAPCSOLVA, a program sehol nem látja (az adatai megmaradnak). A párok alap-értékei (pont-méret, költség, run_state) a lista ELSŐ brókeréi.",
+  "brokers": [
+    {
+      "_comment": "MT5 belépési adatok — a valós config.json-ban töltsd ki. is_demo=true amíg demón tesztelsz. Az id NE változzon (mappák, futás-zár).",
+      "id": "yourbroker",
+      "tag": "Yb",
+      "main": true,
+      "active": true,
+      "name": "YourBroker",
+      "server": "YourBroker-Demo",
+      "login": 0,
+      "password": "",
+      "is_demo": true,
+      "magic": 20260627,
+      "mt5": {
+        "_comment": "MetaTrader 5 terminál elérési útja. Kötelező ha egy gépen több MT5 fut! portable=true: az MT5 a saját könyvtárából olvassa az adatait",
+        "path": "C:\\Path\\To\\MetaTrader5\\terminal64.exe",
+        "portable": true
+      }
+    }
+  ],
   "trading": {
     "_comment_risk": "Az összes nyitott slot EGYÜTTES kockázata (nem per-trade!). 0.01 = 1%",
     "account_risk_pct": 0.01,

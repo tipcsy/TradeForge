@@ -990,6 +990,7 @@
   "gui.saved_restart": "Saved. The font applies immediately; {what} only changes the next time the program starts.",
   "gui.sl_t_trailing_mozgatta": "   SL ⇘T = moved by trailing   |   SL P&L / TP target = R + $ if it gets there",
   "gui.stopped_elrejtese": "Hide STOPPED",
+  "gui.kikapcsolt_ures": "Blank disabled",
   "gui.strategia": "Strategy:",
   "gui.szimbolumok_betoltese": "Loading symbols...",
   "gui.telegram_ertesites_magyarazat": "Telegram notification per strategy: TRADES on by default, SIGNALS off (there are many). The `notify` block turns the whole thing on.",

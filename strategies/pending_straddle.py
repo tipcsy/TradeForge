@@ -500,7 +500,8 @@ class PendingStraddleStrategy(Strategy):
     def magic(self, cfg: dict) -> int:
         """EGYEDI magic — hogy a nyitott pozíciók broker-szinten is
         szétválaszthatók legyenek a többi stratégiától."""
-        base = int(((cfg or {}).get("broker") or {}).get("magic", 0) or 0)
+        from core import broker_profile as _bp   # a `brokers` lista aktív brókere
+        base = _bp.magic_of(cfg)
         return base + MAGIC_OFFSET
 
     def warmup_bars(self, params: dict, timeframe_label: str) -> int:

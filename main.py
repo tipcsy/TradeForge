@@ -247,7 +247,9 @@ def stop_all_engines(cfg: dict, skip_ids=()) -> list:
     from core import broker_profile, engine_supervisor
     out = []
     try:
-        profs = broker_profile.profiles(cfg)
+        # a kikapcsolt bróker is: ha a motorja még fut (pl. futás közben
+        # kapcsolták ki), a bezárás azt is leállítja
+        profs = broker_profile.all_profiles(cfg)
     except Exception:
         return out
     for p in profs:

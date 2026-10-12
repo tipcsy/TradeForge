@@ -81,8 +81,12 @@ def parse(spec) -> ServerZone:
 
 
 def of_config(cfg: dict | None) -> ServerZone:
-    """A config `broker.server_zone` mezője (hiányzik → kanonikus)."""
-    return parse(((cfg or {}).get("broker") or {}).get("server_zone"))
+    """Az aktív bróker `server_zone` mezője (hiányzik → kanonikus)."""
+    from core import broker_profile
+    try:
+        return broker_profile.active(cfg).server_zone
+    except ValueError:
+        return broker_profile.main(cfg).server_zone
 
 
 # ── egyedi időpont ──────────────────────────────────────────────────────────

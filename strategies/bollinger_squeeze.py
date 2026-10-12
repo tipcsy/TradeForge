@@ -637,7 +637,8 @@ class BollingerSqueezeStrategy(Strategy):
         return param_constraints.check(params, self._opt_constraints())
 
     def magic(self, cfg: dict) -> int:
-        return int(cfg.get("broker", {}).get("magic", 0)) + MAGIC_OFFSET
+        from core import broker_profile as _bp   # a `brokers` lista aktív brókere
+        return _bp.magic_of(cfg) + MAGIC_OFFSET
 
     # ── MT5 chart-vizualizáció ────────────────────────────────────────────
 

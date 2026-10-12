@@ -578,8 +578,8 @@ def _check_shared_instruments(cfg: dict, out: list) -> None:
         if not isinstance(pc, dict):
             continue
         elok: dict = {}
-        for i, p in enumerate(profs):
-            rs = (pc.get("run_state") if i == 0
+        for p in profs:
+            rs = (pc.get("run_state") if p.base
                   else ((pc.get("brokers") or {}).get(p.id) or {}).get("run_state"))
             for strat, allapot in (rs or {}).items():
                 if allapot == "live":

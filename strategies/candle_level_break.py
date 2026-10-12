@@ -141,7 +141,8 @@ class CandleLevelBreakStrategy(Strategy):
     def magic(self, cfg: dict) -> int:
         """EGYEDI magic — hogy a nyitott pozíciók broker-szinten is
         szétválaszthatók legyenek a többi stratégiától."""
-        base = int(((cfg or {}).get("broker") or {}).get("magic", 0) or 0)
+        from core import broker_profile as _bp   # a `brokers` lista aktív brókere
+        base = _bp.magic_of(cfg)
         return base + 30
 
     def signal_bar_seconds(self, params: dict) -> int:

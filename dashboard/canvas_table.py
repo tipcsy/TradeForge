@@ -680,10 +680,17 @@ class CanvasTable:
     def _slot_structure_changed(self, i: int, cells: dict) -> bool:
         """Változott-e a rekesz CELLA-SZERKEZETE (nem csak a tartalma)?
 
-        Ma egyetlen ilyen van: a pöttyök DARABSZÁMA (idősík-irányok, stádiumok).
-        Ha 0-ról 3-ra vált, nincs mit színezni — a sort újra kell rajzolni. (Ez
-        a v2.1.2-es „Együtt beragadt" hiba magva; ott az egész tábla újraépült,
-        itt elég az az egy sor.)"""
+        Két ilyen van: a pöttyök DARABSZÁMA (idősík-irányok, stádiumok) — ha
+        0-ról 3-ra vált, nincs mit színezni (a v2.1.2-es „Együtt beragadt" hiba
+        magva) —, és a cellák HALMAZA: egy kikapcsolt stratégia üresen hagyott
+        blokkja (`hide_disabled`) nem rajzolódik, tehát ha a rekeszbe rendezéskor
+        vagy be-/kikapcsoláskor más állapotú sor kerül, elem keletkezik/tűnik el.
+        Ilyenkor az az egy sor újrarajzolódik."""
+        # csak a TÉNYLEG rajzolt (oszloppal bíró) cellák számítanak — egy rejtett
+        # kapu-oszlop cellája különben minden ütemben újrarajzolást kérne
+        rajzolt = {k for k, _x, _w in self._cols if k in cells}
+        if {k[1] for k in self._visual if k[0] == i} != rajzolt:
+            return True
         for key, cell in cells.items():
             if cell.kind != "dots":
                 continue

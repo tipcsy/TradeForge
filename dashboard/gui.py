@@ -3026,6 +3026,14 @@ class DashboardWindow:
                        bg=BG, fg=FG_GRAY, selectcolor=BG_HEADER,
                        activebackground=BG, activeforeground=FG_WHITE, font=small_font,
                        command=self._apply_filter_sort).pack(side="left", padx=4)
+        # Kikapcsolt stratégia sora: halvány jelek vagy ÜRES (2026-10-12, Tibi:
+        # „nézzük meg, melyik a zavaróbb"). A választás a configba kerül
+        # (`dashboard.hide_disabled_strategies`).
+        self._hide_disabled_var = tk.BooleanVar(value=self._hide_disabled_on())
+        tk.Checkbutton(toolbar, text=_t("gui.kikapcsolt_ures"), variable=self._hide_disabled_var,
+                       bg=BG, fg=FG_GRAY, selectcolor=BG_HEADER,
+                       activebackground=BG, activeforeground=FG_WHITE, font=small_font,
+                       command=self._toggle_hide_disabled).pack(side="left", padx=4)
         tk.Button(toolbar, text="  +  Instrumentum", font=small_font,
                   bg=BTN_OPT_BG, fg=BTN_OPT_FG, relief="flat", cursor="hand2",
                   command=self._show_add_instrument).pack(side="right", padx=4)
@@ -3234,7 +3242,9 @@ class DashboardWindow:
                        # a Beállítások „Kapuk" fülének eredménye.
                        "gate_columns": _gate_layout.enabled_columns(self.cfg),
                        # 0029/5b: „Bróker” oszlop — csak több brókernél
-                       "show_broker": self._show_broker_column()},
+                       "show_broker": self._show_broker_column(),
+                       # kikapcsolt stratégia üres sora (eszközsáv-kapcsoló)
+                       "hide_disabled": self._hide_disabled_on()},
             on_close=self._handle_delete)
         self._live2.frame.pack(fill="both", expand=True)
 
@@ -3255,6 +3265,20 @@ class DashboardWindow:
         config `available_strategies`-éből dolgozunk, nem a pár sajátjából."""
         from strategy import available_strategy_names
         return list(available_strategy_names(self.cfg))
+
+    def _hide_disabled_on(self) -> bool:
+        """A kikapcsolt stratégia blokkja üres-e (`dashboard.hide_disabled_strategies`)."""
+        return bool((self.cfg.get("dashboard") or {}).get("hide_disabled_strategies", False))
+
+    def _toggle_hide_disabled(self) -> None:
+        """Eszközsáv-kapcsoló: azonnal újrarajzol ÉS a configba ment."""
+        on = bool(self._hide_disabled_var.get())
+        self.cfg.setdefault("dashboard", {})["hide_disabled_strategies"] = on
+        tbl = getattr(self, "_live2", None)
+        if tbl is not None:
+            tbl._collapsed["hide_disabled"] = on
+            tbl.rebuild()
+        self._save_main_config()
 
     def _live2_visible_rows(self) -> list:
         """A MEGJELENÍTENDŐ sorok: keresés + „STOPPED elrejtése" alkalmazva.
@@ -6612,10 +6636,14 @@ class DashboardWindow:
                 self.lbl_balance.config(text=f"Egyenleg: {info['balance']:,.2f} {cur}")
         else:
             self.lbl_conn.config(text="● Offline", fg=FG_RED)
-            broker = self.cfg.get("broker", {})
-            demo_tag = "  [DEMO]" if broker.get("is_demo") else _t("gui2.eles")
+            from core import broker_profile as _bp
+            try:
+                _p = _bp.active(self.cfg)
+            except ValueError:
+                _p = _bp.main(self.cfg)
+            demo_tag = "  [DEMO]" if _p.is_demo else _t("gui2.eles")
             self.lbl_account.config(
-                text=f"#{broker.get('login','—')}  {broker.get('server','—')}{demo_tag}",
+                text=f"#{_p.login or '—'}  {_p.server or '—'}{demo_tag}",
                 fg=FG_GRAY)
             self._btn_connect.pack(side="right", padx=6)
 

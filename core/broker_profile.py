@@ -14,9 +14,24 @@ brókert ismert (a config `broker` + `mt5` blokkja). A profil ezt általánosít
     ],
     "active_broker": "activtrades"
 
-⚠ VISSZAFELÉ KOMPATIBILIS: ha nincs `brokers` lista, a mai `broker` + `mt5`
-blokkból EGY profil épül — ugyanazokkal az értékekkel. A mai config tehát
-változatlanul működik, és semmit nem kell átírni.
+⚠ 2026-10-12: a config.json-ban MÁR CSAK a `brokers` lista van (a régi `broker`
++ `mt5` blokk kikerült — a belső motor is a listából olvas). Egy régi config
+(lista nélkül) továbbra is beolvasható: a `broker` + `mt5` blokkból EGY profil
+épül.
+
+⚠ KÉT JELZŐ brókerenként (Tibi, 2026-10-12):
+  • `"main": true`  — a FŐSZÁMLA (a felület saját motorja, ez áll a lista
+    elején). Ha több van bejelölve, az ELSŐ találat számít; ha egy sincs, az
+    első aktív bróker.
+  • `"active": false` — a bróker KI VAN KAPCSOLVA: a program sehol nem látja
+    (nem indul motorja, nincs oszlopa, órája, fül-sora). Hiányzik → aktív.
+    Így egy bróker adatai törlés nélkül félretehetők.
+
+⚠ FŐSZÁMLA ≠ ALAP-ÉRTÉKEK GAZDÁJA. A `pairs.<sym>` saját kulcsai (pont-méret,
+jutalék, run_state, kötés-mód …) a lista ELSŐ elemének brókeréé (`base`) — a
+főszámla átállítása ezen NEM változtat, különben egy másik bróker motorja az
+első bróker Play/Stop-ját és ÉLES kötés-módját örökölné (lásd a 0031-es
+AUDCHF-esetet lent).
 
 ⚠ LEGFELJEBB 5 BRÓKER (Tibi döntése, 2026-09-28): „a 2-3-4 még reális, 5
 már sok, annál több ne lehessen". A `validate` ezt hibának jelzi.
@@ -52,10 +67,14 @@ class BrokerProfile:
     mt5: dict = field(default_factory=dict, compare=False, hash=False)
     server_zone: BT.ServerZone = BT.CANONICAL
     symbols: dict = field(default_factory=dict, compare=False, hash=False)
-    # Az OTTHONI bróker (a lista első eleme; régi config: az egyetlen). Az adatai
-    # 2026-10-08 óta ugyanúgy a saját mappájában vannak, mint a többié
-    # (core/broker_paths); a jelző a felület és a config-mentés miatt kell.
+    # Az OTTHONI bróker = a FŐSZÁMLA (`"main": true`; ha nincs, az első aktív) —
+    # a felület saját motorja. Az adatai 2026-10-08 óta ugyanúgy a saját
+    # mappájában vannak, mint a többié (core/broker_paths).
     home: bool = True
+    # Az ALAP-ÉRTÉKEK gazdája: a `brokers` lista ELSŐ eleme (régi config: az
+    # egyetlen). A `pairs.<sym>` saját kulcsai az övéi; a többi bróker a
+    # `pairs.<sym>.brokers.<id>` blokkból kap felülírást (overlay_pairs).
+    base: bool = True
     # A felügyelő újraindítja-e a leállt motort (core/engine_supervisor).
     # Alapból NEM: egy kereskedő motor magától ne induljon, csak ha kérted.
     autostart: bool = False
@@ -89,7 +108,8 @@ def _alap_tag(nev: str, azon: str) -> str:
     return s[:3]
 
 
-def _profil(d: dict, mt5_cfg: dict | None = None, home: bool = True) -> BrokerProfile:
+def _profil(d: dict, mt5_cfg: dict | None = None, home: bool = True,
+            base: bool = True) -> BrokerProfile:
     nev = str(d.get("name", "") or "")
     azon = str(d.get("id") or re.sub(r"[^a-z0-9]", "", nev.lower()) or "broker")
     return BrokerProfile(
@@ -106,20 +126,76 @@ def _profil(d: dict, mt5_cfg: dict | None = None, home: bool = True) -> BrokerPr
         symbols={str(k): str(v) for k, v in (d.get("symbols") or {}).items()
                  if str(k) != str(v)},
         home=home,
+        base=base,
         autostart=bool(d.get("autostart", False)),
         trading={k: v for k, v in (d.get("trading") or {}).items()
                  if k in BROKER_TRADING_KEYS},
     )
 
 
+def is_active(d: dict) -> bool:
+    """Egy `brokers`-elem aktív-e (`"active": false` → ki van kapcsolva)."""
+    return bool(d.get("active", True))
+
+
+def _main_index(dl: list) -> int:
+    """A főszámla indexe a nyers listában: az első `main: true` AKTÍV elem;
+    ha nincs ilyen, az első aktív; ha egy sem aktív, a 0."""
+    akt = [i for i, d in enumerate(dl) if is_active(d)]
+    for i in akt:
+        if bool(dl[i].get("main", False)):
+            return i
+    return akt[0] if akt else 0
+
+
 def profiles(cfg: dict | None) -> list[BrokerProfile]:
-    """Az összes profil. `brokers` lista nélkül a régi `broker` + `mt5` blokk."""
+    """Az AKTÍV profilok, a FŐSZÁMLA az első helyen (utána a lista sorrendje).
+
+    A kikapcsolt (`"active": false`) bróker NINCS benne — a program sehol nem
+    látja. Ha MINDEN bróker ki van kapcsolva, a főszámla (vagy az első) marad:
+    bróker nélkül nincs mihez kapcsolódni (a `validate` ezt jelzi).
+    `brokers` lista nélkül a régi `broker` + `mt5` blokk (egy profil)."""
     cfg = cfg or {}
     lista = cfg.get("brokers")
     if isinstance(lista, list) and lista:
         dl = [d for d in lista if isinstance(d, dict)]
-        return [_profil(d, home=(i == 0)) for i, d in enumerate(dl)]
+        if not dl:
+            return [_profil({})]
+        fo = _main_index(dl)
+        sorrend = [fo] + [i for i, d in enumerate(dl) if i != fo and is_active(d)]
+        return [_profil(dl[i], home=(i == fo), base=(i == 0)) for i in sorrend]
     return [_profil(cfg.get("broker") or {}, cfg.get("mt5") or {})]
+
+
+def all_profiles(cfg: dict | None) -> list[BrokerProfile]:
+    """MINDEN profil, a kikapcsoltakkal együtt (a lista sorrendjében) — csak
+    ott kell, ahol egy kikapcsolt bróker maradványát is el kell érni (pl. a
+    program bezárásakor egy még futó motorja leállítása)."""
+    cfg = cfg or {}
+    lista = cfg.get("brokers")
+    if isinstance(lista, list) and lista:
+        dl = [d for d in lista if isinstance(d, dict)]
+        if dl:
+            fo = _main_index(dl)
+            return [_profil(d, home=(i == fo), base=(i == 0)) for i, d in enumerate(dl)]
+    return profiles(cfg)
+
+
+def main(cfg: dict | None) -> BrokerProfile:
+    """A főszámla (a felület saját motorja)."""
+    return profiles(cfg)[0]
+
+
+def magic_of(cfg: dict | None) -> int:
+    """Az aktív bróker `magic` alapszáma (a stratégiák erre teszik az eltolásukat).
+
+    ⚠ Eddig a régi `broker` blokkból jött — az a configból kikerült. Ismeretlen
+    `--broker` esetén (ValueError) a főszámláé: a magic csak azonosít, a hibás
+    választást a motor indulása úgyis megállítja."""
+    try:
+        return int(active(cfg).magic or 0)
+    except ValueError:
+        return int(main(cfg).magic or 0)
 
 
 _override: str | None = None
@@ -202,9 +278,18 @@ def validate(cfg: dict | None) -> list[str]:
                         raise ValueError
                 except (TypeError, ValueError):
                     hibak.append(f"{d.get('id', '?')}: trading.{k} érvénytelen: {tr[k]!r}")
+    if nyers is not None:
+        dl = [d for d in nyers if isinstance(d, dict)]
+        if dl and not any(is_active(d) for d in dl):
+            hibak.append("minden bróker ki van kapcsolva (active: false) — "
+                         "a főszámla/első bróker fut")
+        fok = [str(d.get("id", "?")) for d in dl if bool(d.get("main", False))]
+        if len(fok) > 1:
+            hibak.append(f"több főszámla is be van jelölve ({', '.join(fok)}) — "
+                         f"az első aktív számít")
     want = (cfg or {}).get("active_broker")
-    if want and want not in [p.id for p in ps]:
-        hibak.append(f"az active_broker ('{want}') nincs a profilok között")
+    if want and want not in [p.id for p in profiles(cfg)]:
+        hibak.append(f"az active_broker ('{want}') nincs az aktív profilok között")
     return hibak
 
 
@@ -242,13 +327,13 @@ OVERLAY_KEY = "_broker_overlay"
 
 
 def overlay_pairs(cfg: dict, profile: BrokerProfile) -> dict:
-    """A nem-otthoni bróker értékei (instrumentum + szándék) a pár alapkulcsaira
-    (helyben). Otthoni brókernél NEM csinál semmit. Visszaad: a cfg.
+    """A nem-alap bróker értékei (instrumentum + szándék) a pár alapkulcsaira
+    (helyben). Az alap-értékek gazdájánál (`base`) NEM csinál semmit. Visszaad: a cfg.
 
     A betöltött értékről PILLANATKÉP készül: a mentés ehhez hasonlít, így a
     helyben módosított (pl. `run_state[...] = "live"`) érték is a bróker
     blokkjába kerül."""
-    if profile is None or profile.home or not isinstance(cfg, dict):
+    if profile is None or profile.base or not isinstance(cfg, dict):
         return cfg
     applied, orig, hianyzott = {}, {}, {}
     for sym, pc in (cfg.get("pairs") or {}).items():
@@ -370,7 +455,7 @@ def restore_for_save(data: dict) -> dict:
 
 def write_target(pair_cfg: dict, profile: BrokerProfile) -> dict:
     """Hova írjon egy bróker-függő értéket egy eszköz (pl. refresh_costs):
-    otthoni brókernél a pár maga, különben a `brokers.<id>` blokkja."""
-    if profile is None or profile.home:
+    az alap-értékek gazdájánál a pár maga, különben a `brokers.<id>` blokkja."""
+    if profile is None or profile.base:
         return pair_cfg
     return pair_cfg.setdefault("brokers", {}).setdefault(profile.id, {})

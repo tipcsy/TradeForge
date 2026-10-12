@@ -1166,15 +1166,19 @@ def connection_info(cfg: dict) -> dict:
         # néma. Az OKA viszont enélkül elveszne (rossz jelszó? lezárt terminál?).
         log.debug("connection_info: az account_info nem olvasható: %s", ex)
 
-    broker = cfg.get("broker", {})
+    from core import broker_profile
+    try:
+        _p = broker_profile.active(cfg)
+    except ValueError:
+        _p = broker_profile.main(cfg)
     return {
         "connected": False,
-        "login":     broker.get("login", "—"),
-        "server":    broker.get("server", "—"),
+        "login":     _p.login or "—",
+        "server":    _p.server or "—",
         "name":      "—",
         "balance":   0.0,
         "currency":  "—",
-        "is_demo":   broker.get("is_demo", True),
+        "is_demo":   _p.is_demo,
         "margin_mode":      None,
         "margin_mode_name": "—",
         "is_netting":       False,

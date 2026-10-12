@@ -205,7 +205,7 @@ def main() -> int:
         return undo(Path(args[1]))
 
     cfg = BP._config()
-    home = broker_profile.profiles(cfg)[0]
+    home = broker_profile.all_profiles(cfg)[0]      # a régi data/ a lista ELSŐ brókeréé
     lepesek, ismeretlen = plan(home.id)
 
     print(f"Otthoni bróker: {home.id}   (data: {DATA})\n")

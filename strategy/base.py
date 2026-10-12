@@ -483,7 +483,8 @@ class Strategy(ABC):
         kompatibilitás — a meglévő pozíciók magicje nem változik). TÖBB stratégia
         esetén mindegyik adjon EGYEDI magicet (pl. broker.magic + eltolás), hogy a
         pozíciók broker-szinten szétválaszthatók legyenek."""
-        return int(cfg.get("broker", {}).get("magic", 0))
+        from core import broker_profile as _bp   # a `brokers` lista aktív brókere
+        return _bp.magic_of(cfg)
 
     # --- Optimalizálás: paraméter-érvényesség -----------------------------
     def constraints_ok(self, params: dict) -> bool:
