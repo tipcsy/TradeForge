@@ -860,6 +860,8 @@
   "gui.ep": "Ép:—",
   "gui.equity_gorbe": "Equity görbe:",
   "gui.eredmenyek": "Eredmények:",
+  "gui.exit.be_trail_r": "Ki (alap kezelés): amikor az ár {r} R-t megy a javadra, a stop a költség-tudatos breakevenre kerül, utána a trailing követi az árat a TP-ig.",
+  "gui.exit.no_be": "\n⚠ Nincs breakeven-küszöb (nincs célár és R-küszöb sincs) → a motor magától nem BE-z; a trailing csak kézi BE után indul.",
   "gui.exit.be_trail": "Ki (alap kezelés): amikor az ár a belépő→TP táv {pct}%-át megteszi, a stop a költség-tudatos breakevenre kerül, utána a trailing követi az árat a TP-ig.",
   "gui.exit.costcut": "  Cost-cut: {bars} fő-gyertya után, ha még veszteséges, piaci zárás.",
   "gui.exit.fibo": "Fibo: amikor az ár a belépő→TP táv {pct}%-át megteszi, a stop a {stop} szintre áll és OTT MARAD — nincs részleges zárás, nincs trailing; a TP fut.",

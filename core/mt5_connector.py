@@ -923,6 +923,13 @@ def move_to_breakeven(ticket: int) -> bool:
             # Csak a HELYES oldalon mozgatunk (különben veszteséget rögzítenénk /
             # a bróker elutasítja): BUY → target < aktuális ár; SELL → target > ár.
             target_sl, feasible = _breakeven_plan(p, info)
+            # ⚠ SOSEM HÚZZUK VISSZA: ha az SL már a cél-szinten vagy azon TÚL van
+            # (pl. a trailing vagy egy kézi húzás már tovább vitte), a BE kész —
+            # egy „BE-re állítás" itt ROMLÁST jelentene.
+            tol = info.point or 1e-9
+            if p.sl and ((p.sl >= target_sl - tol) if p.type == mt5.ORDER_TYPE_BUY
+                         else (p.sl <= target_sl + tol)):
+                return True
             if not feasible:
                 return False
 

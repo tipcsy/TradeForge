@@ -860,6 +860,8 @@
   "gui.ep": "Bld:—",
   "gui.equity_gorbe": "Equity curve:",
   "gui.eredmenyek": "Results:",
+  "gui.exit.be_trail_r": "Off (default handling): once price moves {r} R in your favour, the stop goes to cost-aware breakeven, then trailing follows price to the TP.",
+  "gui.exit.no_be": "\n⚠ No breakeven threshold (no target and no R threshold) → the engine will not move to BE on its own; trailing starts only after a manual BE.",
   "gui.exit.be_trail": "Off (base handling): when the price covers {pct}% of the entry→TP distance, the stop moves to the cost-aware breakeven, then trailing follows the price to the TP.",
   "gui.exit.costcut": "  Cost-cut: after {bars} main bars, if still losing, close at market.",
   "gui.exit.fibo": "Fibo: when the price covers {pct}% of the entry→TP distance, the stop moves to the {stop} level and STAYS there — no partial close, no trailing; the TP runs.",

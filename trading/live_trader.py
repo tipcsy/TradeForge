@@ -2058,7 +2058,11 @@ def _apply_be_and_trailing(symbol, pos, ticket, pstate, is_rf, risky,
     # `not _is_none`: a fő ág `_do_trailing` feltételében ott van — a kézi SL-húzás
     # ugyanis is_rf-et adhat `none` presetnél is, és onnantól trailelnénk.
     is_rf = slot_mgr.is_risk_free(ticket)
-    if is_rf and not _is_none and pstate.get("trailing_enabled", True):
+    # ⚠ ÁR-ALAPÚ indulás is (2026-10-12): ha az SL a belépőn vagy azon túl van
+    # (kézzel a nyitóárra húzva is), a trailing indulhat — lásd a fő ágat.
+    if ((is_rf or _rr_mod.sl_beyond_entry(pos.type == mt5.ORDER_TYPE_BUY,
+                                          pos.price_open, pos.sl))
+            and not _is_none and pstate.get("trailing_enabled", True)):
         point  = sym_info.point if (sym_info and sym_info.point > 0) else point_size
         digits = sym_info.digits if sym_info else 5
         # A számolás a KÖZÖS `risk_reduction.trailing_new_sl`-ből (ugyanaz a
@@ -2846,7 +2850,17 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
         is_rf = slot_mgr.is_risk_free(ticket)
         # Trailing: off/risky mint eddig; Felező/Pajzsnál CSAK ha a runner-mód trailing;
         # Fibónál/Harmadosnál SOHA (a stop a kijelölt szinten marad — tiszta stop-mozgatás).
-        _do_trailing = (is_rf and pstate.get("trailing_enabled", True)
+        # ⚠ ÁR-ALAPÚ INDULÁS (2026-10-12, Tibi: „akkor sem működik, amikor már be
+        # van húzva BE-be"). A trailing eddig CSAK költség-tudatos BE után indult
+        # (`is_rf`): ha a stopot kézzel PONTOSAN a nyitóárra húztad, a motor
+        # sosem trailelt — miközben a felület („BE behúzva", zöld Trail gomb) és
+        # az újraindítás utáni slot-helyreállítás ÁR alapján már kockázatmentesnek
+        # vette. Három forrás, két különböző válasz. Mostantól a trailinghez elég,
+        # ha az SL a belépőn vagy azon túl van; a költség-tudatos BE (slot, BE ✓)
+        # ettől függetlenül fut tovább.
+        _price_rf = _rr.sl_beyond_entry(pos.type == mt5.ORDER_TYPE_BUY,
+                                        pos.price_open, pos.sl)
+        _do_trailing = ((is_rf or _price_rf) and pstate.get("trailing_enabled", True)
                         and not _is_none and not _is_fibo and not _is_thirds and
                         (not _is_partial or pstate.get("runner_mode") == _rr.RUNNER_TRAILING))
         if _do_trailing:

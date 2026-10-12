@@ -1690,6 +1690,9 @@ POSITION_COLUMNS = [
     ("tp",      "TP",         10, "center"),
     ("tp_pnl",  _t("gui2.tp_cel"),     12, "center"),   # a TP-nél várható eredmény: R + $
     ("orig_sl", "Er. SL",     10, "center"),
+    # 1 R PONTBAN (2026-10-12, Tibi: „ki sem írja, hány pont az 1 R távolság").
+    # A belépő és az EREDETI stop távolsága — ebből számol minden R a sorban.
+    ("one_r",   "1R",          7, "center"),
     ("pnl",     "P&L",        13, "center"),   # folyó eredmény: $ + R (egy cellában)
 ]
 
@@ -1731,7 +1734,12 @@ def _exit_plan(symbol: str, pstate: dict | None, ctx: dict | None = None) -> dic
     risk_usd = ctx.get("risk_usd")
     entry   = ctx.get("entry"); cur = ctx.get("cur"); tp = ctx.get("tp")
     dir_s   = ctx.get("dir_s", 1)
-    be_pct  = ctx.get("be_pct", 0.5)
+    # ⚠ A BE-küszöb a KOCKÁZATCSÖKKENTÉS beállításából (`rr_state.spec_for`) —
+    # ugyanonnan, ahonnan a motor olvassa. Eddig a stratégia paraméterfájljából
+    # jött (v1.96.0 óta nem ott él), és a `breakeven_r`-t figyelmen kívül hagyta:
+    # a „Ki →BE" tooltip más küszöböt mutatott, mint amire a motor várt.
+    be_pct  = float(spec.get("breakeven_pct", 0.5) or 0.0)
+    be_r    = float(spec.get("breakeven_r", 0.0) or 0.0)
 
     _IND = {"supertrend": "ST", "wpr": "WPR", "divergence": "Div"}
     _RUNNER_DESC = {
@@ -1786,11 +1794,15 @@ def _exit_plan(symbol: str, pstate: dict | None, ctx: dict | None = None) -> dic
     # ── Fázis-tudatos szöveg + tooltip presetenként ─────────────────────────
     if eff == _rrx.PRESET_OFF:
         color = FG_GRAY
-        be_price = (entry + be_pct * (tp - entry)) if (entry and tp) else None
+        be_price = (_rrx.breakeven_trigger(entry, tp or 0.0, risk, dir_s > 0,
+                                           be_pct, be_r) if entry else None)
         if not be_done:
             rem = r_to(be_price)
             text = "Ki →BE"
-            tip = (_t("gui.exit.be_trail", pct=f"{be_pct * 100:.0f}") + prog(rem))
+            tip = ((_t("gui.exit.be_trail_r", r=f"{be_r:g}") if be_r > 0 else
+                    _t("gui.exit.be_trail", pct=f"{be_pct * 100:.0f}")) + prog(rem))
+            if be_price is None:
+                tip += _t("gui.exit.no_be")
         else:
             text = "Ki: Trail fut"
             tip = _t("gui2.a_be_megvolt_a")
@@ -2142,6 +2154,11 @@ class PositionRow:
         # Eredeti SL: fehér, de ha a trailing már elmozdította → szürke
         self.labels["orig_sl"].config(text=_fmt_price(orig, digits) if orig else "—",
                                       fg=FG_GRAY if moved else FG_WHITE)
+        # 1 R pontban — a felhasználónak ne kelljen kiszámolnia.
+        _pt = point or 0.0
+        self.labels["one_r"].config(
+            text=(f"{_risk_price / _pt:.0f}p" if (_pt > 0 and _risk_price > _pt) else "—"),
+            fg=FG_WHITE)
         # Folyó eredmény EGY cellában: R ELÖL, $ HÁTUL — pontosan úgy, mint az SL P&L
         # és a TP cél (mindenhol egységes sorrend). A folyó R = (ár − belépő)/kockázat
         # a profit irányában; a kockázat (_risk_price) ugyanaz, amivel az SL P&L / TP
@@ -2162,7 +2179,7 @@ class PositionRow:
         _risk_usd = abs(profit / cur_r) if (cur_r not in (None, 0)) else None
         _ctx = {"cur_r": cur_r, "risk_price": _risk_price, "risk_usd": _risk_usd,
                 "entry": entry, "cur": cur, "tp": tp, "dir_s": dir_s,
-                "be_pct": (params or {}).get("breakeven_pct", 0.5)}
+                }
         plan = _exit_plan(pos["symbol"], pstate, _ctx)
         self.labels["exit"].config(text=plan["text"], fg=plan["color"])
         self._exit_tip_text = plan["tooltip"]
@@ -2423,7 +2440,11 @@ class PositionsTab:
                                   on_strategy_click=self._on_strategy_click,
                                   on_exit_click=self._on_exit_click)
                 self._rows[tid] = row
-            trail_def = self._trail_default_provider(pos["symbol"])
+            try:
+                trail_def = self._trail_default_provider(pos["symbol"],
+                                                         self._pos_state.get(tid))
+            except TypeError:
+                trail_def = self._trail_default_provider(pos["symbol"])
             point     = self._point_provider(pos["symbol"])
             strat     = (self._strategy_provider(pos.get("magic"), tid)
                          if self._strategy_provider else "—")
@@ -6415,18 +6436,26 @@ class DashboardWindow:
                 pass
         return {}
 
-    def _trail_default(self, symbol: str) -> Optional[int]:
-        """Egy szimbólum optimalizált trail-távolsága PONTBAN (a Pozíciók fül
-        mezőjéhez). A paraméter ATR-SZORZÓKÉNT van tárolva → pont =
-        szorzó × ATR / point. Ha az ATR vagy a 'point' még nem ismert (MT5 adat
-        nélkül), None-t ad — a mező üresen marad, mint eddig."""
-        mult = self._pos_params(symbol).get("trail_distance_atr")
-        if mult is None:
-            mult = self.cfg.get("position_mgmt", {}).get("trail_distance_atr")
+    def _trail_default(self, symbol: str, pstate: dict = None) -> Optional[int]:
+        """A pozíció trail-távolsága PONTBAN (a Pozíciók fül mezőjéhez) —
+        UGYANAZ, amivel a motor számol: `szorzó × belépéskori ATR / point`.
+
+        ⚠ JAVÍTVA (2026-10-12): a szorzót eddig a STRATÉGIA paraméterfájljából
+        olvasta, ahol v1.96.0 óta nincs (a BE/trailing a kockázatcsökkentésé, lásd
+        `core.risk_reduction.BE_TRAIL_KEYS`) — a mező ezért ÜRES maradt, holott a
+        motor közben 0,4 × ATR-rel trailelt volna. Most a `rr_state.spec_for`-ból
+        jön, az ATR pedig a pozíció BELÉPÉSKORI értéke (`entry_atr`), ha a motor
+        már eltette — különben a mostani ATR (közelítés)."""
+        try:
+            from core import rr_state as _rrs
+            mult = _rrs.spec_for(symbol).get("trail_distance_atr")
+        except Exception:
+            mult = None
         if mult is None:
             return None
         _ds = self.dashboard_ref.get(symbol)
-        atr_price = getattr(_ds, "atr_price", None) if _ds else None
+        atr_price = (pstate or {}).get("entry_atr") or (
+            getattr(_ds, "atr_price", None) if _ds else None)
         if not atr_price:
             return None
         pair_cfg = self.cfg["pairs"].get(symbol, {})

@@ -344,6 +344,19 @@ def breakeven_trigger(open_price: float, tp: float, sl_dist: float, is_buy: bool
             else open_price - (open_price - tp) * be_pct)
 
 
+def sl_beyond_entry(is_buy: bool, price_open: float, sl) -> bool:
+    """Az SL a belépőn vagy azon TÚL van a profit irányában (ár szerint
+    kockázatmentes). Ugyanaz a szabály, mint a felület `risk_free`-je és a
+    slot-helyreállításé (`mt5_connector._pos_risk_free`)."""
+    try:
+        sl = float(sl or 0.0)
+    except (TypeError, ValueError):
+        return False
+    if sl <= 0:
+        return False
+    return sl >= price_open if is_buy else sl <= price_open
+
+
 def trailing_new_sl(is_buy: bool, price_open: float, price_current: float,
                     current_sl: float, *, entry_atr: float,
                     trail_distance_atr: float, trail_activation_atr: float,
