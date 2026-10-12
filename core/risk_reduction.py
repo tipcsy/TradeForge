@@ -146,8 +146,12 @@ def default_config() -> dict:
         # Mérve, 14 pár, OOS: BE ~7 R → −0,3198 R/kötés; BE 1 R → −0,2234.
         # A csatolás ára +0,166 R/kötés.
         #
-        # `0.0` (alap) = a régi viselkedés BITAZONOSAN — a `breakeven_pct` dönt.
-        "breakeven_r":          0.0,
+        # ⚠ ALAP: 1 R (2026-10-12, Tibi: „állítsd be a BE-t 1 R-re mindenhol").
+        # Addig `0.0` volt (a célár-arányos `breakeven_pct` döntött), és minden
+        # pár a `data/risk_mode.json`-ban kapta meg az 1 R-t — egy ÚJ instrumentum
+        # viszont még a célár-arányos BE-vel indult volna. `0.0` = a célár-arányos
+        # viselkedés (kifejezetten beállítva továbbra is elérhető).
+        "breakeven_r":          1.0,
         "trail_activation_atr": 0.5,        # ennyi ATR profit UTÁN indul a trailing
         "trail_distance_atr":   0.4,        # ennyi ATR-rel követ
         "trigger_R":        1.0,            # hány R-nél lép életbe a részleges zárás

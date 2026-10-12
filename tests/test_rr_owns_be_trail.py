@@ -115,8 +115,12 @@ bt._manage_position(t4, high=109.0, low=99.0, point_size=0.01,
 check("`none` preset: a stop MARAD, ahol volt", t4.sl == 90.0 and not t4.risk_free,
       f"sl={t4.sl}")
 
+# 2026-10-12: az alap BE-küszöb 1 R (a stop 10 → a BE 110-nél) — a mozgás ezért
+# 1 R fölé megy, a célár pedig messzebb van, hogy ne zárjon ki előbb.
 t5 = T()
-bt._manage_position(t5, high=109.0, low=99.0, point_size=0.01,
+t5.tp = 120.0
+t5.sl_points, t5.point_size = 1000, 0.01     # 1 R = 10 (a valódi Trade-nek van)
+bt._manage_position(t5, high=111.0, low=99.0, point_size=0.01,
                     min_lot=0.01, lot_step=0.01,
                     rr={**rr.default_config(), "preset": rr.PRESET_OFF})
 check("`off` preset: kockazatmentesit (ez a KULONBSEG a ketto kozt)",

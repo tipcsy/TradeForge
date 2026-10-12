@@ -43,6 +43,15 @@ from strategy import get_strategy_by_name
 from strategy.settings import load_strategy_config, param_class, EXEC_PARAM
 from ml import optimizer as opt
 
+# ⚠ A KISZÁLLÁS rögzítése (2026-10-12): a teszt a beágyazott optimalizáló
+# MECHANIKÁJÁT nézi szintetikus adaton. Az alap BE-küszöb 1 R lett; ezen az
+# adaton ettől egyetlen próba sem ad elfogadható eredményt — a mechanikának
+# ehhez semmi köze. A „TEST" párnak ezért a régi, célár-arányos BE-t adjuk, CSAK
+# a memóriában (a `data/risk_mode.json`-t nem írjuk).
+from core import rr_state as _rrs
+_rrs.ensure_loaded()
+_rrs._state["TEST"] = {"preset": "off", "breakeven_r": 0.0}
+
 results = []
 
 

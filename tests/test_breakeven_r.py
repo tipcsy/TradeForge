@@ -134,8 +134,10 @@ check("...de okonként CSAK EGYSZER (a backteszt szoros ciklusban hívja)",
 # ══ 2. Az alapérték visszafelé kompatibilis ════════════════════════════════
 _d = rr.default_config()
 check("a default_config ismeri a breakeven_r-t", "breakeven_r" in _d)
-check("⚠ az alapértéke 0.0 → a meglévő párok viselkedése VÁLTOZATLAN",
-      _d["breakeven_r"] == 0.0, str(_d.get("breakeven_r")))
+# 2026-10-12: az alap 1 R lett (Tibi döntése) — minden pár már eddig is 1 R-t
+# kapott a risk_mode.json-ból; az alap egy ÚJ instrumentumnak számít.
+check("⚠ az alapértéke 1 R (a célártól független BE)",
+      _d["breakeven_r"] == 1.0, str(_d.get("breakeven_r")))
 
 # A rögzített szerződést NEM bővítettük (három teszt egyenlőséget vár rá)
 check("⚠ a breakeven_r NINCS a BE_TRAIL_KEYS-ben (rögzített szerződés)",
