@@ -7,16 +7,17 @@ melyik gátol, és melyik szabad, melyik kapu aktív, és melyik nem. Esetleg be
 tudnánk, vagy ki is tudnánk kapcsolni az egyes kapuk működését."
 
     ┌ GOLD — Kapuk ─────────────────────────────────────────────────────────┐
-    │ Kapu         Bekapcsolva   Most        │ wpr_sma        │ csilla      │
-    │ Spread       igen          ✓ szabad    │ [Gátol ▾] ✓    │ [Örökölt▾] ✓│
-    │ Piac         igen          ⛔ Érdekt.   │ [Gátol ▾] ⛔   │ [Ki ▾]   –  │
-    │ Volatilitás  NEM (Beáll.)  –           │ Ki (Beáll.)    │ …           │
+    │ Kapu                Rövid név  Most       │ wpr_sma       │ csilla     │
+    │ Spread              Spread     ✓ szabad   │ [Gátol ▾] ✓   │ [Örökölt▾]✓│
+    │ Idősík-együttállás  Együtt     ⛔ gátol    │ [Gátol ▾] ⛔  │ [Ki ▾]   – │
     └───────────────────────────────────────────────────────────────────────┘
 
-Három külön kérdés, három oszlop — és a különbség számít:
-  • **Bekapcsolva** — a kapu EGYÁLTALÁN él-e (`dashboard.gate_order`, a
-    Beállítások „Kapuk" füle). Ha nem, se oszlopa, se hatása: a stratégiánkénti
-    beállítása FELFÜGGESZTVE, nem törölve. Ez globális, ezért itt csak olvasható.
+Csak a BEKAPCSOLT kapuk látszanak, a Beállítások „Kapuk" fülén megadott
+SORRENDBEN (ugyanaz, mint a tábla oszlopaié). Egy kikapcsolt kapu itt úgysem
+kapcsolható be (az globális, nem a páré), ezért nincs sora (Tibi, 2026-10-12).
+A név mellett a tábla oszlopának RÖVID neve áll, hogy a sor egyértelműen
+azonosítható legyen a táblán.
+
   • **Most** — a mért állapot: szabad / gátol / nincs adat. Ugyanaz, amiből a
     `K.Össz.` számol (minden bekapcsolt kaput blokkolónak véve).
   • **Stratégiánként** — a hatás (Gátol / Csökkent / Ki / Örökölt) és hogy
@@ -38,10 +39,16 @@ from core.i18n import t as _t
 INHERIT = None
 
 
-def rows(cfg: dict, symbol: str, ctx: dict, strategies) -> list:
-    """Kapunként egy sor (a REGISTRY sorrendjében, a behelyezett kapukkal együtt).
+def short_label(key: str) -> str:
+    """A kapu RÖVID neve = a tábla oszlopfejléce („Együtt", „Volat.×")."""
+    from dashboard import live_row as _lr
+    return _lr.header_text(_gl.column_key(key))
 
-    `[{key, label, enabled, state, detail,
+
+def rows(cfg: dict, symbol: str, ctx: dict, strategies) -> list:
+    """BEKAPCSOLT kapunként egy sor, a Beállításokban megadott sorrendben.
+
+    `[{key, label, short, enabled, state, detail,
        per: {stratégia: {effect, source, override, state}}}]`
     — `state` a kapu MÉRT állapota (PASS/BLOCKING/UNKNOWN; OFF, ha a kapu ki van
     kapcsolva), a `per[..]["state"]` pedig az, amit a stratégia a SAJÁT hatásával
@@ -57,7 +64,7 @@ def rows(cfg: dict, symbol: str, ctx: dict, strategies) -> list:
         per_strategy[name] = {s["key"]: s for s in _g.evaluate(ctx, eff)}
     pg = ((cfg.get("pairs") or {}).get(symbol) or {}).get("gates") or {}
     out = []
-    for key in _g.KEYS:
+    for key in _gl.enabled_gates(cfg):
         m = measured.get(key) or {}
         per = {}
         for name in strategies or []:
@@ -67,7 +74,8 @@ def rows(cfg: dict, symbol: str, ctx: dict, strategies) -> list:
                 "override": _g._as_effect((pg.get(key) or {}).get(name)) is not None,
                 "state": (per_strategy[name].get(key) or {}).get("state", _g.OFF),
             }
-        out.append({"key": key, "label": _g.label_of(key), "enabled": key in on,
+        out.append({"key": key, "label": _g.label_of(key), "short": short_label(key),
+                    "enabled": key in on,
                     "state": m.get("state", _g.OFF), "detail": m.get("detail", ""),
                     "per": per})
     return out
@@ -169,7 +177,7 @@ class GateSummaryDialog:
         grid = tk.Frame(page, bg=BG)
         grid.pack(fill="x")
 
-        fejlec = [_t("gsum.col.gate"), _t("gsum.col.enabled"), _t("gsum.col.now")] \
+        fejlec = [_t("gsum.col.gate"), _t("gsum.col.short"), _t("gsum.col.now")] \
             + list(self.strategies)
         for c, txt in enumerate(fejlec):
             tk.Label(grid, text=txt, bg=BG, fg=FG_BLUE, font=f["small"],
@@ -183,9 +191,7 @@ class GateSummaryDialog:
             nev.grid(row=r, column=0, sticky="w", padx=(0, 14), pady=2)
             if on_open_gate:
                 nev.bind("<Button-1>", lambda _e, k=key: self._open(k))
-            tk.Label(grid, text=(_t("gsum.enabled.yes") if row["enabled"]
-                                 else _t("gsum.enabled.no")),
-                     bg=BG, fg=(FG_GREEN if row["enabled"] else FG_GRAY_DIM),
+            tk.Label(grid, text=row["short"], bg=BG, fg=FG_GRAY,
                      font=f["small"], anchor="w").grid(row=r, column=1, sticky="w",
                                                        padx=(0, 14))
             st_txt, st_col = _state_text(row["state"])
@@ -196,12 +202,6 @@ class GateSummaryDialog:
                 p = row["per"][name]
                 cell = tk.Frame(grid, bg=BG)
                 cell.grid(row=r, column=c, sticky="w", padx=(0, 14))
-                if not row["enabled"]:
-                    # A Beállításokban kikapcsolt kapu: a hatása FELFÜGGESZTVE —
-                    # itt nem állítható (globális kapcsoló, nem a páré).
-                    tk.Label(cell, text=_t("gsum.master_off"), bg=BG, fg=FG_GRAY_DIM,
-                             font=f["small"]).pack(side="left")
-                    continue
                 inh, _src = _g.inherited_effect(cfg, symbol, name, key)
                 cimkek = {_t("gate.effect.inherited",
                              effect=_g.EFFECT_LABEL[inh]): INHERIT}

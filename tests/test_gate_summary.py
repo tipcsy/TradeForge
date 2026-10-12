@@ -34,18 +34,22 @@ CFG = {"dashboard": {"gate_order": ["spread", "market", "momentum"]},
 CTX = {"signal": "BUY", "market_name": "regime", "market_label": "Érdektelen",
        "market_state": "dead"}
 
-R = {r["key"]: r for r in GS.rows(CFG, "GOLD", CTX, ["wpr_sma", "csilla"])}
-check("minden regisztrált kapu kap sort", set(R) == set(G.KEYS), sorted(R))
-check("a Beállításokban bekapcsolt kapu: enabled", R["market"]["enabled"])
-check("...a ki nem kapcsolt (gate_order-ből hiányzó): NEM enabled",
-      not R["volatility"]["enabled"] and not R["cost"]["enabled"])
-check("kikapcsolt kapu stratégia-hatása: none + master_off forrás",
-      R["volatility"]["per"]["wpr_sma"]["effect"] == G.EFFECT_NONE
-      and R["volatility"]["per"]["wpr_sma"]["source"] == G.SRC_MASTER_OFF)
+_ROWS = GS.rows(CFG, "GOLD", CTX, ["wpr_sma", "csilla"])
+R = {r["key"]: r for r in _ROWS}
+check("CSAK a bekapcsolt kapuk kapnak sort (a kikapcsolt itt úgysem kapcsolható be)",
+      set(R) == {"spread", "market", "momentum"}, sorted(R))
+check("a sorrend a Beállításoké (gate_order), nem a REGISTRY-é",
+      [r["key"] for r in _ROWS] == ["spread", "market", "momentum"],
+      [r["key"] for r in _ROWS])
+check("a rövid név a tábla oszlopfejléce",
+      R["market"]["short"] == GS.short_label("market") and R["spread"]["short"] == "Spread")
+check("tf_align rövid neve az `align` oszlopé (nem a kapu-kulcs)",
+      GS.short_label("tf_align") not in ("", "tf_align"), GS.short_label("tf_align"))
 check("pár-szintű felülírás jelölve", R["market"]["per"]["wpr_sma"]["override"]
       and not R["market"]["per"]["csilla"]["override"])
-check("a mért állapot a kapuét mutatja (kikapcsolt kapu: OFF)",
-      R["volatility"]["state"] == G.OFF)
+_R2 = GS.rows({**CFG, "dashboard": {"gate_order": ["momentum", "spread"]}}, "GOLD", CTX,
+              ["wpr_sma"])
+check("más sorrend a Beállításokban → itt is az", [r["key"] for r in _R2] == ["momentum", "spread"])
 
 # ── mentés ────────────────────────────────────────────────────────────────
 import copy                                                      # noqa: E402
@@ -92,7 +96,7 @@ if _TK:
         d = GS.GateSummaryDialog(root, copy.deepcopy(CFG), "GOLD", ["wpr_sma", "csilla"],
                                  ctx=CTX)
         check("az ablak felépül", d.top.winfo_exists())
-        check("csak a BEKAPCSOLT kapukra van választó (3 kapu × 2 stratégia)",
+        check("a bekapcsolt kapukra van választó (3 kapu × 2 stratégia)",
               len(d._vars) == 6, len(d._vars))
         check("változtatás nélkül nincs mit menteni", d._changes() == {})
         sv, cimkek, _ = d._vars[("market", "csilla")]
