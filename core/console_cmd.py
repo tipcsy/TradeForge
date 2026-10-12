@@ -1266,6 +1266,80 @@ def cmd_photo(ctx: Context, args: list, confirmed: bool = False) -> Result:
     return Result(sorok, photo=png)
 
 
+# A kézi szűrő állapotainak beírható nevei (kis/nagybetű mindegy). Magyarul ÉS
+# angolul, mert telefonon azt írod, ami előbb eszedbe jut.
+_MANUAL_WORDS = {
+    "none": "none", "nincs": "none", "off": "none", "-": "none",
+    "no": "no_trade", "notrade": "no_trade", "no_trade": "no_trade", "ne": "no_trade",
+    "stop": "no_trade", "tilt": "no_trade",
+    "cautious": "cautious", "ovatos": "cautious", "óvatos": "cautious", "half": "cautious",
+    "fel": "bull", "felfele": "bull", "lefele": "bear",
+    "bull": "bull", "up": "bull", "long": "bull",
+    "bear": "bear", "down": "bear", "le": "bear", "short": "bear",
+    "nice": "nice", "szep": "nice", "szép": "nice", "both": "nice",
+}
+
+
+def manual_state_word(word: str) -> Optional[str]:
+    """Egy beírt szó → kézi-szűrő állapot (None, ha ismeretlen)."""
+    from core import manual_filter as _mf
+    w = str(word or "").strip().lower()
+    return w if w in _mf.STATES else _MANUAL_WORDS.get(w)
+
+
+def cmd_manual(ctx: Context, args: list, confirmed: bool = False) -> Result:
+    """`manual` — a mai kézi szűrők; `manual <pár>` — egy pár állapota;
+    `manual <pár>|all <állapot>` — beállítás (mára; új nap → Nincs).
+
+    ⚠ NEM NYIT KÖTÉST: a kézi szűrő csak SZŰKÍT (gátol, felez, irányt szűr),
+    ezért megerősítés nélkül állítható — mint a felület lenyílójában."""
+    from core import manual_filter as _mf
+    if not _mf.enabled(ctx.cfg):
+        return Result([_t("console.manual.disabled")], ok=False)
+    if not args:
+        mai = _mf.states()
+        if not mai:
+            return Result([_t("console.manual.all_none"), _t("console.manual.usage")])
+        sorok = [_t("console.manual.header")]
+        sorok += [f"{s}: {_mf.LABEL.get(st, st)}" for s, st in sorted(mai.items())]
+        return Result(sorok + [_t("console.manual.usage")])
+    celok = None
+    if str(args[0]).lower() in ("all", "mind", "minden"):
+        celok = [s for s in _pairs(ctx)]
+    else:
+        sym = _resolve_symbol(ctx, args[0])
+        if sym is None:
+            jeloltek = _close_symbols(ctx, args[0])
+            if len(jeloltek) != 1:
+                return Result([_t("console.photo.unknown", given=args[0],
+                                  candidates=", ".join(jeloltek) or "—")], ok=False)
+            sym = jeloltek[0]
+        celok = [sym]
+    if len(args) < 2:
+        if len(celok) != 1:
+            return Result([_t("console.manual.usage")], ok=False)
+        st = _mf.state_of(celok[0])
+        return Result([_t("console.manual.current", symbol=celok[0],
+                          state=_mf.LABEL.get(st, st))])
+    st = manual_state_word(args[1])
+    if st is None:
+        return Result([_t("console.manual.bad_state", given=args[1]),
+                       _t("console.manual.usage")], ok=False)
+    for s in celok:
+        _mf.set_state(s, st)
+        ds = (ctx.dashboard or {}).get(s)
+        if ds is not None:
+            try:
+                ds.manual_state = st
+            except Exception:
+                pass
+    if len(celok) == 1:
+        return Result([_t("console.manual.set", symbol=celok[0],
+                          state=_mf.LABEL.get(st, st))])
+    return Result([_t("console.manual.set_all", n=len(celok),
+                      state=_mf.LABEL.get(st, st))])
+
+
 def _close_symbols(ctx: Context, name: str) -> list:
     """A beírt névhez KÖZELI párok (kisbetűsen, elöl-egyezés + difflib)."""
     import difflib
@@ -1325,6 +1399,7 @@ COMMANDS: dict = {
     "state":   cmd_state,
     "heart":   cmd_heart,
     "photo":   cmd_photo,
+    "manual":  cmd_manual,
     "quit":    cmd_quit,
 }
 
@@ -1357,6 +1432,7 @@ _HELP = (
     ("state", "console.help.state"),
     ("heart", "console.help.heart"),
     ("photo <pár> [M1|M15] [wpr]", "console.help.photo"),
+    ("manual [<pár>|all] [<állapot>]", "console.help.manual"),
     ("quit", "console.help.quit"),
 )
 

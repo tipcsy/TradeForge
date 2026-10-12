@@ -215,8 +215,11 @@ def send_buttons(token: str, chat_id, szoveg: str, gombok) -> bool:
     ok, res = _hivas(token, "sendMessage", {
         "chat_id": str(chat_id), "text": _elo(szoveg)[:MAX_HOSSZ],
         "disable_web_page_preview": True,
-        "reply_markup": {"inline_keyboard": [[
-            {"text": str(f), "callback_data": str(a)[:64]} for f, a in gombok]]},
+        # Egy sor (`[(felirat, adat), …]`) VAGY több sor (`[[…], […]]`).
+        "reply_markup": {"inline_keyboard": [
+            [{"text": str(f), "callback_data": str(a)[:64]} for f, a in sor]
+            for sor in (gombok if gombok and isinstance(gombok[0], list)
+                        else [list(gombok)])]},
     })
     if ok and isinstance(res, dict) and res.get("ok"):
         return True

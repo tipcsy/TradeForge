@@ -50,8 +50,11 @@ log = logging.getLogger(__name__)
 # kimarad: egy felig hasznalhato postalada (latod, de nem donthetsz) zavarobb,
 # mint egy tisztan olvaso nezet.
 # ⚠ A `photo` OLVASÓ parancs (pillanatkép a párról) — semmit nem állít.
+# ⚠ A `manual` (kézi előszűrő) ÁLLÍT, de csak SZŰKÍT (gátol / felez / irányt
+# szűr) — kötést nem nyit, ezért szerepelhet itt megerősítés nélkül.
 ENGEDETT = ("help", "balance", "pos", "today", "report", "why", "health",
-            "plan", "inbox", "optq", "state", "heart", "photo", "play", "stop")
+            "plan", "inbox", "optq", "state", "heart", "photo", "manual",
+            "play", "stop")
 
 # Meddig él egy megerősítő gomb.
 AJANLAT_MP = 600
@@ -65,9 +68,9 @@ POLL_MP = 25
 # A parancs-menü sorrendje. ⚠ NEM ábécé: a leggyakrabban használt kerül előre,
 # és a két ÁLLÍTÓ parancs (`play`/`stop`) a végére — hogy ne azokra essen a
 # mutatóujj, amikor csak megnézni akarsz valamit.
-MENU_SORREND = ("state", "pos", "today", "photo", "report", "inbox", "optq",
-                "why", "health", "plan", "balance", "heart", "help", "play",
-                "stop")
+MENU_SORREND = ("state", "pos", "today", "photo", "manual", "report", "inbox",
+                "optq", "why", "health", "plan", "balance", "heart", "help",
+                "play", "stop")
 
 
 def parancs_lista(nyelv: str = "") -> list:
@@ -90,7 +93,7 @@ def parancs_lista(nyelv: str = "") -> list:
     for nev in sorrend:
         leiras = _szoveg(f"console.help.{nev}")
         # A paraméteres parancsoknál a menüben is látszódjon, mit vár.
-        if nev in ("play", "stop", "why", "photo"):
+        if nev in ("play", "stop", "why", "photo", "manual"):
             leiras = _szoveg("tg.menu.arg_pair", leiras=leiras)
         ki.append((nev, leiras))
     return ki
@@ -163,6 +166,15 @@ class Bot:
             return [Kimenet(chat_id=chat, text=_t("tg.unknown", name=elso))]
         sor = (nev + " " + maradek).strip()
         res = cc.dispatch(self.ctx, sor)
+        # KÉZI SZŰRŐ: `/manual <pár>` → az állapot GOMBOKKAL választható (telefonon
+        # nem kell az állapot nevét begépelni). A gomb a párt és az állapotot viszi.
+        _arg = maradek.split()
+        if nev == "manual" and res.ok and len(_arg) == 1                 and _arg[0].lower() not in ("all", "mind", "minden"):
+            sym = cc._resolve_symbol(self.ctx, _arg[0]) or (
+                (cc._close_symbols(self.ctx, _arg[0]) or [None])[0])
+            if sym:
+                return [Kimenet(chat_id=chat, text=self._szoveg(res),
+                                buttons=self._manual_gombok(sym))]
         if res.confirm:
             # ⚠ A parancsot NEM hajtottuk végre: gombot kínálunk hozzá.
             azon = secrets.token_urlsafe(8)
@@ -184,6 +196,13 @@ class Bot:
         # megerősítés-nyilvántartás (`_fuggo`) itt nem játszik.
         if valasz in ("a", "m", "x"):
             return self._ajanlat_gomb(valasz, azon, chat, cid, mid)
+        if valasz == "k":
+            # KÉZI SZŰRŐ gomb: `k:<pár>:<állapot>` — ugyanaz a parancs, mint a
+            # begépelt `/manual <pár> <állapot>` (egy út, egy szabály).
+            sym, _, st = azon.rpartition(":")
+            res = cc.dispatch(self.ctx, f"manual {sym} {st}")
+            return [Kimenet(chat_id=chat, callback_id=cid, edit_message_id=mid,
+                            text=self._szoveg(res))]
         bejegyzes = self._fuggo.pop(azon, None)
         if not bejegyzes or float(self.ora()) > bejegyzes[2]:
             # ⚠ LEJÁRT vagy ismeretlen → NEM csinálunk semmit. Egy fél órája
@@ -225,6 +244,15 @@ class Bot:
                                      (_t("tg.btn.no"), f"x:{azon}")))]
         return [Kimenet(chat_id=chat, callback_id=cid, edit_message_id=mid,
                         text=szoveg)]
+
+    @staticmethod
+    def _manual_gombok(sym: str) -> tuple:
+        """A kézi szűrő hat állapota gombként, KÉT sorban (egy sorban telefonon
+        olvashatatlanul keskeny lenne)."""
+        from core import manual_filter as _mf
+        g = [(_mf.SHORT.get(s, s) if s != _mf.NONE else _mf.LABEL.get(s, s),
+              f"k:{sym}:{s}") for s in _mf.STATES]
+        return ([g[0], g[1], g[2]], [g[3], g[4], g[5]])
 
     @staticmethod
     def _szoveg(res: "cc.Result") -> str:
