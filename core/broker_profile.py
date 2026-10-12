@@ -199,15 +199,23 @@ def magic_of(cfg: dict | None) -> int:
 
 
 _override: str | None = None
+_override_any: bool = False
 
 
-def set_override(broker_id: str | None) -> None:
+def set_override(broker_id: str | None, allow_inactive: bool = False) -> None:
     """A `--broker <id>` futásidejű választása (0029, 4. lépés).
 
     ⚠ NEM a configba: ha a motor egy mentésnél kiírná az `active_broker`-t, a
-    következő indításkor a FELÜLET motorja is erre a brókerre állna át."""
-    global _override
+    következő indításkor a FELÜLET motorja is erre a brókerre állna át.
+
+    `allow_inactive=True`: egy KIKAPCSOLT (`"active": false`) bróker is választható
+    — CSAK tesztnek és kutató-eszköznek, ami egy adott bróker ADATÁN akar futni
+    (pl. a tesztek az ActivTrades-adatra rögzítve, akkor is, ha épp a RoboForex a
+    főszámla). A motor (`--broker`) ezt NEM használja: kikapcsolt brókeren motor
+    nem indulhat."""
+    global _override, _override_any
     _override = broker_id or None
+    _override_any = bool(allow_inactive and broker_id)
 
 
 def active(cfg: dict | None) -> BrokerProfile:
@@ -215,7 +223,7 @@ def active(cfg: dict | None) -> BrokerProfile:
     első. Ismeretlen `--broker` azonosítóra ValueError — csendben NEM esünk
     vissza az otthoni brókerre (egy második motor azzal az otthoni számlán
     kereskedne)."""
-    ps = profiles(cfg)
+    ps = all_profiles(cfg) if _override_any else profiles(cfg)
     if _override:
         for p in ps:
             if p.id == _override:

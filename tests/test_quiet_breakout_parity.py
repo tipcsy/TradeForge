@@ -22,6 +22,8 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from core import broker_paths as _BP                      # noqa: E402
+from tests import _broker_pin                            # noqa: E402
+_broker_pin.pin()   # a valódi adat az ActivTradesé, akármelyik a főszámla
 sys.path.insert(0, str(ROOT / "tools" / "research"))
 
 from core import applog  # noqa: E402

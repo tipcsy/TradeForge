@@ -176,7 +176,13 @@ except Exception:
     _live = False
 
 if _live:
-    _syms = [s for s in cfg["pairs"] if not s.startswith("_")]
+    # ⚠ Csak a CSATLAKOZOTT brókernél LÉTEZŐ instrumentumok (2026-10-12): a
+    # RoboForex főszámlán 8 pár (UK100, Fra40, EURHUF …) nem létezik — azok
+    # jogosan „ismeretlenek", nem a szerver-eltolás hibája. (Ugyanezt mutatja
+    # a felület „Piac: N ismeretlen" sora, és az „Ismeretlen elrejtése" szűrő.)
+    from core import connector as _cn
+    _syms = [s for s in cfg["pairs"] if not s.startswith("_")
+             and _cn.get().symbol_spec(s) is not None]
     _st = ms.states_of(_syms)
     logging.disable(logging.NOTSET)
     _n_open = sum(1 for v in _st.values() if v["state"] == ms.OPEN)

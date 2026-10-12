@@ -81,6 +81,14 @@ except ValueError:
 finally:
     B.set_override(None)
 check("`--broker` egy kikapcsolt brókerre: hiba (nem indul motor)", ok)
+B.set_override(ROB, allow_inactive=True)
+try:
+    _p = B.active(c)
+finally:
+    B.set_override(None)
+check("teszt/kutatás KIFEJEZETTEN kérheti a kikapcsolt bróker adatát",
+      _p.id == ROB and _p.base is False)
+check("...a felülírás visszavonása után újra a főszámla", B.active(c).id == AT)
 
 c = {"brokers": [br(AT, main=True, active=False), br(ROB)]}
 ps = B.profiles(c)
@@ -126,5 +134,5 @@ check("alapból az ismeretlen is LÁTSZIK", len(filter_rows(_rows)) == 3)
 check("pipával az ismeretlen eltűnik, a zárt piac marad",
       [r["symbol"] for r in filter_rows(_rows, hide_unknown=True)] == ["GOLD", "Fra40"])
 
-print(f"\n{sum(results)}/{len(results)} PASS")
+print(f"\n{sum(results)}/{len(results)} teszt PASS")
 sys.exit(0 if all(results) else 1)

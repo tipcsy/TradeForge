@@ -78,5 +78,5 @@ a = MS.latest_category("regime", m15)
 b = MS.latest_category("regime", m15)
 check("a legutóbbi besorolás stabil és gyorsítótárazott", a == b and a is not None, a)
 
-print(f"\n{sum(results)}/{len(results)} PASS")
+print(f"\n{sum(results)}/{len(results)} teszt PASS")
 sys.exit(0 if all(results) else 1)

@@ -84,13 +84,16 @@ def _env_profile():
     if not azon:
         return None
     from core import broker_profile
-    for p in broker_profile.profiles(_config()):
+    # ⚠ A környezeti változó KIFEJEZETT adat-választás (kutatás, tesztek) — egy
+    # kikapcsolt (`"active": false`) bróker adata is elérhető vele: a kikapcsolás
+    # a motort és a felületet érinti, a letöltött adat attól még ott van.
+    for p in broker_profile.all_profiles(_config()):
         if p.id == azon:
             return p
     # ⚠ NEM esünk vissza csendben az otthonira: egy elgépelt név az otthoni
     # bróker adatán futtatná a „roboforexes" kutatást.
     raise ValueError(f"{ENV}={azon!r}: ismeretlen bróker (a profilok: "
-                     f"{', '.join(p.id for p in broker_profile.profiles(_config()))})")
+                     f"{', '.join(p.id for p in broker_profile.all_profiles(_config()))})")
 
 
 def _aktiv(profile=None):
