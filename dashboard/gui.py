@@ -3389,6 +3389,7 @@ class DashboardWindow:
                 # cellái ezen keresztül nyílnak, mert rájuk nincs — és nem is
                 # lehet — külön `on_<kapu>` visszahívás a felületen.
                 on_gate=self._open_gate_dialog,
+                on_gates=self._open_gate_summary,
                 broker_tags=_btags(_profs, sym, _mas)))
         return rows
 
@@ -3500,6 +3501,23 @@ class DashboardWindow:
             all_symbols=[s for s, p in self.cfg.get("pairs", {}).items()
                          if isinstance(p, dict)],
             on_saved=lambda: self._on_gate_saved(symbol))
+
+    def _open_gate_summary(self, symbol: str):
+        """A `K.Össz.` cella: az instrumentum összes kapuja — mért állapot,
+        bekapcsoltság és stratégiánkénti hatás, állítható (`gate_summary`)."""
+        from dashboard.gate_summary import open_gate_summary
+        from strategy import enabled_strategy_names
+        ds = self.dashboard_ref.get(symbol)
+        pc = self.cfg.get("pairs", {}).get(symbol) or {}
+        try:
+            from core import gates as _g
+            ctx = _g.ctx_from_state(ds, getattr(ds, "params", None) or {}, pc)
+        except Exception:
+            ctx = {}
+        open_gate_summary(
+            self.root, self.cfg, symbol, enabled_strategy_names(self.cfg, symbol) or [],
+            ctx=ctx, on_saved=lambda: self._on_gate_saved(symbol),
+            on_open_gate=lambda k: self._open_gate_dialog(symbol, k))
 
     def _on_gate_saved(self, symbol: str):
         """Mentés után: config.json kiírása + a pár adatainak frissítése, hogy a

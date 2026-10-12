@@ -182,7 +182,8 @@ def cells_for(d: dict, collapsed: dict, on_close=None) -> dict:
                             on_click=_gv.get("on_click"))
     badge = g.get("badge", "✓")
     out["badge"] = Cell("badge", text=badge, anchor="center",
-                        fg=(FG_RED if badge != "✓" else FG_GREEN))
+                        fg=(FG_RED if badge != "✓" else FG_GREEN),
+                        on_click=g.get("on_badge"))
 
     # ── közép: stratégiánként ────────────────────────────────────────────
     for st in (d.get("strategies") or []):

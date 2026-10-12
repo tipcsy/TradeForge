@@ -278,7 +278,7 @@ def row_data(symbol: str, ds, strategy_names, cfg: dict = None,
              on_symbol=None, on_align=None, on_spread=None,
              on_market=None, on_momentum=None, on_cost=None,
              on_volatility=None, open_charts=None, market_states=None,
-             broker_tags: str = "") -> dict:
+             broker_tags: str = "", on_gates=None) -> dict:
     """Egy instrumentum sorának adata a `live_row.LiveRow` számára.
 
     `ds`          — `live_trader.PairDashboardState` (duck-typed).
@@ -407,6 +407,9 @@ def row_data(symbol: str, ds, strategy_names, cfg: dict = None,
             "cost": _cost_cell(ctx, on_cost, symbol),
             "volatility": _volatility_cell(ctx, on_volatility, symbol),
             "badge": badge,
+            # A `K.Össz.` cella: az instrumentum ÖSSZES kapuja egy ablakban
+            # (`dashboard/gate_summary.py`) — eddig a kattintás semmit nem csinált.
+            "on_badge": (lambda: on_gates(symbol)) if on_gates else None,
             "blocking_count": blocking_count,
         },
         "strategies": strategies,
