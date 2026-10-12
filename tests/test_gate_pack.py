@@ -265,7 +265,7 @@ for _lang in ("hu", "en"):
 # NEM nyult a beepitettekhez (se torles, se sorrend-csere).
 check_("a beépített kapuk sértetlenek maradtak",
        tuple(e["key"] for e in G._BUILTIN)
-       == ("spread", "tf_align", "market", "momentum", "cost", "volatility")
+       == ("spread", "tf_align", "market", "momentum", "cost", "volatility", "manual")
        and all(k in G.KEYS for k in (e["key"] for e in G._BUILTIN)),
        str(G.KEYS))
 

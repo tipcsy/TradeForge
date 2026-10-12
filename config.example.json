@@ -78,6 +78,10 @@
       }
     }
   ],
+  "_comment_manual_filter": "Manuális előszűrő: a reggeli kézi piac-áttekintés instrumentumonként (Nincs / Ne kereskedj! / Óvatosan / Szép chart ↑ ↓ ↕). enabled=true → „Kézi” oszlop a Kapuk előtt, a cellán lenyíló; új nap → minden Nincs.",
+  "manual_filter": {
+    "enabled": false
+  },
   "trading": {
     "_comment_risk": "Az összes nyitott slot EGYÜTTES kockázata (nem per-trade!). 0.01 = 1%",
     "account_risk_pct": 0.01,

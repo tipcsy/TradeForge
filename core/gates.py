@@ -76,6 +76,10 @@ MARKET = "market"
 MOMENTUM = "momentum"
 COST = "cost"
 VOLATILITY = "volatility"
+# A MANUÁLIS ELŐSZŰRŐ (2026-10-12): a reggeli kézi ítélet. A motorban kapu, de
+# NEM a Kapuk blokk része: a táblán ELŐTTE áll, a `dashboard.gate_order` nem
+# rendezi, és a be/kikapcsolása a saját kulcsa (`manual_filter.enabled`).
+MANUAL = "manual"
 
 # ── A LENDÜLET-kapu MÓDJA: MIT figyeljen ───────────────────────────────────
 # A többi kapunál egyértelmű, mi a „bukás" (túl tág spread, nincs együttállás,
@@ -212,6 +216,11 @@ _BUILTIN = (
     # költség) látható kapu volt; ez az aszimmetria került a felhasználónak hetekbe.
     {"key": VOLATILITY, "default_effect": EFFECT_BLOCK,
      "module": "vol_baseline", "phase": PHASE_SIGNAL},
+    # A MANUÁLIS ELŐSZŰRŐ `block`-kal indul: csak akkor él, ha a config-ban
+    # bekapcsolták ÉS aznap kézzel állapotot választottak — egy frissítéstől
+    # semmi nem változik. A hatás a kapu ALAP-LÉTRÁJÁBÓL jön (gátol / felez).
+    {"key": MANUAL, "default_effect": EFFECT_BLOCK,
+     "module": "manual", "phase": PHASE_SIGNAL, "kind": "category"},
 )
 
 # ── PARAMÉTER-VEZÉRELT kapuk: a küszöbük a stratégia PARAMÉTER-SZÓTÁRÁBAN jön ──
@@ -649,9 +658,15 @@ def effect_with_source(cfg: dict, symbol: str, strategy: str,
     # kapu ablaka KIÍRHASSA az okot: enélkül „Ki"-t mutatna, ami azt sugallná,
     # hogy a felhasználó állította így.
     try:
-        from core import gate_layout as _gl
-        if not _gl.is_enabled(cfg, key):
-            return EFFECT_NONE, SRC_MASTER_OFF
+        if key == MANUAL:
+            # A manuális előszűrő SAJÁT kapcsolója — nem a kapu-sorrend.
+            from core import manual_filter as _mf
+            if not _mf.enabled(cfg):
+                return EFFECT_NONE, SRC_MASTER_OFF
+        else:
+            from core import gate_layout as _gl
+            if not _gl.is_enabled(cfg, key):
+                return EFFECT_NONE, SRC_MASTER_OFF
     except Exception:
         pass
     pair_gates = ((cfg.get("pairs") or {}).get(symbol) or {}).get("gates")
@@ -1186,6 +1201,7 @@ def ctx_from_state(ds, params: dict, pair_cfg: dict) -> dict:
         "pair_cfg": pair_cfg or {},
         "sessions_state": getattr(ds, "sessions_state", None),
         "sessions_market": getattr(ds, "sessions_market", None),
+        "manual_state": getattr(ds, "manual_state", None),
     }
 
 

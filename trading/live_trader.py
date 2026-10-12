@@ -264,6 +264,9 @@ class PairDashboardState:
     # ki-kapcsoltak köreit). Üres → az elsődleges/aktív stratégia.
     enabled_strategies: list = field(default_factory=list)
 
+    # MANUÁLIS ELŐSZŰRŐ — a reggeli kézi ítélet mai állapota (`core.manual_filter`),
+    # a `manual` kapu bemenete. None = nincs bekapcsolva / nincs adat.
+    manual_state:       Optional[str] = None
     # Piac-előszűrő (market strategy) — a kiválasztott osztályozó neve (vagy None),
     # és az AKTUÁLIS piac-állapot rövid címkéje + szemantikus színe a „Piac" oszlophoz.
     market_strategy:    Optional[str] = None
@@ -2419,6 +2422,18 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
         _warn_once(("market_state", symbol),
                    "%s: a piac-állapot nem számolható (%s) — a Piac-kapu üres "
                    "címkével dolgozik.", symbol, ex)
+
+    # --- Manuális előszűrő: a reggeli kézi ítélet MAI állapota (a `manual` kapu
+    # bemenete). A fájlból olvas (mtime-cache), így a külön processzben futó
+    # motor is azonnal látja, amit a felületen kiválasztottál.
+    try:
+        from core import manual_filter as _mf
+        ds.manual_state = (_mf.state_of(symbol) if _mf.enabled(_run_cfg or {})
+                           else None)
+    except Exception as ex:
+        _warn_once(("manual_state", symbol),
+                   "%s: a manuális előszűrő nem olvasható (%s) — a kapu nem "
+                   "szól bele.", symbol, ex)
 
     # --- Jelzés a stratégiától (ZÁRT gyertyán, állapottartó) ---
     state.strat_state, signal = strategy.on_bar_close(state.strat_state, md)

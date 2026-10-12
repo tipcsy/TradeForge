@@ -74,6 +74,8 @@ def groups(strategies, collapsed: dict = None) -> list:
     stratégia neve); `None` = nem összecsukható csoport."""
     collapsed = collapsed or {}
     out = [("Instrumentum", ["symbol", "bid", "ask", "change"], None)]
+    if collapsed.get("show_manual"):
+        out.append((_t("table.manual"), ["manual"], None))
     if not collapsed.get("gates"):
         gk = list(_gate_columns(collapsed))
         if gk:
@@ -106,6 +108,8 @@ def blocks(strategies, collapsed: dict = None) -> list:
     Tanulság: a felirat-csoport és a vizuális blokk NEM ugyanaz a fogalom."""
     collapsed = collapsed or {}
     out = [["symbol", "bid", "ask", "change"]]
+    if collapsed.get("show_manual"):
+        out.append(["manual"])          # a manuális előszűrő SAJÁT blokk, a kapuk előtt
     gate = []
     if not collapsed.get("gates"):
         gate += list(_gate_columns(collapsed))

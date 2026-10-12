@@ -3253,7 +3253,9 @@ class DashboardWindow:
                        # 0029/5b: „Bróker” oszlop — csak több brókernél
                        "show_broker": self._show_broker_column(),
                        # kikapcsolt stratégia üres sora (eszközsáv-kapcsoló)
-                       "hide_disabled": self._hide_disabled_on()},
+                       "hide_disabled": self._hide_disabled_on(),
+                       # manuális előszűrő oszlopa (`manual_filter.enabled`)
+                       "show_manual": self._manual_on()},
             on_close=self._handle_delete)
         self._live2.frame.pack(fill="both", expand=True)
 
@@ -3390,6 +3392,7 @@ class DashboardWindow:
                 # lehet — külön `on_<kapu>` visszahívás a felületen.
                 on_gate=self._open_gate_dialog,
                 on_gates=self._open_gate_summary,
+                on_manual=self._manual_menu,
                 broker_tags=_btags(_profs, sym, _mas)))
         return rows
 
@@ -3501,6 +3504,41 @@ class DashboardWindow:
             all_symbols=[s for s, p in self.cfg.get("pairs", {}).items()
                          if isinstance(p, dict)],
             on_saved=lambda: self._on_gate_saved(symbol))
+
+    def _manual_on(self) -> bool:
+        from core import manual_filter as _mf
+        return _mf.enabled(self.cfg)
+
+    def _manual_menu(self, symbol: str):
+        """A manuális előszűrő LENYÍLÓJA a cellán: a reggeli kézi ítélet
+        kiválasztása erre az instrumentumra (mára — holnap újra „Nincs")."""
+        from core import manual_filter as _mf
+        cur = _mf.state_of(symbol)
+        m = tk.Menu(self.root, tearoff=0, bg=BG_HEADER, fg=FG_WHITE,
+                    activebackground=BG, activeforeground=FG_WHITE)
+        sv = tk.StringVar(master=m, value=cur)
+
+        def _valaszt(st):
+            try:
+                _mf.set_state(symbol, st)
+            except Exception as ex:
+                self._set_status(_t("manual.save_failed", error=ex))
+                return
+            ds = self.dashboard_ref.get(symbol)
+            if ds is not None:
+                ds.manual_state = st
+            self._set_status(_t("manual.set", symbol=symbol,
+                                state=_mf.LABEL.get(st, st)))
+            if getattr(self, "_live2", None) is not None:
+                self._live2.refresh(self._live2_visible_rows())
+
+        for st in _mf.STATES:
+            m.add_radiobutton(label=_mf.LABEL.get(st, st), variable=sv, value=st,
+                              command=lambda s=st: _valaszt(s))
+        try:
+            m.tk_popup(self.root.winfo_pointerx(), self.root.winfo_pointery())
+        finally:
+            m.grab_release()
 
     def _open_gate_summary(self, symbol: str):
         """A `K.Össz.` cella: az instrumentum összes kapuja — mért állapot,
@@ -7114,6 +7152,14 @@ class DashboardWindow:
         from strategy import enabled_strategy_names, get_strategy_by_name
         enabled = enabled_strategy_names(self.cfg, symbol)
         ds.enabled_strategies = enabled
+        # A manuális előszűrő MAI állapota (STOPPED páron is — a motor csak a
+        # futókat tölti). Kikapcsolva None.
+        try:
+            from core import manual_filter as _mfx
+            ds.manual_state = (_mfx.state_of(symbol) if _mfx.enabled(self.cfg)
+                               else None)
+        except Exception:
+            pass
         # A piac-kapu AKTUÁLIS besorolása a „Piac" oszlophoz — minden páron (a
         # kapu osztályozója, nem az instrumentum választása).
         from core import market_strategy as _ms

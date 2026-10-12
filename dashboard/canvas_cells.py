@@ -120,6 +120,15 @@ def cells_for(d: dict, collapsed: dict, on_close=None) -> dict:
                              (FG_GRAY if ch is None
                               else (FG_GREEN if ch >= 0 else FG_RED))))
 
+    # ── MANUÁLIS ELŐSZŰRŐ (a kapuk ELŐTT) — kattintásra lenyíló ─────────
+    if (collapsed or {}).get("show_manual"):
+        mf = d.get("manual") or {}
+        out["manual"] = Cell("manual", text=mf.get("text", "—"), anchor="center",
+                             font="small",
+                             fg={"red": FG_RED, "yellow": FG_YELLOW,
+                                 "green": FG_GREEN}.get(mf.get("color"), FG_GRAY_DIM),
+                             on_click=mf.get("on_click"), tip=mf.get("tip", ""))
+
     # ── közép: kapuk ─────────────────────────────────────────────────────
     if not (collapsed or {}).get("gates"):
         sp = g.get("spread") or {}

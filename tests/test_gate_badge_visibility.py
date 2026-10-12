@@ -50,10 +50,14 @@ def check(name, ok, detail=""):
 # elter, egy oszlop URESEN all — es a hianyzo ok pont az lesz, ami blokkol.
 d = lr.demo_row()
 cells = cc.cells_for(d, {})
+# ⚠ A MANUÁLIS előszűrő cellája csak bekapcsolva (`show_manual`) készül — ott
+# is mérjük, a saját feltételével.
+cells_m = cc.cells_for(d, {"show_manual": True})
 for key in g.KEYS:
     col = gl.column_key(key)
+    _c = cells_m if key == g.MANUAL else cells
     check(f"a(z) „{g.label_of(key)}” kapunak van cellaja ({col})",
-          col in cells, "" if col in cells else f"HIANYZIK: {col}")
+          col in _c, "" if col in _c else f"HIANYZIK: {col}")
 
 # ⚠ A `Volat.` volt a konkret hianyzo — kulon is rogzitve, hogy egy jovobeli
 # atrendezes ne ejtse ki ujra csendben.

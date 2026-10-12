@@ -155,6 +155,15 @@ def ladder_with_source(cfg: dict, symbol: str, strategy: str, key: str) -> tuple
                 b = _bands_of(section.get(name))
                 if b is not None:
                     return b, src
+    # A kapu SAJÁT alap-létrája (`GATE["bands"]`) — pl. a manuális előszűrő
+    # egyszer gátol, máskor felez, egyetlen beállított hatásból ez nem jönne ki.
+    try:
+        mod = _g.gate_module(key)
+        alap = (getattr(mod, "GATE", None) or {}).get("bands") if mod is not None else None
+        if alap:
+            return _clean(alap, None), _g.SRC_BUILTIN
+    except Exception:
+        pass
     return ([] if kind_of(key) != CATEGORY else {}), _g.SRC_BUILTIN
 
 

@@ -238,7 +238,7 @@ _sig, _plan = G.keys_in_phase(G.PHASE_SIGNAL), G.keys_in_phase(G.PHASE_PLAN)
 _beep = [e["key"] for e in G._BUILTIN]
 check("a FÁZISOK a valóságot tükrözik",
       tuple(k for k in _sig if k in _beep) == ("spread", "tf_align", "market",
-                                               "momentum", "volatility")
+                                               "momentum", "volatility", "manual")
       and tuple(k for k in _plan if k in _beep) == ("cost",)
       and set(_sig) | set(_plan) == set(G.KEYS)
       and not (set(_sig) & set(_plan)),

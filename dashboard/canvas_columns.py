@@ -41,6 +41,10 @@ def column_keys(strategies, collapsed: dict = None) -> list:
     if collapsed.get("show_broker"):
         keys.append("broker")
     keys += ["bid", "ask", "change"]
+    # A MANUÁLIS ELŐSZŰRŐ a Kapuk ELŐTT — csak ha a config-ban be van kapcsolva
+    # (`manual_filter.enabled`); a kapuk összecsukása nem rejti el (nem kapu-oszlop).
+    if collapsed.get("show_manual"):
+        keys.append("manual")
     if not collapsed.get("gates"):
         # A kapu-oszlopok KÖRE és SORRENDJE a configból jön (`dashboard.gate_order`,
         # a Beállítások „Kapuk" fülén szerkeszthető). Korábban be volt drótozva, és

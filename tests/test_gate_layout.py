@@ -33,7 +33,10 @@ def check(name, ok, detail=""):
 
 # ══ 1. Alapertelmezes: a MAI viselkedes ═══════════════════════════════════
 check("hianyzo config -> MINDEN kapu, a REGISTRY sorrendjeben",
-      gl.enabled_gates({}) == list(g.KEYS), str(gl.enabled_gates({})))
+      gl.enabled_gates({}) == [k for k in g.KEYS if k != g.MANUAL],
+      str(gl.enabled_gates({})))
+check("a MANUÁLIS előszűrő sosem kapu-oszlop (saját kapcsolója van)",
+      g.MANUAL not in gl.enabled_gates({}) and g.MANUAL not in gl.disabled_gates({}))
 check("...es semmi nincs kikapcsolva", gl.disabled_gates({}) == [])
 
 # ══ 2. A LISTA dont — kor es sorrend ══════════════════════════════════════
@@ -45,7 +48,7 @@ check("csak a listaban szereplok engedelyezettek",
 # viselkedes valtozatlan volt. Amit orizni akarunk, az a ZARTSAG: ami nincs a
 # listaban, az kikapcsolt, es a ketto egyutt PONTOSAN a registry.
 check("a tobbi KIKAPCSOLT",
-      set(gl.disabled_gates(cfg)) == set(g.KEYS) - set(gl.enabled_gates(cfg))
+      set(gl.disabled_gates(cfg)) == set(g.KEYS) - set(gl.enabled_gates(cfg)) - {g.MANUAL}
       and set(gl.disabled_gates(cfg)) and not (set(gl.disabled_gates(cfg))
                                                & set(gl.enabled_gates(cfg))),
       str(gl.disabled_gates(cfg)))

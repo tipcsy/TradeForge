@@ -64,12 +64,14 @@ def enabled_gates(cfg: dict = None) -> list:
     viselkedés). Az ismeretlen kulcsokat kiszűrjük, hogy egy elgépelés ne
     tüntessen el némán egy kaput."""
     raw = _raw(cfg)
+    # ⚠ A MANUÁLIS ELŐSZŰRŐ nem a Kapuk blokk része (a táblán ELŐTTE áll, saját
+    # kapcsolója van: `manual_filter.enabled`) — itt sosem szerepel.
     if raw is None:
-        return list(_g.KEYS)
+        return [k for k in _g.KEYS if k != _g.MANUAL]
     seen, out = set(), []
     for k in raw:
         k = gate_key(str(k))
-        if k in _g.KEYS and k not in seen:
+        if k in _g.KEYS and k != _g.MANUAL and k not in seen:
             seen.add(k)
             out.append(k)
     return out
@@ -78,7 +80,7 @@ def enabled_gates(cfg: dict = None) -> list:
 def disabled_gates(cfg: dict = None) -> list:
     """A KIKAPCSOLT kapuk, a `REGISTRY` sorrendjében (a beállító ablak bal listája)."""
     on = set(enabled_gates(cfg))
-    return [k for k in _g.KEYS if k not in on]
+    return [k for k in _g.KEYS if k not in on and k != _g.MANUAL]
 
 
 def is_enabled(cfg: dict, key: str) -> bool:

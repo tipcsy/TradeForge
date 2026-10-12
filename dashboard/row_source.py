@@ -34,6 +34,15 @@ from core import gates as _g
 from core.i18n import t as _t
 
 
+def _manual_cell(ds, on_click=None, symbol: str = None) -> dict:
+    """A manuális előszűrő cellája: a mai állapot rövid felirata + színe."""
+    from core import manual_filter as _mf
+    st = getattr(ds, "manual_state", None) or _mf.NONE
+    return {"state": st, "text": _mf.SHORT.get(st, st),
+            "color": _mf.COLOR.get(st, "muted"), "tip": _mf.LABEL.get(st, st),
+            "on_click": (lambda: on_click(symbol)) if on_click else None}
+
+
 def _plugged_cells(ctx, on_gate, symbol) -> dict:
     """A saját cella NÉLKÜLI behelyezett kapuk cella-adata: `{kulcs: {...}}`.
 
@@ -278,7 +287,7 @@ def row_data(symbol: str, ds, strategy_names, cfg: dict = None,
              on_symbol=None, on_align=None, on_spread=None,
              on_market=None, on_momentum=None, on_cost=None,
              on_volatility=None, open_charts=None, market_states=None,
-             broker_tags: str = "", on_gates=None) -> dict:
+             broker_tags: str = "", on_gates=None, on_manual=None) -> dict:
     """Egy instrumentum sorának adata a `live_row.LiveRow` számára.
 
     `ds`          — `live_trader.PairDashboardState` (duck-typed).
@@ -393,6 +402,7 @@ def row_data(symbol: str, ds, strategy_names, cfg: dict = None,
         "change_pct": getattr(ds, "change_pct", None),
         "digits": getattr(ds, "digits", 5),
         "on_symbol": (lambda: on_symbol(symbol)) if on_symbol else None,
+        "manual": _manual_cell(ds, on_manual, symbol),
         "gates": {
             "spread": _spread_cell(ctx),
             "on_spread": (lambda: on_spread(symbol)) if on_spread else None,

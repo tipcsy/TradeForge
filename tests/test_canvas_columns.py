@@ -51,7 +51,8 @@ if TK_OK:
     # kapu (barmely `.tfg`) attol buktatta, hogy letezik. Amit orizni akarunk,
     # az az ALLITAS: a kapu-blokk a registry sorrendjeben all, es a K.Ossz.
     # UTANA jon — nem az, hogy epp hany kapu van.
-    _kapuk = [_gl0.column_key(k) for k in _g0.KEYS]
+    # (a MANUÁLIS előszűrő nem a Kapuk blokk része — a táblán ELŐTTE áll)
+    _kapuk = [_gl0.column_key(k) for k in _g0.KEYS if k != _g0.MANUAL]
     check("a kapu-blokk a REGISTRY sorrendjeben, majd K.Ossz.",
           keys[4:4 + len(_kapuk) + 1] == _kapuk + ["badge"],
           str(keys[4:4 + len(_kapuk) + 1]))
@@ -96,7 +97,8 @@ if TK_OK:
     check("ures lista -> csak a K.Ossz.",
           cc.column_keys(STRATS, {"gate_columns": []})[4] == "badge")
     check("hianyzo config -> MINDEN kapu, a REGISTRY sorrendjeben",
-          gl.enabled_columns(None) == [gl.column_key(k) for k in _g0.KEYS],
+          gl.enabled_columns(None) == [gl.column_key(k) for k in _g0.KEYS
+                                       if k != _g0.MANUAL],
           str(gl.enabled_columns(None)))
 
     # ── A SZELESSEGEK a meglevo live_row.widths()-bol jonnek ──────────────
