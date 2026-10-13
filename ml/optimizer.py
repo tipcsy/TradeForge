@@ -1683,16 +1683,22 @@ def _optimize_symbol_locked(symbol, df_m15, df_m1, cfg, initial_balance,
     }
 
 
-def apply_optimized_rr(symbol: str, rr: dict):
+def apply_optimized_rr(symbol: str, rr: dict, strategy: str = None):
     """A nyertes rr-t a per-pár állapotba írja (data/risk_mode.json) → a live/GUI
-    ezt veszi át (mint az optimalizált paramétereket). Naplózza az alkalmazást."""
+    ezt veszi át (mint az optimalizált paramétereket). Naplózza az alkalmazást.
+
+    ⚠ A HANGOLT STRATÉGIA FELÜLÍRÁSÁBA (2026-10-13, Tibi döntése), nem a pár
+    alapjába: egy stratégia hangolása eddig a pár ÖSSZES stratégiájának
+    kiszállását átírta (mérve: a trend_pullback-re hangolt kilépés a Bollinger-t
+    rontotta). `strategy=None` → a régi út (a pár alapja)."""
     if not rr:
         return
     try:
         from core import rr_state
-        rr_state.set_from_optimizer(symbol, rr)
-        log.info("  %s — rr alkalmazva a live-ra: preset=%s runner=%s "
-                 "trigger_R=%s halving=%s shield=%s", symbol, rr.get("preset"),
+        rr_state.set_from_optimizer(symbol, rr, strategy=strategy)
+        log.info("  %s%s — rr alkalmazva a live-ra: preset=%s runner=%s "
+                 "trigger_R=%s halving=%s shield=%s", symbol,
+                 f"/{strategy}" if strategy else "", rr.get("preset"),
                  rr.get("runner_stop"), rr.get("trigger_R"),
                  rr.get("halving_fraction"), rr.get("shield_fraction"))
     except Exception as e:
@@ -1873,7 +1879,7 @@ def run_optimizer(cfg: dict, symbols: Optional[list[str]] = None,
         tmp.replace(out)
         log.info("  Mentve: %s", out)
         if _rr:
-            apply_optimized_rr(symbol, _rr)
+            apply_optimized_rr(symbol, _rr, strategy=sname)
 
     log.info("=" * 60)
     log.info("Optimalizálás kész.")

@@ -1082,7 +1082,7 @@ class OptimizerController:
             tmp.replace(out)
             if _rr:
                 from ml.optimizer import apply_optimized_rr
-                apply_optimized_rr(symbol, _rr)
+                apply_optimized_rr(symbol, _rr, strategy=strategy)
 
             # Sikeres: a pár azonnal "tanított" → Play aktiválható
             ds = self.dashboard_ref.get(symbol)
@@ -3070,6 +3070,10 @@ class DashboardWindow:
         tk.Button(toolbar, text=_t("gui.beallitas"), font=small_font,
                   bg=BG_INACTIVE, fg=FG_WHITE, relief="flat", cursor="hand2",
                   command=self._show_settings).pack(side="right", padx=4)
+        # KOCKÁZATKEZELÉS — egy ablak, minden pár, minden stratégia (2026-10-13)
+        tk.Button(toolbar, text=_t("gui.risk_btn"), font=small_font,
+                  bg=BG_INACTIVE, fg=FG_WHITE, relief="flat", cursor="hand2",
+                  command=self._show_risk_window).pack(side="right", padx=4)
 
         legend = tk.Frame(parent, bg=BG, pady=2)
         legend.pack(fill="x", padx=6)
@@ -3525,6 +3529,21 @@ class DashboardWindow:
             all_symbols=[s for s, p in self.cfg.get("pairs", {}).items()
                          if isinstance(p, dict)],
             on_saved=lambda: self._on_gate_saved(symbol))
+
+    def _show_risk_window(self, symbol: str = None, strategy: str = None):
+        """A Kockázatkezelés ablak; `symbol` (+ `strategy`) megadásával a
+        szerkesztő azonnal azon a cellán nyílik."""
+        from dashboard.risk_window import open_risk_window
+
+        def _frissit():
+            try:
+                if getattr(self, "_pos_tab", None) is not None:
+                    self._pos_tab.refresh()
+            except Exception:
+                pass
+        open_risk_window(self.root, self.cfg,
+                         focus=((symbol, strategy) if symbol else None),
+                         on_changed=_frissit)
 
     def _manual_on(self) -> bool:
         from core import manual_filter as _mf
