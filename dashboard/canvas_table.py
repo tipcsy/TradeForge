@@ -534,17 +534,7 @@ class CanvasTable:
         # ⚠ BUBORÉK — MINDEN cellafajtára. A `ctrl` a RÉSZ-tagjeire köt, mert ott
         # a szöveg nem a cella-tagen ül. `add="+"`, hogy a kéz-kurzor kötése
         # (ami ugyanezt az eseményt hallgatja) ne vesszen el.
-        _tags = ([f"{tag}_{p[0]}" for p in (cell.parts or [])]
-                 if cell.kind == "ctrl" else [tag])
-        for _tg in _tags:
-            # a szöveg a SZÓTÁRBAN — a kötés egyszeri, a tartalom friss
-            self._tips[(str(bc), _tg)] = getattr(cell, "tip", "") or ""
-            if self._tips[(str(bc), _tg)]:
-                self._tb(bc, _tg, "<Enter>",
-                         lambda e, c=bc, g=_tg: (self._tip_of(c, g)
-                                                 and self._tip_show(e, self._tip_of(c, g))),
-                         add="+")
-                self._tb(bc, _tg, "<Leave>", self._tip_hide, add="+")
+        self._set_tip(bc, tag, cell)
         self._items[(i, cell.key)] = ids
         self._visual[(i, cell.key)] = cell.visual()
         if cell.kind == "dots" and cell.frame:
@@ -569,10 +559,32 @@ class CanvasTable:
     # EGYETLEN ablakot használunk újra (nem cellánként egyet): a tábla több száz
     # cellát rajzol, és annyi Toplevel létrehozása mérhetően akadna.
 
-    def _tb(self, canvas, tag, event, fn, add=None) -> None:
-        """`tag_bind` EGYSZER (vászon, címke, esemény) hármasonként — lásd
-        `self._bound`. A `fn` ne zárjon be változó adatot (azt szótárból)."""
-        k = (str(canvas), tag, event, bool(add))
+    def _set_tip(self, bc, tag, cell) -> None:
+        """A cella BUBORÉKJA: a szöveg a szótárba (MINDEN rajzoláskor ÉS
+        frissítéskor — rendezés után a rekeszben MÁS instrumentum ül), a kötés
+        egyszer. A `ctrl` a RÉSZ-tagjeire köt, mert ott a szöveg nem a cella-tagen ül."""
+        _tags = ([f"{tag}_{p[0]}" for p in (cell.parts or [])]
+                 if cell.kind == "ctrl" else [tag])
+        for _tg in _tags:
+            self._tips[(str(bc), _tg)] = getattr(cell, "tip", "") or ""
+            if self._tips[(str(bc), _tg)]:
+                # ⚠ `purpose="tip"`: KÜLÖN kulcs a kéz-kurzor `<Enter>`-jétől.
+                # Közös kulccsal a kattintható cellák (név, Tőzsdék, kapuk) buboréka
+                # NÉMÁN kimaradt — a kurzor-kötés foglalta el a helyét (2026-10-13).
+                self._tb(bc, _tg, "<Enter>",
+                         lambda e, c=bc, g=_tg: (self._tip_of(c, g)
+                                                 and self._tip_show(e, self._tip_of(c, g))),
+                         add="+", purpose="tip")
+                self._tb(bc, _tg, "<Leave>", self._tip_hide, add="+", purpose="tip")
+
+    def _tb(self, canvas, tag, event, fn, add=None, purpose: str = "") -> None:
+        """`tag_bind` EGYSZER (vászon, címke, esemény, CÉL) négyesenként — lásd
+        `self._bound`. A `fn` ne zárjon be változó adatot (azt szótárból).
+
+        ⚠ A `purpose` a kulcs része: ugyanarra az eseményre KÉT különböző célú
+        kötés is kellhet (kéz-kurzor ÉS buborék) — cél nélkül a második némán
+        elveszett."""
+        k = (str(canvas), tag, event, bool(add), purpose)
         if k in self._bound:
             return
         self._bound.add(k)
@@ -663,6 +675,11 @@ class CanvasTable:
                 # szín) — két pár azonos kinézetű vezérlőjénél tehát a `continue`
                 # ág fut, és az elavult kötés túlélné.
                 self._rebind_clicks(i, cell)
+                try:
+                    _pane = _cc.PANE_OF(_cols.base_key(key))
+                    self._set_tip(self._bc[_pane], f"c{i}_{cell.key}", cell)
+                except KeyError:
+                    pass
                 if self._visual.get((i, key)) == cell.visual():
                     continue          # nem változott → egyetlen írás sem
                 self._visual[(i, key)] = cell.visual()
@@ -692,11 +709,20 @@ class CanvasTable:
         Ilyenkor az az egy sor újrarajzolódik."""
         # csak a TÉNYLEG rajzolt (oszloppal bíró) cellák számítanak — egy rejtett
         # kapu-oszlop cellája különben minden ütemben újrarajzolást kérne
-        rajzolt = {k for k, _x, _w in self._cols if k in cells}
-        if {k[1] for k in self._visual if k[0] == i} != rajzolt:
+        #
+        # ⚠ MINDKÉT oldalt az OSZLOPOKRA szűrjük (2026-10-13, „iszonyatosan lassú
+        # lett"). A frissítés a `_visual`-ba az oszlop NÉLKÜLI cellákat is beírja
+        # (pl. a Beállításokban kikapcsolt kapuét) — a szűretlen oldal ezért
+        # SOSEM egyezett, és MINDEN sor MINDEN frissítéskor újrarajzolódott
+        # (betű-mérésekkel a fő szálon: 4 mp-es fagyások 7–8 mp-enként).
+        oszlop = {k for k, _x, _w in self._cols}
+        rajzolt = {k for k in oszlop if k in cells}
+        if {k[1] for k in self._visual if k[0] == i and k[1] in oszlop} != rajzolt:
             return True
         for key, cell in cells.items():
-            if cell.kind != "dots":
+            # ⚠ Oszlop nélküli pöttyös cellának nincs elmentett állapota — a
+            # `prev is None` különben MINDIG újrarajzolást kérne (ugyanaz a lyuk).
+            if cell.kind != "dots" or key not in oszlop:
                 continue
             prev = self._visual.get((i, key))
             if prev is None or len(prev[2]) != len(cell.dots):

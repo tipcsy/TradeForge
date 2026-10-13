@@ -81,7 +81,15 @@ _IDO_ATTR = ("t", "t1", "t2")
 
 def to_chart_time(objects: list) -> list:
     """A rajz-objektumok idői (kanonikus) → a futó bróker SZERVER-órájára.
-    Kanonikus szerverórájú brókernél (ActivTrades) a bemenet változatlan."""
+    Kanonikus szerverórájú brókernél (ActivTrades) a bemenet változatlan.
+
+    ⚠ EGYETLEN TÖMBÖS ÁTVÁLTÁS (2026-10-13, Tibi: „iszonyatosan lassú lett a
+    program"). Az első változat objektumonként és mezőnként külön hívta a
+    `canonical_to_server_epoch`-ot — minden hívás egy pandas-index + időzóna-
+    konverzió. Egy pár rajza több ezer objektum (minden gyertyának sáv-állapota
+    van): mérve 1,4 mp / pár / stratégia, a GIL-t fogva — a felület akadozott.
+    Most minden időt EGY numpy-tömbben váltunk át (a nyári időszámítás miatt nem
+    elég egy fix eltolás: a NY és a berlini átállás hetekkel eltér)."""
     try:
         from core import broker_adapter, broker_time as _bt
         p = broker_adapter.current()
@@ -91,16 +99,30 @@ def to_chart_time(objects: list) -> list:
     except Exception:
         return objects
     import dataclasses
-    out = []
-    for o in objects:
-        if dataclasses.is_dataclass(o):
-            mezok = {a: int(_bt.canonical_to_server_epoch(int(getattr(o, a)), sz))
-                     for a in _IDO_ATTR
-                     if hasattr(o, a) and isinstance(getattr(o, a), (int, float))
-                     and getattr(o, a)}
-            out.append(dataclasses.replace(o, **mezok) if mezok else o)
-        else:
-            out.append(o)
+    import numpy as np
+    hely, ertek = [], []                      # (objektum-index, mező) → érték
+    for i, o in enumerate(objects):
+        if not dataclasses.is_dataclass(o):
+            continue
+        for a in _IDO_ATTR:
+            v = getattr(o, a, None)
+            if isinstance(v, (int, float)) and v:
+                hely.append((i, a))
+                ertek.append(int(v))
+    if not ertek:
+        return objects
+    uj = _bt.canonical_to_server_epoch(np.asarray(ertek, dtype=np.int64), sz)
+    # ⚠ MÁSOLATON írunk (a stratégia rajz-objektumai lehetnek tároltak — helyben
+    # átírva körönként ÚJRA eltolódnának), de `copy.copy` + mezőírással: a
+    # `dataclasses.replace` újrafuttatja az `__init__`-et, ez itt a költség zöme.
+    import copy as _copy
+    out = list(objects)
+    utolso = -1
+    for (i, a), v in zip(hely, uj):
+        if i != utolso:
+            out[i] = _copy.copy(objects[i])
+            utolso = i
+        object.__setattr__(out[i], a, int(v))
     return out
 
 
