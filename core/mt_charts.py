@@ -89,6 +89,13 @@ def open_charts(max_age_sec: int = MAX_AGE_SEC) -> list:
                 continue
             rec = _parse(p)
             if rec:
+                # A chart a BRÓKER szimbólumnevét írja (`.DE40Cash`) — a program
+                # a kanonikus nevet (`Ger40`) kérdezi.
+                try:
+                    from core import mt5_visual as _mv
+                    rec["symbol"] = _mv.canonical_symbol(rec.get("symbol") or "")
+                except Exception:
+                    pass
                 rec["age"] = age
                 out.append(rec)
     except OSError as ex:

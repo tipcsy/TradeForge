@@ -79,9 +79,12 @@ check("...es a kihagyott strategiakat is", 'r["skipped"]' in _gsrc
       and "idlg.skipped_off" in _gsrc)
 check("...hibat pirossal", "FG_RED" in _gsrc)
 
-_psrc = inspect.getsource(idlg.InstrumentParamsDialog._build_link_pane)
-check("a gomb CSAK az MT5 fulon van (ott van elo kapcsolat)",
-      "if name == _md.MT5:" in _psrc)
+# 2026-10-13: a kitelepítés a Beállításokba költözött; a stratégia-ablak „Chart"
+# lapja egy oldalon mutatja az MT5-küldést és az MT4-visszajátszást.
+_psrc = inspect.getsource(idlg.InstrumentParamsDialog._build_link_tab)
+check("a küldés gomb az MT5 szakaszban van (ott van élő kapcsolat)",
+      '"MT5 — " + _t("idlg.kuldes_a_charthoz")' in _psrc
+      and "command=self._send_viz" in _psrc)
 # ⚠ A spec kulon kikoti: a kuldes NEM mentes.
 #
 # ⚠ A FELIRAT MAR NEM A FORRASBAN VAN, hanem a nyelvi katalogusban — a forrasban

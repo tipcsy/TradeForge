@@ -104,8 +104,11 @@ def cells_for(d: dict, collapsed: dict, on_close=None) -> dict:
     _tip = _ses.get("tip") or None
     _price_fg = FG_GRAY_DIM if _closed else FG_WHITE
 
+    # A NÉV buborékja: „Ger40 → .DE40Cash" + teljes név, alatta a piac állapota.
+    _ntip = d.get("name_tip") or ""
     out["symbol"] = Cell("symbol", text=d.get("symbol", "—"), font="mono_bold",
-                         on_click=d.get("on_symbol"), tip=_tip)
+                         on_click=d.get("on_symbol"),
+                         tip=(_ntip + (chr(10) + _tip if _tip else "")) or _tip)
     if (collapsed or {}).get("show_broker"):
         out["broker"] = Cell("broker", text=d.get("broker") or "—", font="small",
                              fg=FG_GRAY)

@@ -447,7 +447,7 @@ class InstrumentParamsDialog:
         self._shell = TabShell(popup, (("overview", _t("tab.overview")),
                                        ("params",   _t("tab.params")),
                                        ("trials",   _t("tab.trials")),
-                                       ("link",     _t("tab.link")),
+                                       ("link",     _t("tab.chart")),
                                        ("docs",     _t("tab.docs"))),
                                on_show=self._on_tab, notify_every_show=True)
 
@@ -2467,23 +2467,52 @@ class InstrumentParamsDialog:
     # hiba). A lap ezért ELŐSZÖR megmondja, mi van kint, és csak utána kínál gombot.
 
     def _build_link_tab(self):
+        """A „Chart" lap — a PÁRHOZ tartozó két MT-művelet.
+
+        ⚠ 2026-10-13 (Tibi): a terminálok KITELEPÍTÉSE a Beállításokba költözött
+        (`dashboard/mt_link_panel.py`) — az a gépé, nem egy pár+stratégiáé. Itt
+        az maradt, ami ehhez a párhoz és a MOSTANI paraméterekhez kötődik:
+          • MT5 — küldés a chartra (és „miért nincs fájl");
+          • MT4 — a backtest-belépők visszajátszásának generálása."""
         page = self._shell.page("link")
         for w in page.winfo_children():
             w.destroy()
-        from dashboard.tab_shell import TabShell
-        # ⚠ A TabShell a KONSTRUKTORÁBAN megmutatja az első lapot, tehát a
-        # visszahívás lefutna, mielőtt a `self._link_sub` létezne. Ezért előbb
-        # LÉTREHOZZUK visszahívás nélkül, elmentjük, és csak utána kötjük be —
-        # majd expliciten megmutatjuk az elsőt. (Ugyanez a csapda a fő héjnál is
-        # elsült; lásd `_on_tab`.)
-        # A fülek FENT: egy bal oldali fülsávon BELÜL egy másik bal oldali sáv
-        # két függőleges oszlopot adna egymás mellett — elveszi a tartalom
-        # helyét, és nehéz eldönteni, melyik szint melyik.
-        sub = TabShell(page, ("MT4", "MT5"), notify_every_show=True,
-                       side="top")
-        self._link_sub = sub
-        sub._on_show = self._build_link_pane
-        sub.show("MT4")
+        holder, body, _cv = _scrollable(page)
+        holder.pack(side="top", fill="both", expand=True)
+
+        def _h(txt):
+            tk.Label(body, text=txt, bg=BG, fg=FG_WHITE, font=self._hf,
+                     anchor="w").pack(anchor="w", padx=10, pady=(10, 2))
+
+        def _n(txt, fg=FG_GRAY):
+            tk.Label(body, text=txt, bg=BG, fg=fg, font=self._sf, anchor="w",
+                     justify="left", wraplength=820).pack(anchor="w", padx=10)
+
+        # ── MT5: KÜLDÉS A CHARTHOZ ──────────────────────────────────────────
+        # ⚠ A KÜLDÉS NEM MENTÉS: csak kirajzol a mostani beállításokkal.
+        from core import mt5_visual as _mv
+        _h("MT5 — " + _t("idlg.kuldes_a_charthoz"))
+        _n(_t("idlg.redraw_tip", file=f"TFV_{_mv.chart_symbol(self.symbol)}.csv"))
+        _n(_t("idlg2.a_kuldes_nem_mentes"), FG_GRAY_DIM)
+        _srow = tk.Frame(body, bg=BG)
+        _srow.pack(anchor="w", fill="x", padx=10, pady=(4, 0))
+        tk.Button(_srow, text=_t("idlg.kuldes_a_charthoz"), bg=BTN_BT_BG, fg=BTN_BT_FG,
+                  relief="flat", font=self._sf, cursor="hand2",
+                  command=self._send_viz).pack(side="left")
+        tk.Button(_srow, text=_t("idlg.miert_nincs_fajl"), bg=BG_HEADER, fg=FG_WHITE,
+                  relief="flat", font=self._sf, cursor="hand2",
+                  command=self._diag_viz).pack(side="left", padx=(6, 0))
+        self._viz_send_lbl = tk.Label(_srow, text="", bg=BG, fg=FG_GRAY,
+                                      font=self._sf, anchor="w", justify="left")
+        self._viz_send_lbl.pack(side="left", padx=(10, 0), fill="x", expand=True)
+        _n(_t("idlg2.az_elo_motor_folyamatosan"))
+        _n(_t("idlg2.a_kapuk_ablakban_allitod"), FG_GRAY_DIM)
+
+        # ── MT4: A VISSZAJÁTSZÁS GENERÁLÁSA ─────────────────────────────────
+        _h("MT4 — " + _t("idlg2.visszajatszas_generalasa"))
+        _n(_t("idlg2.a_parameter_lap_aktualis"))
+        self._build_mt4_export(body)
+        _n(_t("idlg.link_moved"), FG_GRAY_DIM)
 
     def _diag_viz(self):
         """Végigkérdezi, MIÉRT nem jön létre a chart-fájl.
@@ -2558,147 +2587,6 @@ class InstrumentParamsDialog:
             # úgy nézne ki, mintha a küldés nem működne.
             _txt += _t("idlg.skipped_off", names=", ".join(r["skipped"]))
         lbl.config(text=_txt, fg=FG_GREEN)
-
-    def _build_link_pane(self, name: str):
-        from core import mt_deploy as _md
-        pane = self._link_sub.page(name)
-        for w in pane.winfo_children():
-            w.destroy()
-        holder, body, _cv = _scrollable(pane)
-        holder.pack(side="top", fill="both", expand=True)
-
-        def _h(txt):
-            tk.Label(body, text=txt, bg=BG, fg=FG_WHITE, font=self._hf,
-                     anchor="w").pack(anchor="w", padx=10, pady=(10, 2))
-
-        def _n(txt, fg=FG_GRAY):
-            tk.Label(body, text=txt, bg=BG, fg=fg, font=self._sf, anchor="w",
-                     justify="left", wraplength=820).pack(anchor="w", padx=10)
-
-        roots = _md.discover_roots()
-        st = _md.status(name, roots)
-        tgts = _md.targets(name, roots)
-
-        # ── 1. MI VAN KINT ─────────────────────────────────────────────────
-        _h(_t("idlg.terminals_title", platform=name))
-        if not tgts:
-            _n(_t("idlg2.nem_talaltam_terminal_mappat"), FG_RED)
-        else:
-            from collections import Counter
-            cnt = Counter(s["state"] for s in st)
-            _fg = (FG_RED if cnt.get(_md.ST_STALE) else
-                   (FG_YELLOW if cnt.get(_md.ST_MISSING) else FG_GREEN))
-            _n(_t("idlg.terminal_counts", n=len(tgts),
-               fresh_l=_md.state_label(_md.ST_FRESH), fresh=cnt.get(_md.ST_FRESH, 0),
-               stale_l=_md.state_label(_md.ST_STALE), stale=cnt.get(_md.ST_STALE, 0),
-               missing_l=_md.state_label(_md.ST_MISSING),
-               missing=cnt.get(_md.ST_MISSING, 0)),
-               _fg)
-            # ⚠ Az ELAVULT a legfontosabb: ott MÁS fut, mint amit a repóban látsz.
-            bad = [s for s in st if s["state"] == _md.ST_STALE]
-            for s in bad:
-                tk.Label(body, bg=BG, fg=FG_RED, font=self._sf, anchor="w",
-                         justify="left", wraplength=820,
-                         text=f"   ⚠ ELAVULT: {s['file']}  —  {s['target']}"
-                         ).pack(anchor="w", padx=10)
-            if bad:
-                _n(_t("idlg2.az_elavult_fajlnal_a"),
-                   FG_RED)
-            for t in tgts:
-                tk.Label(body, bg=BG, fg=FG_GRAY_DIM, font=self._sf, anchor="w",
-                         text=f"   {t}").pack(anchor="w", padx=10)
-
-        row = tk.Frame(body, bg=BG)
-        row.pack(anchor="w", padx=10, pady=(6, 2))
-        tk.Button(row, text=_t("idlg.kitelepites"), bg=BTN_PLAY_BG, fg=BTN_PLAY_FG,
-                  relief="flat", font=self._sf,
-                  command=lambda p=name: self._deploy_mql(p)).pack(side="left")
-        # ⚠ NINCS „Fordítás" gomb: a MetaEditor parancssori fordítása egyetlen
-        # dokumentált alakra sem működött (rc=0, semmi kimenet). Helyette a
-        # F7 UTÁN ide lehet BEHOZNI a lefordítottat a repóba — így verziózva
-        # tárolódik, és a következő kitelepítés már viheti is.
-        tk.Button(row, text=_t("idlg.leforditott_beolvasasa"), bg=BTN_BT_BG, fg=BTN_BT_FG,
-                  relief="flat", font=self._sf,
-                  command=lambda p=name: self._capture_mql(p)).pack(side="left",
-                                                                    padx=(6, 0))
-        self._link_status = tk.Label(row, text="", bg=BG, fg=FG_GRAY,
-                                     font=self._sf)
-        self._link_status.pack(side="left", padx=(10, 0))
-
-        # ── MELYIK FÁJL MICSODA ────────────────────────────────────────────
-        # ── KÜLDÉS A CHARTHOZ (csak MT5 — ott van élő kapcsolat) ───────────
-        # ⚠ A spec kérése: „ha beállítom a spread kaput, akkor rögtön reagálja le
-        # a TBAND". A viz-fájlt eddig KIZÁRÓLAG a futó motor írta, a saját
-        # ütemében: egy leállított páron egyáltalán nem lehetett megnézni, mit
-        # csinálna a mostani beállításokkal, futó páron pedig várni kellett a
-        # következő viz-körre.
-        #
-        # ⚠ ÉS A KÜLDÉS NEM MENTÉS — ahogy a spec külön kiköti. Ez csak KIRAJZOL:
-        # a config/paraméterek attól még változatlanok maradnak.
-        if name == _md.MT5:
-            _h(_t("idlg.kuldes_a_charthoz"))
-            _n(_t("idlg.redraw_tip", file=f"TFV_{self.symbol}.csv"))
-            _n(_t("idlg2.a_kuldes_nem_mentes"), FG_GRAY_DIM)
-            _srow = tk.Frame(body, bg=BG)
-            _srow.pack(anchor="w", fill="x", padx=10, pady=(4, 0))
-            tk.Button(_srow, text=_t("idlg.kuldes_a_charthoz"), bg=BTN_BT_BG, fg=BTN_BT_FG,
-                      relief="flat", font=self._sf, cursor="hand2",
-                      command=self._send_viz).pack(side="left")
-            # ⚠ Ha a fájl NEM jön létre, a motor öt ponton lép ki csendben —
-            # kívülről mind ugyanúgy néz ki (nincs ott a fájl). Ez a gomb
-            # végigkérdezi a feltételeket, és megnevezi az elsőt, ami bukik.
-            tk.Button(_srow, text=_t("idlg.miert_nincs_fajl"), bg=BG_HEADER, fg=FG_WHITE,
-                      relief="flat", font=self._sf, cursor="hand2",
-                      command=self._diag_viz).pack(side="left", padx=(6, 0))
-            self._viz_send_lbl = tk.Label(_srow, text="", bg=BG, fg=FG_GRAY,
-                                          font=self._sf, anchor="w",
-                                          justify="left")
-            self._viz_send_lbl.pack(side="left", padx=(10, 0), fill="x",
-                                    expand=True)
-
-        # A kérés: „nem látom, milyen fájlokat is szeretne odamásolni, és egy
-        # rövid leírás sem ártana, hogy melyik mit csinál."
-        _h(_t("idlg2.mit_telepit_ki"))
-        cs = {c["file"]: c for c in _md.compiled_status(name)}
-        for src in _md.sources(name):
-            rovid, hasznalat = _md.describe(src)
-            line = tk.Frame(body, bg=BG)
-            line.pack(anchor="w", fill="x", padx=10)
-            _sub = _md.subfolder_of(src)
-            tk.Label(line, text=f"   {src.name}", bg=BG,
-                     fg=(FG_YELLOW if _sub == "Experts" else FG_WHITE),
-                     font=self._sf, anchor="w", width=26).pack(side="left")
-            tk.Label(line, text=_sub, bg=BG, fg=FG_GRAY_DIM, font=self._sf,
-                     width=11, anchor="w").pack(side="left")
-            _v = _md.source_version(src)
-            tk.Label(line, text=(f"v{_v}" if _v else "—"), bg=BG, fg=FG_GRAY_DIM,
-                     font=self._sf, width=7, anchor="w").pack(side="left")
-            tk.Label(line, text=rovid, bg=BG, fg=FG_GRAY, font=self._sf,
-                     anchor="w").pack(side="left")
-            # A TÁROLT lefordított állapota — ha más forráshoz készült, az baj.
-            _c = cs.get(src.name) or {}
-            if _c.get("state") == _md.ST_OTHER_SOURCE:
-                tk.Label(line, text=_t("idlg.a_tarolt_leforditott_mas"),
-                         bg=BG, fg=FG_RED, font=self._sf, anchor="w").pack(side="left")
-            elif _c.get("state") == _md.ST_MATCH:
-                tk.Label(line, text=_t("idlg.leforditott_tarolva"), bg=BG, fg=FG_GREEN,
-                         font=self._sf, anchor="w").pack(side="left")
-        _n(_md.usage_of(name), FG_GRAY)
-
-        # ⚠ Nem fordítunk — és ezt nem szépítjük. A „kitelepítve" önmagában NEM
-        # jelenti azt, hogy az új kód FUT: a régi .ex4/.ex5 addig érvényben marad.
-        _n(_t("idlg2.a_kitelepites_a_forrast"), FG_YELLOW)
-
-        # ── 2. AMIT INNEN INDÍTHATSZ ───────────────────────────────────────
-        if name == "MT4":
-            # ── A VISSZAJÁTSZÁS ITT, a lapon (nem külön ablakban) ───────────
-            _h(_t("idlg2.visszajatszas_generalasa"))
-            _n(_t("idlg2.a_parameter_lap_aktualis"))
-            self._build_mt4_export(body)
-        else:
-            _h(_t("idlg2.elo_megjelenites"))
-            _n(_t("idlg2.az_elo_motor_folyamatosan"))
-            _n(_t("idlg2.a_kapuk_ablakban_allitod"), FG_GRAY_DIM)
 
     def _build_mt4_export(self, body):
         """A visszajátszás-export a LAPON — nem külön ablakban.
@@ -2848,51 +2736,6 @@ class InstrumentParamsDialog:
 
         threading.Thread(target=_work, daemon=True, name="MT4Export").start()
         self.popup.after(150, _poll)
-
-    def _capture_mql(self, platform: str):
-        """A terminálban LEFORDÍTOTT fájlok beemelése a repóba (F7 után).
-
-        ⚠ A jegyzék a FORRÁS TARTALMÁNAK ujjlenyomatát tárolja, nem csak a
-        `#property version`-t: az utóbbit kézzel írják, és két különböző forrás
-        viselheti ugyanazt. Így ha később a forrás változik, a tárolt
-        lefordítottról KIDERÜL, hogy már máshoz tartozik."""
-        from core import mt_deploy as _md
-        try:
-            res = _md.capture_compiled(platform, _md.discover_roots())
-        except Exception as ex:
-            self._link_status.config(text=f"Hiba: {ex}", fg=FG_RED)
-            return
-        msg = _t("idlg.compiled_taken", n=len(res["taken"]))
-        if res["missing"]:
-            msg += (_t("idlg.compiled_missing", files=", ".join(res["missing"][:3]),
-                       more=("…" if len(res["missing"]) > 3 else "")))
-        self._link_status.config(
-            text=msg[:170], fg=(FG_YELLOW if res["missing"] else FG_GREEN))
-        try:
-            self._build_link_pane(platform)
-        except Exception:
-            pass
-
-    def _deploy_mql(self, platform: str):
-        """A repó indikátorainak kimásolása MINDEN megtalált terminál-mappába."""
-        from core import mt_deploy as _md
-        try:
-            res = _md.deploy(platform, _md.discover_roots())
-        except Exception as ex:
-            self._link_status.config(text=f"Hiba: {ex}", fg=FG_RED)
-            return
-        if res["errors"]:
-            self._link_status.config(text=res["errors"][0][:110], fg=FG_RED)
-            return
-        self._link_status.config(
-            text=(_t("idlg.deployed", n=len(res["copied"]), targets=res["targets"],
-                  skipped=len(res["skipped"]))),
-            fg=FG_GREEN)
-        # A lap újraépül, hogy az állapot AZONNAL a valóságot mutassa.
-        try:
-            self._build_link_pane(platform)
-        except Exception:
-            pass
 
     # ── „Eredmények” lap — a trials CSV OLVASHATÓ formában ─────────────────
     # A doksi kérése: szűrhető, rendezhető tábla, típusos mezőkkel (DD = %), a

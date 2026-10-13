@@ -48,6 +48,62 @@ def files_dir() -> Optional[Path]:
     return None
 
 
+# ── A CHART a BRÓKER világában él (2026-10-13) ────────────────────────────
+# A Python mindent KANONIKUS névvel és órával számol (`GOLD`, berlini fal-óra).
+# A TradeForgeViz viszont a chart SAJÁT szimbólumát (`_Symbol`) és a SZERVER
+# óráját látja. ActivTradesnél a kettő azonos volt — RoboForexnél nem: ott a
+# Ger40 `.DE40Cash`, a GOLD `XAUUSD`, a szerver-óra pedig NY+7. Így az indikátor
+# `TFV_.DE40Cash.csv`-t keresett (nem volt), a fájl `TFV_Ger40.csv` volt: a chart
+# ÜRES maradt, „mintha rajta sem lenne". A határon fordítunk, mint az adapter.
+
+def chart_symbol(symbol: str) -> str:
+    """Kanonikus név → a futó bróker chart-szimbóluma (nincs profil → változatlan)."""
+    try:
+        from core import broker_adapter
+        p = broker_adapter.current()
+        return p.to_broker(symbol) if p is not None else symbol
+    except Exception:
+        return symbol
+
+
+def canonical_symbol(chart_sym: str) -> str:
+    """A chart-szimbólum → kanonikus név (az életjel-fájlok olvasásához)."""
+    try:
+        from core import broker_adapter
+        p = broker_adapter.current()
+        return p.to_canonical(chart_sym) if p is not None else chart_sym
+    except Exception:
+        return chart_sym
+
+
+_IDO_ATTR = ("t", "t1", "t2")
+
+
+def to_chart_time(objects: list) -> list:
+    """A rajz-objektumok idői (kanonikus) → a futó bróker SZERVER-órájára.
+    Kanonikus szerverórájú brókernél (ActivTrades) a bemenet változatlan."""
+    try:
+        from core import broker_adapter, broker_time as _bt
+        p = broker_adapter.current()
+        sz = getattr(p, "server_zone", None)
+        if sz is None or sz.is_canonical:
+            return objects
+    except Exception:
+        return objects
+    import dataclasses
+    out = []
+    for o in objects:
+        if dataclasses.is_dataclass(o):
+            mezok = {a: int(_bt.canonical_to_server_epoch(int(getattr(o, a)), sz))
+                     for a in _IDO_ATTR
+                     if hasattr(o, a) and isinstance(getattr(o, a), (int, float))
+                     and getattr(o, a)}
+            out.append(dataclasses.replace(o, **mezok) if mezok else o)
+        else:
+            out.append(o)
+    return out
+
+
 def write_lines(symbol: str, lines: list, clear_first: bool = False,
                 name_suffix: str = "") -> Optional[Path]:
     """A `symbol` teljes pillanatképét kiírja `TFV_<symbol>.csv`-be ELŐRE
@@ -65,7 +121,7 @@ def write_lines(symbol: str, lines: list, clear_first: bool = False,
     d.mkdir(parents=True, exist_ok=True)
     # `name_suffix`: a visszajátszás-export SAJÁT fájlba mehet (pl. `TFV_Ger40_BT.csv`),
     # így az élő motor pillanatképe nem írja felül, és fordítva.
-    path = d / f"{PREFIX}{symbol}{name_suffix}.csv"
+    path = d / f"{PREFIX}{chart_symbol(symbol)}{name_suffix}.csv"
     tmp  = path.with_suffix(".csv.tmp")
 
     payload = "\n".join((["CLEAR"] if clear_first else []) + list(lines))
@@ -98,7 +154,7 @@ def clear(symbol: str) -> Optional[Path]:
     if d is None:
         return None
     d.mkdir(parents=True, exist_ok=True)
-    path = d / f"{PREFIX}{symbol}.csv"
+    path = d / f"{PREFIX}{chart_symbol(symbol)}.csv"
     tmp  = path.with_suffix(".csv.tmp")
     tmp.write_text("CLEAR\n", encoding="ascii")
     for _ in range(5):

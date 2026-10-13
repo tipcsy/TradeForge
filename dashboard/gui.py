@@ -4355,9 +4355,16 @@ class DashboardWindow:
                                   ("gates", _t("tab.gates")),
                                   ("strategies", _t("tab.strategies")),
                                   ("telegram", _t("tab.telegram")),
+                                  ("mtlink", _t("tab.link")),
                                   ("appearance", _t("gui.megjelenes")),
                                   ("language", _t("lang.label"))))
         _page = {n: _shell.page(n) for n in _shell.names()}
+
+        # ── MT4/MT5 KAPCSOLAT lap (2026-10-13, a stratégia-ablakból ide) ──
+        # A terminálok kitelepítése a GÉP dolga, nem egy pár+stratégiáé.
+        from dashboard.mt_link_panel import MtLinkPanel
+        MtLinkPanel(_page["mtlink"], self._header_font,
+                    self._small_font).frame.pack(fill="both", expand=True)
 
         # ── KAPUK lap ────────────────────────────────────────────────────
         from core import gates as _gts, gate_layout as _glay

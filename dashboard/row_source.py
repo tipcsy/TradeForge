@@ -34,6 +34,22 @@ from core import gates as _g
 from core.i18n import t as _t
 
 
+def name_tip(symbol: str, pair_cfg: dict = None, cfg: dict = None) -> str:
+    """Az instrumentum NEVE a buborékba (Tibi, 2026-10-13): „Ger40 → .DE40Cash"
+    (ha a futó bróker más néven ismeri) + a teljes név (`description`)."""
+    try:
+        from core import broker_adapter as _ba, broker_profile as _bp
+        p = _ba.current()
+        if p is None and cfg:
+            p = _bp.active(cfg)
+        bsym = p.to_broker(symbol) if p is not None else symbol
+    except Exception:
+        bsym = symbol
+    sor = symbol if bsym == symbol else f"{symbol} → {bsym}"
+    leiras = str((pair_cfg or {}).get("description") or "").strip()
+    return sor + (chr(10) + _t("row.full_name", name=leiras) if leiras else "")
+
+
 def _manual_cell(ds, on_click=None, symbol: str = None) -> dict:
     """A manuális előszűrő cellája: a mai állapot rövid felirata + színe."""
     from core import manual_filter as _mf
@@ -402,6 +418,7 @@ def row_data(symbol: str, ds, strategy_names, cfg: dict = None,
         "change_pct": getattr(ds, "change_pct", None),
         "digits": getattr(ds, "digits", 5),
         "on_symbol": (lambda: on_symbol(symbol)) if on_symbol else None,
+        "name_tip": name_tip(symbol, pair_cfg, cfg),
         "manual": _manual_cell(ds, on_manual, symbol),
         "gates": {
             "spread": _spread_cell(ctx),

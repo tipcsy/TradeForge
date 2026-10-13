@@ -1634,11 +1634,13 @@ def pair_visual_lines(symbol: str, params: dict, strategy, point_size: float,
     szimbólum-fájlba írhasson, és az MQL5 indikátor `InpStrategy` szerint
     szűrhessen."""
     from strategy.visual import tag_line
+    # ⚠ A chart a BRÓKER órájában jár: az objektum-idők oda váltanak (RoboForex:
+    # NY+7) — különben a jelölők órákkal a gyertyák mellé kerülnének.
     return [tag_line(o.line(), strategy.name)
-            for o in pair_visual_objects(
+            for o in mt5_visual.to_chart_time(pair_visual_objects(
                 symbol, params, strategy, point_size, pair_cfg=pair_cfg,
                 bars=bars, actual_trades=actual_trades, cfg=cfg,
-                exec_gates=exec_gates, journal=journal)]
+                exec_gates=exec_gates, journal=journal))]
 
 
 def write_pair_visuals(symbol: str, params: dict, strategy, point_size: float,
