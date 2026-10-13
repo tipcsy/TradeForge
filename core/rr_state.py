@@ -10,6 +10,19 @@ dict {"preset","cautious","runner"}. Régi string → {"preset": string}.
 
 A régi `risky_mode` (R gomb, kívülről is írható) MEGMARAD: `effective_preset`
 egyesíti — ha itt 'off' de a risky_mode be van kapcsolva → 'risky'.
+
+⚠ STRATÉGIÁNKÉNTI FELÜLÍRÁS (2026-10-13, Tibi: „az egyes stratégiáknak lehet
+külön kiszállójuk"). A pár bejegyzése a pár ALAPJA; alatta egy opcionális
+`strategies` blokk stratégiánként CSAK AZ ELTÉRÉST tartja:
+
+    "Ger40": {"preset": "off", "breakeven_r": 1.0,
+              "strategies": {"csilla": {"preset": "shield", "runner": "exit"}}}
+
+Minden lekérdező kap egy opcionális `strategy` paramétert: ha a stratégiának van
+felülírása, az a kulcs nyer, különben a pár alapja érvényes (ugyanaz az öröklés,
+mint a kapuknál). `strategy=None` → PONTOSAN a régi, páronkénti viselkedés — a
+meglévő fájlok és hívók változtatás nélkül működnek. Egy páron futó két stratégia
+eddig OSZTOZOTT a kiszálláson; az egyikre hangolt kilépés a másikat rontotta.
 """
 
 import json
@@ -71,6 +84,22 @@ _CALIB_KEYS = ("trigger_R", "halving_fraction", "shield_fraction",
                "breakeven_r")
 
 
+_OVERRIDE_KEYS = ("preset", "cautious", "cost_cut", "eod_close", "max_hold_min",
+                  "runner", "exit") + _CALIB_KEYS
+
+
+def _norm_override(v) -> dict:
+    """Egy stratégia-felülírás normalizálása: CSAK a megadott kulcsok maradnak
+    (a hiányzó = örökölt a pártól). Ugyanazok a szabályok, mint a pár alapjánál."""
+    if not isinstance(v, dict):
+        return {}
+    teljes = _norm({**v, "preset": v.get("preset", PRESET_OFF)})
+    out = {k: teljes[k] for k in _OVERRIDE_KEYS if k in teljes and k in v}
+    if "cautious" in v and v["cautious"] is None:
+        out["cautious"] = None
+    return out
+
+
 def _norm(v) -> dict:
     """Érték normalizálása dict-re (régi string → {preset})."""
     if isinstance(v, str):
@@ -99,6 +128,12 @@ def _norm(v) -> dict:
         ex = v.get("exit")
         if isinstance(ex, dict):
             d["exit"] = {k: ex[k] for k in _EXIT_KEYS if k in ex}
+        st = v.get("strategies")
+        if isinstance(st, dict):
+            ov = {str(n): _norm_override(o) for n, o in st.items()}
+            ov = {n: o for n, o in ov.items() if o}
+            if ov:
+                d["strategies"] = ov
         return d
     return {"preset": PRESET_OFF}
 
@@ -138,38 +173,96 @@ def ensure_loaded() -> None:
         load()
 
 
-def _entry(symbol: str) -> dict:
-    return _state.get(symbol, {"preset": PRESET_OFF})
+def _entry(symbol: str, strategy: str = None) -> dict:
+    """A pár bejegyzése — `strategy` megadásával a stratégia felülírásával
+    ÖSSZEFÉSÜLVE (a felülírt kulcs nyer; az `exit` blokk kulcsonként)."""
+    alap = _state.get(symbol, {"preset": PRESET_OFF})
+    if not strategy:
+        return alap
+    ov = (alap.get("strategies") or {}).get(strategy)
+    if not ov:
+        return alap
+    out = {k: v for k, v in alap.items() if k != "strategies"}
+    for k, v in ov.items():
+        if k == "exit" and isinstance(v, dict):
+            out["exit"] = {**(alap.get("exit") or {}), **v}
+        else:
+            out[k] = v
+    return out
 
 
-def get_preset(symbol: str) -> str:
+def override_of(symbol: str, strategy: str) -> dict:
+    """A stratégia SAJÁT felülírása (üres = mindent örököl a pártól)."""
     with _lock:
-        return _entry(symbol).get("preset", PRESET_OFF)
+        return dict(((_state.get(symbol) or {}).get("strategies") or {})
+                    .get(strategy) or {})
 
 
-def get_runner(symbol: str) -> str:
+def overridden_strategies(symbol: str) -> list:
+    """Mely stratégiáknak van saját felülírása ezen a páron."""
     with _lock:
-        return _entry(symbol).get("runner", default_config()["runner_stop"])
+        return sorted(((_state.get(symbol) or {}).get("strategies") or {}).keys())
 
 
-def get_cautious(symbol: str):
+def clear_override(symbol: str, strategy: str, keys=None) -> None:
+    """A stratégia felülírásának törlése („vissza örököltre") — `keys` nélkül
+    az egész, különben csak a megadott kulcsok."""
+    with _lock:
+        d = dict(_state.get(symbol) or {"preset": PRESET_OFF})
+        st = dict(d.get("strategies") or {})
+        if strategy not in st:
+            return
+        if keys is None:
+            st.pop(strategy, None)
+        else:
+            o = {k: v for k, v in st[strategy].items() if k not in set(keys)}
+            if o:
+                st[strategy] = o
+            else:
+                st.pop(strategy, None)
+        if st:
+            d["strategies"] = st
+        else:
+            d.pop("strategies", None)
+        _state[symbol] = _norm(d)
+        _save_locked()
+
+
+def get_preset(symbol: str, strategy: str = None) -> str:
+    with _lock:
+        return _entry(symbol, strategy).get("preset", PRESET_OFF)
+
+
+def get_runner(symbol: str, strategy: str = None) -> str:
+    with _lock:
+        return _entry(symbol, strategy).get("runner", default_config()["runner_stop"])
+
+
+def get_cautious(symbol: str, strategy: str = None):
     """None = a preset szerint (Risky→igen); True/False = kézi felülbírálás."""
     with _lock:
-        return _entry(symbol).get("cautious", None)
+        return _entry(symbol, strategy).get("cautious", None)
 
 
-def get_calibration(symbol: str) -> dict:
+def get_calibration(symbol: str, strategy: str = None) -> dict:
     """A per-pár numerikus kalibrációs override-ok (trigger_R/frakciók), ha vannak.
     Üres dict, ha nincs (→ a default_config érvényes)."""
     with _lock:
-        e = _entry(symbol)
+        e = _entry(symbol, strategy)
         return {k: float(e[k]) for k in _CALIB_KEYS if isinstance(e.get(k), (int, float))}
 
 
-def _set(symbol: str, **kw):
+def _set(symbol: str, strategy: str = None, **kw):
+    """Írás a pár ALAPJÁBA, vagy — `strategy` megadásával — a stratégia
+    FELÜLÍRÁSÁBA (csak a megadott kulcsok; a többi továbbra is örökölt)."""
     with _lock:
-        d = dict(_entry(symbol))
-        d.update(kw)
+        d = dict(_state.get(symbol) or {"preset": PRESET_OFF})
+        if strategy:
+            st = dict(d.get("strategies") or {})
+            st[strategy] = {**(st.get(strategy) or {}), **kw}
+            d["strategies"] = st
+        else:
+            d.update(kw)
         _state[symbol] = _norm(d)
         _save_locked()
 
@@ -199,89 +292,100 @@ def _sync_risky(symbol: str, preset: str) -> None:
                     symbol, ex)
 
 
-def set_preset(symbol: str, preset: str):
+def set_preset(symbol: str, preset: str, strategy: str = None):
     p = preset if preset in PRESETS else PRESET_OFF
-    _set(symbol, preset=p)
-    _sync_risky(symbol, p)
+    _set(symbol, strategy, preset=p)
+    if not strategy:
+        # A régi `risky_mode` PÁRONKÉNTI — csak a pár alapja szinkronizál vele.
+        _sync_risky(symbol, p)
 
 
-def set_runner(symbol: str, runner: str):
-    _set(symbol, runner=runner if runner in RUNNERS else RUNNER_TRAILING)
+def set_runner(symbol: str, runner: str, strategy: str = None):
+    _set(symbol, strategy, runner=runner if runner in RUNNERS else RUNNER_TRAILING)
 
 
-def get_exit_config(symbol: str) -> dict:
+def get_exit_config(symbol: str, strategy: str = None) -> dict:
     """A per-pár KISZÁLLÁSI-MODUL beállítása (core.exit_signal cfg formátumban).
     A default_config-ra ráolvasztjuk a per-pár override-ot, és az `enabled`-et a
     runner-mód dönti: csak akkor él, ha a runner == 'exit' (Kiszállási jel)."""
     cfg = exit_signal.default_config()
     with _lock:
-        ov = _entry(symbol).get("exit")
-        runner = _entry(symbol).get("runner", default_config()["runner_stop"])
+        ov = _entry(symbol, strategy).get("exit")
+        runner = _entry(symbol, strategy).get("runner", default_config()["runner_stop"])
     if isinstance(ov, dict):
         cfg.update({k: ov[k] for k in _EXIT_KEYS if k in ov})
     cfg["enabled"] = (runner == RUNNER_EXIT)
     return cfg
 
 
-def set_exit_config(symbol: str, **params):
+def set_exit_config(symbol: str, strategy: str = None, **params):
     """A per-pár kiszállási-modul mezőinek frissítése (indicator/paraméterek).
     Csak az ismert kulcsokat tartja meg; a meglévő override-ot kiegészíti."""
     upd = {k: params[k] for k in _EXIT_KEYS if k in params}
     if not upd:
         return
     with _lock:
-        d = dict(_entry(symbol))
-        ex = dict(d.get("exit") or {})
-        ex.update(upd)
-        d["exit"] = ex
+        d = dict(_state.get(symbol) or {"preset": PRESET_OFF})
+        if strategy:
+            st = dict(d.get("strategies") or {})
+            o = dict(st.get(strategy) or {})
+            o["exit"] = {**(o.get("exit") or {}), **upd}
+            st[strategy] = o
+            d["strategies"] = st
+        else:
+            ex = dict(d.get("exit") or {})
+            ex.update(upd)
+            d["exit"] = ex
         _state[symbol] = _norm(d)
         _save_locked()
 
 
-def set_cautious(symbol: str, value):
-    _set(symbol, cautious=(None if value is None else bool(value)))
+def set_cautious(symbol: str, value, strategy: str = None):
+    _set(symbol, strategy, cautious=(None if value is None else bool(value)))
 
 
-def get_cost_cut(symbol: str) -> bool:
+def get_cost_cut(symbol: str, strategy: str = None) -> bool:
     """Cost-cut (idő-stop) be van-e kapcsolva a párra. Default: ki."""
     with _lock:
-        return bool(_entry(symbol).get("cost_cut", False))
+        return bool(_entry(symbol, strategy).get("cost_cut", False))
 
 
-def set_cost_cut(symbol: str, value: bool):
-    _set(symbol, cost_cut=bool(value))
+def set_cost_cut(symbol: str, value: bool, strategy: str = None):
+    _set(symbol, strategy, cost_cut=bool(value))
 
 
-def get_cost_cut_bars(symbol: str) -> int:
+def get_cost_cut_bars(symbol: str, strategy: str = None) -> int:
     """Hány fő-timeframe gyertya után vágjuk le a veszteséges pozíciót."""
     with _lock:
-        v = _entry(symbol).get("cost_cut_bars")
+        v = _entry(symbol, strategy).get("cost_cut_bars")
     return int(v) if isinstance(v, (int, float)) else int(default_config()["cost_cut_bars"])
 
 
-def set_cost_cut_bars(symbol: str, bars: int):
+def set_cost_cut_bars(symbol: str, bars: int, strategy: str = None):
     if bars > 0:
-        _set(symbol, cost_cut_bars=float(int(bars)))
+        _set(symbol, strategy, cost_cut_bars=float(int(bars)))
 
 
-def get_time_exit(symbol: str) -> dict:
+def get_time_exit(symbol: str, strategy: str = None) -> dict:
     """Az idő-kilépés per-pár beállítása: `{"eod_close": "HH:MM"|"",
     "max_hold_min": perc}` (hiányzó → a default_config: kikapcsolva)."""
     dc = default_config()
     with _lock:
-        e = _entry(symbol)
+        e = _entry(symbol, strategy)
         return {"eod_close": e.get("eod_close", dc["eod_close"]),
                 "max_hold_min": float(e.get("max_hold_min", dc["max_hold_min"]))}
 
 
-def set_time_exit(symbol: str, eod_close: str = "", max_hold_min: float = 0):
+def set_time_exit(symbol: str, eod_close: str = "", max_hold_min: float = 0,
+                  strategy: str = None):
     """⚠ Az érvénytelen időpont (pl. "25:00") hibát dob, nem némán kikapcsol."""
     if eod_close and parse_hhmm(eod_close) is None:
         raise ValueError(f"érvénytelen napvégi időpont: {eod_close!r} (HH:MM kell)")
-    _set(symbol, eod_close=str(eod_close or ""), max_hold_min=float(max(0, max_hold_min)))
+    _set(symbol, strategy, eod_close=str(eod_close or ""),
+         max_hold_min=float(max(0, max_hold_min)))
 
 
-def set_from_optimizer(symbol: str, rr: dict):
+def set_from_optimizer(symbol: str, rr: dict, strategy: str = None):
     """Az optimalizáló nyertes rr-jét a per-pár állapotba írja: preset + runner +
     cautious + numerikus kalibráció (trigger_R/frakciók). A live/GUI ezt veszi át."""
     if not rr:
@@ -292,7 +396,7 @@ def set_from_optimizer(symbol: str, rr: dict):
     for k in _CALIB_KEYS:
         if isinstance(rr.get(k), (int, float)):
             kw[k] = float(rr[k])
-    _set(symbol, **kw)
+    _set(symbol, strategy, **kw)
 
 
 def cycle_preset(symbol: str) -> str:
@@ -308,31 +412,36 @@ def cycle_preset(symbol: str) -> str:
     return nxt
 
 
-def effective_preset(symbol: str) -> str:
-    """A ténylegesen érvényes preset: a per-pár választás, DE ha 'off' és a régi
-    risky_mode (R gomb / külső fájl) be van kapcsolva → 'risky'."""
-    p = get_preset(symbol)
+def effective_preset(symbol: str, strategy: str = None) -> str:
+    """A ténylegesen érvényes preset: a per-pár (vagy a stratégia felülírta)
+    választás, DE ha 'off' és a régi risky_mode (R gomb / külső fájl) be van
+    kapcsolva → 'risky'."""
+    p = get_preset(symbol, strategy)
     if p == PRESET_OFF and risky_mode.is_risky(symbol):
         return PRESET_RISKY
     return p
 
 
-def spec_for(symbol: str) -> dict:
+def spec_for(symbol: str, strategy: str = None) -> dict:
     """Teljes run_pair kockázatcsökkentő spec az adott párra (preset + runner +
-    cautious felülbírálás). A run_pair a `cautious` kulcsot a méretezéshez nézi."""
-    preset = effective_preset(symbol)
-    spec = {**default_config(), "preset": preset, "runner_stop": get_runner(symbol)}
+    cautious felülbírálás). A run_pair a `cautious` kulcsot a méretezéshez nézi.
+
+    `strategy` → a stratégia felülírása az örökölt pár-alapra ráfésülve (a motor
+    és a backtest a pozíció/futás SAJÁT stratégiájával hívja)."""
+    preset = effective_preset(symbol, strategy)
+    spec = {**default_config(), "preset": preset,
+            "runner_stop": get_runner(symbol, strategy)}
     # Numerikus kalibráció-override (ha az optimalizáló beírta) — különben a default.
-    spec.update(get_calibration(symbol))
-    c = get_cautious(symbol)
+    spec.update(get_calibration(symbol, strategy))
+    c = get_cautious(symbol, strategy)
     spec["cautious"] = wants_cautious_size(preset) if c is None else bool(c)
     # Cost-cut (idő-stop): per-pár kapcsoló — bármely presettel kombinálható.
-    spec["cost_cut"] = get_cost_cut(symbol)
+    spec["cost_cut"] = get_cost_cut(symbol, strategy)
     # Idő-kilépés (napvégi zárás / max. tartás) — szintén per pár.
-    spec.update(get_time_exit(symbol))
+    spec.update(get_time_exit(symbol, strategy))
     # A kiszállási-modul beállítása (enabled = runner==exit) — a motor/backtest ezt
     # adja tovább az exit_signal.exit_triggered-nek a runner zárásához.
-    spec["exit"] = get_exit_config(symbol)
+    spec["exit"] = get_exit_config(symbol, strategy)
     return spec
 
 

@@ -619,7 +619,8 @@ class _Row(dict):
     __slots__ = ("name",)
 
 
-def _rr_spec(rr: "dict | None", risky: bool, symbol: str = "") -> dict:
+def _rr_spec(rr: "dict | None", risky: bool, symbol: str = "",
+             strategy: str = "") -> dict:
     """A run_pair kockázatcsökkentő specje, ha a hívó nem adott sajátot.
 
     ⚠ A BE/trailing értékeket a PÁR SAJÁT kalibrációjából vesszük (v1.96.0).
@@ -664,8 +665,8 @@ def _rr_spec(rr: "dict | None", risky: bool, symbol: str = "") -> dict:
             try:
                 from core import rr_state as _rrs
                 _rrs.ensure_loaded()
-                spec.update({k: v for k, v in _rrs.get_calibration(symbol).items()
-                             if k in _rrm.BE_TRAIL_KEYS})
+                spec.update({k: v for k, v in _rrs.get_calibration(
+                    symbol, strategy or None).items() if k in _rrm.BE_TRAIL_KEYS})
             except Exception:
                 pass
         return spec
@@ -673,7 +674,9 @@ def _rr_spec(rr: "dict | None", risky: bool, symbol: str = "") -> dict:
         try:
             from core import rr_state as _rrs
             _rrs.ensure_loaded()
-            return dict(_rrs.spec_for(symbol))     # ÉL-PARITÁS: preset is a páré
+            # ÉL-PARITÁS: ugyanaz a feloldás, mint a motorban (a stratégia
+            # felülírása, különben a pár alapja).
+            return dict(_rrs.spec_for(symbol, strategy or None))
         except Exception:
             pass
     spec = _rrm.default_config()
@@ -1534,7 +1537,7 @@ def run_pair(
             f"build_signal_series-t újra. A csendes újrahasznosítás hamis "
             f"eredményt adna.")
     from core import risk_reduction as _rrm
-    rr_spec    = _rr_spec(rr, risky, symbol)
+    rr_spec    = _rr_spec(rr, risky, symbol, getattr(strategy, "name", ""))
     # Óvatos (felezett) méret? A spec `cautious` felülbírálja, különben a preset
     # dönti (Risky felezi; a többi alap normál).
     _cautious  = rr_spec.get("cautious")
@@ -2773,8 +2776,9 @@ def run_portfolio_backtest(
                     "RISKY módban futnak, amit az ÉLŐ MOTOR NEM csinál. Az "
                     "eredmény NEM az él modellje.")
 
-    def _pair_auto_rr(sym: str, weak_risky: bool) -> dict:
-        spec = _rr_state.spec_for(sym)                     # per-pár preset + runner + cautious
+    def _pair_auto_rr(sym: str, weak_risky: bool, strategy_name: str = None) -> dict:
+        # a stratégia felülírása, különben a pár alapja (mint a motorban)
+        spec = _rr_state.spec_for(sym, strategy_name)
         # ⚠ NÉV-CSAPDA: a `PRESET_OFF` értéke `"off"`, de a FELIRATA
         # „BE + trailing" — az az AKTÍV alapértelmezés, nem a „semmi". A „Ki
         # (semmi)" a `PRESET_NONE` (`"none"`). A feltétel tehát MINDEN
@@ -2896,8 +2900,8 @@ def run_portfolio_backtest(
 
         # A kockázatcsökkentő spec: globális rr (mind a párra), különben a
         # per-pár választott preset (rr_state) + gyenge-minősítés auto-risky.
-        # ⚠ A PÁRÉ, nem a stratégiáé: két stratégia ugyanazon a páron ugyanazt kapja.
-        _rr_pair = rr if rr else _pair_auto_rr(sym, pair_risky.get(cell, False))
+        # ⚠ 2026-10-13 óta a STRATÉGIA felülírhatja a pár alapját (mint a motorban).
+        _rr_pair = rr if rr else _pair_auto_rr(sym, pair_risky.get(cell, False), _sn)
         # A per-bar sor-epites tombokbol (mint a run_pair-ben) — a `.iloc`
         # baronkent uj pandas Series-t epitene. EGYSZER oldjuk fel, par-szinten.
         _c15, _a15 = _oszlop_tombok(m15)

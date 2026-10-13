@@ -2260,7 +2260,9 @@ def process_pair(state: LivePairState, slot_mgr: SlotManager, balance: float,
     #   • shield_fibo : Pajzs↔Fibo auto — pozíciónként dől el (nagy mozgásnál
     #     Fibo, különben Pajzs; ATR vs átlag, big_move_atr_mult).
     from core import rr_state, risk_reduction as _rr
-    _spec    = rr_state.spec_for(symbol)
+    # ⚠ A pozíciók STRATÉGIÁNKÉNT (`get_open_positions(magic, strategy.name)`),
+    # tehát a kiszállás is: a stratégia felülírása, különben a pár alapja.
+    _spec    = rr_state.spec_for(symbol, strategy.name)
     _preset  = _spec.get("preset", _rr.PRESET_OFF)
     _cautious = bool(_spec.get("cautious", False))
     risky    = (_preset == _rr.PRESET_RISKY)      # a régi BE/trailing ág ehhez igazodik
