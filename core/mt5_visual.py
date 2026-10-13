@@ -111,7 +111,8 @@ def to_chart_time(objects: list) -> list:
                 ertek.append(int(v))
     if not ertek:
         return objects
-    uj = _bt.canonical_to_server_epoch(np.asarray(ertek, dtype=np.int64), sz)
+    # A zóna ÓRÁNKÉNTI eltolás-táblázatából — közös minden párnak és stratégiának.
+    uj = _bt.canonical_to_server_epoch_fast(np.asarray(ertek, dtype=np.int64), sz)
     # ⚠ MÁSOLATON írunk (a stratégia rajz-objektumai lehetnek tároltak — helyben
     # átírva körönként ÚJRA eltolódnának), de `copy.copy` + mezőírással: a
     # `dataclasses.replace` újrafuttatja az `__init__`-et, ez itt a költség zöme.

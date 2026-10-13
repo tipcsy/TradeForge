@@ -4146,14 +4146,30 @@ class DashboardWindow:
     # ── JSON szintaxis-színezés (Text widgethez) ─────────────────────────
     @staticmethod
     def _highlight_json(text):
+        """JSON-színezés a Beállítások Json-lapján.
+
+        ⚠ GYORS ÚT (2026-10-13, Tibi: „a Beállításokra kattintva 4-5 mp-et kell
+        várni"). Eddig minden találatot `1.0+<n>c` alakú indexszel jelölt: a Tk
+        ezt a szöveg ELEJÉTŐL lépkedve oldja fel, tehát ~3000 soros confignál a
+        sok ezer találat négyzetes időt adott (mérve 1,07 mp). Most a `sor.oszlop`
+        indexet Pythonban számoljuk (a sorkezdetekből, bináris kereséssel), és
+        címkénként EGY `tag_add` hívás viszi az összes tartományt."""
+        import bisect
         import re
         content = text.get("1.0", "end-1c")
         for tag in ("json_key", "json_str", "json_num", "json_bool"):
             text.tag_remove(tag, "1.0", "end")
+        sorkezd = [0] + [i + 1 for i, ch in enumerate(content) if ch == chr(10)]
+
+        def _ix(pos):
+            n = bisect.bisect_right(sorkezd, pos) - 1
+            return f"{n + 1}.{pos - sorkezd[n]}"
+
         token = re.compile(
             r'"(?:\\.|[^"\\])*"'                  # idézőjeles szöveg
             r'|-?\d+\.?\d*(?:[eE][+-]?\d+)?'      # szám
             r'|\b(?:true|false|null)\b')          # logikai / null
+        tart = {"json_key": [], "json_str": [], "json_num": [], "json_bool": []}
         for m in token.finditer(content):
             s, e, tok = m.start(), m.end(), m.group()
             if tok[0] == '"':
@@ -4163,7 +4179,13 @@ class DashboardWindow:
                 tag = "json_bool"
             else:
                 tag = "json_num"
-            text.tag_add(tag, f"1.0+{s}c", f"1.0+{e}c")
+            tart[tag] += (_ix(s), _ix(e))
+        for tag, idx in tart.items():
+            # a Tk `tag add` több tartományt is elfogad egy hívásban; darabolva,
+            # hogy egy parancssor se legyen túl hosszú
+            for k in range(0, len(idx), 2000):
+                if idx[k:k + 2000]:
+                    text.tag_add(tag, *idx[k:k + 2000])
 
     # ── config.json perzisztálás (CSAK a váz-szekciók) ───────────────────
     def _save_main_config(self) -> bool:
@@ -4362,9 +4384,17 @@ class DashboardWindow:
 
         # ── MT4/MT5 KAPCSOLAT lap (2026-10-13, a stratégia-ablakból ide) ──
         # A terminálok kitelepítése a GÉP dolga, nem egy pár+stratégiáé.
-        from dashboard.mt_link_panel import MtLinkPanel
-        MtLinkPanel(_page["mtlink"], self._header_font,
-                    self._small_font).frame.pack(fill="both", expand=True)
+        # ⚠ LUSTÁN: csak az első megnyitáskor épül (a terminál-mappák bejárása
+        # ~0,3 mp) — a Beállítások megnyitása ne várjon rá, ha nem is nézed.
+        _mtlink_kesz = []
+
+        def _on_settings_tab(name):
+            if name == "mtlink" and not _mtlink_kesz:
+                _mtlink_kesz.append(True)
+                from dashboard.mt_link_panel import MtLinkPanel
+                MtLinkPanel(_page["mtlink"], self._header_font,
+                            self._small_font).frame.pack(fill="both", expand=True)
+        _shell._on_show = _on_settings_tab
 
         # ── KAPUK lap ────────────────────────────────────────────────────
         from core import gates as _gts, gate_layout as _glay

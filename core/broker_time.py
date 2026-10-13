@@ -176,6 +176,40 @@ def canonical_to_server_epoch(sec, sz: ServerZone, unit: str = "s"):
     return int(out[0]) if skalar else out
 
 
+# ── ÓRÁNKÉNTI ELTOLÁS-TÁBLÁZAT (2026-10-13, Tibi: „Egy brókernél egy idő
+# van. Nem elég azt használni?") ─────────────────────────────────────────────
+# Az eltolás CSAK a zónától és az időponttól függ — instrumentumtól és
+# stratégiától nem. Ezért zónánként EGY táblázat (`óra → másodperc`), amit
+# minden pár és stratégia közösen olvas; egy óra eltolását EGYSZER számoljuk ki.
+# Egy fix szám nem elég: a NY és a berlini nyári átállás hetekkel eltér (évente
+# ~4 hétig 0 vagy 2 óra a megszokott 1 helyett).
+#
+# ⚠ Mérve (2026, 5 percenként, 105 408 időpont): a táblázat MINDEN valódi
+# időpontra bitre a pontos átváltást adja. Az egyetlen eltérés a berlini tavaszi
+# átállás NEM LÉTEZŐ órája (vasárnap 02:00–03:00) — ott gyertya sincs, és a
+# pontos számítás is értelmetlen értéket ad.
+_OFFSET_TABLAK: dict = {}
+
+
+def canonical_to_server_epoch_fast(sec, sz: ServerZone):
+    """Ugyanaz, mint a `canonical_to_server_epoch` (másodpercben), de a zóna
+    ÓRÁNKÉNTI eltolás-táblázatából. Skalár vagy numpy tömb."""
+    if sz.is_canonical:
+        return sec
+    skalar = np.isscalar(sec)
+    a = np.atleast_1d(np.asarray(sec, dtype=np.int64))
+    tabla = _OFFSET_TABLAK.setdefault((sz.zone, sz.shift_h), {})
+    orak = a // 3600
+    uj = [h for h in np.unique(orak).tolist() if h not in tabla]
+    if uj:
+        uj_a = np.asarray(uj, dtype=np.int64) * 3600
+        for h, o in zip(uj, (canonical_to_server_epoch(uj_a, sz) - uj_a).tolist()):
+            tabla[h] = int(o)
+    out = a + np.fromiter((tabla[h] for h in orak.tolist()), dtype=np.int64,
+                          count=len(a))
+    return int(out[0]) if skalar else out
+
+
 def frame_to_canonical(df: pd.DataFrame, sz: ServerZone) -> pd.DataFrame:
     """Gyertya-tábla indexének átváltása (kanonikusnál a bemenet, másolás nélkül)."""
     if sz.is_canonical:

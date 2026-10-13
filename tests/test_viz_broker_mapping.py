@@ -90,6 +90,24 @@ try:
 finally:
     A.configure(_eredeti)
 
+# ── óránkénti eltolás-táblázat (brókerenként EGY, minden pár közösen) ─────
+import numpy as np                                               # noqa: E402
+import pandas as pd                                              # noqa: E402
+_sz = T.parse("America/New_York+7")
+_a = np.arange(1767225600, 1767225600 + 366 * 86400, 300, dtype=np.int64)  # 2026
+_gy, _po = T.canonical_to_server_epoch_fast(_a, _sz), T.canonical_to_server_epoch(_a, _sz)
+_el = pd.to_datetime(_a[_gy != _po], unit="s")
+check("a táblázat egy teljes évre egyezik a pontos átváltással…",
+      len(_el) > 0 and all(str(x).startswith("2026-03-29 02:") for x in _el), list(_el[:3]))
+check("…kivéve a berlini tavaszi átállás NEM LÉTEZŐ óráját (vasárnap 02:xx)",
+      len(_el) <= 12, len(_el))
+check("a nyári eltérés hetei is benne vannak (0/1/2 helyett itt 1 és 2 óra)",
+      set(((_po - _a) // 3600).tolist()) == {1, 2})
+check("skalárra is működik", T.canonical_to_server_epoch_fast(1790000000, _sz)
+      == T.canonical_to_server_epoch(1790000000, _sz))
+check("zónánként EGY közös táblázat", (_sz.zone, _sz.shift_h) in T._OFFSET_TABLAK)
+check("kanonikus zónán változatlan", T.canonical_to_server_epoch_fast(123, T.CANONICAL) == 123)
+
 src = (ROOT / "trading" / "live_trader.py").read_text(encoding="utf-8")
 check("az élő viz-út a chart-órára vált", "mt5_visual.to_chart_time(pair_visual_objects(" in src)
 
