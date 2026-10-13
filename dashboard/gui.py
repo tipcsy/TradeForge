@@ -5245,13 +5245,15 @@ class DashboardWindow:
                 _apply_to(_sym, _rows, chosen, now)
             try:
                 self._save_main_config()
-                _mstxt = (now["market"] if now["market"] != "Nincs"
-                          else _t("gui2.nincs_piac_eloszuro"))
+                # ⚠ A „piac: …" rész 2026-10-12 óta NINCS: a Piac-előszűrő sora
+                # kikerült ebből az ablakból (a Piac-KAPU beállítása lett), de a
+                # visszajelzés még a `now["market"]`-ot olvasta → KeyError a mentés
+                # UTÁN („Mentési hiba: 'market'"), holott a config már kiíródott.
                 if len(targets) > 1:
                     _rows = ", ".join(sorted(_ba.label_of(k) for k in changed))
                     lbl.config(text=_t("gui.bulk.saved", n=len(targets), rows=_rows), fg=FG_GREEN)
                 else:
-                    lbl.config(text=_t("gui.bulk.saved_one", names=", ".join(chosen), market=_mstxt), fg=FG_GREEN)
+                    lbl.config(text=_t("gui.bulk.saved_one", names=", ".join(chosen)), fg=FG_GREEN)
                 # Az ablak állapota lesz az ÚJ kiindulás: különben egy második
                 # Mentés ugyanazokat a sorokat „módosítottnak" látná, és a pipa
                 # újra szétterítené őket.

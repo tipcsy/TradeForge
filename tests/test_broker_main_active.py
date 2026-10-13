@@ -60,6 +60,34 @@ check("a főszámlára állított Rob a SAJÁT blokkjából kap értékeket",
       _cfg["pairs"]["GOLD"]["point_size"] == 0.1
       and _cfg["pairs"]["GOLD"]["run_state"] == {}, _cfg["pairs"]["GOLD"])
 
+# ── FUTÁS KÖZBEN felvett pár (2026-10-13, BRENT) ──────────────────────────
+import copy as _cp                                               # noqa: E402
+_run = {"brokers": [br(AT), br(ROB, main=True)],
+        "pairs": {"GOLD": {"point_size": 0.01, "run_state": {"x": "live"}}}}
+B.overlay_pairs(_run, B.active(_run))
+# a felület MOST vesz fel egy új párt, Play-t nyom rajta (a futásidejű dictben)
+_run["pairs"]["BRENT"] = {"point_size": 0.01, "pv1_point": 10.0, "enabled": True,
+                          "run_state": {"wpr_sma": "live"},
+                          "strategy_mode": {"*": "signal"}, "strategies": ["wpr_sma"]}
+_ki = B.restore_for_save(_cp.deepcopy(_run))["pairs"]["BRENT"]
+check("új pár: a Play-állapot a FUTÓ bróker blokkjába kerül, nem az alapba",
+      "run_state" not in _ki and _ki["brokers"][ROB]["run_state"] == {"wpr_sma": "live"}, _ki)
+check("...a kötés-mód is", "strategy_mode" not in _ki
+      and _ki["brokers"][ROB]["strategy_mode"] == {"*": "signal"})
+check("...a pont-méret ODA is kerül, és az alapban is marad",
+      _ki["brokers"][ROB]["point_size"] == 0.01 and _ki["point_size"] == 0.01)
+check("...a stratégia-lista (nem bróker-függő) az alapban marad",
+      _ki["strategies"] == ["wpr_sma"])
+_ujra = _cp.deepcopy(B.restore_for_save(_cp.deepcopy(_run)))
+B.overlay_pairs(_ujra, B.active(_ujra))
+check("újraindítás után a Rob motor FUTÓNAK látja (nem leállítottnak)",
+      _ujra["pairs"]["BRENT"]["run_state"] == {"wpr_sma": "live"})
+_at = {**_cp.deepcopy(B.restore_for_save(_cp.deepcopy(_run))),
+       "brokers": [br(AT, main=True), br(ROB)]}
+B.overlay_pairs(_at, B.active(_at))
+check("...az ActivTrades viszont NEM örökli a Rob-on nyomott Play-t",
+      not _at["pairs"]["BRENT"].get("run_state"))
+
 # ── több főszámla: az első számít ─────────────────────────────────────────
 c = {"brokers": [br(AT), br(ROB, main=True), br(IC, main=True)]}
 check("több `main`: az ELSŐ találat", B.profiles(c)[0].id == ROB)

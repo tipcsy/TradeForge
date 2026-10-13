@@ -458,6 +458,25 @@ def restore_for_save(data: dict) -> dict:
                 pc[k] = ov["orig"][sym][k]
             elif k in (ov.get("missing") or {}).get(sym, []):
                 pc.pop(k, None)
+    # ⚠ FUTÁS KÖZBEN FELVETT PÁR (2026-10-13, BRENT). A fenti ciklus csak a
+    # BETÖLTÉSKOR már létező párokat ismeri (`applied`) — egy új instrumentum
+    # Play-állapota és kötés-módja így a pár ALAPKULCSAIBA került, ami a lista
+    # első brókeréé. Újraindítás után a futó bróker motorja a párt LEÁLLÍTOTTNAK
+    # látta volna (a saját blokkja üres), az alap-bróker pedig a más brókeren
+    # nyomott Play-t örökölte volna — a bróker-szivárgás hibaosztálya. Ezért:
+    #   • a SZÁNDÉK (run_state, strategy_mode) ÁTKERÜL a bróker blokkjába;
+    #   • az `enabled` és az instrumentum-értékek (pont-méret, költség) oda is
+    #     MÁSOLÓDNAK, az alapban is maradnak (más forrás nincs rájuk).
+    for sym, pc in pairs.items():
+        if sym in (ov.get("applied") or {}) or not isinstance(pc, dict):
+            continue
+        blokk = pc.setdefault("brokers", {}).setdefault(pid, {})
+        for k in ("run_state", "strategy_mode"):
+            if k in pc:
+                blokk[k] = pc.pop(k)
+        for k in ("enabled",) + BROKER_PAIR_KEYS:
+            if k in pc and k not in blokk:
+                blokk[k] = copy.deepcopy(pc[k])
     return data
 
 
